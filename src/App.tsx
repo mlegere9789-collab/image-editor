@@ -1,109 +1,165 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 
-/** Mirrors the `LoadedImage` struct returned by the `load_image` Rust command. */
-type LoadedImage = {
-  path: string;
-  fileName: string;
-  width: number;
-  height: number;
-  byteLength: number;
-  dataUrl: string;
-};
+import LayerPanel from "./LayerPanel";
+import type { BlendMode, BlendModeInfo, DocumentView, MoveDirection, Snapshot } from "./types";
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
+const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 
 export default function App() {
-  const [image, setImage] = useState<LoadedImage | null>(null);
+  const [document, setDocument] = useState<DocumentView | null>(null);
+  const [composite, setComposite] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [blendModes, setBlendModes] = useState<BlendModeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
 
-  const loadPath = useCallback(async (path: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      setImage(await invoke<LoadedImage>("load_image", { path }));
-    } catch (err) {
-      setImage(null);
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
+  // Dragging the opacity slider fires many overlapping commands. Each one is
+  // tagged, and only the newest response is allowed to land, so a slow render
+  // can never overwrite a newer one.
+  const requestId = useRef(0);
+
+  const runCommand = useCallback(
+    async (command: string, args: Record<string, unknown> = {}, selectAfter?: "top") => {
+      const ticket = ++requestId.current;
+      setBusy(true);
+      try {
+        const snapshot = await invoke<Snapshot>(command, args);
+        if (ticket !== requestId.current) return;
+
+        setError(null);
+        setDocument(snapshot.document);
+        setComposite(snapshot.composite);
+
+        const { layers } = snapshot.document;
+        setSelectedId((current) => {
+          if (selectAfter === "top") return layers[layers.length - 1]?.id ?? null;
+          // Keep the selection unless that layer is gone.
+          if (current !== null && layers.some((layer) => layer.id === current)) return current;
+          return layers[layers.length - 1]?.id ?? null;
+        });
+      } catch (err) {
+        if (ticket !== requestId.current) return;
+        setError(String(err));
+      } finally {
+        if (ticket === requestId.current) setBusy(false);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
+      // A failure here only costs the picker its labels; the canvas still works.
+      setBlendModes([]);
+    });
   }, []);
 
-  const openDialog = useCallback(async () => {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      filters: [{ name: "PNG image", extensions: ["png"] }],
-    });
-    if (typeof selected === "string") await loadPath(selected);
-  }, [loadPath]);
+  const openDocument = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: PNG_FILTER });
+    if (typeof selected === "string") await runCommand("open_document", { path: selected }, "top");
+  }, [runCommand]);
 
-  // Dropping a file anywhere on the window opens it, same as the Open button.
+  const addLayer = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: PNG_FILTER });
+    if (typeof selected === "string") await runCommand("add_layer", { path: selected }, "top");
+  }, [runCommand]);
+
+  // A drop opens the file when nothing is open, and stacks it as a layer when
+  // something is.
+  const hasDocument = document !== null;
+  const hasDocumentRef = useRef(hasDocument);
+  hasDocumentRef.current = hasDocument;
+
   useEffect(() => {
     const unlisten = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === "over") {
         setDropping(true);
-      } else if (event.payload.type === "drop") {
-        setDropping(false);
-        const [first] = event.payload.paths;
-        if (first) void loadPath(first);
-      } else {
-        setDropping(false);
+        return;
       }
+      setDropping(false);
+      if (event.payload.type !== "drop") return;
+      const [first] = event.payload.paths;
+      if (!first) return;
+      void runCommand(
+        hasDocumentRef.current ? "add_layer" : "open_document",
+        { path: first },
+        "top",
+      );
     });
     return () => {
       void unlisten.then((off) => off());
     };
-  }, [loadPath]);
+  }, [runCommand]);
+
+  const layers = document?.layers ?? [];
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
       <header className="toolbar">
         <h1 className="toolbar__title">Image Editor</h1>
-        <button className="button" onClick={openDialog} disabled={loading}>
-          {loading ? "Opening…" : "Open PNG…"}
+        <button className="button" onClick={openDocument} disabled={busy}>
+          Open PNG…
+        </button>
+        <button className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
+          Add layer…
         </button>
       </header>
 
-      <main className="stage">
-        {error && (
-          <div className="notice notice--error" role="alert">
-            {error}
-          </div>
-        )}
-        {!error && !image && (
-          <div className="notice">
-            <p className="notice__lead">No image open</p>
-            <p>Click <strong>Open PNG…</strong> or drop a .png file onto this window.</p>
-          </div>
-        )}
-        {image && (
-          <img className="canvas" src={image.dataUrl} alt={image.fileName} />
-        )}
-      </main>
+      <div className="workspace">
+        <main className="stage">
+          {error && (
+            <div className="notice notice--error" role="alert">
+              {error}
+            </div>
+          )}
+          {!error && !composite && (
+            <div className="notice">
+              <p className="notice__lead">No image open</p>
+              <p>
+                Click <strong>Open PNG…</strong> or drop a .png file onto this window. Drop another
+                to stack it as a layer.
+              </p>
+            </div>
+          )}
+          {composite && <img className="canvas" src={composite} alt="Flattened composite" />}
+        </main>
+
+        <LayerPanel
+          layers={layers}
+          selectedId={selectedId}
+          blendModes={blendModes}
+          disabled={busy}
+          onSelect={setSelectedId}
+          onToggleVisible={(id, visible) =>
+            void runCommand("set_layer_visible", { id, visible })
+          }
+          onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
+          onBlendMode={(id, blendMode: BlendMode) =>
+            void runCommand("set_layer_blend_mode", { id, blendMode })
+          }
+          onMove={(id, direction: MoveDirection) =>
+            void runCommand("move_layer", { id, direction })
+          }
+          onRemove={(id) => void runCommand("remove_layer", { id })}
+        />
+      </div>
 
       <footer className="statusbar">
-        {image ? (
+        {document ? (
           <>
-            <span className="statusbar__name" title={image.path}>
-              {image.fileName}
+            <span className="statusbar__name">
+              {document.width} × {document.height}
             </span>
             <span>
-              {image.width} × {image.height}
+              {layers.length} layer{layers.length === 1 ? "" : "s"}
             </span>
-            <span>{formatBytes(image.byteLength)}</span>
           </>
         ) : (
-          <span>Ready</span>
+          <span className="statusbar__name">Ready</span>
         )}
       </footer>
     </div>

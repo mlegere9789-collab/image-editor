@@ -1,79 +1,177 @@
+// Suppress the extra console window on Windows in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+pub mod blend;
+pub mod composite;
+pub mod document;
+pub mod png;
+
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine as _;
 use serde::Serialize;
+use tauri::State;
 
-/// Refuse anything large enough that base64-ing it into the webview would be a
-/// memory problem. Phase 0 ships the pixels as a data URL; a streaming/asset
-/// protocol path is what lifts this ceiling later.
-const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+use blend::BlendMode;
+use document::{Document, DocumentView, LayerId, MoveDirection};
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LoadedImage {
-    path: String,
-    file_name: String,
-    width: u32,
-    height: u32,
-    byte_length: u64,
-    /// `data:image/png;base64,…` holding the file's original, unmodified bytes.
-    data_url: String,
+/// The open document. `None` until the first image is opened.
+#[derive(Default)]
+struct AppState {
+    document: Mutex<Option<Document>>,
 }
 
-fn load(path: &Path) -> Result<LoadedImage, String> {
-    let metadata = std::fs::metadata(path)
-        .map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+/// What every mutating command hands back: the new layer state plus the
+/// re-flattened image to show. Keeping them together means one round trip per
+/// edit instead of two.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Snapshot {
+    document: DocumentView,
+    /// `data:image/png;base64,…` of the flattened composite.
+    composite: String,
+}
 
-    if !metadata.is_file() {
-        return Err(format!("{} is not a file.", path.display()));
-    }
+/// One entry in the blend-mode picker.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BlendModeInfo {
+    mode: BlendMode,
+    label: &'static str,
+}
 
-    let byte_length = metadata.len();
-    if byte_length > MAX_IMAGE_BYTES {
-        return Err(format!(
-            "{} is {:.1} MB, which is over the {} MB limit.",
-            path.display(),
-            byte_length as f64 / (1024.0 * 1024.0),
-            MAX_IMAGE_BYTES / (1024 * 1024)
-        ));
-    }
+fn snapshot(document: &Document) -> Result<Snapshot, String> {
+    Ok(Snapshot {
+        document: document.view(),
+        composite: png::to_data_url(&composite::flatten(document))?,
+    })
+}
 
-    let bytes = std::fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+/// Run `edit` against the open document, then re-flatten.
+fn edit<F>(state: &State<'_, AppState>, edit: F) -> Result<Snapshot, String>
+where
+    F: FnOnce(&mut Document) -> Result<(), String>,
+{
+    let mut guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    edit(document)?;
+    snapshot(document)
+}
 
-    // Decoding the header both validates that this really is a PNG and gives us
-    // the dimensions to show in the status bar.
-    let reader = image::ImageReader::with_format(
-        std::io::Cursor::new(&bytes),
-        image::ImageFormat::Png,
-    );
-    let (width, height) = reader
-        .into_dimensions()
-        .map_err(|err| format!("{} is not a readable PNG: {err}", path.display()))?;
+const POISONED: &str = "The document is in an inconsistent state; please reopen the image.";
+const NO_DOCUMENT: &str = "No document is open.";
 
-    Ok(LoadedImage {
-        path: path.display().to_string(),
-        file_name: path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.display().to_string()),
-        width,
-        height,
-        byte_length,
-        data_url: format!("data:image/png;base64,{}", STANDARD.encode(&bytes)),
+fn layer_name(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+/// Open `path` as a new single-layer document, replacing whatever was open.
+#[tauri::command]
+fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, String> {
+    let path = PathBuf::from(path);
+    let decoded = png::read(&path)?;
+
+    let mut document = Document::new(decoded.width, decoded.height)?;
+    document.add_layer(
+        layer_name(&path),
+        &decoded.pixels,
+        decoded.width,
+        decoded.height,
+    )?;
+
+    let result = snapshot(&document)?;
+    *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
+    Ok(result)
+}
+
+/// Add `path` as a new top layer of the open document. The document keeps its
+/// original size: a smaller image is pasted at the origin, a larger one clipped.
+#[tauri::command]
+fn add_layer(state: State<'_, AppState>, path: String) -> Result<Snapshot, String> {
+    let path = PathBuf::from(path);
+    let decoded = png::read(&path)?;
+    edit(&state, |document| {
+        document
+            .add_layer(
+                layer_name(&path),
+                &decoded.pixels,
+                decoded.width,
+                decoded.height,
+            )
+            .map(|_| ())
     })
 }
 
 #[tauri::command]
-fn load_image(path: String) -> Result<LoadedImage, String> {
-    load(&PathBuf::from(path))
+fn set_layer_visible(
+    state: State<'_, AppState>,
+    id: LayerId,
+    visible: bool,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| document.set_visible(id, visible))
+}
+
+#[tauri::command]
+fn set_layer_opacity(
+    state: State<'_, AppState>,
+    id: LayerId,
+    opacity: f32,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| document.set_opacity(id, opacity))
+}
+
+#[tauri::command]
+fn set_layer_blend_mode(
+    state: State<'_, AppState>,
+    id: LayerId,
+    blend_mode: BlendMode,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| document.set_blend_mode(id, blend_mode))
+}
+
+#[tauri::command]
+fn remove_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit(&state, |document| document.remove_layer(id))
+}
+
+#[tauri::command]
+fn move_layer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    direction: MoveDirection,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| document.move_layer(id, direction))
+}
+
+/// The blend modes the compositor supports, in display order.
+#[tauri::command]
+fn blend_modes() -> Vec<BlendModeInfo> {
+    BlendMode::ALL
+        .into_iter()
+        .map(|mode| BlendModeInfo {
+            mode,
+            label: mode.label(),
+        })
+        .collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(AppState::default())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![load_image])
+        .invoke_handler(tauri::generate_handler![
+            open_document,
+            add_layer,
+            set_layer_visible,
+            set_layer_opacity,
+            set_layer_blend_mode,
+            remove_layer,
+            move_layer,
+            blend_modes,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -82,45 +180,18 @@ pub fn run() {
 mod tests {
     use super::*;
 
-    /// Smallest valid PNG: a 1x1 opaque red pixel.
-    const ONE_PIXEL_PNG: &[u8] = &[
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44,
-        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00, 0x90,
-        0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08, 0xD7, 0x63, 0xF8,
-        0xCF, 0xC0, 0x00, 0x00, 0x03, 0x01, 0x01, 0x00, 0x18, 0xDD, 0x8D, 0xB0, 0x00, 0x00, 0x00,
-        0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
-    ];
-
-    fn write_temp(name: &str, bytes: &[u8]) -> PathBuf {
-        let path = std::env::temp_dir().join(name);
-        std::fs::write(&path, bytes).unwrap();
-        path
+    #[test]
+    fn every_blend_mode_is_offered_to_the_ui() {
+        let offered = blend_modes();
+        assert_eq!(offered.len(), BlendMode::ALL.len());
+        for (info, mode) in offered.iter().zip(BlendMode::ALL) {
+            assert_eq!(info.mode, mode);
+            assert!(!info.label.is_empty());
+        }
     }
 
     #[test]
-    fn reads_dimensions_and_embeds_original_bytes() {
-        let path = write_temp("image_editor_ok.png", ONE_PIXEL_PNG);
-        let loaded = load(&path).unwrap();
-
-        assert_eq!((loaded.width, loaded.height), (1, 1));
-        assert_eq!(loaded.file_name, "image_editor_ok.png");
-        assert_eq!(loaded.byte_length, ONE_PIXEL_PNG.len() as u64);
-        assert_eq!(
-            loaded.data_url,
-            format!("data:image/png;base64,{}", STANDARD.encode(ONE_PIXEL_PNG))
-        );
-    }
-
-    #[test]
-    fn rejects_a_file_that_is_not_a_png() {
-        let path = write_temp("image_editor_bad.png", b"definitely not a png");
-        assert!(load(&path).unwrap_err().contains("not a readable PNG"));
-    }
-
-    #[test]
-    fn rejects_a_missing_file() {
-        let path = std::env::temp_dir().join("image_editor_absent.png");
-        let _ = std::fs::remove_file(&path);
-        assert!(load(&path).unwrap_err().contains("Could not read"));
+    fn layer_names_come_from_the_file_name() {
+        assert_eq!(layer_name(Path::new("/tmp/photo.png")), "photo.png");
     }
 }
