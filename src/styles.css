@@ -1,0 +1,148 @@
+:root {
+  --bg: #1b1d21;
+  --surface: #24272c;
+  --border: #34383f;
+  --text: #e6e8ea;
+  --muted: #9aa0a8;
+  --accent: #4c8dff;
+  --danger: #ff6b6b;
+
+  color-scheme: dark;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  user-select: none;
+}
+
+.app {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+.app--dropping .stage {
+  outline: 2px dashed var(--accent);
+  outline-offset: -10px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar__title {
+  flex: 1;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.button {
+  padding: 7px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.stage {
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 24px;
+  /* Checkerboard, so transparent PNGs read correctly. */
+  background-color: #15171a;
+  background-image:
+    linear-gradient(45deg, #1f2226 25%, transparent 25%),
+    linear-gradient(-45deg, #1f2226 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1f2226 75%),
+    linear-gradient(-45deg, transparent 75%, #1f2226 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+
+.canvas {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+}
+
+.notice {
+  max-width: 420px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.notice p {
+  margin: 0;
+}
+
+.notice__lead {
+  margin-bottom: 4px !important;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.notice--error {
+  border-color: var(--danger);
+  color: var(--danger);
+  user-select: text;
+}
+
+.statusbar {
+  display: flex;
+  gap: 20px;
+  padding: 7px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.statusbar__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
