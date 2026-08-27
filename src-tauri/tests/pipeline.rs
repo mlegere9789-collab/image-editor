@@ -67,7 +67,11 @@ fn a_single_layer_document_flattens_back_to_its_source() {
         .enumerate()
     {
         if src[3] == 0 {
-            assert_eq!(out, [0, 0, 0, 0], "transparent pixel {index} was not normalised");
+            assert_eq!(
+                out,
+                [0, 0, 0, 0],
+                "transparent pixel {index} was not normalised"
+            );
             checked_transparent += 1;
         } else {
             assert_eq!(out, src, "visible pixel {index} changed");
@@ -91,7 +95,10 @@ fn colour_under_zero_alpha_is_dropped_from_the_composite() {
         .chunks_exact(4)
         .filter(|p| p[3] == 0 && (p[0] > 0 || p[1] > 0 || p[2] > 0))
         .count();
-    assert!(hidden_colour > 0, "sample.png no longer exercises this case");
+    assert!(
+        hidden_colour > 0,
+        "sample.png no longer exercises this case"
+    );
 
     let composite = flatten(&document_from("sample.png"));
     assert!(composite
@@ -106,7 +113,11 @@ fn hiding_the_top_layer_restores_the_layer_below() {
     let baseline = flatten(&document).pixels;
 
     let rings = push_layer(&mut document, "rings.png");
-    assert_ne!(flatten(&document).pixels, baseline, "adding a layer changed nothing");
+    assert_ne!(
+        flatten(&document).pixels,
+        baseline,
+        "adding a layer changed nothing"
+    );
 
     document.set_visible(rings, false).unwrap();
     assert_eq!(flatten(&document).pixels, baseline);
@@ -170,11 +181,15 @@ fn base64_decode(input: &str) -> Vec<u8> {
     let mut out = Vec::with_capacity(input.len() / 4 * 3);
     let mut accumulator: u32 = 0;
     let mut bits = 0;
-    for byte in input.bytes().filter(|b| *b != b'=' && !b.is_ascii_whitespace()) {
+    for byte in input
+        .bytes()
+        .filter(|b| *b != b'=' && !b.is_ascii_whitespace())
+    {
         let value = ALPHABET
             .iter()
             .position(|c| *c == byte)
-            .unwrap_or_else(|| panic!("unexpected base64 byte {byte:?}")) as u32;
+            .unwrap_or_else(|| panic!("unexpected base64 byte {byte:?}"))
+            as u32;
         accumulator = (accumulator << 6) | value;
         bits += 6;
         if bits >= 8 {

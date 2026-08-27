@@ -229,7 +229,9 @@ mod tests {
 
     fn doc_with_one_layer() -> (Document, LayerId) {
         let mut doc = Document::new(2, 2).unwrap();
-        let id = doc.add_layer("base", &solid(2, 2, [10, 20, 30, 255]), 2, 2).unwrap();
+        let id = doc
+            .add_layer("base", &solid(2, 2, [10, 20, 30, 255]), 2, 2)
+            .unwrap();
         (doc, id)
     }
 
@@ -278,7 +280,8 @@ mod tests {
     #[test]
     fn a_smaller_source_is_pasted_at_the_origin_and_padded() {
         let mut doc = Document::new(2, 2).unwrap();
-        doc.add_layer("small", &solid(1, 1, [9, 9, 9, 255]), 1, 1).unwrap();
+        doc.add_layer("small", &solid(1, 1, [9, 9, 9, 255]), 1, 1)
+            .unwrap();
 
         let pixels = &doc.layers()[0].pixels;
         assert_eq!(pixels.len(), 16);
@@ -289,7 +292,8 @@ mod tests {
     #[test]
     fn a_larger_source_is_clipped() {
         let mut doc = Document::new(1, 1).unwrap();
-        doc.add_layer("big", &solid(2, 2, [7, 7, 7, 255]), 2, 2).unwrap();
+        doc.add_layer("big", &solid(2, 2, [7, 7, 7, 255]), 2, 2)
+            .unwrap();
 
         let pixels = &doc.layers()[0].pixels;
         assert_eq!(pixels.len(), 4);

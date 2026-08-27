@@ -43,8 +43,7 @@ pub fn read(path: &Path) -> Result<DecodedPng, String> {
     let bytes =
         std::fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
 
-    let reader =
-        image::ImageReader::with_format(std::io::Cursor::new(&bytes), ImageFormat::Png);
+    let reader = image::ImageReader::with_format(std::io::Cursor::new(&bytes), ImageFormat::Png);
     let decoded = reader
         .decode()
         .map_err(|err| format!("{} is not a readable PNG: {err}", path.display()))?
@@ -69,7 +68,10 @@ pub fn to_data_url(composite: &Composite) -> Result<String, String> {
         )
         .map_err(|err| format!("Could not encode the composite: {err}"))?;
 
-    Ok(format!("data:image/png;base64,{}", STANDARD.encode(&buffer)))
+    Ok(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(&buffer)
+    ))
 }
 
 #[cfg(test)]

@@ -98,10 +98,20 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ## Tests
 
 ```bash
+cd src-tauri && cargo fmt --check
+cd src-tauri && cargo clippy --all-targets -- -D warnings
 cd src-tauri && cargo test      # 55 tests: blend math, model, compositor, pipeline
-cd src-tauri && cargo clippy --all-targets
 npm run build                   # frontend: typecheck + production build
 ```
+
+These same five commands run in CI (`.github/workflows/ci.yml`) on every push to
+`main` and every pull request, in two parallel jobs. The Rust job installs the
+GTK/WebKit headers Tauri needs on Linux; it does **not** build the frontend
+first, because `tauri::generate_context!` tolerates a missing `dist/` — only a
+real bundle needs it.
+
+CI covers Linux only. macOS and Windows builds, and the native file dialog, are
+still unverified.
 
 The Rust suite is where the behaviour is pinned: blend-function identities and
 singularities, layer operations and their error paths, compositing (opacity,

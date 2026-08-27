@@ -127,7 +127,10 @@ mod tests {
         ($actual:expr, $expected:expr) => {{
             let actual = $actual;
             let expected = $expected;
-            assert!(near(actual, expected), "expected {expected:?}, got {actual:?}");
+            assert!(
+                near(actual, expected),
+                "expected {expected:?}, got {actual:?}"
+            );
         }};
     }
 
@@ -147,7 +150,8 @@ mod tests {
     #[test]
     fn output_dimensions_match_the_document() {
         let mut doc = Document::new(5, 7).unwrap();
-        doc.add_layer("a", &solid(5, 7, [1, 2, 3, 255]), 5, 7).unwrap();
+        doc.add_layer("a", &solid(5, 7, [1, 2, 3, 255]), 5, 7)
+            .unwrap();
         let out = flatten(&doc);
         assert_eq!((out.width, out.height), (5, 7));
         assert_eq!(out.pixels.len(), 5 * 7 * 4);
@@ -155,7 +159,10 @@ mod tests {
 
     #[test]
     fn a_single_opaque_layer_passes_through_unchanged() {
-        assert_near!(dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, Normal)]), [200, 100, 50, 255]);
+        assert_near!(
+            dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, Normal)]),
+            [200, 100, 50, 255]
+        );
     }
 
     #[test]
@@ -231,8 +238,11 @@ mod tests {
     #[test]
     fn reordering_layers_changes_the_composite() {
         let mut doc = Document::new(1, 1).unwrap();
-        let bottom = doc.add_layer("b", &solid(1, 1, [255, 0, 0, 255]), 1, 1).unwrap();
-        doc.add_layer("t", &solid(1, 1, [0, 255, 0, 255]), 1, 1).unwrap();
+        let bottom = doc
+            .add_layer("b", &solid(1, 1, [255, 0, 0, 255]), 1, 1)
+            .unwrap();
+        doc.add_layer("t", &solid(1, 1, [0, 255, 0, 255]), 1, 1)
+            .unwrap();
         assert_eq!(&flatten(&doc).pixels[..], &[0, 255, 0, 255]);
 
         doc.move_layer(bottom, MoveDirection::Up).unwrap();
@@ -279,14 +289,20 @@ mod tests {
         // With nothing underneath, every mode must show the source as-is —
         // there is no backdrop to blend against.
         for mode in BlendMode::ALL {
-            assert_near!(dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, mode)]), [200, 100, 50, 255]);
+            assert_near!(
+                dot(&[([200, 100, 50, 255], OPAQUE, SHOWN, mode)]),
+                [200, 100, 50, 255]
+            );
         }
     }
 
     #[test]
     fn the_bottom_layer_alpha_is_preserved() {
         // A half-transparent lone layer stays half-transparent.
-        assert_near!(dot(&[([255, 0, 0, 128], OPAQUE, SHOWN, Normal)]), [255, 0, 0, 128]);
+        assert_near!(
+            dot(&[([255, 0, 0, 128], OPAQUE, SHOWN, Normal)]),
+            [255, 0, 0, 128]
+        );
     }
 
     #[test]
