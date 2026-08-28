@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 import type { BlendMode, BlendModeInfo, LayerView, MoveDirection } from "./types";
 
 type Props = {
@@ -26,10 +28,31 @@ export default function LayerPanel({
   onMove,
   onRemove,
 }: Props) {
+  // While the opacity slider is being dragged its value has to come from the
+  // pointer, not from the last command that happened to land - otherwise the
+  // thumb snaps backwards mid-drag. The draft holds the in-flight value until
+  // the model catches up.
+  const [draftOpacity, setDraftOpacity] = useState<number | null>(null);
+
+  const selected = layers.find((layer) => layer.id === selectedId) ?? null;
+
+  useEffect(() => {
+    setDraftOpacity(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (draftOpacity !== null && selected && Math.abs(selected.opacity - draftOpacity) < 1e-6) {
+      setDraftOpacity(null);
+    }
+  }, [draftOpacity, selected]);
+
+  /** Opacity to display for a layer: the draft wins for the one being dragged. */
+  const shownOpacity = (layer: LayerView) =>
+    layer.id === selectedId && draftOpacity !== null ? draftOpacity : layer.opacity;
+
   // The stack is stored bottom-first but reads top-first, like every other
   // layers panel.
   const topFirst = [...layers].reverse();
-  const selected = layers.find((layer) => layer.id === selectedId) ?? null;
 
   return (
     <aside className="panel">
@@ -57,7 +80,7 @@ export default function LayerPanel({
               <span className="layer__name" title={layer.name}>
                 {layer.name}
               </span>
-              <span className="layer__meta">{Math.round(layer.opacity * 100)}%</span>
+              <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>
           ))}
         </ul>
@@ -67,16 +90,23 @@ export default function LayerPanel({
         <div className="controls">
           <label className="control">
             <span className="control__label">
-              Opacity<span className="control__value">{Math.round(selected.opacity * 100)}%</span>
+              Opacity
+              <span className="control__value">{Math.round(shownOpacity(selected) * 100)}%</span>
             </span>
+            {/* Deliberately not disabled while busy: a drag fires a command per
+                step, and disabling the input mid-drag cancels the drag. Stale
+                responses are already discarded by the caller's sequencing. */}
             <input
               type="range"
               min={0}
               max={100}
               step={1}
-              value={Math.round(selected.opacity * 100)}
-              disabled={disabled}
-              onChange={(event) => onOpacity(selected.id, Number(event.target.value) / 100)}
+              value={Math.round(shownOpacity(selected) * 100)}
+              onChange={(event) => {
+                const next = Number(event.target.value) / 100;
+                setDraftOpacity(next);
+                onOpacity(selected.id, next);
+              }}
             />
           </label>
 
