@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 # A new push supersedes an in-flight run on the same ref.
 concurrency:
@@ -64,6 +65,43 @@ jobs:
       # These three run against src-tauri without a frontend build first:
       # `tauri::generate_context!` tolerates a missing `dist/`. Only a real
       # bundle (`npm run tauri:build`) needs the frontend on disk.
+      - name: Format
+        working-directory: src-tauri
+        run: cargo fmt --check
+
+      - name: Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: src-tauri
+        run: cargo test
+
+  rust-windows:
+    name: Rust on Windows (fmt + clippy + test)
+    runs-on: windows-latest
+    # Windows minutes bill at 2x on a private repo, so this only runs where a
+    # platform break would actually get noticed: on main, and on demand.
+    # PRs stay Linux-only for fast, cheap feedback.
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      # No system deps to install here: Tauri on Windows links against
+      # WebView2, which ships preinstalled on windows-latest runners.
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - run: rustup component add rustfmt clippy
+
       - name: Format
         working-directory: src-tauri
         run: cargo fmt --check

@@ -110,8 +110,14 @@ GTK/WebKit headers Tauri needs on Linux; it does **not** build the frontend
 first, because `tauri::generate_context!` tolerates a missing `dist/` — only a
 real bundle needs it.
 
-CI covers Linux only. macOS and Windows builds, and the native file dialog, are
-still unverified.
+A third job, `rust-windows`, runs the same `fmt`/`clippy`/`test` trio on
+`windows-latest` (WebView2 ships preinstalled there, so no system deps to
+install). It only runs on pushes to `main` and on manual dispatch, not on
+every PR — Windows minutes bill at 2x on this private repo, so PRs stay
+Linux-only for fast, cheap feedback, and the Windows build is checked when a
+branch actually lands.
+
+macOS builds and the native file dialog are still unverified.
 
 The Rust suite is where the behaviour is pinned: blend-function identities and
 singularities, layer operations and their error paths, compositing (opacity,
