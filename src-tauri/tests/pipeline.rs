@@ -154,48 +154,21 @@ fn each_blend_mode_produces_a_distinct_composite() {
 }
 
 #[test]
-fn the_composite_encodes_to_a_png_data_url_that_decodes_back() {
+fn the_composite_encodes_to_png_bytes_that_decode_back() {
     let mut document = document_from("sample.png");
     let rings = push_layer(&mut document, "rings.png");
     document.set_blend_mode(rings, BlendMode::Multiply).unwrap();
     document.set_opacity(rings, 0.75).unwrap();
 
     let composite = flatten(&document);
-    let url = png::to_data_url(&composite).unwrap();
-    assert!(url.starts_with("data:image/png;base64,"));
+    let bytes = png::encode(&composite).unwrap();
+    assert!(bytes.starts_with(b"\x89PNG"));
 
     // Write it out and read it back through the same decoder the app uses.
-    let raw = base64_decode(url.trim_start_matches("data:image/png;base64,"));
     let path = std::env::temp_dir().join("pipeline_composite.png");
-    std::fs::write(&path, raw).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
 
     let reread = png::read(&path).unwrap();
     assert_eq!((reread.width, reread.height), (640, 400));
     assert_eq!(reread.pixels, composite.pixels);
-}
-
-/// Minimal standard-alphabet base64 decoder, so the test does not depend on the
-/// crate whose output it is checking.
-fn base64_decode(input: &str) -> Vec<u8> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    let mut accumulator: u32 = 0;
-    let mut bits = 0;
-    for byte in input
-        .bytes()
-        .filter(|b| *b != b'=' && !b.is_ascii_whitespace())
-    {
-        let value = ALPHABET
-            .iter()
-            .position(|c| *c == byte)
-            .unwrap_or_else(|| panic!("unexpected base64 byte {byte:?}"))
-            as u32;
-        accumulator = (accumulator << 6) | value;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((accumulator >> bits) as u8);
-        }
-    }
-    out
 }

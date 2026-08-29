@@ -7,29 +7,41 @@ pub mod document;
 pub mod png;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 use blend::BlendMode;
 use document::{Document, DocumentView, LayerId, MoveDirection};
+
+/// The latest flattened composite, encoded as PNG bytes and served to the
+/// webview by the `composite://` protocol below rather than embedded in every
+/// command response. `generation` is bumped each time `bytes` changes, so the
+/// frontend can cache-bust its `<img>` src without the bytes themselves
+/// crossing the IPC boundary.
+#[derive(Default)]
+struct CompositeCache {
+    bytes: Mutex<Option<Vec<u8>>>,
+    generation: AtomicU64,
+}
 
 /// The open document. `None` until the first image is opened.
 #[derive(Default)]
 struct AppState {
     document: Mutex<Option<Document>>,
+    composite: CompositeCache,
 }
 
 /// What every mutating command hands back: the new layer state plus the
-/// re-flattened image to show. Keeping them together means one round trip per
-/// edit instead of two.
+/// generation of the re-flattened composite now cached in `AppState`.
+/// Keeping them together means one round trip per edit instead of two.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     document: DocumentView,
-    /// `data:image/png;base64,…` of the flattened composite.
-    composite: String,
+    generation: u64,
 }
 
 /// One entry in the blend-mode picker.
@@ -40,11 +52,37 @@ struct BlendModeInfo {
     label: &'static str,
 }
 
-fn snapshot(document: &Document) -> Result<Snapshot, String> {
+/// Re-flatten `document`, cache the encoded result, and hand back the new
+/// document view plus the generation the frontend should now request.
+fn snapshot(state: &AppState, document: &Document) -> Result<Snapshot, String> {
+    let bytes = png::encode(&composite::flatten(document))?;
+    *state
+        .composite
+        .bytes
+        .lock()
+        .map_err(|_| POISONED.to_string())? = Some(bytes);
+    let generation = state.composite.generation.fetch_add(1, Ordering::SeqCst) + 1;
     Ok(Snapshot {
         document: document.view(),
-        composite: png::to_data_url(&composite::flatten(document))?,
+        generation,
     })
+}
+
+/// Build the response the `composite://` protocol hands the webview: the
+/// cached PNG bytes, or 404 before anything has ever been composited.
+fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
+    let bytes = cache.bytes.lock().ok().and_then(|guard| guard.clone());
+    match bytes {
+        Some(bytes) => tauri::http::Response::builder()
+            .header(tauri::http::header::CONTENT_TYPE, "image/png")
+            .header(tauri::http::header::CACHE_CONTROL, "no-store")
+            .body(bytes)
+            .expect("a static response is always well-formed"),
+        None => tauri::http::Response::builder()
+            .status(tauri::http::StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .expect("a static response is always well-formed"),
+    }
 }
 
 /// Run `edit` against the open document, then re-flatten.
@@ -55,7 +93,7 @@ where
     let mut guard = state.document.lock().map_err(|_| POISONED.to_string())?;
     let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
     edit(document)?;
-    snapshot(document)
+    snapshot(state, document)
 }
 
 const POISONED: &str = "The document is in an inconsistent state; please reopen the image.";
@@ -81,7 +119,7 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
         decoded.height,
     )?;
 
-    let result = snapshot(&document)?;
+    let result = snapshot(&state, &document)?;
     *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
     Ok(result)
 }
@@ -162,6 +200,12 @@ pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
         .plugin(tauri_plugin_dialog::init())
+        // Serves the cached composite to `<img src="composite://composite.png?g=…">`
+        // in the frontend, so a re-render ships raw PNG bytes over a normal
+        // resource fetch instead of a base64 string through IPC/JSON.
+        .register_uri_scheme_protocol("composite", |ctx, _request| {
+            serve_composite(&ctx.app_handle().state::<AppState>().composite)
+        })
         .invoke_handler(tauri::generate_handler![
             open_document,
             add_layer,
@@ -193,5 +237,44 @@ mod tests {
     #[test]
     fn layer_names_come_from_the_file_name() {
         assert_eq!(layer_name(Path::new("/tmp/photo.png")), "photo.png");
+    }
+
+    #[test]
+    fn serve_composite_is_not_found_before_anything_is_cached() {
+        let cache = CompositeCache::default();
+        let response = serve_composite(&cache);
+        assert_eq!(response.status(), tauri::http::StatusCode::NOT_FOUND);
+        assert!(response.body().is_empty());
+    }
+
+    #[test]
+    fn serve_composite_returns_the_cached_bytes_as_a_png_response() {
+        let cache = CompositeCache::default();
+        *cache.bytes.lock().unwrap() = Some(vec![1, 2, 3]);
+
+        let response = serve_composite(&cache);
+
+        assert_eq!(response.status(), tauri::http::StatusCode::OK);
+        assert_eq!(response.body(), &vec![1u8, 2, 3]);
+        assert_eq!(
+            response
+                .headers()
+                .get(tauri::http::header::CONTENT_TYPE)
+                .unwrap(),
+            "image/png"
+        );
+    }
+
+    #[test]
+    fn snapshot_bumps_the_generation_and_caches_the_encoded_composite() {
+        let state = AppState::default();
+        let document = Document::new(1, 1).unwrap();
+
+        let first = snapshot(&state, &document).unwrap();
+        let second = snapshot(&state, &document).unwrap();
+
+        assert_eq!(first.generation, 1);
+        assert_eq!(second.generation, 2);
+        assert!(state.composite.bytes.lock().unwrap().is_some());
     }
 }

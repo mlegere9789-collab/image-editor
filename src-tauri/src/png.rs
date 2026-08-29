@@ -1,16 +1,14 @@
-//! Reading PNG files into RGBA8 and writing composites back out as data URLs.
+//! Reading PNG files into RGBA8, and encoding composites back out as PNG bytes
+//! for the `composite://` protocol to serve.
 
 use std::path::Path;
 
-use base64::engine::general_purpose::STANDARD;
-use base64::Engine as _;
 use image::{ImageEncoder, ImageFormat};
 
 use crate::composite::Composite;
 
-/// Refuse anything large enough that compositing and base64-ing it would be a
-/// memory problem. Phase 1 still ships each composite to the webview as a data
-/// URL; a shared-buffer or asset-protocol path is what lifts this ceiling.
+/// Refuse anything large enough that decoding and compositing it would be a
+/// memory problem.
 const MAX_FILE_BYTES: u64 = 64 * 1024 * 1024;
 
 /// A decoded PNG in non-premultiplied RGBA8.
@@ -56,8 +54,8 @@ pub fn read(path: &Path) -> Result<DecodedPng, String> {
     })
 }
 
-/// Encode a composite as `data:image/png;base64,…` for an `<img>` tag.
-pub fn to_data_url(composite: &Composite) -> Result<String, String> {
+/// Encode a composite as PNG bytes.
+pub fn encode(composite: &Composite) -> Result<Vec<u8>, String> {
     let mut buffer = Vec::new();
     image::codecs::png::PngEncoder::new(&mut buffer)
         .write_image(
@@ -68,10 +66,7 @@ pub fn to_data_url(composite: &Composite) -> Result<String, String> {
         )
         .map_err(|err| format!("Could not encode the composite: {err}"))?;
 
-    Ok(format!(
-        "data:image/png;base64,{}",
-        STANDARD.encode(&buffer)
-    ))
+    Ok(buffer)
 }
 
 #[cfg(test)]
@@ -123,14 +118,11 @@ mod tests {
             height: 1,
             pixels: vec![255, 0, 0, 255, 0, 0, 255, 128],
         };
-        let url = to_data_url(&composite).unwrap();
-        assert!(url.starts_with("data:image/png;base64,"));
+        let bytes = encode(&composite).unwrap();
+        assert!(bytes.starts_with(b"\x89PNG"));
 
         // Decode it back and confirm the pixels survived, alpha included.
-        let raw = STANDARD
-            .decode(url.trim_start_matches("data:image/png;base64,"))
-            .unwrap();
-        let path = write_temp("png_rs_roundtrip.png", &raw);
+        let path = write_temp("png_rs_roundtrip.png", &bytes);
         let decoded = read(&path).unwrap();
         assert_eq!((decoded.width, decoded.height), (2, 1));
         assert_eq!(decoded.pixels, composite.pixels);

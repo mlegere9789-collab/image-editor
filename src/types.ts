@@ -38,8 +38,12 @@ export type DocumentView = {
 /** Mirrors `Snapshot` in src-tauri/src/lib.rs. */
 export type Snapshot = {
   document: DocumentView;
-  /** data:image/png;base64,… of the flattened composite. */
-  composite: string;
+  /**
+   * Bumped every time the composite changes. The frontend refetches
+   * `composite://composite.png?g=<generation>` when this changes rather than
+   * receiving the encoded image over IPC.
+   */
+  generation: number;
 };
 
 export type MoveDirection = "up" | "down";

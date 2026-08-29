@@ -10,7 +10,10 @@ const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 
 export default function App() {
   const [document, setDocument] = useState<DocumentView | null>(null);
-  const [composite, setComposite] = useState<string | null>(null);
+  // `null` until the first snapshot lands. The composite's actual bytes never
+  // cross IPC: this only tells the `<img>` below which `composite://`
+  // generation to fetch.
+  const [generation, setGeneration] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [blendModes, setBlendModes] = useState<BlendModeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +35,7 @@ export default function App() {
 
         setError(null);
         setDocument(snapshot.document);
-        setComposite(snapshot.composite);
+        setGeneration(snapshot.generation);
 
         const { layers } = snapshot.document;
         setSelectedId((current) => {
@@ -96,6 +99,7 @@ export default function App() {
   }, [runCommand]);
 
   const layers = document?.layers ?? [];
+  const compositeSrc = generation !== null ? `composite://composite.png?g=${generation}` : null;
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
@@ -116,7 +120,7 @@ export default function App() {
               {error}
             </div>
           )}
-          {!error && !composite && (
+          {!error && !compositeSrc && (
             <div className="notice">
               <p className="notice__lead">No image open</p>
               <p>
@@ -125,7 +129,7 @@ export default function App() {
               </p>
             </div>
           )}
-          {composite && <img className="canvas" src={composite} alt="Flattened composite" />}
+          {compositeSrc && <img className="canvas" src={compositeSrc} alt="Flattened composite" />}
         </main>
 
         <LayerPanel

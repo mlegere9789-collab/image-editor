@@ -6,6 +6,8 @@ Desktop image editor, Tauri + Rust + React.
 
 - **Phase 0** — Tauri + Rust + React shell that opens and displays a PNG. *Done.*
 - **Phase 1** — the document model and compositor. *Done, described below.*
+- **Phase 2** — composite delivery over a custom protocol instead of base64 IPC.
+  *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -59,6 +61,25 @@ Two consequences worth knowing:
 edges. `samples/rings.png` is a matching-size ring pattern on a transparent
 surround. Open the first and add the second to see blend modes at work.
 
+## Phase 2: composite delivery
+
+Phase 1 shipped the flattened composite as a `data:image/png;base64,…` string
+inside every command's JSON response — simple, but base64 inflates the bytes
+by a third and the whole thing rides the same IPC channel as everything else.
+
+Phase 2 replaces that with a `composite://` custom protocol registered on the
+Tauri app. Each edit still re-flattens and PNG-encodes in Rust, but the raw
+bytes are cached in `AppState` behind a generation counter instead of encoded
+into the response; the command now returns just that counter. The frontend
+points its `<img>` at `composite://composite.png?g=<generation>` and lets the
+webview fetch the bytes directly as a normal image request — no base64, no
+JSON string, no size limit from what IPC can carry as text.
+
+This is the transport half of the "worth flagging" note from Phase 1.
+Recompositing only the dirty region instead of the whole document on every
+edit is still future work — there's no per-pixel edit tool yet to make a
+"dirty region" mean anything narrower than "the whole layer."
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -100,7 +121,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 55 tests: blend math, model, compositor, pipeline
+cd src-tauri && cargo test      # 58 tests: blend math, model, compositor, protocol, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -140,7 +161,7 @@ src-tauri/
   src/document.rs       Document and Layer: the core model
   src/composite.rs      the compositor
   src/png.rs            PNG decode and composite encode
-  src/lib.rs            Tauri commands over the model
+  src/lib.rs            Tauri commands, AppState, and the composite:// protocol
   src/main.rs           desktop entry point
   tests/pipeline.rs     end-to-end tests over the bundled samples
   tauri.conf.json       window, bundle, and CSP config
@@ -153,13 +174,17 @@ samples/                test images
 1. React sends a file path, or a layer edit, to one of the Rust commands in
    `lib.rs`. The open document lives in Rust behind a mutex; the frontend holds
    no pixel data.
-2. The command mutates the `Document`, re-runs the compositor, encodes the result
-   as a PNG data URL, and returns it together with the new layer state.
-3. React puts that URL in an `<img>` and re-renders the layers panel.
+2. The command mutates the `Document`, re-runs the compositor, PNG-encodes the
+   result, and caches those bytes in `AppState` behind a generation counter. It
+   returns that counter together with the new layer state — not the bytes.
+3. React points its `<img>` at `composite://composite.png?g=<generation>`. The
+   webview's own resource fetch hits the `composite://` protocol registered in
+   `lib.rs`, which serves the cached bytes straight back, no IPC round trip for
+   the pixels themselves.
 
-One round trip per edit, and the frontend never has to know how compositing
-works. The cost is that every edit re-flattens the whole document and ships a
-base64 PNG across the IPC boundary, which is why files over 64 MB are refused.
-Incremental re-compositing of only the dirty region, and a shared buffer or the
-asset protocol instead of data URLs, are the natural next steps when documents
-get large.
+One command call per edit either way, but the composite no longer inflates
+through base64 or shares the IPC channel with everything else — files up to
+the 64 MB decode ceiling ship as a plain binary response. Recompositing only
+the dirty region instead of the whole document on every edit is the next
+natural step once there's a per-pixel edit tool to make "dirty region" mean
+something.
