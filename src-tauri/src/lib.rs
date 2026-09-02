@@ -68,6 +68,14 @@ fn snapshot(state: &AppState, document: &Document) -> Result<Snapshot, String> {
     })
 }
 
+/// Flatten `document` and write the result to `path` as PNG. Kept separate
+/// from the `#[tauri::command]` wrapper below so it can be unit-tested
+/// directly, the same way [`snapshot`] is.
+fn export(document: &Document, path: &Path) -> Result<(), String> {
+    let bytes = png::encode(&composite::flatten(document))?;
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
 /// Build the response the `composite://` protocol hands the webview: the
 /// cached PNG bytes, or 404 before anything has ever been composited.
 fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
@@ -215,6 +223,16 @@ fn erase_stroke(
     })
 }
 
+/// Flatten the open document and write it to `path` as a new PNG file. The
+/// open document itself is untouched — this reads it, it does not mutate it —
+/// so unlike every other command here there is no [`Snapshot`] to return.
+#[tauri::command]
+fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    export(document, Path::new(&path))
+}
+
 /// The blend modes the compositor supports, in display order.
 #[tauri::command]
 fn blend_modes() -> Vec<BlendModeInfo> {
@@ -248,6 +266,7 @@ pub fn run() {
             move_layer,
             paint_stroke,
             erase_stroke,
+            export_png,
             blend_modes,
         ])
         .run(tauri::generate_context!())
@@ -310,5 +329,30 @@ mod tests {
         assert_eq!(first.generation, 1);
         assert_eq!(second.generation, 2);
         assert!(state.composite.bytes.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn export_writes_the_flattened_composite_as_a_png_that_decodes_back() {
+        let mut document = Document::new(2, 1).unwrap();
+        document
+            .add_layer("l", &[255, 0, 0, 255, 0, 0, 255, 255], 2, 1)
+            .unwrap();
+
+        let path = std::env::temp_dir().join("lib_rs_export_ok.png");
+        export(&document, &path).unwrap();
+
+        let decoded = png::read(&path).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 1));
+        assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn export_reports_a_directory_that_does_not_exist() {
+        let document = Document::new(1, 1).unwrap();
+        let path = std::env::temp_dir()
+            .join("lib_rs_export_missing_dir_that_does_not_exist")
+            .join("out.png");
+        let err = export(&document, &path).unwrap_err();
+        assert!(err.contains("Could not write"), "{err}");
     }
 }

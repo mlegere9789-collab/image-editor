@@ -10,6 +10,8 @@ Desktop image editor, Tauri + Rust + React.
   *Done, described below.*
 - **Phase 3** — brush and eraser tools: the first per-pixel edits. *Done,
   described below.*
+- **Phase 4** — **Export PNG…**: the app can finally save what you made.
+  *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -118,6 +120,28 @@ of the whole document on every stroke segment (Phase 2's deferred note — now
 that there's an actual per-pixel edit tool, this is the next natural
 candidate); and undo/redo, which nothing in the app has yet.
 
+## Phase 4: exporting
+
+Every prior phase could open, edit, and preview a document, but nothing wrote
+the result back to disk — editing something with no way to save it is not
+yet an editor. **Export PNG…** closes that gap: it flattens the open document
+and writes it to a `.png` file at a path chosen through the OS save dialog.
+
+- `export()` (`src-tauri/src/lib.rs`) is the same `flatten` + `png::encode`
+  pipeline every edit already runs to refresh the on-screen composite, just
+  written to a file instead of cached for the `composite://` protocol. It
+  reads the open document; it does not touch it, so unlike every other
+  command there is no new `Snapshot` — success or an error string is all the
+  frontend gets back.
+- `export_png` needed a new capability, `dialog:allow-save`, alongside the
+  `dialog:allow-open` Phase 0 already granted for **Open PNG…**.
+
+Exporting is deliberately a flattened PNG, not a save of the editable
+document (layers, blend modes, opacity): the app's only file format so far
+is PNG, on both the read and write side, and a project format able to round
+trip the full layer stack is a bigger, separate piece of scope than "make
+the button that writes a file exist."
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -159,7 +183,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 68 tests: blend math, model, strokes, compositor, protocol, pipeline
+cd src-tauri && cargo test      # 70 tests: blend math, model, strokes, compositor, protocol, export, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -180,10 +204,11 @@ macOS builds and the native file dialog are still unverified.
 
 The Rust suite is where the behaviour is pinned: blend-function identities and
 singularities, layer operations and their error paths, brush and eraser
-strokes (coverage, segment continuity, overlap handling, clipping), compositing
-(opacity, visibility, stacking order, alpha accumulation), and end-to-end runs
-over the bundled samples. The frontend is a thin shell over those commands and
-is covered by the typecheck plus the production build.
+strokes (coverage, segment continuity, overlap handling, clipping),
+compositing (opacity, visibility, stacking order, alpha accumulation),
+exporting a document round-trips through PNG intact, and end-to-end runs over
+the bundled samples. The frontend is a thin shell over those commands and is
+covered by the typecheck plus the production build.
 
 ## Layout
 

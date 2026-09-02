@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 import LayerPanel from "./LayerPanel";
 import type {
@@ -107,6 +107,22 @@ export default function App() {
     if (typeof selected === "string") await runCommand("add_layer", { path: selected }, "top");
   }, [runCommand]);
 
+  // Unlike runCommand, exporting reads the open document but never mutates
+  // it — there is no new Snapshot to apply, only success or an error to show.
+  const exportDocument = useCallback(async () => {
+    const destination = await save({ filters: PNG_FILTER, defaultPath: "untitled.png" });
+    if (typeof destination !== "string") return;
+    setBusy(true);
+    try {
+      await invoke("export_png", { path: destination });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   // A drop opens the file when nothing is open, and stacks it as a layer when
   // something is.
   const hasDocument = document !== null;
@@ -200,6 +216,13 @@ export default function App() {
         </button>
         <button className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
           Add layer…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={exportDocument}
+          disabled={busy || !hasDocument}
+        >
+          Export PNG…
         </button>
 
         <div className="tools" role="group" aria-label="Paint tool">
