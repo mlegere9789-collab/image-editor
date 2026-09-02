@@ -77,11 +77,14 @@ pub fn flatten(document: &Document) -> Composite {
     }
 }
 
-fn to_unit(byte: u8) -> f32 {
+/// `u8` channel value to `0.0..=1.0`. Shared with [`crate::document`], whose
+/// brush and eraser strokes do the same non-premultiplied `source-over` math
+/// this module uses to flatten layers.
+pub(crate) fn to_unit(byte: u8) -> f32 {
     f32::from(byte) / 255.0
 }
 
-fn to_byte(unit: f32) -> u8 {
+pub(crate) fn to_byte(unit: f32) -> u8 {
     // `round` then clamp: the arithmetic above can land a hair outside 0..=1.
     (unit * 255.0).round().clamp(0.0, 255.0) as u8
 }

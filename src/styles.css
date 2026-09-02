@@ -50,11 +50,49 @@ body {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.tools__color {
+  width: 30px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tools__color:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tools__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tools__slider input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
 }
 
 .toolbar__title {
@@ -106,6 +144,15 @@ body {
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  touch-action: none;
+}
+
+.canvas--brush {
+  cursor: crosshair;
+}
+
+.canvas--eraser {
+  cursor: cell;
 }
 
 .notice {
@@ -284,6 +331,16 @@ body {
 .button--quiet:hover:not(:disabled) {
   background: rgb(255 255 255 / 7%);
   filter: none;
+}
+
+.button--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button--active:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
 }
 
 .button--danger {

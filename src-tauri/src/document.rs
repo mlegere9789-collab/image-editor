@@ -9,6 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
+use crate::composite::{to_byte, to_unit};
 
 pub type LayerId = u64;
 
@@ -212,6 +213,149 @@ impl Document {
         self.layers.swap(index, target);
         Ok(())
     }
+
+    /// Apply `stroke` along the polyline `points` (document pixel coordinates,
+    /// fractional) with the given `radius`, onto layer `id`'s own pixels — not
+    /// the composite. A single point paints a dot; consecutive points are
+    /// joined into capsule-shaped segments so a stroke drawn from fast pointer
+    /// movement has no gaps between samples.
+    ///
+    /// Coverage from overlapping segments within one call is taken as a
+    /// maximum, not summed: a stroke that briefly doubles back on itself (a
+    /// tight curve, a corner) must not paint or erase that overlap twice as
+    /// hard as the rest of the stroke.
+    pub fn stroke(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke,
+    ) -> Result<(), String> {
+        if points.is_empty() {
+            return Ok(());
+        }
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(format!(
+                "Brush radius must be a positive number, got {radius}."
+            ));
+        }
+        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("Stroke points must be finite numbers.".to_string());
+        }
+
+        let (width, height) = (self.width, self.height);
+        let layer = self.layer_mut(id)?;
+
+        let mut min_x = f32::INFINITY;
+        let mut max_x = f32::NEG_INFINITY;
+        let mut min_y = f32::INFINITY;
+        let mut max_y = f32::NEG_INFINITY;
+        for &(x, y) in points {
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_y = min_y.min(y);
+            max_y = max_y.max(y);
+        }
+        // The stroke's bounding box, expanded by the brush radius and clamped
+        // to the document — painting off the edge of the canvas is clipped,
+        // not an error.
+        let x0 = (min_x - radius).floor().max(0.0) as u32;
+        let y0 = (min_y - radius).floor().max(0.0) as u32;
+        let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
+        let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
+        if x0 >= x1 || y0 >= y1 {
+            return Ok(());
+        }
+        let box_width = (x1 - x0) as usize;
+        let box_height = (y1 - y0) as usize;
+
+        let segments: Vec<((f32, f32), (f32, f32))> = if points.len() == 1 {
+            vec![(points[0], points[0])]
+        } else {
+            points.windows(2).map(|pair| (pair[0], pair[1])).collect()
+        };
+
+        let mut coverage = vec![0f32; box_width * box_height];
+        for (a, b) in segments {
+            for row in 0..box_height {
+                let cy = (y0 as usize + row) as f32 + 0.5;
+                for col in 0..box_width {
+                    let cx = (x0 as usize + col) as f32 + 0.5;
+                    let distance = point_segment_distance(cx, cy, a, b);
+                    // A soft 1px edge rather than a hard aliased circle.
+                    let c = (radius - distance + 0.5).clamp(0.0, 1.0);
+                    let slot = &mut coverage[row * box_width + col];
+                    if c > *slot {
+                        *slot = c;
+                    }
+                }
+            }
+        }
+
+        for row in 0..box_height {
+            for col in 0..box_width {
+                let c = coverage[row * box_width + col];
+                if c <= 0.0 {
+                    continue;
+                }
+                let base = ((y0 as usize + row) * width as usize + (x0 as usize + col)) * CHANNELS;
+                match stroke {
+                    Stroke::Brush { color } => {
+                        let source_alpha = to_unit(color[3]) * c;
+                        if source_alpha <= 0.0 {
+                            continue;
+                        }
+                        let dest_alpha = to_unit(layer.pixels[base + 3]);
+                        let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
+                        let dest = &mut layer.pixels[base..base + CHANNELS];
+                        for (channel, &source_byte) in color.iter().enumerate().take(3) {
+                            let cs = to_unit(source_byte);
+                            let cb = to_unit(dest[channel]);
+                            let out = if out_alpha > 0.0 {
+                                (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha))
+                                    / out_alpha
+                            } else {
+                                0.0
+                            };
+                            dest[channel] = to_byte(out);
+                        }
+                        dest[3] = to_byte(out_alpha);
+                    }
+                    Stroke::Eraser => {
+                        let dest_alpha = to_unit(layer.pixels[base + 3]);
+                        layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// A tool [`Document::stroke`] applies.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Stroke {
+    /// Paints `color` (RGBA8) over the layer with normal, `source-over`
+    /// blending — the same math the compositor uses to stack layers, applied
+    /// here to a layer's own pixels instead of the accumulated backdrop.
+    Brush { color: [u8; 4] },
+    /// Multiplies existing alpha down toward zero; colour is left alone; a
+    /// fully transparent pixel's colour is invisible and not otherwise
+    /// meaningful.
+    Eraser,
+}
+
+/// Shortest distance from `(px, py)` to the segment `a`-`b`.
+fn point_segment_distance(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len_sq = dx * dx + dy * dy;
+    if len_sq <= f32::EPSILON {
+        return ((px - a.0).powi(2) + (py - a.1).powi(2)).sqrt();
+    }
+    let t = (((px - a.0) * dx + (py - a.1) * dy) / len_sq).clamp(0.0, 1.0);
+    let (cx, cy) = (a.0 + t * dx, a.1 + t * dy);
+    ((px - cx).powi(2) + (py - cy).powi(2)).sqrt()
 }
 
 #[cfg(test)]
@@ -403,5 +547,176 @@ mod tests {
 
     fn ids(doc: &Document) -> Vec<LayerId> {
         doc.layers().iter().map(|l| l.id).collect()
+    }
+
+    fn pixel(doc: &Document, id: LayerId, x: u32, y: u32) -> [u8; 4] {
+        let layer = doc.layers().iter().find(|l| l.id == id).unwrap();
+        let base = (y as usize * doc.width() as usize + x as usize) * CHANNELS;
+        [
+            layer.pixels[base],
+            layer.pixels[base + 1],
+            layer.pixels[base + 2],
+            layer.pixels[base + 3],
+        ]
+    }
+
+    fn transparent_doc(size: u32) -> (Document, LayerId) {
+        let mut doc = Document::new(size, size).unwrap();
+        let id = doc
+            .add_layer(
+                "layer",
+                &vec![0u8; (size * size) as usize * CHANNELS],
+                size,
+                size,
+            )
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn a_brush_dot_paints_a_solid_circle_on_a_transparent_layer() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.stroke(
+            id,
+            &[(4.0, 4.0)],
+            3.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        // The centre gets full coverage.
+        assert_eq!(pixel(&doc, id, 4, 4), [255, 0, 0, 255]);
+        // Well outside the radius is untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn brush_alpha_blends_source_over_the_existing_pixel() {
+        let (mut doc, id) = transparent_doc(3);
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Brush {
+                color: [0, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 255]);
+
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 128],
+            },
+        )
+        .unwrap();
+        // 50%-alpha white over opaque black is mid-grey, same as the compositor.
+        let out = pixel(&doc, id, 1, 1);
+        assert!(out[3] == 255, "alpha was {}", out[3]);
+        for channel in out[..3].iter() {
+            assert!(
+                channel.abs_diff(128) <= 1,
+                "channel {channel} was not near mid-grey"
+            );
+        }
+    }
+
+    #[test]
+    fn eraser_multiplies_alpha_toward_zero() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [10, 20, 30, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Eraser).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 0);
+        // Colour is left alone; only alpha is erased.
+        assert_eq!(&pixel(&doc, id, 1, 1)[..3], &[10, 20, 30]);
+    }
+
+    #[test]
+    fn a_two_point_stroke_fills_the_segment_between_them_not_just_the_endpoints() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.stroke(
+            id,
+            &[(1.0, 4.0), (7.0, 4.0)],
+            1.0,
+            Stroke::Brush {
+                color: [1, 2, 3, 255],
+            },
+        )
+        .unwrap();
+        // The midpoint, far from either endpoint, is still painted.
+        assert_eq!(pixel(&doc, id, 4, 4), [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn overlapping_coverage_within_one_stroke_is_maxed_not_summed() {
+        // Two dots on the same spot, each with 50%-alpha colour: if coverage
+        // summed instead of maxing, the overlap would come out more opaque
+        // than a single 50%-alpha dot painted alone.
+        let (mut doc, id) = transparent_doc(9);
+        let color = [255, 0, 0, 128];
+        doc.stroke(id, &[(4.0, 4.0)], 3.0, Stroke::Brush { color })
+            .unwrap();
+        let once = pixel(&doc, id, 4, 4);
+
+        let (mut doubled, id2) = transparent_doc(9);
+        doubled
+            .stroke(id2, &[(4.0, 4.0), (4.0, 4.0)], 3.0, Stroke::Brush { color })
+            .unwrap();
+        let twice = pixel(&doubled, id2, 4, 4);
+
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn a_zero_or_negative_radius_is_rejected() {
+        let (mut doc, id) = transparent_doc(3);
+        assert!(doc.stroke(id, &[(1.0, 1.0)], 0.0, Stroke::Eraser).is_err());
+        assert!(doc.stroke(id, &[(1.0, 1.0)], -1.0, Stroke::Eraser).is_err());
+    }
+
+    #[test]
+    fn non_finite_points_are_rejected() {
+        let (mut doc, id) = transparent_doc(3);
+        assert!(doc
+            .stroke(id, &[(f32::NAN, 1.0)], 1.0, Stroke::Eraser)
+            .is_err());
+    }
+
+    #[test]
+    fn an_empty_stroke_is_a_no_op() {
+        let (mut doc, id) = transparent_doc(3);
+        doc.stroke(id, &[], 1.0, Stroke::Eraser).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_stroke_entirely_off_canvas_is_clipped_to_nothing() {
+        let (mut doc, id) = transparent_doc(3);
+        doc.stroke(
+            id,
+            &[(100.0, 100.0)],
+            2.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        for y in 0..3 {
+            for x in 0..3 {
+                assert_eq!(pixel(&doc, id, x, y), [0, 0, 0, 0]);
+            }
+        }
+    }
+
+    #[test]
+    fn stroking_an_unknown_layer_is_an_error() {
+        let (mut doc, _) = transparent_doc(3);
+        assert!(doc.stroke(999, &[(1.0, 1.0)], 1.0, Stroke::Eraser).is_err());
     }
 }

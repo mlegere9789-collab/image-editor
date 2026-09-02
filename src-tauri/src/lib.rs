@@ -14,7 +14,7 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use blend::BlendMode;
-use document::{Document, DocumentView, LayerId, MoveDirection};
+use document::{Document, DocumentView, LayerId, MoveDirection, Stroke};
 
 /// The latest flattened composite, encoded as PNG bytes and served to the
 /// webview by the `composite://` protocol below rather than embedded in every
@@ -183,6 +183,38 @@ fn move_layer(
     edit(&state, |document| document.move_layer(id, direction))
 }
 
+/// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
+/// layer `id`, with normal `source-over` blending. `points` is the polyline
+/// since the previous pointer event, not the whole stroke — the frontend
+/// calls this once per pointer move, so each call's own bounding box stays
+/// small regardless of how long the drag has run.
+#[tauri::command]
+fn paint_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Brush { color })
+    })
+}
+
+/// Erase along `points` on layer `id`: multiplies existing alpha toward zero
+/// rather than painting a colour. See [`paint_stroke`] for `points`.
+#[tauri::command]
+fn erase_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Eraser)
+    })
+}
+
 /// The blend modes the compositor supports, in display order.
 #[tauri::command]
 fn blend_modes() -> Vec<BlendModeInfo> {
@@ -214,6 +246,8 @@ pub fn run() {
             set_layer_blend_mode,
             remove_layer,
             move_layer,
+            paint_stroke,
+            erase_stroke,
             blend_modes,
         ])
         .run(tauri::generate_context!())

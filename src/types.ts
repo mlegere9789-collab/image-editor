@@ -47,3 +47,6 @@ export type Snapshot = {
 };
 
 export type MoveDirection = "up" | "down";
+
+/** The two ways a pointer drag on the canvas can edit the selected layer. */
+export type Tool = "brush" | "eraser";

@@ -8,6 +8,8 @@ Desktop image editor, Tauri + Rust + React.
 - **Phase 1** — the document model and compositor. *Done, described below.*
 - **Phase 2** — composite delivery over a custom protocol instead of base64 IPC.
   *Done, described below.*
+- **Phase 3** — brush and eraser tools: the first per-pixel edits. *Done,
+  described below.*
 
 ## Phase 1: document model and compositor
 
@@ -80,6 +82,42 @@ Recompositing only the dirty region instead of the whole document on every
 edit is still future work — there's no per-pixel edit tool yet to make a
 "dirty region" mean anything narrower than "the whole layer."
 
+## Phase 3: brush and eraser
+
+Phases 1 and 2 only ever replaced or recomposited whole layers; nothing let you
+touch an individual pixel. Phase 3 adds that: a **Brush** and an **Eraser**,
+selected from the toolbar, that paint or erase on the selected layer wherever
+you drag across the canvas.
+
+- `Document::stroke` (`src-tauri/src/document.rs`) applies a tool along a
+  polyline of document-pixel coordinates, onto one layer's own pixels — not
+  the composite. Consecutive points are joined into capsule-shaped segments
+  (a point-to-segment distance test per pixel in the stroke's bounding box),
+  so a fast drag has no gaps between samples, with a soft 1px edge rather
+  than a hard-aliased circle.
+- Coverage from segments that overlap **within one call** is taken as a
+  maximum, not summed — a stroke that briefly doubles back on itself (a tight
+  curve, a corner) does not paint or erase that overlap twice as hard as the
+  rest of the stroke.
+- The **Brush** paints an RGBA colour with normal, `source-over` blending —
+  the same math `composite.rs` uses to stack layers, applied here to a
+  layer's own pixels instead of the accumulated backdrop.
+- The **Eraser** multiplies existing alpha down toward zero rather than
+  painting; colour is left alone, since a fully transparent pixel's colour is
+  invisible and not otherwise meaningful.
+- The frontend (`App.tsx`) tracks a pointer drag across the canvas `<img>`,
+  converts each event to document-pixel coordinates from the element's
+  bounding rect, and sends just the segment since the last point — the
+  `paint_stroke` / `erase_stroke` commands — once per pointer move. Each
+  call's own bounding box (and the coverage work behind it) stays small
+  regardless of how long the drag has run; the stroke is many small edits,
+  not one command holding a growing point list.
+
+Two things this does *not* do yet: recomposite only the dirty region instead
+of the whole document on every stroke segment (Phase 2's deferred note — now
+that there's an actual per-pixel edit tool, this is the next natural
+candidate); and undo/redo, which nothing in the app has yet.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -121,7 +159,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 58 tests: blend math, model, compositor, protocol, pipeline
+cd src-tauri && cargo test      # 68 tests: blend math, model, strokes, compositor, protocol, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -141,10 +179,11 @@ branch actually lands.
 macOS builds and the native file dialog are still unverified.
 
 The Rust suite is where the behaviour is pinned: blend-function identities and
-singularities, layer operations and their error paths, compositing (opacity,
-visibility, stacking order, alpha accumulation), and end-to-end runs over the
-bundled samples. The frontend is a thin shell over those commands and is covered
-by the typecheck plus the production build.
+singularities, layer operations and their error paths, brush and eraser
+strokes (coverage, segment continuity, overlap handling, clipping), compositing
+(opacity, visibility, stacking order, alpha accumulation), and end-to-end runs
+over the bundled samples. The frontend is a thin shell over those commands and
+is covered by the typecheck plus the production build.
 
 ## Layout
 

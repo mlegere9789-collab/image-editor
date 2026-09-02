@@ -4,9 +4,34 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import LayerPanel from "./LayerPanel";
-import type { BlendMode, BlendModeInfo, DocumentView, MoveDirection, Snapshot } from "./types";
+import type {
+  BlendMode,
+  BlendModeInfo,
+  DocumentView,
+  MoveDirection,
+  Snapshot,
+  Tool,
+} from "./types";
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
+
+/** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
+function hexToRgb(hex: string): [number, number, number] {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+}
+
+/** A pointer event's position, in document pixel coordinates. */
+function toDocPoint(
+  event: React.PointerEvent<HTMLImageElement>,
+  doc: DocumentView,
+): [number, number] {
+  const rect = event.currentTarget.getBoundingClientRect();
+  return [
+    ((event.clientX - rect.left) / rect.width) * doc.width,
+    ((event.clientY - rect.top) / rect.height) * doc.height,
+  ];
+}
 
 export default function App() {
   const [document, setDocument] = useState<DocumentView | null>(null);
@@ -20,10 +45,21 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
 
+  const [tool, setTool] = useState<Tool>("brush");
+  const [brushColor, setBrushColor] = useState("#ffffff");
+  const [brushSize, setBrushSize] = useState(16);
+  const [brushOpacity, setBrushOpacity] = useState(1);
+
   // Dragging the opacity slider fires many overlapping commands. Each one is
   // tagged, and only the newest response is allowed to land, so a slow render
   // can never overwrite a newer one.
   const requestId = useRef(0);
+
+  // A stroke is a sequence of pointer-move events, not one command: each move
+  // sends just the segment since the last point, so a call's own bounding box
+  // (and the coverage work behind it) stays small regardless of how long the
+  // drag has run. `lastPoint` is `null` between strokes.
+  const lastPoint = useRef<[number, number] | null>(null);
 
   const runCommand = useCallback(
     async (command: string, args: Record<string, unknown> = {}, selectAfter?: "top") => {
@@ -98,6 +134,60 @@ export default function App() {
     };
   }, [runCommand]);
 
+  // Sends the segment `points` (1 or 2 document-space coordinates) to the
+  // active tool's command. Not gated on `busy`, for the same reason the
+  // opacity slider isn't: each pointer move is its own command, and stale
+  // responses are already discarded by `runCommand`'s ticket.
+  const applyStroke = useCallback(
+    (points: [number, number][]) => {
+      if (selectedId === null) return;
+      if (tool === "eraser") {
+        void runCommand("erase_stroke", { id: selectedId, points, radius: brushSize });
+      } else {
+        const [r, g, b] = hexToRgb(brushColor);
+        const alpha = Math.round(brushOpacity * 255);
+        void runCommand("paint_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          color: [r, g, b, alpha],
+        });
+      }
+    },
+    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize],
+  );
+
+  const canPaint = document !== null && selectedId !== null;
+
+  const handlePointerDown = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!canPaint || !document) return;
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const point = toDocPoint(event, document);
+      lastPoint.current = point;
+      applyStroke([point]);
+    },
+    [canPaint, document, applyStroke],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (lastPoint.current === null || !document) return;
+      const point = toDocPoint(event, document);
+      const previous = lastPoint.current;
+      lastPoint.current = point;
+      applyStroke([previous, point]);
+    },
+    [document, applyStroke],
+  );
+
+  const endStroke = useCallback((event: React.PointerEvent<HTMLImageElement>) => {
+    lastPoint.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
   const layers = document?.layers ?? [];
   const compositeSrc = generation !== null ? `composite://composite.png?g=${generation}` : null;
 
@@ -111,6 +201,55 @@ export default function App() {
         <button className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
           Add layer…
         </button>
+
+        <div className="tools" role="group" aria-label="Paint tool">
+          <button
+            className={`button button--quiet${tool === "brush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "brush"}
+            onClick={() => setTool("brush")}
+          >
+            Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "eraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "eraser"}
+            onClick={() => setTool("eraser")}
+          >
+            Eraser
+          </button>
+          <input
+            type="color"
+            className="tools__color"
+            value={brushColor}
+            disabled={!canPaint || tool === "eraser"}
+            aria-label="Brush color"
+            onChange={(event) => setBrushColor(event.target.value)}
+          />
+          <label className="tools__slider">
+            Size
+            <input
+              type="range"
+              min={1}
+              max={150}
+              value={brushSize}
+              disabled={!canPaint}
+              onChange={(event) => setBrushSize(Number(event.target.value))}
+            />
+          </label>
+          <label className="tools__slider">
+            Flow
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={Math.round(brushOpacity * 100)}
+              disabled={!canPaint || tool === "eraser"}
+              onChange={(event) => setBrushOpacity(Number(event.target.value) / 100)}
+            />
+          </label>
+        </div>
       </header>
 
       <div className="workspace">
@@ -129,7 +268,26 @@ export default function App() {
               </p>
             </div>
           )}
-          {compositeSrc && <img className="canvas" src={compositeSrc} alt="Flattened composite" />}
+          {compositeSrc && (
+            <img
+              className={`canvas${canPaint ? ` canvas--${tool}` : ""}`}
+              src={compositeSrc}
+              alt="Flattened composite"
+              draggable={false}
+              onDragStart={(event) => event.preventDefault()}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={endStroke}
+              onPointerCancel={endStroke}
+              onPointerLeave={(event) => {
+                // Pointer capture keeps delivering move/up here even once the
+                // cursor leaves the element, but a mouse that was never
+                // pressed on the canvas has no capture to keep the stroke
+                // alive — treat leaving as the end of the stroke either way.
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
+              }}
+            />
+          )}
         </main>
 
         <LayerPanel
