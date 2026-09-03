@@ -8,6 +8,7 @@ import type {
   BlendMode,
   BlendModeInfo,
   DocumentView,
+  HistoryState,
   MoveDirection,
   Snapshot,
   Tool,
@@ -44,6 +45,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
 
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
@@ -72,6 +75,8 @@ export default function App() {
         setError(null);
         setDocument(snapshot.document);
         setGeneration(snapshot.generation);
+        setCanUndo(snapshot.canUndo);
+        setCanRedo(snapshot.canRedo);
 
         const { layers } = snapshot.document;
         setSelectedId((current) => {
@@ -89,6 +94,48 @@ export default function App() {
     },
     [],
   );
+
+  // Snapshots the document onto the undo stack, for a multi-step gesture
+  // (a stroke, an opacity drag) to call once, at the start — the whole
+  // gesture then undoes as one step rather than one step per command it
+  // happens to have sent. Unlike runCommand, this doesn't touch document,
+  // generation, or selection: only the undo/redo button states change.
+  //
+  // Returns the promise so a caller that needs the checkpoint to actually
+  // land before its first edit — not just be issued first, which two
+  // invoke() calls fired back to back in the same tick do not guarantee —
+  // can await it. paint/erase strokes do; the opacity slider doesn't need
+  // to, since its own onChange only fires later, on real pointer movement.
+  const checkpoint = useCallback(() => {
+    return invoke<HistoryState>("checkpoint")
+      .then((history) => {
+        setCanUndo(history.canUndo);
+        setCanRedo(history.canRedo);
+      })
+      .catch(() => {
+        // A failed checkpoint just costs this gesture its undo step; the
+        // edit that follows still happens normally.
+      });
+  }, []);
+
+  const undo = useCallback(() => void runCommand("undo"), [runCommand]);
+  const redo = useCallback(() => void runCommand("redo"), [runCommand]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        if (canUndo && !busy) undo();
+      } else if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        if (canRedo && !busy) redo();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canUndo, canRedo, busy, undo, redo]);
 
   useEffect(() => {
     invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
@@ -181,9 +228,13 @@ export default function App() {
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = toDocPoint(event, document);
       lastPoint.current = point;
-      applyStroke([point]);
+      // Two invoke() calls fired back to back in the same tick race for the
+      // document lock on the Rust side with no guaranteed order — awaiting
+      // the checkpoint's own promise is what actually guarantees it lands
+      // before the stroke's first segment does.
+      void checkpoint().then(() => applyStroke([point]));
     },
-    [canPaint, document, applyStroke],
+    [canPaint, document, checkpoint, applyStroke],
   );
 
   const handlePointerMove = useCallback(
@@ -224,6 +275,25 @@ export default function App() {
         >
           Export PNG…
         </button>
+
+        <div className="tools" role="group" aria-label="Undo history">
+          <button
+            className="button button--quiet"
+            onClick={undo}
+            disabled={busy || !canUndo}
+            title="Undo (Ctrl/Cmd+Z)"
+          >
+            Undo
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={redo}
+            disabled={busy || !canRedo}
+            title="Redo (Ctrl/Cmd+Shift+Z)"
+          >
+            Redo
+          </button>
+        </div>
 
         <div className="tools" role="group" aria-label="Paint tool">
           <button
@@ -323,6 +393,7 @@ export default function App() {
             void runCommand("set_layer_visible", { id, visible })
           }
           onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
+          onOpacityDragStart={checkpoint}
           onBlendMode={(id, blendMode: BlendMode) =>
             void runCommand("set_layer_blend_mode", { id, blendMode })
           }

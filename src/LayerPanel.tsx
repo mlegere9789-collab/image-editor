@@ -11,6 +11,9 @@ type Props = {
   onSelect: (id: number) => void;
   onToggleVisible: (id: number, visible: boolean) => void;
   onOpacity: (id: number, opacity: number) => void;
+  /** Called once, when an opacity drag starts, so the whole drag undoes as
+   * one step rather than one step per `onOpacity` call it makes. */
+  onOpacityDragStart: () => void;
   onBlendMode: (id: number, mode: BlendMode) => void;
   onMove: (id: number, direction: MoveDirection) => void;
   onRemove: (id: number) => void;
@@ -24,6 +27,7 @@ export default function LayerPanel({
   onSelect,
   onToggleVisible,
   onOpacity,
+  onOpacityDragStart,
   onBlendMode,
   onMove,
   onRemove,
@@ -95,13 +99,17 @@ export default function LayerPanel({
             </span>
             {/* Deliberately not disabled while busy: a drag fires a command per
                 step, and disabling the input mid-drag cancels the drag. Stale
-                responses are already discarded by the caller's sequencing. */}
+                responses are already discarded by the caller's sequencing.
+                onOpacityDragStart only fires for a pointer-driven drag, not a
+                keyboard-driven arrow-key nudge — an accepted gap, not a
+                deliberate design choice to exclude keyboard users from undo. */}
             <input
               type="range"
               min={0}
               max={100}
               step={1}
               value={Math.round(shownOpacity(selected) * 100)}
+              onPointerDown={onOpacityDragStart}
               onChange={(event) => {
                 const next = Number(event.target.value) / 100;
                 setDraftOpacity(next);

@@ -12,6 +12,7 @@ Desktop image editor, Tauri + Rust + React.
   described below.*
 - **Phase 4** — **Export PNG…**: the app can finally save what you made.
   *Done, described below.*
+- **Phase 5** — undo/redo. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -115,10 +116,10 @@ you drag across the canvas.
   regardless of how long the drag has run; the stroke is many small edits,
   not one command holding a growing point list.
 
-Two things this does *not* do yet: recomposite only the dirty region instead
+One thing this does *not* do yet: recomposite only the dirty region instead
 of the whole document on every stroke segment (Phase 2's deferred note — now
 that there's an actual per-pixel edit tool, this is the next natural
-candidate); and undo/redo, which nothing in the app has yet.
+candidate).
 
 ## Phase 4: exporting
 
@@ -141,6 +142,41 @@ document (layers, blend modes, opacity): the app's only file format so far
 is PNG, on both the read and write side, and a project format able to round
 trip the full layer stack is a bigger, separate piece of scope than "make
 the button that writes a file exist."
+
+## Phase 5: undo and redo
+
+Every edit so far was one-way — a mistake meant reopening the file. Phase 5
+adds **Undo** and **Redo** (toolbar buttons, and Ctrl/Cmd+Z /
+Ctrl/Cmd+Shift+Z / Ctrl+Y), backed by whole-document snapshots kept in Rust.
+
+- `AppState` gained a `history: Mutex<History>` — two `VecDeque<Document>`
+  stacks, `undo` and `redo`, each bounded at 50 entries (`MAX_HISTORY`; the
+  oldest entry drops off rather than growing forever). Every mutating
+  command's `Snapshot` now also carries `canUndo`/`canRedo`, so the toolbar
+  buttons enable and disable themselves without a separate query.
+- **Checkpointing is gesture-granular, not call-granular.** A brush stroke or
+  an opacity drag sends many small IPC calls (one per pointer move); auto-
+  checkpointing each one would fragment a single stroke into dozens of undo
+  steps. Instead the frontend calls a dedicated `checkpoint` command once, at
+  the *start* of a gesture, and the gesture's own edit commands
+  (`paint_stroke`, `erase_stroke`, `set_layer_opacity`) use a plain,
+  non-checkpointing `edit()` helper. Discrete one-shot commands (add a layer,
+  toggle visibility, change blend mode, reorder, delete) checkpoint
+  themselves via `edit_checkpointed()`.
+- A new checkpoint clears the redo stack — standard editor semantics: you
+  cannot redo past a new edit. Opening a new document resets history
+  entirely, rather than letting you undo into whatever was open before.
+- **A real async-ordering bug, found only by live testing.** The original
+  `handlePointerDown` fired `checkpoint()` and `applyStroke(...)` back to
+  back with no `await` between them. Two `invoke()` calls issued in the same
+  synchronous tick have no guaranteed processing order on the Rust side —
+  each becomes an independent async task racing for the same
+  `std::sync::Mutex` — so the paint command's response sometimes overwrote
+  the frontend's undo-state before the checkpoint's own response landed,
+  leaving Undo visibly stuck disabled after a stroke. Rust unit tests could
+  never catch this (they call `perform_undo`/`push_checkpoint` synchronously,
+  with no IPC involved); only interactive testing under Xvfb surfaced it. The
+  fix makes the ordering explicit: `checkpoint().then(() => applyStroke(...))`.
 
 ## Prerequisites
 
@@ -183,7 +219,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 70 tests: blend math, model, strokes, compositor, protocol, export, pipeline
+cd src-tauri && cargo test      # 78 tests: blend math, model, strokes, compositor, protocol, export, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -206,9 +242,11 @@ The Rust suite is where the behaviour is pinned: blend-function identities and
 singularities, layer operations and their error paths, brush and eraser
 strokes (coverage, segment continuity, overlap handling, clipping),
 compositing (opacity, visibility, stacking order, alpha accumulation),
-exporting a document round-trips through PNG intact, and end-to-end runs over
-the bundled samples. The frontend is a thin shell over those commands and is
-covered by the typecheck plus the production build.
+exporting a document round-trips through PNG intact, undo/redo (checkpoint,
+history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
+paths), and end-to-end runs over the bundled samples. The frontend is a thin
+shell over those commands and is covered by the typecheck plus the production
+build.
 
 ## Layout
 

@@ -6,6 +6,7 @@ pub mod composite;
 pub mod document;
 pub mod png;
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -32,16 +33,51 @@ struct CompositeCache {
 struct AppState {
     document: Mutex<Option<Document>>,
     composite: CompositeCache,
+    history: Mutex<History>,
+}
+
+/// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
+/// document onto `undo` before a gesture (a stroke, an opacity drag) starts;
+/// commands that are already one discrete action (add a layer, toggle
+/// visibility, ...) checkpoint themselves. Undoing moves the current
+/// document onto `redo`; a fresh checkpoint clears `redo`, the same as every
+/// other editor's undo history — you cannot redo past a new edit.
+#[derive(Default)]
+struct History {
+    undo: VecDeque<Document>,
+    redo: VecDeque<Document>,
+}
+
+/// Bounds how much whole-document history can pile up behind one open
+/// document. Old entries fall off the far end rather than growing forever.
+const MAX_HISTORY: usize = 50;
+
+fn push_bounded(stack: &mut VecDeque<Document>, document: Document) {
+    stack.push_back(document);
+    if stack.len() > MAX_HISTORY {
+        stack.pop_front();
+    }
 }
 
 /// What every mutating command hands back: the new layer state plus the
 /// generation of the re-flattened composite now cached in `AppState`.
 /// Keeping them together means one round trip per edit instead of two.
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Snapshot {
     document: DocumentView,
     generation: u64,
+    can_undo: bool,
+    can_redo: bool,
+}
+
+/// What [`checkpoint`] hands back: just the two flags of [`Snapshot`] that
+/// change, since a checkpoint does not touch the document or the composite.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryState {
+    can_undo: bool,
+    can_redo: bool,
 }
 
 /// One entry in the blend-mode picker.
@@ -62,10 +98,68 @@ fn snapshot(state: &AppState, document: &Document) -> Result<Snapshot, String> {
         .lock()
         .map_err(|_| POISONED.to_string())? = Some(bytes);
     let generation = state.composite.generation.fetch_add(1, Ordering::SeqCst) + 1;
+    let history = state.history.lock().map_err(|_| POISONED.to_string())?;
     Ok(Snapshot {
         document: document.view(),
         generation,
+        can_undo: !history.undo.is_empty(),
+        can_redo: !history.redo.is_empty(),
     })
+}
+
+/// Snapshot the open document (if any) onto the undo stack and clear the
+/// redo stack — the checkpoint a gesture takes before it starts changing the
+/// document, so the whole gesture undoes as one step rather than one step
+/// per command it happens to have sent.
+fn push_checkpoint(state: &AppState) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    if let Some(document) = guard.as_ref() {
+        let mut history = state.history.lock().map_err(|_| POISONED.to_string())?;
+        push_bounded(&mut history.undo, document.clone());
+        history.redo.clear();
+    }
+    Ok(())
+}
+
+fn history_state(state: &AppState) -> Result<HistoryState, String> {
+    let history = state.history.lock().map_err(|_| POISONED.to_string())?;
+    Ok(HistoryState {
+        can_undo: !history.undo.is_empty(),
+        can_redo: !history.redo.is_empty(),
+    })
+}
+
+const NOTHING_TO_UNDO: &str = "Nothing to undo.";
+const NOTHING_TO_REDO: &str = "Nothing to redo.";
+
+fn perform_undo(state: &AppState) -> Result<Snapshot, String> {
+    let mut doc_guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let mut history = state.history.lock().map_err(|_| POISONED.to_string())?;
+    let previous = history
+        .undo
+        .pop_back()
+        .ok_or_else(|| NOTHING_TO_UNDO.to_string())?;
+    if let Some(current) = doc_guard.take() {
+        push_bounded(&mut history.redo, current);
+    }
+    *doc_guard = Some(previous);
+    drop(history);
+    snapshot(state, doc_guard.as_ref().expect("just set"))
+}
+
+fn perform_redo(state: &AppState) -> Result<Snapshot, String> {
+    let mut doc_guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let mut history = state.history.lock().map_err(|_| POISONED.to_string())?;
+    let next = history
+        .redo
+        .pop_back()
+        .ok_or_else(|| NOTHING_TO_REDO.to_string())?;
+    if let Some(current) = doc_guard.take() {
+        push_bounded(&mut history.undo, current);
+    }
+    *doc_guard = Some(next);
+    drop(history);
+    snapshot(state, doc_guard.as_ref().expect("just set"))
 }
 
 /// Flatten `document` and write the result to `path` as PNG. Kept separate
@@ -93,7 +187,12 @@ fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
     }
 }
 
-/// Run `edit` against the open document, then re-flatten.
+/// Run `edit` against the open document, then re-flatten. Does not itself
+/// checkpoint: callers that are one whole gesture on their own (add a layer,
+/// toggle visibility, ...) should use [`edit_checkpointed`] instead. Callers
+/// that are one step of a longer gesture (a stroke, an opacity drag) call
+/// this directly — the frontend checkpoints once, at the start of the
+/// gesture, not on every step.
 fn edit<F>(state: &State<'_, AppState>, edit: F) -> Result<Snapshot, String>
 where
     F: FnOnce(&mut Document) -> Result<(), String>,
@@ -102,6 +201,16 @@ where
     let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
     edit(document)?;
     snapshot(state, document)
+}
+
+/// [`edit`], preceded by a checkpoint — for commands that are a whole,
+/// discrete user action on their own rather than one step of a longer one.
+fn edit_checkpointed<F>(state: &State<'_, AppState>, edit_fn: F) -> Result<Snapshot, String>
+where
+    F: FnOnce(&mut Document) -> Result<(), String>,
+{
+    push_checkpoint(state)?;
+    edit(state, edit_fn)
 }
 
 const POISONED: &str = "The document is in an inconsistent state; please reopen the image.";
@@ -127,6 +236,9 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
         decoded.height,
     )?;
 
+    // A newly opened document starts its own history; undoing "past" it into
+    // whatever was open before is not a thing any editor does.
+    *state.history.lock().map_err(|_| POISONED.to_string())? = History::default();
     let result = snapshot(&state, &document)?;
     *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
     Ok(result)
@@ -138,7 +250,7 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
 fn add_layer(state: State<'_, AppState>, path: String) -> Result<Snapshot, String> {
     let path = PathBuf::from(path);
     let decoded = png::read(&path)?;
-    edit(&state, |document| {
+    edit_checkpointed(&state, |document| {
         document
             .add_layer(
                 layer_name(&path),
@@ -156,9 +268,12 @@ fn set_layer_visible(
     id: LayerId,
     visible: bool,
 ) -> Result<Snapshot, String> {
-    edit(&state, |document| document.set_visible(id, visible))
+    edit_checkpointed(&state, |document| document.set_visible(id, visible))
 }
 
+/// Not checkpointed: dragging the slider fires this once per pointer move,
+/// and the whole drag should undo as one step. The frontend checkpoints once
+/// itself, when the drag starts.
 #[tauri::command]
 fn set_layer_opacity(
     state: State<'_, AppState>,
@@ -174,12 +289,12 @@ fn set_layer_blend_mode(
     id: LayerId,
     blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
-    edit(&state, |document| document.set_blend_mode(id, blend_mode))
+    edit_checkpointed(&state, |document| document.set_blend_mode(id, blend_mode))
 }
 
 #[tauri::command]
 fn remove_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
-    edit(&state, |document| document.remove_layer(id))
+    edit_checkpointed(&state, |document| document.remove_layer(id))
 }
 
 #[tauri::command]
@@ -188,14 +303,16 @@ fn move_layer(
     id: LayerId,
     direction: MoveDirection,
 ) -> Result<Snapshot, String> {
-    edit(&state, |document| document.move_layer(id, direction))
+    edit_checkpointed(&state, |document| document.move_layer(id, direction))
 }
 
 /// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
 /// layer `id`, with normal `source-over` blending. `points` is the polyline
 /// since the previous pointer event, not the whole stroke — the frontend
 /// calls this once per pointer move, so each call's own bounding box stays
-/// small regardless of how long the drag has run.
+/// small regardless of how long the drag has run. Not checkpointed for the
+/// same reason: the frontend checkpoints once, when the stroke starts, so
+/// the whole stroke undoes as one step.
 #[tauri::command]
 fn paint_stroke(
     state: State<'_, AppState>,
@@ -233,6 +350,30 @@ fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
     export(document, Path::new(&path))
 }
 
+/// Snapshot the open document onto the undo stack, for the frontend to call
+/// once at the start of a multi-step gesture (a stroke, an opacity drag) —
+/// see [`edit`] vs [`edit_checkpointed`]. A no-op, not an error, when no
+/// document is open.
+#[tauri::command]
+fn checkpoint(state: State<'_, AppState>) -> Result<HistoryState, String> {
+    push_checkpoint(&state)?;
+    history_state(&state)
+}
+
+/// Undo the most recent checkpoint, moving the current document onto the
+/// redo stack. An error, not a silent no-op, when there is nothing to undo —
+/// same as every other command here reporting what it could not do.
+#[tauri::command]
+fn undo(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    perform_undo(&state)
+}
+
+/// Redo the most recently undone checkpoint. See [`undo`].
+#[tauri::command]
+fn redo(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    perform_redo(&state)
+}
+
 /// The blend modes the compositor supports, in display order.
 #[tauri::command]
 fn blend_modes() -> Vec<BlendModeInfo> {
@@ -267,6 +408,9 @@ pub fn run() {
             paint_stroke,
             erase_stroke,
             export_png,
+            checkpoint,
+            undo,
+            redo,
             blend_modes,
         ])
         .run(tauri::generate_context!())
@@ -354,5 +498,150 @@ mod tests {
             .join("out.png");
         let err = export(&document, &path).unwrap_err();
         assert!(err.contains("Could not write"), "{err}");
+    }
+
+    #[test]
+    fn snapshot_reports_whether_there_is_anything_to_undo_or_redo() {
+        let state = AppState::default();
+        let document = Document::new(1, 1).unwrap();
+
+        let fresh = snapshot(&state, &document).unwrap();
+        assert!(!fresh.can_undo);
+        assert!(!fresh.can_redo);
+
+        state
+            .history
+            .lock()
+            .unwrap()
+            .undo
+            .push_back(document.clone());
+        let with_undo = snapshot(&state, &document).unwrap();
+        assert!(with_undo.can_undo);
+        assert!(!with_undo.can_redo);
+
+        state
+            .history
+            .lock()
+            .unwrap()
+            .redo
+            .push_back(document.clone());
+        let with_both = snapshot(&state, &document).unwrap();
+        assert!(with_both.can_undo);
+        assert!(with_both.can_redo);
+    }
+
+    #[test]
+    fn checkpoint_with_no_document_open_is_a_no_op() {
+        let state = AppState::default();
+        push_checkpoint(&state).unwrap();
+        let history = history_state(&state).unwrap();
+        assert!(!history.can_undo);
+        assert!(!history.can_redo);
+    }
+
+    #[test]
+    fn undo_restores_the_document_from_before_the_checkpoint() {
+        let state = AppState::default();
+        let mut document = Document::new(1, 1).unwrap();
+        document.add_layer("a", &[255, 0, 0, 255], 1, 1).unwrap();
+        *state.document.lock().unwrap() = Some(document);
+
+        push_checkpoint(&state).unwrap();
+        // Simulate an edit that happened after the checkpoint.
+        state
+            .document
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .add_layer("b", &[0, 255, 0, 255], 1, 1)
+            .unwrap();
+        assert_eq!(
+            state
+                .document
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .layers()
+                .len(),
+            2
+        );
+
+        let after_undo = perform_undo(&state).unwrap();
+        assert_eq!(after_undo.document.layers.len(), 1);
+        assert!(!after_undo.can_undo);
+        assert!(after_undo.can_redo);
+    }
+
+    #[test]
+    fn redo_reapplies_what_undo_undid() {
+        let state = AppState::default();
+        *state.document.lock().unwrap() = Some(Document::new(1, 1).unwrap());
+
+        push_checkpoint(&state).unwrap();
+        state
+            .document
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .add_layer("l", &[1, 2, 3, 255], 1, 1)
+            .unwrap();
+
+        perform_undo(&state).unwrap();
+        assert_eq!(
+            state
+                .document
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .layers()
+                .len(),
+            0
+        );
+
+        let after_redo = perform_redo(&state).unwrap();
+        assert_eq!(after_redo.document.layers.len(), 1);
+        assert!(after_redo.can_undo);
+        assert!(!after_redo.can_redo);
+    }
+
+    #[test]
+    fn undo_with_nothing_to_undo_is_an_error() {
+        let state = AppState::default();
+        assert_eq!(perform_undo(&state).unwrap_err(), NOTHING_TO_UNDO);
+    }
+
+    #[test]
+    fn redo_with_nothing_to_redo_is_an_error() {
+        let state = AppState::default();
+        assert_eq!(perform_redo(&state).unwrap_err(), NOTHING_TO_REDO);
+    }
+
+    #[test]
+    fn a_new_checkpoint_clears_the_redo_stack() {
+        let state = AppState::default();
+        *state.document.lock().unwrap() = Some(Document::new(1, 1).unwrap());
+
+        push_checkpoint(&state).unwrap();
+        perform_undo(&state).unwrap();
+        assert!(history_state(&state).unwrap().can_redo);
+
+        push_checkpoint(&state).unwrap();
+        assert!(!history_state(&state).unwrap().can_redo);
+    }
+
+    #[test]
+    fn history_is_capped_so_it_cannot_grow_without_bound() {
+        let state = AppState::default();
+        *state.document.lock().unwrap() = Some(Document::new(1, 1).unwrap());
+
+        for _ in 0..MAX_HISTORY + 5 {
+            push_checkpoint(&state).unwrap();
+        }
+
+        assert_eq!(state.history.lock().unwrap().undo.len(), MAX_HISTORY);
     }
 }

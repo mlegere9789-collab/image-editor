@@ -35,8 +35,14 @@ export type DocumentView = {
   layers: LayerView[];
 };
 
+/** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
+export type HistoryState = {
+  canUndo: boolean;
+  canRedo: boolean;
+};
+
 /** Mirrors `Snapshot` in src-tauri/src/lib.rs. */
-export type Snapshot = {
+export type Snapshot = HistoryState & {
   document: DocumentView;
   /**
    * Bumped every time the composite changes. The frontend refetches
