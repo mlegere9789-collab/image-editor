@@ -15,15 +15,21 @@ use serde::Serialize;
 use tauri::{Manager, State};
 
 use blend::BlendMode;
+use composite::Rect;
 use document::{Document, DocumentView, LayerId, MoveDirection, Stroke};
 
-/// The latest flattened composite, encoded as PNG bytes and served to the
-/// webview by the `composite://` protocol below rather than embedded in every
-/// command response. `generation` is bumped each time `bytes` changes, so the
-/// frontend can cache-bust its `<img>` src without the bytes themselves
-/// crossing the IPC boundary.
+/// The latest flattened composite: raw RGBA8 pixels, so a stroke's dirty
+/// rect can be recomposited into just that region instead of the whole
+/// document (see [`snapshot`]), plus the PNG-encoded bytes actually served
+/// to the webview by the `composite://` protocol below rather than embedded
+/// in every command response. `generation` is bumped each time `bytes`
+/// changes, so the frontend can cache-bust its `<img>` src without the bytes
+/// themselves crossing the IPC boundary.
 #[derive(Default)]
 struct CompositeCache {
+    /// `None` until the first flatten; always replaced outright (never
+    /// region-patched in place) whenever [`snapshot`] does a full flatten.
+    pixels: Mutex<Option<composite::Composite>>,
     bytes: Mutex<Option<Vec<u8>>>,
     generation: AtomicU64,
 }
@@ -88,10 +94,44 @@ struct BlendModeInfo {
     label: &'static str,
 }
 
-/// Re-flatten `document`, cache the encoded result, and hand back the new
-/// document view plus the generation the frontend should now request.
-fn snapshot(state: &AppState, document: &Document) -> Result<Snapshot, String> {
-    let bytes = png::encode(&composite::flatten(document))?;
+/// Re-flatten `document` — or, given a dirty `rect`, recomposite only that
+/// region of the cached composite — cache the encoded result, and hand back
+/// the new document view plus the generation the frontend should now
+/// request.
+///
+/// `rect` is `Some` only after a brush/eraser stroke, whose caller already
+/// knows exactly which pixels it touched (see [`document::Document::stroke`]).
+/// Every other edit — opacity, visibility, blend mode, a layer being added,
+/// removed, or reordered — can change any pixel in the composite, so those
+/// pass `None` and get a full flatten. A `rect` is also ignored (falls back
+/// to a full flatten) whenever nothing has been cached yet, or the cached
+/// composite's dimensions do not match `document`'s — the latter cannot
+/// actually happen given how commands call this (every path that can change
+/// the document's size, i.e. [`open_document`], always passes `None`), but
+/// the check costs little and turns a would-be silent mismatch into the
+/// always-correct fallback rather than a subtle bug.
+fn snapshot(state: &AppState, document: &Document, rect: Option<Rect>) -> Result<Snapshot, String> {
+    let mut pixels_guard = state
+        .composite
+        .pixels
+        .lock()
+        .map_err(|_| POISONED.to_string())?;
+    let fresh_composite = match (rect, pixels_guard.as_mut()) {
+        (Some(rect), Some(cached))
+            if cached.width == document.width() && cached.height == document.height() =>
+        {
+            composite::recomposite_region(document, rect, &mut cached.pixels);
+            None
+        }
+        _ => Some(composite::flatten(document)),
+    };
+    if let Some(fresh) = fresh_composite {
+        *pixels_guard = Some(fresh);
+    }
+    let composite = pixels_guard.as_ref().expect("just populated above");
+    let bytes = png::encode(composite)?;
+    drop(pixels_guard);
+
     *state
         .composite
         .bytes
@@ -144,7 +184,7 @@ fn perform_undo(state: &AppState) -> Result<Snapshot, String> {
     }
     *doc_guard = Some(previous);
     drop(history);
-    snapshot(state, doc_guard.as_ref().expect("just set"))
+    snapshot(state, doc_guard.as_ref().expect("just set"), None)
 }
 
 fn perform_redo(state: &AppState) -> Result<Snapshot, String> {
@@ -159,7 +199,7 @@ fn perform_redo(state: &AppState) -> Result<Snapshot, String> {
     }
     *doc_guard = Some(next);
     drop(history);
-    snapshot(state, doc_guard.as_ref().expect("just set"))
+    snapshot(state, doc_guard.as_ref().expect("just set"), None)
 }
 
 /// Flatten `document` and write the result to `path` as PNG. Kept separate
@@ -187,7 +227,8 @@ fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
     }
 }
 
-/// Run `edit` against the open document, then re-flatten. Does not itself
+/// Run `edit` against the open document, then re-flatten (or recomposite just
+/// the rect `edit` reports touching — see [`snapshot`]). Does not itself
 /// checkpoint: callers that are one whole gesture on their own (add a layer,
 /// toggle visibility, ...) should use [`edit_checkpointed`] instead. Callers
 /// that are one step of a longer gesture (a stroke, an opacity drag) call
@@ -195,19 +236,19 @@ fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
 /// gesture, not on every step.
 fn edit<F>(state: &State<'_, AppState>, edit: F) -> Result<Snapshot, String>
 where
-    F: FnOnce(&mut Document) -> Result<(), String>,
+    F: FnOnce(&mut Document) -> Result<Option<Rect>, String>,
 {
     let mut guard = state.document.lock().map_err(|_| POISONED.to_string())?;
     let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
-    edit(document)?;
-    snapshot(state, document)
+    let rect = edit(document)?;
+    snapshot(state, document, rect)
 }
 
 /// [`edit`], preceded by a checkpoint — for commands that are a whole,
 /// discrete user action on their own rather than one step of a longer one.
 fn edit_checkpointed<F>(state: &State<'_, AppState>, edit_fn: F) -> Result<Snapshot, String>
 where
-    F: FnOnce(&mut Document) -> Result<(), String>,
+    F: FnOnce(&mut Document) -> Result<Option<Rect>, String>,
 {
     push_checkpoint(state)?;
     edit(state, edit_fn)
@@ -239,7 +280,7 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
     // A newly opened document starts its own history; undoing "past" it into
     // whatever was open before is not a thing any editor does.
     *state.history.lock().map_err(|_| POISONED.to_string())? = History::default();
-    let result = snapshot(&state, &document)?;
+    let result = snapshot(&state, &document, None)?;
     *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
     Ok(result)
 }
@@ -258,7 +299,7 @@ fn add_layer(state: State<'_, AppState>, path: String) -> Result<Snapshot, Strin
                 decoded.width,
                 decoded.height,
             )
-            .map(|_| ())
+            .map(|_| None)
     })
 }
 
@@ -268,7 +309,9 @@ fn set_layer_visible(
     id: LayerId,
     visible: bool,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.set_visible(id, visible))
+    edit_checkpointed(&state, |document| {
+        document.set_visible(id, visible).map(|_| None)
+    })
 }
 
 /// Not checkpointed: dragging the slider fires this once per pointer move,
@@ -280,7 +323,9 @@ fn set_layer_opacity(
     id: LayerId,
     opacity: f32,
 ) -> Result<Snapshot, String> {
-    edit(&state, |document| document.set_opacity(id, opacity))
+    edit(&state, |document| {
+        document.set_opacity(id, opacity).map(|_| None)
+    })
 }
 
 #[tauri::command]
@@ -289,12 +334,14 @@ fn set_layer_blend_mode(
     id: LayerId,
     blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.set_blend_mode(id, blend_mode))
+    edit_checkpointed(&state, |document| {
+        document.set_blend_mode(id, blend_mode).map(|_| None)
+    })
 }
 
 #[tauri::command]
 fn remove_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.remove_layer(id))
+    edit_checkpointed(&state, |document| document.remove_layer(id).map(|_| None))
 }
 
 #[tauri::command]
@@ -303,7 +350,9 @@ fn move_layer(
     id: LayerId,
     direction: MoveDirection,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.move_layer(id, direction))
+    edit_checkpointed(&state, |document| {
+        document.move_layer(id, direction).map(|_| None)
+    })
 }
 
 /// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
@@ -313,6 +362,10 @@ fn move_layer(
 /// small regardless of how long the drag has run. Not checkpointed for the
 /// same reason: the frontend checkpoints once, when the stroke starts, so
 /// the whole stroke undoes as one step.
+///
+/// [`document::Document::stroke`] hands back exactly which pixels it
+/// touched, so [`snapshot`] recomposites just that rect instead of the whole
+/// document — the point of each call's bounding box staying small.
 #[tauri::command]
 fn paint_stroke(
     state: State<'_, AppState>,
@@ -467,12 +520,89 @@ mod tests {
         let state = AppState::default();
         let document = Document::new(1, 1).unwrap();
 
-        let first = snapshot(&state, &document).unwrap();
-        let second = snapshot(&state, &document).unwrap();
+        let first = snapshot(&state, &document, None).unwrap();
+        let second = snapshot(&state, &document, None).unwrap();
 
         assert_eq!(first.generation, 1);
         assert_eq!(second.generation, 2);
         assert!(state.composite.bytes.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_region_snapshot_matches_a_full_flatten_of_the_same_document() {
+        let state = AppState::default();
+        let mut document = Document::new(4, 4).unwrap();
+        document
+            .add_layer("l", &[10u8, 20, 30, 255].repeat(16), 4, 4)
+            .unwrap();
+
+        // Seed the cache with a full flatten first, the same as any real
+        // command sequence would (a stroke is never the very first edit on
+        // a freshly opened document).
+        snapshot(&state, &document, None).unwrap();
+
+        let rect = Rect {
+            x0: 1,
+            y0: 1,
+            x1: 3,
+            y1: 3,
+        };
+        snapshot(&state, &document, Some(rect)).unwrap();
+
+        let cached = state.composite.pixels.lock().unwrap().clone().unwrap();
+        assert_eq!(cached.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn a_region_snapshot_falls_back_to_a_full_flatten_when_nothing_is_cached_yet() {
+        let state = AppState::default();
+        let document = Document::new(2, 2).unwrap();
+
+        // No prior full snapshot — the (unrealistic, defensive-only) case of
+        // a rect passed in before there is anything to patch.
+        let result = snapshot(
+            &state,
+            &document,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1,
+            }),
+        )
+        .unwrap();
+        assert_eq!(result.generation, 1);
+        assert!(state.composite.pixels.lock().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_region_snapshot_falls_back_to_a_full_flatten_on_a_dimension_mismatch() {
+        let state = AppState::default();
+        let small = Document::new(2, 2).unwrap();
+        snapshot(&state, &small, None).unwrap();
+
+        let mut big = Document::new(4, 4).unwrap();
+        big.add_layer("l", &[1u8, 2, 3, 255].repeat(16), 4, 4)
+            .unwrap();
+        // A rect that would be valid for `small` but not `big` - the cached
+        // buffer is still 2x2, so this must fully re-flatten rather than
+        // writing a 4x4 pixel's worth of data into a 2x2 buffer.
+        let result = snapshot(
+            &state,
+            &big,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1,
+            }),
+        )
+        .unwrap();
+
+        let cached = state.composite.pixels.lock().unwrap().clone().unwrap();
+        assert_eq!((cached.width, cached.height), (4, 4));
+        assert_eq!(cached.pixels, composite::flatten(&big).pixels);
+        assert_eq!(result.generation, 2);
     }
 
     #[test]
@@ -505,7 +635,7 @@ mod tests {
         let state = AppState::default();
         let document = Document::new(1, 1).unwrap();
 
-        let fresh = snapshot(&state, &document).unwrap();
+        let fresh = snapshot(&state, &document, None).unwrap();
         assert!(!fresh.can_undo);
         assert!(!fresh.can_redo);
 
@@ -515,7 +645,7 @@ mod tests {
             .unwrap()
             .undo
             .push_back(document.clone());
-        let with_undo = snapshot(&state, &document).unwrap();
+        let with_undo = snapshot(&state, &document, None).unwrap();
         assert!(with_undo.can_undo);
         assert!(!with_undo.can_redo);
 
@@ -525,7 +655,7 @@ mod tests {
             .unwrap()
             .redo
             .push_back(document.clone());
-        let with_both = snapshot(&state, &document).unwrap();
+        let with_both = snapshot(&state, &document, None).unwrap();
         assert!(with_both.can_undo);
         assert!(with_both.can_redo);
     }

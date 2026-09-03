@@ -27,6 +27,16 @@ pub struct Composite {
     pub pixels: Vec<u8>,
 }
 
+/// An axis-aligned pixel rectangle, `x0..x1` by `y0..y1` (half-open),
+/// already clamped to a document's bounds — see [`recomposite_region`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
+}
+
 /// Flatten every contributing layer, bottom to top.
 ///
 /// Layers that are hidden or at zero opacity are skipped. A document with no
@@ -36,45 +46,87 @@ pub struct Composite {
 /// under zero alpha is not visible, so it is not carried into the result even
 /// when the source layer stored something there.
 pub fn flatten(document: &Document) -> Composite {
-    let pixel_count = document.width() as usize * document.height() as usize;
-
-    // Accumulated backdrop: non-premultiplied RGBA, starting fully transparent.
-    let mut backdrop = vec![0f32; pixel_count * CHANNELS];
-
-    for layer in document.layers().iter().filter(|layer| layer.contributes()) {
-        for i in 0..pixel_count {
-            let base = i * CHANNELS;
-
-            let source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
-            if source_alpha <= 0.0 {
-                continue;
-            }
-            let backdrop_alpha = backdrop[base + 3];
-            let out_alpha = source_alpha + backdrop_alpha * (1.0 - source_alpha);
-            if out_alpha <= 0.0 {
-                continue;
-            }
-
-            for channel in 0..3 {
-                let cs = to_unit(layer.pixels[base + channel]);
-                let cb = backdrop[base + channel];
-                // Where the backdrop is transparent there is nothing to blend
-                // against, so the source shows through unblended.
-                let blended =
-                    (1.0 - backdrop_alpha) * cs + backdrop_alpha * layer.blend_mode.blend(cb, cs);
-                backdrop[base + channel] = (source_alpha * blended
-                    + backdrop_alpha * cb * (1.0 - source_alpha))
-                    / out_alpha;
-            }
-            backdrop[base + 3] = out_alpha;
+    let width = document.width();
+    let height = document.height();
+    let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+    for y in 0..height {
+        for x in 0..width {
+            write_pixel(&mut pixels, width, x, y, composite_pixel(document, x, y));
         }
     }
-
     Composite {
-        width: document.width(),
-        height: document.height(),
-        pixels: backdrop.into_iter().map(to_byte).collect(),
+        width,
+        height,
+        pixels,
     }
+}
+
+/// Recomposite just `rect` of `document`'s layer stack into `target` — a
+/// full document-sized (`width * height * 4` byte) RGBA8 buffer that already
+/// holds valid pixels for everywhere outside `rect`, e.g. one previously
+/// produced by [`flatten`]. Pixels inside `rect` are fully overwritten from
+/// scratch, the same as [`flatten`] does for the whole image; pixels outside
+/// it are untouched.
+///
+/// Used after a brush/eraser stroke, whose caller already knows exactly
+/// which pixels it touched (the stroke's own bounding box), so a small local
+/// edit does not have to re-flatten the entire document to stay correct.
+/// Every other edit (opacity, visibility, blend mode, a layer being added,
+/// removed, or reordered) can change any pixel in the composite, so those
+/// still go through a full [`flatten`].
+pub fn recomposite_region(document: &Document, rect: Rect, target: &mut [u8]) {
+    let width = document.width();
+    for y in rect.y0..rect.y1 {
+        for x in rect.x0..rect.x1 {
+            write_pixel(target, width, x, y, composite_pixel(document, x, y));
+        }
+    }
+}
+
+/// Composite one pixel `(x, y)` of `document`'s layer stack: non-premultiplied
+/// RGBA in `0.0..=1.0`. The single place the blend math lives, shared by
+/// [`flatten`] (every pixel) and [`recomposite_region`] (just a dirty rect) —
+/// iterating pixel-outer, layer-inner here is what makes that sharing
+/// possible; per pixel it applies each contributing layer in the same order
+/// [`flatten`] always has, so the two produce identical results.
+fn composite_pixel(document: &Document, x: u32, y: u32) -> [f32; 4] {
+    let width = document.width() as usize;
+    let base = (y as usize * width + x as usize) * CHANNELS;
+
+    // Non-premultiplied RGBA, starting fully transparent.
+    let mut backdrop = [0f32; 4];
+    for layer in document.layers().iter().filter(|layer| layer.contributes()) {
+        let source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
+        if source_alpha <= 0.0 {
+            continue;
+        }
+        let backdrop_alpha = backdrop[3];
+        let out_alpha = source_alpha + backdrop_alpha * (1.0 - source_alpha);
+        if out_alpha <= 0.0 {
+            continue;
+        }
+
+        for (channel, slot) in backdrop.iter_mut().enumerate().take(3) {
+            let cs = to_unit(layer.pixels[base + channel]);
+            let cb = *slot;
+            // Where the backdrop is transparent there is nothing to blend
+            // against, so the source shows through unblended.
+            let blended =
+                (1.0 - backdrop_alpha) * cs + backdrop_alpha * layer.blend_mode.blend(cb, cs);
+            *slot =
+                (source_alpha * blended + backdrop_alpha * cb * (1.0 - source_alpha)) / out_alpha;
+        }
+        backdrop[3] = out_alpha;
+    }
+    backdrop
+}
+
+fn write_pixel(buf: &mut [u8], width: u32, x: u32, y: u32, rgba: [f32; 4]) {
+    let base = (y as usize * width as usize + x as usize) * CHANNELS;
+    buf[base] = to_byte(rgba[0]);
+    buf[base + 1] = to_byte(rgba[1]);
+    buf[base + 2] = to_byte(rgba[2]);
+    buf[base + 3] = to_byte(rgba[3]);
 }
 
 /// `u8` channel value to `0.0..=1.0`. Shared with [`crate::document`], whose
@@ -348,5 +400,89 @@ mod tests {
         // Reaching here without a panic plus a valid alpha is the assertion; u8
         // cannot represent an out-of-range value, so the clamp is what is tested.
         assert!(out.pixels[3] > 0);
+    }
+
+    #[test]
+    fn recompositing_a_region_matches_a_full_flatten_inside_it() {
+        // Two 4x4 layers, one Multiply on top, so there is real blend math to
+        // get right, not just a pass-through.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_layer("base", &solid(4, 4, [200, 150, 50, 255]), 4, 4)
+            .unwrap();
+        let top = doc
+            .add_layer("top", &solid(4, 4, [100, 100, 100, 180]), 4, 4)
+            .unwrap();
+        doc.set_blend_mode(top, BlendMode::Multiply).unwrap();
+
+        let full = flatten(&doc);
+        let mut target = vec![0u8; full.pixels.len()];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3,
+            },
+            &mut target,
+        );
+
+        for y in 1..3 {
+            for x in 1..3 {
+                let base = (y * 4 + x) * CHANNELS;
+                assert_eq!(
+                    &target[base..base + CHANNELS],
+                    &full.pixels[base..base + CHANNELS],
+                    "pixel ({x},{y}) inside the region should match a full flatten"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recompositing_a_region_leaves_pixels_outside_it_untouched() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_layer("base", &solid(4, 4, [10, 20, 30, 255]), 4, 4)
+            .unwrap();
+
+        // Pre-seed the target with a sentinel value nothing in the document
+        // could ever produce, so any write outside the rect is unmistakable.
+        let mut target = vec![9u8; 4 * 4 * CHANNELS];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2,
+            },
+            &mut target,
+        );
+
+        // The one pixel inside the 1x1 rect, at row 1 col 1 of a 4-wide
+        // image, changed...
+        let inside = 5 * CHANNELS;
+        assert_eq!(&target[inside..inside + CHANNELS], &[10, 20, 30, 255]);
+        // ...but a pixel outside it did not.
+        assert_eq!(&target[0..CHANNELS], &[9, 9, 9, 9]);
+    }
+
+    #[test]
+    fn an_empty_region_touches_nothing() {
+        let mut doc = Document::new(2, 2).unwrap();
+        doc.add_layer("base", &solid(2, 2, [1, 2, 3, 255]), 2, 2)
+            .unwrap();
+        let mut target = vec![9u8; 2 * 2 * CHANNELS];
+        recomposite_region(
+            &doc,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 1,
+                y1: 1,
+            },
+            &mut target,
+        );
+        assert_eq!(target, vec![9u8; 2 * 2 * CHANNELS]);
     }
 }

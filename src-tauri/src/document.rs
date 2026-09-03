@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
-use crate::composite::{to_byte, to_unit};
+use crate::composite::{to_byte, to_unit, Rect};
 
 pub type LayerId = u64;
 
@@ -224,15 +224,21 @@ impl Document {
     /// maximum, not summed: a stroke that briefly doubles back on itself (a
     /// tight curve, a corner) must not paint or erase that overlap twice as
     /// hard as the rest of the stroke.
+    ///
+    /// Returns the pixel rectangle actually touched (the stroke's bounding
+    /// box, expanded by `radius` and clamped to the document) — `None` if
+    /// nothing was painted (an empty `points`, or a stroke entirely off
+    /// canvas). The caller can recomposite just that rect instead of the
+    /// whole document.
     pub fn stroke(
         &mut self,
         id: LayerId,
         points: &[(f32, f32)],
         radius: f32,
         stroke: Stroke,
-    ) -> Result<(), String> {
+    ) -> Result<Option<Rect>, String> {
         if points.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         if !radius.is_finite() || radius <= 0.0 {
             return Err(format!(
@@ -264,7 +270,7 @@ impl Document {
         let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
         let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
         if x0 >= x1 || y0 >= y1 {
-            return Ok(());
+            return Ok(None);
         }
         let box_width = (x1 - x0) as usize;
         let box_height = (y1 - y0) as usize;
@@ -329,7 +335,7 @@ impl Document {
             }
         }
 
-        Ok(())
+        Ok(Some(Rect { x0, y0, x1, y1 }))
     }
 }
 
@@ -576,15 +582,28 @@ mod tests {
     #[test]
     fn a_brush_dot_paints_a_solid_circle_on_a_transparent_layer() {
         let (mut doc, id) = transparent_doc(9);
-        doc.stroke(
-            id,
-            &[(4.0, 4.0)],
-            3.0,
-            Stroke::Brush {
-                color: [255, 0, 0, 255],
-            },
-        )
-        .unwrap();
+        let rect = doc
+            .stroke(
+                id,
+                &[(4.0, 4.0)],
+                3.0,
+                Stroke::Brush {
+                    color: [255, 0, 0, 255],
+                },
+            )
+            .unwrap();
+        // A dot at (4,4) with radius 3 touches roughly (1,1)-(7,7), clamped
+        // to the document — the returned rect is what a caller would
+        // recomposite instead of the whole 9x9 canvas.
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 7,
+                y1: 7
+            })
+        );
         // The centre gets full coverage.
         assert_eq!(pixel(&doc, id, 4, 4), [255, 0, 0, 255]);
         // Well outside the radius is untouched.
@@ -691,22 +710,25 @@ mod tests {
     #[test]
     fn an_empty_stroke_is_a_no_op() {
         let (mut doc, id) = transparent_doc(3);
-        doc.stroke(id, &[], 1.0, Stroke::Eraser).unwrap();
+        let rect = doc.stroke(id, &[], 1.0, Stroke::Eraser).unwrap();
+        assert_eq!(rect, None);
         assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 0]);
     }
 
     #[test]
     fn a_stroke_entirely_off_canvas_is_clipped_to_nothing() {
         let (mut doc, id) = transparent_doc(3);
-        doc.stroke(
-            id,
-            &[(100.0, 100.0)],
-            2.0,
-            Stroke::Brush {
-                color: [255, 255, 255, 255],
-            },
-        )
-        .unwrap();
+        let rect = doc
+            .stroke(
+                id,
+                &[(100.0, 100.0)],
+                2.0,
+                Stroke::Brush {
+                    color: [255, 255, 255, 255],
+                },
+            )
+            .unwrap();
+        assert_eq!(rect, None);
         for y in 0..3 {
             for x in 0..3 {
                 assert_eq!(pixel(&doc, id, x, y), [0, 0, 0, 0]);

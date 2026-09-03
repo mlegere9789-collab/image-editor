@@ -13,6 +13,8 @@ Desktop image editor, Tauri + Rust + React.
 - **Phase 4** — **Export PNG…**: the app can finally save what you made.
   *Done, described below.*
 - **Phase 5** — undo/redo. *Done, described below.*
+- **Phase 6** — dirty-region recompositing: a stroke only recomposites the
+  pixels it touched. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -82,8 +84,9 @@ JSON string, no size limit from what IPC can carry as text.
 
 This is the transport half of the "worth flagging" note from Phase 1.
 Recompositing only the dirty region instead of the whole document on every
-edit is still future work — there's no per-pixel edit tool yet to make a
-"dirty region" mean anything narrower than "the whole layer."
+edit is still future work here — there's no per-pixel edit tool yet to make a
+"dirty region" mean anything narrower than "the whole layer" (Phase 6 adds
+that once Phase 3 gives it something to be dirty about).
 
 ## Phase 3: brush and eraser
 
@@ -119,7 +122,7 @@ you drag across the canvas.
 One thing this does *not* do yet: recomposite only the dirty region instead
 of the whole document on every stroke segment (Phase 2's deferred note — now
 that there's an actual per-pixel edit tool, this is the next natural
-candidate).
+candidate). Phase 6 adds it.
 
 ## Phase 4: exporting
 
@@ -178,6 +181,57 @@ Ctrl/Cmd+Shift+Z / Ctrl+Y), backed by whole-document snapshots kept in Rust.
   with no IPC involved); only interactive testing under Xvfb surfaced it. The
   fix makes the ordering explicit: `checkpoint().then(() => applyStroke(...))`.
 
+## Phase 6: dirty-region recompositing
+
+Every edit through Phase 5 re-flattened the *entire* document, every time —
+including once per pointer-move during a brush stroke, dozens of times over
+one drag. Deferred at the end of Phase 2 as future work, and again at the end
+of Phase 3 once there was finally a per-pixel edit tool to make "dirty
+region" mean something narrower than "the whole layer."
+
+- `composite::flatten` is unchanged in signature and behaviour — same input,
+  same output — but its blend math was factored into a new `composite_pixel`
+  function that composites exactly one pixel. A new `composite::recomposite_region`
+  reuses that same function over just a `Rect` (a bounding box, already
+  clamped to the document) instead of the whole image, writing into an
+  existing full-size buffer rather than allocating a fresh one. `flatten` and
+  `recomposite_region` sharing one blend implementation means there is
+  exactly one place for that math to be correct, not two copies that could
+  quietly drift apart.
+- `Document::stroke` already computed its own touched bounding box internally
+  (to size its coverage buffer); it now returns that box (`Option<Rect>`,
+  `None` for an empty or entirely-off-canvas stroke) instead of discarding it.
+- `AppState`'s composite cache now holds the raw RGBA pixel buffer, not just
+  the PNG-encoded bytes. `snapshot()` takes an `Option<Rect>`: given one, and
+  a cached buffer whose dimensions match the current document, it patches
+  just that rect via `recomposite_region` instead of calling `flatten`.
+  Every edit that is *not* a stroke (opacity, visibility, blend mode, adding/
+  removing/reordering a layer) can change any pixel in the composite, so
+  those still pass `None` and get a full flatten — as does undo/redo, and
+  opening a document (which also replaces the cache outright, so a
+  differently-sized new image can never be patched against a stale buffer).
+- The PNG is still re-encoded from the full buffer on every edit either way —
+  encoding was never the expensive part. What a dirty stroke segment now
+  skips is the O(width × height × layers) blend loop over pixels nothing
+  touched; for a small brush radius on a normal-sized canvas, a stroke
+  segment's rect is a small fraction of the total pixel count.
+
+**Verified two ways.** `composite.rs` gained tests asserting a region
+recomposite matches a full flatten *inside* the rect and leaves pixels
+*outside* it untouched (with a sentinel value nothing real could produce, so
+any stray write is unmistakable); `lib.rs` gained tests for `snapshot`'s
+three paths — a region patch, the no-cache-yet fallback, and the
+dimension-mismatch fallback. Every one of Phase 1-5's existing tests also
+still passes unchanged, which is what confirms the `flatten` refactor
+(reordering the blend loop from layer-outer/pixel-inner to
+pixel-outer/layer-inner, so it could share `composite_pixel` with the region
+path) produces identical output to before — not just similar, bit-identical,
+pixel for pixel. Live under Xvfb: painted two separate strokes across an
+open document and confirmed both rendered correctly with the background
+gradient untouched around them, then undid both and confirmed the canvas
+returned to its pristine state — the full-flatten fallback undo/redo already
+used stays correct alongside the new region path.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -219,7 +273,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 78 tests: blend math, model, strokes, compositor, protocol, export, undo/redo, pipeline
+cd src-tauri && cargo test      # 84 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -276,9 +330,11 @@ samples/                test images
 1. React sends a file path, or a layer edit, to one of the Rust commands in
    `lib.rs`. The open document lives in Rust behind a mutex; the frontend holds
    no pixel data.
-2. The command mutates the `Document`, re-runs the compositor, PNG-encodes the
-   result, and caches those bytes in `AppState` behind a generation counter. It
-   returns that counter together with the new layer state — not the bytes.
+2. The command mutates the `Document`, re-runs the compositor — the whole
+   document, or (for a stroke) just the rect it touched, see Phase 6 —
+   PNG-encodes the result, and caches both the raw pixels and the encoded
+   bytes in `AppState` behind a generation counter. It returns that counter
+   together with the new layer state — not the bytes.
 3. React points its `<img>` at `composite://composite.png?g=<generation>`. The
    webview's own resource fetch hits the `composite://` protocol registered in
    `lib.rs`, which serves the cached bytes straight back, no IPC round trip for
@@ -286,7 +342,4 @@ samples/                test images
 
 One command call per edit either way, but the composite no longer inflates
 through base64 or shares the IPC channel with everything else — files up to
-the 64 MB decode ceiling ship as a plain binary response. Recompositing only
-the dirty region instead of the whole document on every edit is the next
-natural step once there's a per-pixel edit tool to make "dirty region" mean
-something.
+the 64 MB decode ceiling ship as a plain binary response.
