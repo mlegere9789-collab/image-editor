@@ -41,11 +41,15 @@ pub fn read(path: &Path) -> Result<DecodedPng, String> {
     let bytes =
         std::fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
 
-    let reader = image::ImageReader::with_format(std::io::Cursor::new(&bytes), ImageFormat::Png);
-    let decoded = reader
-        .decode()
-        .map_err(|err| format!("{} is not a readable PNG: {err}", path.display()))?
-        .to_rgba8();
+    decode_bytes(&bytes).map_err(|err| format!("{} is not a readable PNG: {err}", path.display()))
+}
+
+/// Decode already-in-memory PNG bytes to RGBA8 — the part of [`read`] that
+/// doesn't need a filesystem path, shared with `project.rs`, which embeds
+/// one PNG per layer inside a project file rather than one PNG per file.
+pub fn decode_bytes(bytes: &[u8]) -> Result<DecodedPng, String> {
+    let reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), ImageFormat::Png);
+    let decoded = reader.decode().map_err(|err| err.to_string())?.to_rgba8();
 
     Ok(DecodedPng {
         width: decoded.width(),
@@ -56,15 +60,17 @@ pub fn read(path: &Path) -> Result<DecodedPng, String> {
 
 /// Encode a composite as PNG bytes.
 pub fn encode(composite: &Composite) -> Result<Vec<u8>, String> {
+    encode_pixels(composite.width, composite.height, &composite.pixels)
+}
+
+/// Encode a raw RGBA8 buffer as PNG bytes — the part of [`encode`] that
+/// doesn't need a [`Composite`], shared with `project.rs`, which encodes one
+/// layer's own pixels rather than the flattened composite.
+pub fn encode_pixels(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
     let mut buffer = Vec::new();
     image::codecs::png::PngEncoder::new(&mut buffer)
-        .write_image(
-            &composite.pixels,
-            composite.width,
-            composite.height,
-            image::ExtendedColorType::Rgba8,
-        )
-        .map_err(|err| format!("Could not encode the composite: {err}"))?;
+        .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
+        .map_err(|err| format!("Could not encode the image: {err}"))?;
 
     Ok(buffer)
 }
@@ -96,6 +102,27 @@ mod tests {
         assert_eq!((decoded.width, decoded.height), (1, 1));
         // The source is RGB; decoding to RGBA must add an opaque alpha channel.
         assert_eq!(decoded.pixels, vec![255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn decode_bytes_reads_in_memory_png_data_directly() {
+        let decoded = decode_bytes(ONE_PIXEL_PNG).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, 1));
+        assert_eq!(decoded.pixels, vec![255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn decode_bytes_rejects_non_png_bytes() {
+        assert!(decode_bytes(b"not a png").is_err());
+    }
+
+    #[test]
+    fn encode_pixels_and_decode_bytes_round_trip() {
+        let pixels = vec![10, 20, 30, 255, 40, 50, 60, 128];
+        let bytes = encode_pixels(2, 1, &pixels).unwrap();
+        let decoded = decode_bytes(&bytes).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 1));
+        assert_eq!(decoded.pixels, pixels);
     }
 
     #[test]

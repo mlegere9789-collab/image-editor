@@ -5,6 +5,7 @@ pub mod blend;
 pub mod composite;
 pub mod document;
 pub mod png;
+pub mod project;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -263,6 +264,17 @@ fn layer_name(path: &Path) -> String {
         .unwrap_or_else(|| path.display().to_string())
 }
 
+/// Replace whatever document is open with `document` — the shared tail of
+/// [`open_document`] and [`open_project`]: a new document always starts its
+/// own history, since undoing "past" it into whatever was open before is not
+/// a thing any editor does.
+fn replace_open_document(state: &AppState, document: Document) -> Result<Snapshot, String> {
+    *state.history.lock().map_err(|_| POISONED.to_string())? = History::default();
+    let result = snapshot(state, &document, None)?;
+    *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
+    Ok(result)
+}
+
 /// Open `path` as a new single-layer document, replacing whatever was open.
 #[tauri::command]
 fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, String> {
@@ -276,13 +288,7 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
         decoded.width,
         decoded.height,
     )?;
-
-    // A newly opened document starts its own history; undoing "past" it into
-    // whatever was open before is not a thing any editor does.
-    *state.history.lock().map_err(|_| POISONED.to_string())? = History::default();
-    let result = snapshot(&state, &document, None)?;
-    *state.document.lock().map_err(|_| POISONED.to_string())? = Some(document);
-    Ok(result)
+    replace_open_document(&state, document)
 }
 
 /// Add `path` as a new top layer of the open document. The document keeps its
@@ -403,6 +409,27 @@ fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
     export(document, Path::new(&path))
 }
 
+/// Write the open document to `path` as a project file — the full editable
+/// layer stack (order, visibility, opacity, blend mode, and each layer's own
+/// pixels), unlike [`export_png`], which only ever writes the flattened
+/// composite. Like `export_png`, this reads the open document without
+/// mutating it, so there is no [`Snapshot`] to return.
+#[tauri::command]
+fn save_project(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    project::save(document, Path::new(&path))
+}
+
+/// Open `path` as a project file, replacing whatever document was open — the
+/// counterpart to [`open_document`], but for a project file's full layer
+/// stack instead of a single flattened image.
+#[tauri::command]
+fn open_project(state: State<'_, AppState>, path: String) -> Result<Snapshot, String> {
+    let document = project::load(Path::new(&path))?;
+    replace_open_document(&state, document)
+}
+
 /// Snapshot the open document onto the undo stack, for the frontend to call
 /// once at the start of a multi-step gesture (a stroke, an opacity drag) —
 /// see [`edit`] vs [`edit_checkpointed`]. A no-op, not an error, when no
@@ -461,6 +488,8 @@ pub fn run() {
             paint_stroke,
             erase_stroke,
             export_png,
+            save_project,
+            open_project,
             checkpoint,
             undo,
             redo,

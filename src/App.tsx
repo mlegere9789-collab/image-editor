@@ -15,6 +15,7 @@ import type {
 } from "./types";
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
+const PROJECT_FILTER = [{ name: "Image Editor Project", extensions: ["iep"] }];
 
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
 function hexToRgb(hex: string): [number, number, number] {
@@ -170,6 +171,29 @@ export default function App() {
     }
   }, []);
 
+  // Unlike Export PNG…, this writes the full editable layer stack (order,
+  // visibility, opacity, blend mode, and each layer's own pixels) to a
+  // project file, not just the flattened composite — the counterpart to
+  // openProject below. Reads the open document but never mutates it.
+  const saveProject = useCallback(async () => {
+    const destination = await save({ filters: PROJECT_FILTER, defaultPath: "untitled.iep" });
+    if (typeof destination !== "string") return;
+    setBusy(true);
+    try {
+      await invoke("save_project", { path: destination });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const openProject = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: PROJECT_FILTER });
+    if (typeof selected === "string") await runCommand("open_project", { path: selected }, "top");
+  }, [runCommand]);
+
   // A drop opens the file when nothing is open, and stacks it as a layer when
   // something is.
   const hasDocument = document !== null;
@@ -274,6 +298,16 @@ export default function App() {
           disabled={busy || !hasDocument}
         >
           Export PNG…
+        </button>
+        <button className="button button--quiet" onClick={openProject} disabled={busy}>
+          Open Project…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={saveProject}
+          disabled={busy || !hasDocument}
+        >
+          Save Project…
         </button>
 
         <div className="tools" role="group" aria-label="Undo history">

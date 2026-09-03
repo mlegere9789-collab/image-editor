@@ -15,6 +15,9 @@ Desktop image editor, Tauri + Rust + React.
 - **Phase 5** — undo/redo. *Done, described below.*
 - **Phase 6** — dirty-region recompositing: a stroke only recomposites the
   pixels it touched. *Done, described below.*
+- **Phase 7** — **Save Project… / Open Project…**: a layered project file
+  format that round-trips the full editable document, not just a flattened
+  PNG. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -144,7 +147,7 @@ Exporting is deliberately a flattened PNG, not a save of the editable
 document (layers, blend modes, opacity): the app's only file format so far
 is PNG, on both the read and write side, and a project format able to round
 trip the full layer stack is a bigger, separate piece of scope than "make
-the button that writes a file exist."
+the button that writes a file exist." Phase 7 adds that format.
 
 ## Phase 5: undo and redo
 
@@ -232,6 +235,51 @@ gradient untouched around them, then undid both and confirmed the canvas
 returned to its pristine state — the full-flatten fallback undo/redo already
 used stays correct alongside the new region path.
 
+## Phase 7: project files
+
+**Export PNG…** (Phase 4) only ever wrote the *flattened* composite —
+opening that file back up gives you a single fresh layer, not the document
+you actually built. **Save Project…** / **Open Project…** close that gap: a
+project file round-trips the full editable document — layer order, name,
+visibility, opacity, blend mode, and each layer's own pixels — so closing
+the app mid-edit and reopening the project picks up exactly where you left
+off.
+
+- `src-tauri/src/project.rs` is a small custom format rather than a second
+  pixel codec or a pulled-in archive library: a 5-byte magic
+  (`b"IEDP1"`), a length-prefixed JSON manifest (document size, and each
+  layer's name/visibility/opacity/blend mode/PNG byte length, in stack
+  order), followed by each layer's own pixels — PNG-encoded independently
+  and concatenated in that same order. Reusing the PNG codec already in
+  `png.rs` keeps a project file a similar order of magnitude to the images
+  it's built from, instead of a document-sized raw RGBA8 buffer per layer.
+- `png.rs` gained `decode_bytes`/`encode_pixels` — the parts of `read`/
+  `encode` that work on in-memory bytes rather than a filesystem path,
+  needed because a project file's layers are embedded, not one-PNG-per-file.
+  `read` and `encode` now just call them, unchanged in behaviour.
+- `save_project` / `open_project` (`src-tauri/src/lib.rs`) mirror
+  `export_png` / `open_document`: saving reads the open document without
+  mutating it (no `Snapshot` to return, like `export_png`); opening replaces
+  whatever document was open and starts fresh undo/redo history (like
+  `open_document`) — factored into a shared `replace_open_document` helper
+  rather than duplicated between the two.
+- The frontend adds **Open Project…** / **Save Project…** toolbar buttons,
+  filtered to a new `.iep` extension, alongside the existing PNG open/export
+  pair.
+
+**Verified two ways.** `project.rs` gained tests for a full round trip
+(multiple layers, reordered, with non-default opacity/blend-mode/visibility
+all preserved), an empty document, and every truncation/corruption path
+(wrong magic, a manifest or a layer's PNG bytes cut short, a layer whose
+decoded size doesn't match the document) each producing a clear error rather
+than a panic or silent data loss. Live under Xvfb: opened a document, added
+a second layer, set it to 60% opacity and Multiply, saved a project file,
+then reloaded it — the reloaded document showed exactly two layers (not
+duplicated — an early version of the verification probe raced under React
+StrictMode's double-effect in dev and *did* duplicate them, caught before
+this ever reached real code) with the opacity, blend mode, and composite all
+matching what was saved.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -273,7 +321,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 84 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, undo/redo, pipeline
+cd src-tauri && cargo test      # 94 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -317,6 +365,7 @@ src-tauri/
   src/document.rs       Document and Layer: the core model
   src/composite.rs      the compositor
   src/png.rs            PNG decode and composite encode
+  src/project.rs        the layered project file format
   src/lib.rs            Tauri commands, AppState, and the composite:// protocol
   src/main.rs           desktop entry point
   tests/pipeline.rs     end-to-end tests over the bundled samples
