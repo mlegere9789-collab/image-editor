@@ -19,6 +19,10 @@ use blend::BlendMode;
 use composite::Rect;
 use document::{Document, DocumentView, LayerId, MoveDirection, Stroke};
 
+/// Same order of magnitude as `png::MAX_FILE_BYTES` — a blank canvas this
+/// large would be as much of a memory problem as a PNG that big.
+const MAX_NEW_DOCUMENT_BYTES: u64 = 64 * 1024 * 1024;
+
 /// The latest flattened composite: raw RGBA8 pixels, so a stroke's dirty
 /// rect can be recomposited into just that region instead of the whole
 /// document (see [`snapshot`]), plus the PNG-encoded bytes actually served
@@ -291,6 +295,30 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
     replace_open_document(&state, document)
 }
 
+/// Create a blank `width` x `height` document with one fully transparent
+/// layer to paint on immediately, replacing whatever was open. Kept separate
+/// from the `#[tauri::command]` wrapper below so it can be unit-tested
+/// directly, the same way [`export`] is.
+fn create_new_document(state: &AppState, width: u32, height: u32) -> Result<Snapshot, String> {
+    let mut document = Document::new(width, height)?;
+    let byte_len = document.buffer_len() as u64;
+    if byte_len > MAX_NEW_DOCUMENT_BYTES {
+        return Err(format!(
+            "{width}x{height} would be {:.1} MB, which is over the {} MB limit.",
+            byte_len as f64 / (1024.0 * 1024.0),
+            MAX_NEW_DOCUMENT_BYTES / (1024 * 1024)
+        ));
+    }
+    let blank = vec![0u8; document.buffer_len()];
+    document.add_layer("Layer 1", &blank, width, height)?;
+    replace_open_document(state, document)
+}
+
+#[tauri::command]
+fn new_document(state: State<'_, AppState>, width: u32, height: u32) -> Result<Snapshot, String> {
+    create_new_document(&state, width, height)
+}
+
 /// Add `path` as a new top layer of the open document. The document keeps its
 /// original size: a smaller image is pasted at the origin, a larger one clipped.
 #[tauri::command]
@@ -479,6 +507,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
+            new_document,
             add_layer,
             set_layer_visible,
             set_layer_opacity,
@@ -657,6 +686,51 @@ mod tests {
             .join("out.png");
         let err = export(&document, &path).unwrap_err();
         assert!(err.contains("Could not write"), "{err}");
+    }
+
+    #[test]
+    fn new_document_creates_one_blank_paintable_layer() {
+        let state = AppState::default();
+        let result = create_new_document(&state, 4, 3).unwrap();
+        assert_eq!((result.document.width, result.document.height), (4, 3));
+        assert_eq!(result.document.layers.len(), 1);
+        assert_eq!(result.document.layers[0].name, "Layer 1");
+
+        let doc_guard = state.document.lock().unwrap();
+        let document = doc_guard.as_ref().unwrap();
+        assert_eq!(
+            document.layers()[0].pixels,
+            vec![0u8; 4 * 3 * document::CHANNELS]
+        );
+    }
+
+    #[test]
+    fn new_document_rejects_zero_dimensions() {
+        let state = AppState::default();
+        assert!(create_new_document(&state, 0, 5).is_err());
+        assert!(create_new_document(&state, 5, 0).is_err());
+    }
+
+    #[test]
+    fn new_document_rejects_a_canvas_over_the_memory_limit() {
+        let state = AppState::default();
+        // Bytes needed = width * height * 4; pick dimensions comfortably
+        // over MAX_NEW_DOCUMENT_BYTES (64 MB) without actually allocating it.
+        let err = create_new_document(&state, 1 << 16, 1 << 16).unwrap_err();
+        assert!(err.contains("over the"), "{err}");
+    }
+
+    #[test]
+    fn new_document_replaces_whatever_was_open_and_resets_history() {
+        let state = AppState::default();
+        *state.document.lock().unwrap() = Some(Document::new(1, 1).unwrap());
+        push_checkpoint(&state).unwrap();
+        assert!(history_state(&state).unwrap().can_undo);
+
+        let result = create_new_document(&state, 2, 2).unwrap();
+        assert!(!result.can_undo);
+        assert!(!result.can_redo);
+        assert_eq!(state.document.lock().unwrap().as_ref().unwrap().width(), 2);
     }
 
     #[test]

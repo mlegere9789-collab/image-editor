@@ -18,6 +18,8 @@ Desktop image editor, Tauri + Rust + React.
 - **Phase 7** — **Save Project… / Open Project…**: a layered project file
   format that round-trips the full editable document, not just a flattened
   PNG. *Done, described below.*
+- **Phase 8** — **New…**: start a blank document at a chosen size instead of
+  needing to open a file first. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -280,6 +282,43 @@ StrictMode's double-effect in dev and *did* duplicate them, caught before
 this ever reached real code) with the opacity, blend mode, and composite all
 matching what was saved.
 
+## Phase 8: new document
+
+Every prior phase needed a file to already exist — **Open PNG…** or
+**Open Project…**. **New…** starts a blank document at a size you choose, the
+same size a canvas app on any platform lets you start at, with one
+fully-transparent layer ready to paint on immediately.
+
+- `create_new_document` (`src-tauri/src/lib.rs`) builds a `Document` of the
+  requested size with a single blank `"Layer 1"`, then hands it to
+  `replace_open_document` — the same helper `open_document` and
+  `open_project` already use — so **New…** replaces whatever was open and
+  resets undo/redo history exactly like opening a file does. Kept as a plain
+  function separate from its `#[tauri::command]` wrapper `new_document` so it
+  can be unit-tested directly, the same pattern as `export`.
+- A blank canvas has no file size to bound it, so it needed its own limit:
+  `MAX_NEW_DOCUMENT_BYTES` (64 MB) rejects a request before allocating a
+  buffer that large, the same order of magnitude as `png::MAX_FILE_BYTES`
+  already bounds an opened PNG to.
+- The frontend adds a **New…** toolbar button (first in the row, disabled
+  while `busy` like every other action) that opens a small modal — Width and
+  Height number inputs (1–8000, matching the backend's practical range),
+  Cancel, and Create. Create is disabled until both fields hold a positive
+  number, and closing the modal (Cancel, or clicking the overlay) discards
+  the values without calling the backend.
+
+**Verified two ways.** `lib.rs` gained tests for a normal blank document (one
+layer, correct size, all-zero pixels), rejecting zero width or height,
+rejecting a canvas over the 64 MB limit, and — the one that matters most —
+that creating a new document while one is already open replaces it and
+clears undo/redo (checkpoint a document, confirm `can_undo`, create a new
+one, confirm both `can_undo` and `can_redo` come back false). Live under
+Xvfb: opened the bundled sample image, confirmed it painted and undid
+normally, then used **New…** to create a 100×100 document — the sample's
+layer was gone, replaced by a single blank "Layer 1" at the new size, and
+Ctrl+Z (undo) was a no-op, matching the unit test's behavior in the real
+running app.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -321,7 +360,7 @@ Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 94 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, undo/redo, pipeline
+cd src-tauri && cargo test      # 98 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -346,7 +385,8 @@ strokes (coverage, segment continuity, overlap handling, clipping),
 compositing (opacity, visibility, stacking order, alpha accumulation),
 exporting a document round-trips through PNG intact, undo/redo (checkpoint,
 history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
-paths), and end-to-end runs over the bundled samples. The frontend is a thin
+paths), starting a blank document at a chosen size (and its memory limit),
+and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

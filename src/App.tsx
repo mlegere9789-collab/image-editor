@@ -49,6 +49,10 @@ export default function App() {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
 
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newWidth, setNewWidth] = useState(800);
+  const [newHeight, setNewHeight] = useState(600);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -194,6 +198,11 @@ export default function App() {
     if (typeof selected === "string") await runCommand("open_project", { path: selected }, "top");
   }, [runCommand]);
 
+  const createNewDocument = useCallback(async () => {
+    await runCommand("new_document", { width: newWidth, height: newHeight }, "top");
+    setShowNewDialog(false);
+  }, [runCommand, newWidth, newHeight]);
+
   // A drop opens the file when nothing is open, and stacks it as a layer when
   // something is.
   const hasDocument = document !== null;
@@ -286,6 +295,13 @@ export default function App() {
     <div className={`app${dropping ? " app--dropping" : ""}`}>
       <header className="toolbar">
         <h1 className="toolbar__title">Image Editor</h1>
+        <button
+          className="button"
+          onClick={() => setShowNewDialog(true)}
+          disabled={busy}
+        >
+          New…
+        </button>
         <button className="button" onClick={openDocument} disabled={busy}>
           Open PNG…
         </button>
@@ -378,6 +394,55 @@ export default function App() {
           </label>
         </div>
       </header>
+
+      {showNewDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowNewDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="New document"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">New document</h2>
+            <label className="control">
+              <span className="control__label">Width</span>
+              <input
+                type="number"
+                min={1}
+                max={8000}
+                value={newWidth}
+                onChange={(event) => setNewWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">Height</span>
+              <input
+                type="number"
+                min={1}
+                max={8000}
+                value={newHeight}
+                onChange={(event) => setNewHeight(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowNewDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={createNewDocument}
+                disabled={busy || newWidth < 1 || newHeight < 1}
+              >
+                Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="workspace">
         <main className="stage">
