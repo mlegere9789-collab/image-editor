@@ -353,7 +353,18 @@ npm run tauri:build
 ```
 
 Installers are written to `src-tauri/target/release/bundle/` (`.dmg` on macOS,
-`.msi`/`.exe` on Windows, `.deb`/`.AppImage` on Linux).
+`.msi`/`.exe` on Windows, `.deb`/`.rpm`/`.AppImage` on Linux).
+
+**Verified for real**, not just wired up: ran this on Linux, then `dpkg -i`'d
+the resulting `.deb` — a genuine system package install, with a `.desktop`
+entry and icons registered, not a dev build. Launched the installed
+`/usr/bin/image-editor` binary (not `cargo run`, not `tauri dev`) under Xvfb
+and drove it: **New…** created a document, and a real pointer drag painted a
+stroke on it, both rendering correctly. Confirms the packaged build actually
+runs and works, not just that it compiles. Not yet verified: macOS, and
+actually running the Windows `.msi`/`.exe` (built by CI below, but only
+compiled and uploaded there — never installed and launched on a real or
+virtual Windows machine).
 
 ## Tests
 
@@ -376,6 +387,16 @@ install). It only runs on pushes to `main` and on manual dispatch, not on
 every PR — Windows minutes bill at 2x on this private repo, so PRs stay
 Linux-only for fast, cheap feedback, and the Windows build is checked when a
 branch actually lands.
+
+A fourth, `build-installers`, actually runs `npm run tauri:build` — a full
+release compile and bundle, on Linux and Windows in parallel — and uploads
+the resulting installers as workflow artifacts. Same gating as
+`rust-windows` and for the same reason (billing, and there's no reason to
+pay for a release compile on every PR push before a release is wanted); this
+is CI's version of the local **Build a distributable** step above, kept as a
+separate job rather than folded into `rust`/`rust-windows` so a slow release
+build never blocks the fast fmt/clippy/test feedback on every PR. macOS is
+still deferred, same as everywhere else in this project.
 
 macOS builds and the native file dialog are still unverified.
 
