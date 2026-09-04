@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1085,6 +1085,56 @@ expected partial-density blend rather than a flat colour fill,
 screenshotted before and after.
 
 **213 Rust tests total** (205 → 213). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Exposure.** Image > Adjustments > Exposure applies the same
+three-control model Photoshop's own dialog uses, per channel, to a
+`0.0..=1.0` working value: `exposure` (a stop count — `2^exposure`
+multiplies the value, the same doubling-per-stop a camera sensor uses),
+`offset` (added after exposure, shifts black), and `gamma`
+(`value.powf(1.0 / gamma)`, curving the midtones). Each control clamps
+rather than errors on an out-of-range value: `exposure` to `-2000..=2000`
+(hundredths of a stop, `±20.00`, Photoshop's own range), `offset` to
+`-50..=50` (hundredths, `±0.50`), `gamma` to `1..=999` (hundredths,
+`0.01..=9.99` — never zero, which would make `1.0 / gamma` divide by
+zero). The value is floored at zero before the gamma power (a negative
+base raised to a fractional exponent is undefined in `f32::powf`) and
+clamped to `0.0..=1.0` only at the very end, so a highlight exposure
+pushes past white exactly the way it would on a real sensor before
+finally clipping — the clamp is a display limit, not a computation limit.
+Alpha untouched.
+
+`Document::exposure` is the eighth caller of `adjust_layer_pixels`. New
+`edit_checkpointed` command taking the layer id, `exposure`, `offset`,
+and `gamma` (all `i32`, the same hundredths-scaled-integer convention
+`hue_saturation` and `vibrance` already use for fractional ranges without
+needing a float across the Tauri IPC boundary). The frontend adds an
+**Exposure…** toolbar button opening a modal with three sliders — the UI
+narrows `exposure` to `±2.00` stops and `gamma` to `0.10..=3.00` (the
+practically useful ranges) while `offset` matches the backend's own
+`±0.50` exactly, each display value formatted to two decimals rather
+than showing the raw hundredths integer.
+
+**Verified two ways.** New `document.rs` tests cover the all-default
+case being an exact no-op, a positive offset lifting pure black toward
+mid-grey, one stop of exposure exactly doubling a midtone and clamping a
+highlight past white, exposure being purely multiplicative — it cannot
+lift a true-black pixel no matter how many stops are dialed in, unlike
+offset — a gamma of 2.0 applying a hand-verified square-root curve, alpha
+staying untouched, an out-of-range slider saturating, confinement to an
+active selection, a locked layer, and an unknown layer id. Live under
+Xvfb: loaded the same colourful sample-image gradient layer via a
+temporary probe button (removed before committing, `grep -n
+"TEMP\|PROBE"` returning nothing — this increment's probe needed a wider
+Xvfb virtual screen than prior ones, since the accumulated toolbar
+buttons across nine adjustments no longer fit even a 1550px-wide window;
+restarting Xvfb at 2400×1100 resolved it) → **Exposure…** → raised Offset
+to +0.40, applied — the whole gradient lifted dramatically toward white,
+with the darkest corner brightening the most visibly and the lightest
+corner clipping to pure white, exactly the expected offset-lift curve,
+screenshotted before and after.
+
+**223 Rust tests total** (213 → 223). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

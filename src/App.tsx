@@ -119,6 +119,11 @@ export default function App() {
   const [photoFilterColor, setPhotoFilterColor] = useState("#ff9933");
   const [photoFilterDensity, setPhotoFilterDensity] = useState(25);
 
+  const [showExposureDialog, setShowExposureDialog] = useState(false);
+  const [exposureStops, setExposureStops] = useState(0);
+  const [exposureOffset, setExposureOffset] = useState(0);
+  const [exposureGamma, setExposureGamma] = useState(100);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -281,6 +286,17 @@ export default function App() {
     });
     setShowPhotoFilterDialog(false);
   }, [runCommand, selectedId, photoFilterColor, photoFilterDensity]);
+
+  const applyExposure = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("exposure", {
+      id: selectedId,
+      exposure: exposureStops,
+      offset: exposureOffset,
+      gamma: exposureGamma,
+    });
+    setShowExposureDialog(false);
+  }, [runCommand, selectedId, exposureStops, exposureOffset, exposureGamma]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -873,6 +889,14 @@ export default function App() {
           >
             Photo Filter…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowExposureDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Exposure"
+          >
+            Exposure…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1308,6 +1332,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPhotoFilter} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExposureDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowExposureDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Exposure"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Exposure</h2>
+            <label className="control">
+              <span className="control__label">
+                Exposure
+                <span className="control__value">{(exposureStops / 100).toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={-200}
+                max={200}
+                value={exposureStops}
+                onChange={(event) => setExposureStops(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Offset
+                <span className="control__value">{(exposureOffset / 100).toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={-50}
+                max={50}
+                value={exposureOffset}
+                onChange={(event) => setExposureOffset(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Gamma
+                <span className="control__value">{(exposureGamma / 100).toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={300}
+                value={exposureGamma}
+                onChange={(event) => setExposureGamma(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowExposureDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyExposure} disabled={busy}>
                 Apply
               </button>
             </div>

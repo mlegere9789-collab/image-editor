@@ -687,6 +687,20 @@ fn photo_filter(
     edit_checkpointed(&state, |document| document.photo_filter(id, color, density))
 }
 
+/// Image > Adjustments > Exposure on layer `id`.
+#[tauri::command]
+fn exposure(
+    state: State<'_, AppState>,
+    id: LayerId,
+    exposure: i32,
+    offset: i32,
+    gamma: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.exposure(id, exposure, offset, gamma)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -791,6 +805,7 @@ pub fn run() {
             black_and_white,
             vibrance,
             photo_filter,
+            exposure,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**590 distinct capabilities tracked. Currently shipped: 31.**
+**590 distinct capabilities tracked. Currently shipped: 32.**
 
 ## PART I — EVERY TOOL
 
@@ -129,7 +129,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] BRIGHTNESS/CONTRAST
 - [ ] LEVELS
 - [ ] CURVES
-- [ ] EXPOSURE
+- [x] EXPOSURE
 - [x] VIBRANCE
 - [x] HUE/SATURATION
 - [ ] COLOR BALANCE

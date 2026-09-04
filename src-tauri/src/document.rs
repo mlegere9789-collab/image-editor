@@ -1126,6 +1126,40 @@ impl Document {
             ]
         })
     }
+
+    /// Image > Adjustments > Exposure: the same three-control model
+    /// Photoshop's own dialog uses, applied per channel to a `0.0..=1.0`
+    /// working value — `exposure` (a stop count, `2^exposure` multiplies
+    /// the value), `offset` (added after exposure, shifts black), and
+    /// `gamma` (`value.powf(1.0 / gamma)`, curving the midtones) — each
+    /// clamped rather than erroring on an out-of-range value:
+    /// `exposure` to `-2000..=2000` (hundredths of a stop, `±20.00`,
+    /// Photoshop's own range), `offset` to `-50..=50` (hundredths,
+    /// `±0.50`), `gamma` to `1..=999` (hundredths, `0.01..=9.99` — never
+    /// zero, which would make `1.0 / gamma` divide by zero). The value is
+    /// floored at zero before the gamma power (a negative base raised to
+    /// a fractional exponent is undefined) and clamped to `0.0..=1.0`
+    /// only at the very end, so a highlight exposure pushes past white
+    /// exactly the way it would on a real sensor before finally clipping.
+    /// Alpha untouched.
+    pub fn exposure(
+        &mut self,
+        id: LayerId,
+        exposure: i32,
+        offset: i32,
+        gamma: i32,
+    ) -> Result<Option<Rect>, String> {
+        let factor = 2f32.powf(exposure.clamp(-2000, 2000) as f32 / 100.0);
+        let offset = offset.clamp(-50, 50) as f32 / 100.0;
+        let exponent = 100.0 / gamma.clamp(1, 999) as f32;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |c: u8| {
+                let v = (to_unit(c) * factor + offset).max(0.0).powf(exponent);
+                to_byte(v.clamp(0.0, 1.0))
+            };
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2644,6 +2678,100 @@ mod tests {
     fn photo_filter_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.photo_filter(999, [255, 128, 0], 50).is_err());
+    }
+
+    #[test]
+    fn exposure_defaults_are_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.exposure(id, 0, 0, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn positive_offset_lifts_black_toward_grey() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.exposure(id, 0, 50, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn one_stop_of_exposure_doubles_a_midtone_and_clamps_a_highlight() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([64, 64, 64, 255]); // 64/255 * 2 = 128/255 exactly
+        pixels.extend([200, 200, 200, 255]); // doubled would overflow 1.0
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.exposure(id, 100, 0, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn exposure_multiplies_true_black_by_zero_regardless_of_stops() {
+        // Unlike offset, exposure is purely multiplicative - it cannot
+        // lift a fully black pixel no matter how many stops are dialed in.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.exposure(id, 2000, 0, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn gamma_of_two_applies_a_square_root_curve() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[64, 64, 64, 255], 1, 1).unwrap();
+        doc.exposure(id, 0, 0, 200).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn exposure_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.exposure(id, 50, 10, 150).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn exposure_sliders_are_clamped_to_their_range() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        // An out-of-range offset (9999) clamps to the same 50 (+0.50) the
+        // dedicated offset test uses, landing on the same mid-grey.
+        doc.exposure(id, 0, 9999, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn exposure_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [0u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.exposure(id, 0, 50, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn exposure_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.exposure(id, 50, 10, 100).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn exposure_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.exposure(999, 50, 10, 100).is_err());
     }
 
     #[test]
