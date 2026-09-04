@@ -175,6 +175,42 @@ fn shrink_rect(bounds: Rect, width: u32) -> Option<Rect> {
     })
 }
 
+/// The flat average of every channel of `source` (a document-sized RGBA8
+/// buffer, `doc_width` pixels wide) in a `(2*radius+1)`-square window
+/// centred on `(col, row)`, clamped to `width`x`height` — sampling past an
+/// edge repeats the edge pixel rather than wrapping or padding with
+/// transparency. Shared by [`Document::box_blur`] (writes this straight to
+/// the pixel) and [`Document::unsharp_mask`] (subtracts this from the
+/// original instead).
+fn box_blur_at(
+    source: &[u8],
+    doc_width: usize,
+    width: i64,
+    height: i64,
+    row: u32,
+    col: u32,
+    radius: i64,
+) -> [u8; CHANNELS] {
+    let mut sums = [0u32; CHANNELS];
+    let mut count = 0u32;
+    for dy in -radius..=radius {
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        for dx in -radius..=radius {
+            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+            let base = (sy * doc_width + sx) * CHANNELS;
+            for (c, sum) in sums.iter_mut().enumerate() {
+                *sum += source[base + c] as u32;
+            }
+            count += 1;
+        }
+    }
+    let mut averaged = [0u8; CHANNELS];
+    for (out, sum) in averaged.iter_mut().zip(&sums) {
+        *out = (sum / count) as u8;
+    }
+    averaged
+}
+
 impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
@@ -990,22 +1026,78 @@ impl Document {
                 if !keep {
                     continue;
                 }
-                let mut sums = [0u32; CHANNELS];
-                let mut count = 0u32;
-                for dy in -r..=r {
-                    let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
-                    for dx in -r..=r {
-                        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
-                        let base = (sy * doc_width + sx) * CHANNELS;
-                        for (c, sum) in sums.iter_mut().enumerate() {
-                            *sum += source[base + c] as u32;
-                        }
-                        count += 1;
-                    }
-                }
+                let averaged = box_blur_at(&source, doc_width, width, height, row, col, r);
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
-                for (sum, pixel) in sums.iter().zip(&mut layer.pixels[dst..dst + CHANNELS]) {
-                    *pixel = (sum / count) as u8;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&averaged);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Sharpen > Unsharp Mask: the classic "subtract a blurred
+    /// copy from the original, then add that difference back in,
+    /// amplified" sharpen, built directly on [`box_blur_at`] (the same
+    /// clamp-to-edge box-blur sampling [`Self::box_blur`] itself uses) as
+    /// the "blurred copy" — this app's box blur *is* its unsharp mask's
+    /// low-pass filter, not a separate Gaussian one, the same well-scoped
+    /// simplification `box_blur` itself made relative to Photoshop's own
+    /// Gaussian-based filters. For every pixel in the active selection (or
+    /// the whole layer, with none): `diff = original - blurred` on each of
+    /// the R, G, and B channels (alpha is left untouched — sharpening is a
+    /// contrast operation, not a transparency one); if `|diff|` is at
+    /// least `threshold`, the output is `original + diff * amount`,
+    /// clamped to `0..=255`; otherwise the pixel is left exactly as it
+    /// was, which is `threshold`'s whole job — protecting flat, low-
+    /// contrast areas (skin, sky) from picking up sharpening noise while
+    /// real edges (where `|diff|` is large) still get boosted. `amount`
+    /// is a plain multiplier here rather than Photoshop's 1-500% dial;
+    /// `1.0` corresponds to a nominal "100%". Errors on a zero radius, a
+    /// non-finite or non-positive `amount`, or a locked/unknown layer.
+    pub fn unsharp_mask(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        amount: f32,
+        threshold: u8,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Sharpen radius must be at least 1 pixel.".to_string());
+        }
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err(format!(
+                "Sharpen amount must be a positive number, got {amount}."
+            ));
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        let threshold = threshold as i32;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as i32;
+                    let diff = original - blurred[c] as i32;
+                    layer.pixels[dst + c] = if diff.abs() < threshold {
+                        source[dst + c]
+                    } else {
+                        (original as f32 + diff as f32 * amount)
+                            .round()
+                            .clamp(0.0, 255.0) as u8
+                    };
                 }
             }
         }
@@ -2881,6 +2973,91 @@ mod tests {
     fn box_blur_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.box_blur(999, 1).is_err());
+    }
+
+    #[test]
+    fn unsharp_mask_boosts_contrast_using_the_same_box_blur_as_its_low_pass() {
+        let (mut doc, id) = ramped_3x3();
+
+        doc.unsharp_mask(id, 1, 0.5, 0).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Centre: blurred value (50) equals the original, so diff is zero
+        // and the pixel is unchanged.
+        assert_eq!(pixels[idx(1, 1)], 50);
+        // Top-left corner: original 10, box-blurred 23 (same hand-derived
+        // value as the box_blur test above), diff = -13, sharpened =
+        // 10 + (-13 * 0.5) = 3.5, which rounds (half away from zero) to 4.
+        assert_eq!(pixels[idx(0, 0)], 4);
+        // Bottom-right corner: original 90, box-blurred 76, diff = 14,
+        // sharpened = 90 + (14 * 0.5) = 97 exactly.
+        assert_eq!(pixels[idx(2, 2)], 97);
+        // Alpha is a transparency channel, not a contrast one: sharpening
+        // never touches it, so the uniformly-255 alpha survives untouched.
+        assert_eq!(pixels[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn unsharp_mask_threshold_protects_low_contrast_pixels() {
+        let (mut doc, id) = ramped_3x3();
+
+        // Both corners' |diff| (13 and 14) are below this threshold, so
+        // with a high enough amount to prove it isn't just doing nothing,
+        // neither should move from its original value.
+        doc.unsharp_mask(id, 1, 1.0, 20).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(pixels[idx(0, 0)], 10);
+        assert_eq!(pixels[idx(2, 2)], 90);
+    }
+
+    #[test]
+    fn unsharp_mask_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap(); // just the top-left pixel
+
+        doc.unsharp_mask(id, 1, 1.0, 0).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // diff = 10 - 23 = -13, sharpened = 10 + (-13 * 1.0) = -3, clamped to 0.
+        assert_eq!(pixels[idx(0, 0)], 0);
+        // Everywhere outside the selection is untouched.
+        assert_eq!(pixels[idx(1, 1)], 50);
+        assert_eq!(pixels[idx(2, 2)], 90);
+        assert_eq!(pixels[idx(1, 0)], 20);
+    }
+
+    #[test]
+    fn unsharp_mask_with_zero_radius_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        let err = doc.unsharp_mask(id, 0, 1.0, 0).unwrap_err();
+        assert!(err.contains("at least 1"), "{err}");
+    }
+
+    #[test]
+    fn unsharp_mask_rejects_a_non_positive_or_non_finite_amount() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.unsharp_mask(id, 1, 0.0, 0).is_err());
+        assert!(doc.unsharp_mask(id, 1, -1.0, 0).is_err());
+        assert!(doc.unsharp_mask(id, 1, f32::NAN, 0).is_err());
+    }
+
+    #[test]
+    fn unsharp_mask_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.unsharp_mask(id, 1, 1.0, 0).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn unsharp_mask_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.unsharp_mask(999, 1, 1.0, 0).is_err());
     }
 
     #[test]

@@ -2054,6 +2054,71 @@ both confirmed a second, real layer now exists.
 **329 Rust tests total** (325 → 329, 322 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 22 — Filter > Sharpen > Unsharp Mask
+
+Photoshop's own Unsharp Mask is the classic "subtract a blurred copy
+from the original, then add that difference back in, amplified" edge
+enhancement — and Phase 20's box blur turned out to be exactly the
+low-pass filter it needs, making this the natural next filter once box
+blur existed rather than an unrelated new piece of infrastructure. Its
+convolution loop was pulled out into a new free function,
+`box_blur_at(source, doc_width, width, height, row, col, radius)`,
+which computes just the blurred value at one pixel; `box_blur` itself
+now calls it once per pixel and writes the result straight to the
+layer (a pure refactor, verified by the existing box-blur tests
+continuing to pass with their exact same hand-derived values), and
+`unsharp_mask` calls the same function to get its "blurred copy"
+without duplicating a single line of sampling logic.
+
+`Document::unsharp_mask(id, radius, amount, threshold)` computes, for
+every pixel in the active selection (or the whole layer, with none):
+`diff = original - blurred` on the R, G, and B channels only — alpha
+is a transparency channel, not a contrast one, so sharpening leaves it
+completely alone. If `|diff|` is at least `threshold`, the output is
+`original + diff * amount`, clamped to `0..=255`; otherwise the pixel
+is left exactly as it was. `threshold`'s whole job is protecting flat,
+low-contrast regions (skin, sky) from picking up sharpening noise
+while real edges — where `|diff|` is large — still get boosted, the
+same purpose it serves in Photoshop's own dialog. `amount` is a plain
+multiplier here (`1.0` is a nominal "100%") rather than Photoshop's
+1–500% dial with its own internal scaling; the frontend still presents
+it as a 1–500% slider and divides by 100 before sending it to the
+backend, so the dialog itself matches Photoshop's own numbers exactly.
+Errors on a zero radius, a non-finite or non-positive amount, or a
+locked/unknown layer.
+
+The frontend adds an **Unsharp Mask…** button next to Box Blur in the
+adjustments toolbar group, opening a dialog with three sliders —
+Amount (1–500%), Radius (1–40px), and Threshold (0–255) — matching
+Photoshop's own three-control layout for this exact dialog.
+
+**Verified two ways.** New `document.rs` tests reuse the same
+hand-built 3×3 ramped test layer from the box-blur tests (red channel
+climbing 10 → 90 by tens) so every sharpened value can be derived from
+already-known box-blur results: the centre pixel's blurred value (50)
+equals its original, so `diff = 0` and it's left unchanged; the
+top-left corner's original (10) and box-blurred (23) values give
+`diff = -13`, and at 50% amount `10 + (-13 × 0.5) = 3.5`, which rounds
+(half away from zero) to 4; the bottom-right corner's `diff = 14`
+sharpens `90 + (14 × 0.5)` to exactly 97. A second test sets the
+threshold above both corners' `|diff|` (13 and 14) with a full-strength
+100% amount and confirms neither pixel moves — proving the guard
+actually blocks a change that would otherwise happen, not just that
+nothing happens by default. A third test confines the effect to a
+single-pixel selection and confirms everything outside it is
+untouched. Zero-radius, non-positive/non-finite-amount, locked-layer,
+and unknown-layer error cases round out the set — 7 tests, all passing
+on first run. Live under Xvfb: opened the bundled gradient sample and
+applied **Unsharp Mask…** at an exaggerated 500% amount (radius 2px,
+default threshold) — every white grid line between tiles immediately
+grew a visible colour halo (a classic unsharp-mask ringing artifact,
+the same overshoot real Photoshop produces at extreme settings),
+confirming the filter is genuinely doing edge-contrast work rather
+than a no-op.
+
+**336 Rust tests total** (329 → 336, 329 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

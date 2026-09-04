@@ -222,6 +222,11 @@ export default function App() {
   const [showBoxBlurDialog, setShowBoxBlurDialog] = useState(false);
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
 
+  const [showUnsharpMaskDialog, setShowUnsharpMaskDialog] = useState(false);
+  const [unsharpMaskRadius, setUnsharpMaskRadius] = useState(2);
+  const [unsharpMaskAmount, setUnsharpMaskAmount] = useState(100);
+  const [unsharpMaskThreshold, setUnsharpMaskThreshold] = useState(4);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -541,6 +546,17 @@ export default function App() {
     await runCommand("box_blur", { id: selectedId, radius: boxBlurRadius });
     setShowBoxBlurDialog(false);
   }, [runCommand, selectedId, boxBlurRadius]);
+
+  const applyUnsharpMask = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("unsharp_mask", {
+      id: selectedId,
+      radius: unsharpMaskRadius,
+      amount: unsharpMaskAmount / 100,
+      threshold: unsharpMaskThreshold,
+    });
+    setShowUnsharpMaskDialog(false);
+  }, [runCommand, selectedId, unsharpMaskRadius, unsharpMaskAmount, unsharpMaskThreshold]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1296,6 +1312,14 @@ export default function App() {
             title="Filter > Blur > Box Blur"
           >
             Box Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowUnsharpMaskDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Sharpen > Unsharp Mask"
+          >
+            Unsharp Mask…
           </button>
           <input
             type="color"
@@ -2278,6 +2302,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyBoxBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUnsharpMaskDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowUnsharpMaskDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Unsharp Mask"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Sharpen &gt; Unsharp Mask</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{unsharpMaskAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={500}
+                value={unsharpMaskAmount}
+                onChange={(event) => setUnsharpMaskAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{unsharpMaskRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={40}
+                value={unsharpMaskRadius}
+                onChange={(event) => setUnsharpMaskRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Threshold
+                <span className="control__value">{unsharpMaskThreshold}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={unsharpMaskThreshold}
+                onChange={(event) => setUnsharpMaskThreshold(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowUnsharpMaskDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyUnsharpMask} disabled={busy}>
                 Apply
               </button>
             </div>

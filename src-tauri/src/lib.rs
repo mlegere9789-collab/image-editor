@@ -634,6 +634,20 @@ fn box_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snap
     edit_checkpointed(&state, |document| document.box_blur(id, radius))
 }
 
+/// Filter > Sharpen > Unsharp Mask on layer `id`.
+#[tauri::command]
+fn unsharp_mask(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    amount: f32,
+    threshold: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.unsharp_mask(id, radius, amount, threshold)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -1041,6 +1055,7 @@ pub fn run() {
             delete_selection,
             fill_selection,
             box_blur,
+            unsharp_mask,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
