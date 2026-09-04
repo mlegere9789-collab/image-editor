@@ -1100,6 +1100,32 @@ impl Document {
             [r, g, b, a]
         })
     }
+
+    /// Image > Adjustments > Photo Filter: tints a layer toward `color` by
+    /// blending each pixel's RGB toward it by `density` percent
+    /// (`0..=100` — clamped, not erroring, above 100, since Photoshop's
+    /// own slider tops out there too). Alpha untouched. Photoshop's own
+    /// dialog also offers a "Preserve Luminosity" checkbox that
+    /// renormalizes brightness after tinting; this omits it — a
+    /// deliberate scope cut, the same kind Black & White's single fixed
+    /// luma weighting already made in this project.
+    pub fn photo_filter(
+        &mut self,
+        id: LayerId,
+        color: [u8; 3],
+        density: u8,
+    ) -> Result<Option<Rect>, String> {
+        let t = density.min(100) as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let blend = |c: u8, f: u8| to_byte(lerp(to_unit(c), to_unit(f), t));
+            [
+                blend(r, color[0]),
+                blend(g, color[1]),
+                blend(b, color[2]),
+                a,
+            ]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2548,6 +2574,76 @@ mod tests {
     fn vibrance_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.vibrance(999, 10, 10).is_err());
+    }
+
+    #[test]
+    fn photo_filter_at_full_density_fully_replaces_the_colour() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.photo_filter(id, [255, 128, 0], 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 128, 0, 255]);
+    }
+
+    #[test]
+    fn photo_filter_at_zero_density_leaves_the_pixel_unchanged() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.photo_filter(id, [255, 128, 0], 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn photo_filter_at_half_density_lands_at_the_midpoint() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 100, 200, 255], 1, 1).unwrap();
+        doc.photo_filter(id, [100, 200, 0], 50).unwrap();
+        // Midpoint of (0,100,200) and (100,200,0): (50, 150, 100).
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 150, 100, 255]);
+    }
+
+    #[test]
+    fn photo_filter_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.photo_filter(id, [255, 128, 0], 60).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn photo_filter_density_is_clamped_above_100() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.photo_filter(id, [255, 128, 0], 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 128, 0, 255]);
+    }
+
+    #[test]
+    fn photo_filter_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [10u8, 200, 60, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.photo_filter(id, [255, 128, 0], 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 128, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 128, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [10, 200, 60, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn photo_filter_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.photo_filter(id, [255, 128, 0], 50).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn photo_filter_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.photo_filter(999, [255, 128, 0], 50).is_err());
     }
 
     #[test]

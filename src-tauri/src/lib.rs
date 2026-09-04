@@ -675,6 +675,18 @@ fn vibrance(
     })
 }
 
+/// Image > Adjustments > Photo Filter on layer `id`: tints toward `color`
+/// by `density` percent.
+#[tauri::command]
+fn photo_filter(
+    state: State<'_, AppState>,
+    id: LayerId,
+    color: [u8; 3],
+    density: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.photo_filter(id, color, density))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -778,6 +790,7 @@ pub fn run() {
             hue_saturation,
             black_and_white,
             vibrance,
+            photo_filter,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -115,6 +115,10 @@ export default function App() {
   const [vibrance, setVibrance] = useState(0);
   const [vibranceSaturation, setVibranceSaturation] = useState(0);
 
+  const [showPhotoFilterDialog, setShowPhotoFilterDialog] = useState(false);
+  const [photoFilterColor, setPhotoFilterColor] = useState("#ff9933");
+  const [photoFilterDensity, setPhotoFilterDensity] = useState(25);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -266,6 +270,17 @@ export default function App() {
     });
     setShowVibranceDialog(false);
   }, [runCommand, selectedId, vibrance, vibranceSaturation]);
+
+  const applyPhotoFilter = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(photoFilterColor);
+    await runCommand("photo_filter", {
+      id: selectedId,
+      color: [r, g, b],
+      density: photoFilterDensity,
+    });
+    setShowPhotoFilterDialog(false);
+  }, [runCommand, selectedId, photoFilterColor, photoFilterDensity]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -850,6 +865,14 @@ export default function App() {
           >
             Vibrance…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPhotoFilterDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Photo Filter"
+          >
+            Photo Filter…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1235,6 +1258,56 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyVibrance} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPhotoFilterDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPhotoFilterDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Photo Filter"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Photo Filter</h2>
+            <label className="control control--row">
+              <span className="control__label">Filter Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={photoFilterColor}
+                onChange={(event) => setPhotoFilterColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Density
+                <span className="control__value">{photoFilterDensity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={photoFilterDensity}
+                onChange={(event) => setPhotoFilterDensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPhotoFilterDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPhotoFilter} disabled={busy}>
                 Apply
               </button>
             </div>

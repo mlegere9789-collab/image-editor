@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1050,6 +1050,41 @@ desaturated toward soft pastel tones across the whole gradient,
 screenshotted before and after.
 
 **205 Rust tests total** (196 → 205). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Photo Filter.** Image > Adjustments > Photo Filter tints a layer toward
+a chosen colour by blending each pixel's RGB toward it by a `density`
+percentage (`0..=100`, clamped above 100 rather than erroring — Photoshop's
+own slider tops out there too). Alpha untouched. Photoshop's own dialog
+also offers a "Preserve Luminosity" checkbox that renormalizes brightness
+after tinting; this omits it — a deliberate scope cut, the same kind
+Black & White's single fixed luma weighting already made in this project.
+
+`Document::photo_filter` reuses the exact same `lerp`/`to_unit`/`to_byte`
+helpers `gradient_fill` already established for its own colour blending,
+composed through `adjust_layer_pixels` — the seventh caller of that
+helper, and the first to take a colour parameter of its own rather than
+just numeric sliders. New `edit_checkpointed` command taking the layer
+id, `color` (`[u8; 3]`), and `density`. The frontend adds a **Photo
+Filter…** toolbar button opening a modal with a colour picker (defaulting
+to a warm orange, echoing Photoshop's own default Warming Filter) and a
+density slider defaulting to 25%, matching Photoshop's own default.
+
+**Verified two ways.** New `document.rs` tests cover full density fully
+replacing a pixel's colour, zero density leaving it completely unchanged,
+half density landing at the exact hand-computed midpoint between the two
+colours, alpha staying untouched, density saturating above 100 rather
+than erroring, confinement to an active selection, a locked layer, and
+an unknown layer id. Live under Xvfb: loaded the same colourful
+sample-image gradient layer via a temporary probe button (removed before
+committing, `grep -n "TEMP\|PROBE"` returning nothing) → **Photo
+Filter…** → raised Density to 80%, applied — the whole multicoloured
+gradient tinted toward the orange filter colour while still showing
+subtle underlying luminosity variation across the grid, exactly the
+expected partial-density blend rather than a flat colour fill,
+screenshotted before and after.
+
+**213 Rust tests total** (205 → 213). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites
