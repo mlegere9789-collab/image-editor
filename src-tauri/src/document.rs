@@ -112,38 +112,79 @@ pub struct Selection {
     /// variant: "the whole canvas minus a rectangle" is still exactly
     /// expressible by flipping one boolean, no mask needed.
     pub inverted: bool,
+    /// Select > Modify > Border: when `Some(width)`, only a `width`-pixel
+    /// band hugging the *inside* of the shape's own edge is selected — the
+    /// interior beyond that band is excluded, carving a same-shaped hole
+    /// out of the middle. `None` (the default) selects the shape's whole
+    /// interior, as before.
+    pub border: Option<u32>,
+}
+
+/// Whether `(px, py)` — the same `+0.5` pixel-centre convention
+/// [`Document::stroke`] already samples at — falls inside `shape` sized to
+/// `bounds`. Free of [`Selection`]'s `inverted`/`border` handling, which
+/// callers layer on top; factored out of [`Selection::contains`] so it can
+/// be reused against a shrunk copy of `bounds` for Select > Modify > Border.
+fn shape_contains(shape: SelectionShape, bounds: Rect, px: f32, py: f32) -> bool {
+    let Rect { x0, y0, x1, y1 } = bounds;
+    let in_bounds = !(px < x0 as f32 || px >= x1 as f32 || py < y0 as f32 || py >= y1 as f32);
+    in_bounds
+        && match shape {
+            SelectionShape::Rectangle => true,
+            SelectionShape::Ellipse => {
+                let (cx, cy) = ((x0 as f32 + x1 as f32) / 2.0, (y0 as f32 + y1 as f32) / 2.0);
+                let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
+                let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
+                nx * nx + ny * ny <= 1.0
+            }
+            SelectionShape::RoundedRectangle { radius } => {
+                // Clamp (px, py) onto the rectangle inset by `radius` on
+                // every side, then require the point be within `radius` of
+                // that clamped point. On a flat edge this reduces to an
+                // ordinary straight-edge distance check; in a corner square
+                // it checks distance to that corner's rounding circle.
+                // Standard rounded-rect hit test. `radius` is clamped again
+                // here (not just at creation) since a Border-shrunk `bounds`
+                // can be smaller than the shape's own original radius.
+                let r = (radius as f32)
+                    .min((x1 - x0) as f32 / 2.0)
+                    .min((y1 - y0) as f32 / 2.0);
+                let cx = px.clamp(x0 as f32 + r, x1 as f32 - r);
+                let cy = py.clamp(y0 as f32 + r, y1 as f32 - r);
+                let (dx, dy) = (px - cx, py - cy);
+                dx * dx + dy * dy <= r * r
+            }
+        }
+}
+
+/// `bounds` shrunk by `width` pixels on every side, or `None` if that would
+/// collapse it to zero or negative area.
+fn shrink_rect(bounds: Rect, width: u32) -> Option<Rect> {
+    let Rect { x0, y0, x1, y1 } = bounds;
+    let width = width as i64;
+    let (nx0, ny0) = (x0 as i64 + width, y0 as i64 + width);
+    let (nx1, ny1) = (x1 as i64 - width, y1 as i64 - width);
+    if nx0 >= nx1 || ny0 >= ny1 {
+        return None;
+    }
+    Some(Rect {
+        x0: nx0 as u32,
+        y0: ny0 as u32,
+        x1: nx1 as u32,
+        y1: ny1 as u32,
+    })
 }
 
 impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
     fn contains(&self, px: f32, py: f32) -> bool {
-        let Rect { x0, y0, x1, y1 } = self.bounds;
-        let in_bounds = !(px < x0 as f32 || px >= x1 as f32 || py < y0 as f32 || py >= y1 as f32);
-        let in_shape = in_bounds
-            && match self.shape {
-                SelectionShape::Rectangle => true,
-                SelectionShape::Ellipse => {
-                    let (cx, cy) = ((x0 as f32 + x1 as f32) / 2.0, (y0 as f32 + y1 as f32) / 2.0);
-                    let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
-                    let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
-                    nx * nx + ny * ny <= 1.0
-                }
-                SelectionShape::RoundedRectangle { radius } => {
-                    // Clamp (px, py) onto the rectangle inset by `radius` on
-                    // every side, then require the point be within `radius`
-                    // of that clamped point. On a flat edge this reduces to
-                    // an ordinary straight-edge distance check; in a corner
-                    // square it checks distance to that corner's rounding
-                    // circle. Standard rounded-rect hit test.
-                    let r = radius as f32;
-                    let cx = px.clamp(x0 as f32 + r, x1 as f32 - r);
-                    let cy = py.clamp(y0 as f32 + r, y1 as f32 - r);
-                    let (dx, dy) = (px - cx, py - cy);
-                    dx * dx + dy * dy <= r * r
-                }
-            };
-        in_shape != self.inverted
+        let in_shape = shape_contains(self.shape, self.bounds, px, py);
+        let in_border_hole = self
+            .border
+            .and_then(|width| shrink_rect(self.bounds, width))
+            .is_some_and(|inner| shape_contains(self.shape, inner, px, py));
+        (in_shape && !in_border_hole) != self.inverted
     }
 }
 
@@ -250,6 +291,7 @@ impl Document {
             shape: SelectionShape::Rectangle,
             bounds,
             inverted: false,
+            border: None,
         });
         Ok(())
     }
@@ -262,6 +304,7 @@ impl Document {
             shape: SelectionShape::Ellipse,
             bounds,
             inverted: false,
+            border: None,
         });
         Ok(())
     }
@@ -277,6 +320,7 @@ impl Document {
                 y1: self.height,
             },
             inverted: false,
+            border: None,
         });
         Ok(())
     }
@@ -380,6 +424,35 @@ impl Document {
                 radius: radius.min(half_short_side),
             };
         }
+        Ok(())
+    }
+
+    /// Select > Modify > Border: turn the selection into a `width`-pixel
+    /// band hugging the *inside* of its own edge, excluding the interior
+    /// beyond that band — the classic "photo frame" selection, useful for
+    /// painting an outline around a shape without touching its middle.
+    /// Photoshop's own Border straddles the original edge (extending
+    /// outward too, into a fresh region that would need re-clamping against
+    /// the canvas) and feathers the result; this hard-edged selection
+    /// system instead keeps the shape's *outer* boundary exactly where it
+    /// was and only carves a same-shaped hole out of the interior — a
+    /// deliberate scope cut that still produces the same everyday "frame a
+    /// selection" effect without growing the bounding box. Once `width` is
+    /// at least half the shorter side, the hole disappears entirely and the
+    /// whole shape is selected, same as before Border was applied (see
+    /// [`shrink_rect`]). Reapplying Border recomputes the band from the
+    /// selection's original shape, not the current ring — it does not
+    /// stack into a border of a border. An error if nothing is selected, or
+    /// `width` is zero.
+    pub fn border_selection(&mut self, width: u32) -> Result<(), String> {
+        if width == 0 {
+            return Err("Border Width must be greater than zero pixels.".to_string());
+        }
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        selection.border = Some(width);
         Ok(())
     }
 
@@ -3472,6 +3545,7 @@ mod tests {
                     y1: 6
                 },
                 inverted: false,
+                border: None,
             })
         );
     }
@@ -3513,6 +3587,7 @@ mod tests {
                     y1: 6
                 },
                 inverted: false,
+                border: None,
             })
         );
     }
@@ -3771,6 +3846,122 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pixel(&doc, id, 0, 5), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn border_sets_the_border_field_without_touching_shape_or_bounds() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(2.0, 2.0, 18.0, 18.0).unwrap();
+        doc.border_selection(3).unwrap();
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Rectangle);
+        assert_eq!(selection.border, Some(3));
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 2,
+                y0: 2,
+                x1: 18,
+                y1: 18
+            }
+        );
+    }
+
+    #[test]
+    fn border_with_zero_width_is_an_error() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(2.0, 2.0, 18.0, 18.0).unwrap();
+        assert!(doc.border_selection(0).is_err());
+    }
+
+    #[test]
+    fn bordering_with_nothing_selected_is_an_error() {
+        let mut doc = Document::new(20, 20).unwrap();
+        assert!(doc.border_selection(3).is_err());
+    }
+
+    #[test]
+    fn a_rectangle_border_selects_only_a_band_near_the_edge() {
+        let (mut doc, id) = transparent_doc(10);
+        doc.select_rectangle(0.0, 0.0, 10.0, 10.0).unwrap();
+        doc.border_selection(2).unwrap();
+
+        // Near the edge: inside the band.
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+
+        // Dead centre: inside the excluded hole.
+        doc.stroke(
+            id,
+            &[(5.5, 5.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 5, 5), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_border_at_least_half_the_shorter_side_selects_the_whole_shape() {
+        // Width 10 on a 10x10 selection collapses the hole entirely (see
+        // `shrink_rect`) — the border selects everywhere the shape did.
+        let (mut doc, id) = transparent_doc(10);
+        doc.select_rectangle(0.0, 0.0, 10.0, 10.0).unwrap();
+        doc.border_selection(10).unwrap();
+
+        doc.stroke(
+            id,
+            &[(5.5, 5.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 5, 5), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn an_ellipse_border_selects_a_ring() {
+        let (mut doc, id) = transparent_doc(20);
+        doc.select_ellipse(0.0, 0.0, 20.0, 20.0).unwrap();
+        doc.border_selection(3).unwrap();
+
+        // Radius ~8.5 from the centre (10, 10): between the inner ellipse's
+        // radius (7) and the outer one's (10) — inside the ring.
+        doc.stroke(
+            id,
+            &[(18.5, 10.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 18, 10), [255, 255, 255, 255]);
+
+        // Radius ~5.5 from the centre: inside the inner ellipse, so inside
+        // the excluded hole.
+        doc.stroke(
+            id,
+            &[(15.5, 10.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 15, 10), [0, 0, 0, 0]);
     }
 
     #[test]

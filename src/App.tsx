@@ -30,14 +30,15 @@ const IDENTITY_CHANNEL_MIXER = [
  * positions 0, 64, 128, 192, 255. This is the no-op curve. */
 const IDENTITY_CURVE = [0, 64, 128, 192, 255];
 
-/** Heading/label text for the Expand/Contract/Smooth shared dialog. */
+/** Heading/label text for the Expand/Contract/Smooth/Border shared dialog. */
 const MODIFY_SELECTION_LABELS: Record<
-  "expand" | "contract" | "smooth",
+  "expand" | "contract" | "smooth" | "border",
   { heading: string; control: string }
 > = {
   expand: { heading: "Expand selection", control: "Expand By (px)" },
   contract: { heading: "Contract selection", control: "Contract By (px)" },
   smooth: { heading: "Smooth selection", control: "Smooth Radius (px)" },
+  border: { heading: "Border selection", control: "Border Width (px)" },
 };
 
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
@@ -96,6 +97,22 @@ function selectionRadiusStyle(
   return { borderRadius: `${horizontal}% / ${vertical}%`, overflow: "hidden" };
 }
 
+/** `bounds` shrunk by `width` pixels on every side, or `null` if that would
+ * collapse it to zero or negative area. Mirrors `shrink_rect` in
+ * src-tauri/src/document.rs, used here to draw the inner edge of a
+ * Select > Modify > Border selection's outline ring. */
+function shrinkBounds(
+  bounds: { x0: number; y0: number; x1: number; y1: number },
+  width: number,
+): { x0: number; y0: number; x1: number; y1: number } | null {
+  const x0 = bounds.x0 + width;
+  const y0 = bounds.y0 + width;
+  const x1 = bounds.x1 - width;
+  const y1 = bounds.y1 - width;
+  if (x0 >= x1 || y0 >= y1) return null;
+  return { x0, y0, x1, y1 };
+}
+
 /** The two arbitrary drag corners of an in-progress marquee, normalized into
  * a bounds rectangle and clamped to the canvas — purely for the live
  * preview outline; the backend does its own authoritative clamping once the
@@ -135,7 +152,9 @@ export default function App() {
 
   // Select > Modify > Expand/Contract/Smooth share one dialog: `null` means
   // closed, otherwise which of the three backend commands Apply should send.
-  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | "smooth" | null>(null);
+  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | "smooth" | "border" | null>(
+    null,
+  );
   const [modifyAmount, setModifyAmount] = useState(4);
 
   const [showThresholdDialog, setShowThresholdDialog] = useState(false);
@@ -305,6 +324,8 @@ export default function App() {
     if (modifyMode === null) return;
     if (modifyMode === "smooth") {
       await runCommand("smooth_selection", { radius: modifyAmount });
+    } else if (modifyMode === "border") {
+      await runCommand("border_selection", { width: modifyAmount });
     } else {
       const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
       await runCommand(command, { amount: modifyAmount });
@@ -913,6 +934,14 @@ export default function App() {
             title="Select > Modify > Smooth"
           >
             Smooth…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setModifyMode("border")}
+            disabled={busy || !hasSelection}
+            title="Select > Modify > Border"
+          >
+            Border…
           </button>
           <button
             className="button button--quiet"
@@ -1989,6 +2018,29 @@ export default function App() {
                       )}
                     />
                   )}
+                  {document.selection.border !== null &&
+                    (() => {
+                      const inner = shrinkBounds(
+                        document.selection.bounds,
+                        document.selection.border,
+                      );
+                      // A border wide enough to swallow the whole shape (see
+                      // shrink_rect / shrinkBounds) leaves no hole to outline.
+                      if (!inner) return null;
+                      return (
+                        <div
+                          className={`selection-outline${
+                            document.selection.shape === "ellipse"
+                              ? " selection-outline--ellipse"
+                              : ""
+                          }`}
+                          style={{
+                            ...overlayStyle(inner, document),
+                            ...selectionRadiusStyle(document.selection.shape, inner),
+                          }}
+                        />
+                      );
+                    })()}
                 </>
               )}
             </div>

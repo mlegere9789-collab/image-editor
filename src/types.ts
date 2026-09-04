@@ -45,6 +45,9 @@ export type Selection = {
   bounds: { x0: number; y0: number; x1: number; y1: number };
   /** Select > Inverse: selects everywhere *except* `shape`. */
   inverted: boolean;
+  /** Select > Modify > Border: when set, only a band this many pixels wide
+   * hugging the inside of `shape`'s own edge is selected. */
+  border: number | null;
 };
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */

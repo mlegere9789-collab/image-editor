@@ -1388,7 +1388,7 @@ formula exactly (e.g. a shadow pixel's red channel `20 → 84` at luma
 **265 Rust tests total** (256 → 265, 258 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
-## Phase 12 — Select > Modify > Smooth (rounded-rectangle selections)
+## Phase 12 — Select > Modify > Smooth / Border (rounded-rectangle and ring selections)
 
 Select > Modify > Smooth rounds a selection's corners. Photoshop's own
 Smooth operates on arbitrary, possibly irregular selections by rounding
@@ -1455,6 +1455,63 @@ confirming paint confinement respects the new shape exactly as the unit
 tests already proved algebraically.
 
 **271 Rust tests total** (265 → 271, 264 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
+**Border.** Select > Modify > Border turns a selection into a band hugging
+the *inside* of its own edge, excluding the interior beyond that band —
+the classic "picture frame" selection, useful for painting an outline
+around a shape without touching its middle. Photoshop's own Border
+straddles the original edge (extending outward too, into fresh canvas
+area that would need re-clamping) and feathers the result; this
+hard-edged selection system instead keeps the shape's *outer* boundary
+exactly where it was and only carves a same-shaped hole out of the
+interior — a deliberate scope cut that still produces the same everyday
+"frame a selection" effect without growing the bounding box. Once the
+border width is at least half the shorter side, the hole disappears
+entirely and the whole shape is selected again, same as before Border
+was applied. Reapplying Border recomputes the band from the selection's
+original shape, not the current ring — it does not stack into a border
+of a border. An error if nothing is selected, or the width is zero.
+
+Rather than a new `SelectionShape` variant, Border is a new `border:
+Option<u32>` field directly on `Selection`, composing with *any* shape
+— `Rectangle`, `Ellipse`, or the `RoundedRectangle` Smooth added — since
+containment only needed a small refactor: the shape-matching logic
+inside `Selection::contains` was pulled out into a free `shape_contains(shape,
+bounds, px, py)` function, and border containment is just "inside the
+shape at the selection's own bounds, but *not* inside that same shape
+re-tested against a `shrink_rect`-shrunk copy of those bounds." A
+`RoundedRectangle`'s radius is defensively re-clamped inside
+`shape_contains` itself (not only at creation) since a Border-shrunk
+inner rectangle can be smaller than the shape's original radius.
+
+`Document::border_selection` is a new top-level command alongside
+`smooth_selection`, exposed in the frontend as a **Border…** toolbar
+button that plugs into the same shared Expand/Contract/Smooth dialog
+(the heading/label lookup table now covers all four modes) and sends a
+`width` parameter. The marching-ants outline gains a second, inner
+outline — computed via a JS `shrinkBounds` mirroring the Rust
+`shrink_rect`, reusing the existing `overlayStyle`/`selectionRadiusStyle`
+helpers — whenever `border` is set and hasn't collapsed the hole away.
+
+**Verified two ways.** New `document.rs` tests cover: Border setting the
+`border` field without touching `shape` or `bounds`, a zero width being
+an error, bordering with nothing selected being an error, a rectangle
+border selecting a pixel near the edge while excluding one at dead
+centre, a border at least half the shorter side selecting the whole
+shape (the hole having collapsed away), and an ellipse border selecting
+a ring — a pixel between the inner and outer ellipse radii is selected,
+one inside the inner ellipse is excluded. Live under Xvfb: created an
+800×600 document, used **Select All** for a full-canvas rectangle
+selection, opened **Border…**, set the width to `60`, and applied — the
+marching-ants outline visibly grew a second, inset rectangle 60px in
+from every edge, forming a clear picture-frame ring. Switched to the
+Brush tool and clicked once in the band between the two outlines (a
+paint dot appeared) and once in the centre hole (no paint landed —
+correctly blocked), confirming paint confinement respects the ring
+exactly as the unit tests already proved algebraically.
+
+**277 Rust tests total** (271 → 277, 270 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
 ## Prerequisites

@@ -420,6 +420,16 @@ fn smooth_selection(state: State<'_, AppState>, radius: u32) -> Result<Snapshot,
     })
 }
 
+/// Select > Modify > Border: turn the selection into a `width`-pixel band
+/// hugging the inside of its own edge.
+#[tauri::command]
+fn border_selection(state: State<'_, AppState>, width: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.border_selection(width)?;
+        Ok(None)
+    })
+}
+
 /// Select > Reselect: restore the selection `deselect` most recently cleared.
 #[tauri::command]
 fn reselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -897,6 +907,7 @@ pub fn run() {
             expand_selection,
             contract_selection,
             smooth_selection,
+            border_selection,
             reselect,
             deselect,
             export_png,
