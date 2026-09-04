@@ -1026,6 +1026,92 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
+    /// scales saturation by `1 + saturation/100`, and offsets lightness by
+    /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
+    /// HSL -> RGB. Alpha untouched. A pixel with no saturation (a neutral
+    /// grey) has no hue to shift, so it's unaffected by `hue` regardless of
+    /// its value — the same as Photoshop's own behaviour on greys. `hue`
+    /// clamps to `-180..=180`, `saturation` and `lightness` to `-100..=100`
+    /// (Photoshop's own dialog ranges), rather than erroring on an
+    /// out-of-range value, the same saturating convention
+    /// `brightness_contrast` uses.
+    pub fn hue_saturation(
+        &mut self,
+        id: LayerId,
+        hue: i32,
+        saturation: i32,
+        lightness: i32,
+    ) -> Result<Option<Rect>, String> {
+        let hue_shift = hue.clamp(-180, 180) as f32;
+        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+        let light_offset = lightness.clamp(-100, 100) as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let h = (h + hue_shift).rem_euclid(360.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let l = (l + light_offset).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            [r, g, b, a]
+        })
+    }
+}
+
+/// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
+/// (`hue` in `0.0..360.0` degrees, `saturation`/`lightness` in `0.0..=1.0`).
+/// A pixel with no colour (max channel == min channel) is defined as
+/// hue `0.0`, saturation `0.0` — there is no hue to report, and reporting
+/// one would make an achromatic pixel spuriously sensitive to a hue shift.
+fn rgb_to_hsl(r: u8, g: u8, b: u8) -> (f32, f32, f32) {
+    let (r, g, b) = (to_unit(r), to_unit(g), to_unit(b));
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    if d <= f32::EPSILON {
+        return (0.0, 0.0, l);
+    }
+    let s = if l > 0.5 {
+        d / (2.0 - max - min)
+    } else {
+        d / (max + min)
+    };
+    let h = if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    (h * 60.0, s, l)
+}
+
+/// The inverse of [`rgb_to_hsl`]: `hue` in `0.0..360.0` degrees,
+/// `saturation`/`lightness` in `0.0..=1.0`, back to `(r, g, b)` bytes.
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+    if s <= 0.0 {
+        let v = to_byte(l);
+        return (v, v, v);
+    }
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let hp = h / 60.0;
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = if hp < 1.0 {
+        (c, x, 0.0)
+    } else if hp < 2.0 {
+        (x, c, 0.0)
+    } else if hp < 3.0 {
+        (0.0, c, x)
+    } else if hp < 4.0 {
+        (0.0, x, c)
+    } else if hp < 5.0 {
+        (x, 0.0, c)
+    } else {
+        (c, 0.0, x)
+    };
+    let m = l - c / 2.0;
+    (to_byte(r1 + m), to_byte(g1 + m), to_byte(b1 + m))
 }
 
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
@@ -2171,6 +2257,110 @@ mod tests {
     fn brightness_contrast_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.brightness_contrast(999, 10, 10).is_err());
+    }
+
+    #[test]
+    fn hue_shift_of_120_turns_pure_red_into_pure_green() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn hue_shift_wraps_around_360_degrees() {
+        // +240 from red (h=0) lands at h=240 (blue), the same destination
+        // -120 would reach going the other way — confirms rem_euclid
+        // wrapping rather than an out-of-range hue breaking the lookup.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 180, 0, 0).unwrap();
+        let a = pixel(&doc, id, 0, 0);
+        let mut doc2 = Document::new(1, 1).unwrap();
+        let id2 = doc2.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc2.hue_saturation(id2, -180, 0, 0).unwrap();
+        let b = pixel(&doc2, id2, 0, 0);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn saturation_of_negative_100_fully_desaturates() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 0, -100, 0).unwrap();
+        // Pure red's lightness is 0.5; fully desaturated, that's mid-grey.
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn lightness_of_positive_100_turns_any_colour_white() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 0, 0, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn lightness_of_negative_100_turns_any_colour_black() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 0, 0, -100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn hue_saturation_leaves_a_neutral_grey_pixel_unchanged_regardless_of_hue() {
+        // A grey pixel has no hue to shift and no saturation to scale —
+        // this exercises rgb_to_hsl's zero-chroma branch.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 90, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn hue_saturation_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 77], 1, 1).unwrap();
+        doc.hue_saturation(id, 120, -50, 10).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn hue_saturation_sliders_are_clamped_to_their_range() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.hue_saturation(id, 0, 0, 9999).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn hue_saturation_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [255u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.hue_saturation(id, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn hue_saturation_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.hue_saturation(id, 10, 10, 10).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn hue_saturation_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.hue_saturation(999, 10, 10, 10).is_err());
     }
 
     #[test]

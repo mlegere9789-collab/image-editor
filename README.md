@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -931,6 +931,50 @@ grid cells, exactly the expected effect of pushing values away from
 mid-grey, screenshotted before and after.
 
 **180 Rust tests total** (171 → 180). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Hue/Saturation.** Image > Adjustments > Hue/Saturation shifts hue by a
+number of degrees, scales saturation by a percentage, and offsets
+lightness by a percentage — the richest of this batch, since it needs a
+colour-space round trip rather than a flat per-channel formula. Each
+pixel converts RGB -> HSL, the three sliders adjust hue/saturation/
+lightness in that space, then it converts back HSL -> RGB; alpha stays
+untouched throughout. Two new free functions, `rgb_to_hsl` and
+`hsl_to_rgb`, implement the standard conversions (`rgb_to_hsl` treats a
+pixel with no chroma — `max == min` — as hue 0°, saturation 0°, rather
+than an arbitrary hue, since an achromatic pixel genuinely has none; this
+is also why a grey pixel is provably unaffected by any hue shift).
+`Document::hue_saturation` is the fifth caller of `adjust_layer_pixels`,
+wrapping the conversion pair in a closure the same way every other
+adjustment in this phase has. `hue` clamps to `-180..=180` and
+`saturation`/`lightness` to `-100..=100` (Photoshop's own dialog ranges)
+before use, the same saturating convention `brightness_contrast`
+established rather than erroring on an out-of-range value.
+
+New `edit_checkpointed` command taking the layer id, `hue`, `saturation`,
+and `lightness` (all `i32`). The frontend adds a **Hue/Saturation…**
+toolbar button opening a modal with three sliders, matching Photoshop's
+own dialog's three controls and ranges exactly (no UI-narrowing needed
+here, unlike Posterize or Brightness/Contrast, since the backend's own
+clamped range already matches Photoshop's).
+
+**Verified two ways.** New `document.rs` tests cover a +120° hue shift
+turning pure red into pure green (a clean, hand-verifiable rotation
+around the colour wheel), a ±180° shift landing on the same result either
+direction (confirming the wraparound), -100% saturation collapsing pure
+red to its own mid-grey lightness, +100%/-100% lightness turning any
+colour white or black outright, a neutral grey pixel staying exactly
+unchanged under a 90° hue shift (exercising `rgb_to_hsl`'s zero-chroma
+branch), alpha staying untouched, an out-of-range slider saturating,
+confinement to an active selection, a locked layer, and an unknown layer
+id. Live under Xvfb: loaded the same colourful sample-image gradient
+layer via a temporary probe button (removed before committing,
+`grep -n "TEMP\|PROBE"` returning nothing) → **Hue/Saturation…** → raised
+Hue to 60°, applied — the entire blue/purple/pink palette rotated to
+purple/red/orange/green, exactly the expected result of a 60° rotation
+around the colour wheel, screenshotted before and after.
+
+**191 Rust tests total** (180 → 191). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

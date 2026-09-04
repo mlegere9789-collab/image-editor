@@ -106,6 +106,11 @@ export default function App() {
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
 
+  const [showHueSaturationDialog, setShowHueSaturationDialog] = useState(false);
+  const [hue, setHue] = useState(0);
+  const [saturation, setSaturation] = useState(0);
+  const [lightness, setLightness] = useState(0);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -236,6 +241,12 @@ export default function App() {
     await runCommand("brightness_contrast", { id: selectedId, brightness, contrast });
     setShowBrightnessContrastDialog(false);
   }, [runCommand, selectedId, brightness, contrast]);
+
+  const applyHueSaturation = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("hue_saturation", { id: selectedId, hue, saturation, lightness });
+    setShowHueSaturationDialog(false);
+  }, [runCommand, selectedId, hue, saturation, lightness]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -796,6 +807,14 @@ export default function App() {
           >
             Brightness/Contrast…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowHueSaturationDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Hue/Saturation"
+          >
+            Hue/Saturation…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1060,6 +1079,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyBrightnessContrast} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHueSaturationDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowHueSaturationDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Hue/Saturation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Hue/Saturation</h2>
+            <label className="control">
+              <span className="control__label">
+                Hue
+                <span className="control__value">{hue}</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={hue}
+                onChange={(event) => setHue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{saturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={saturation}
+                onChange={(event) => setSaturation(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Lightness
+                <span className="control__value">{lightness}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lightness}
+                onChange={(event) => setLightness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowHueSaturationDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyHueSaturation} disabled={busy}>
                 Apply
               </button>
             </div>
