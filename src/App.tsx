@@ -96,6 +96,9 @@ export default function App() {
   const [modifyMode, setModifyMode] = useState<"expand" | "contract" | null>(null);
   const [modifyAmount, setModifyAmount] = useState(4);
 
+  const [showThresholdDialog, setShowThresholdDialog] = useState(false);
+  const [thresholdLevel, setThresholdLevel] = useState(128);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -208,6 +211,12 @@ export default function App() {
     await runCommand(command, { amount: modifyAmount });
     setModifyMode(null);
   }, [runCommand, modifyMode, modifyAmount]);
+
+  const applyThreshold = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("threshold", { id: selectedId, level: thresholdLevel });
+    setShowThresholdDialog(false);
+  }, [runCommand, selectedId, thresholdLevel]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -744,6 +753,14 @@ export default function App() {
           >
             Invert Colors
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowThresholdDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Threshold"
+          >
+            Threshold…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -872,6 +889,47 @@ export default function App() {
                 onClick={applyModifySelection}
                 disabled={busy || modifyAmount < 1}
               >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showThresholdDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowThresholdDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Threshold"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Threshold</h2>
+            <label className="control">
+              <span className="control__label">
+                Level
+                <span className="control__value">{thresholdLevel}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={255}
+                value={thresholdLevel}
+                onChange={(event) => setThresholdLevel(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowThresholdDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyThreshold} disabled={busy}>
                 Apply
               </button>
             </div>

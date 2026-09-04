@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11: Invert (adjustments)
+## Phase 11 — Invert / Threshold (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -807,6 +807,49 @@ stroke turned solid black, screenshotted before and after — → **Undo**
 itself correctly like every other one-shot action in this project.
 
 **158 Rust tests total** (152 → 158). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Threshold.** Image > Adjustments > Threshold converts a layer to pure
+black or white per pixel, based on standard ITU-R BT.601 luma (`0.299R +
+0.587G + 0.114B`, the same weights Photoshop's own Threshold uses)
+against a `level` (`1..=255`): at or above it, a pixel becomes white;
+below it, black. Alpha untouched, same as Invert.
+
+Landing right after Invert made the shared shape between the two obvious
+enough to pull out: both are whole-canvas, per-pixel, selection-confined,
+lock-respecting transforms that differ only in what they do to each
+pixel's four bytes. `Document::invert_colors` and the new
+`Document::threshold` now both delegate to a new private
+`adjust_layer_pixels(id, f)` helper that owns the iteration, the
+selection/lock guards, and the touched-region bookkeeping once, taking a
+closure that maps one `[u8; 4]` pixel to its replacement — `invert_colors`
+is now a one-line closure, and `threshold` just adds the luma computation
+on top. Any future single-pixel adjustment (Posterize, Brightness/
+Contrast, Hue/Saturation, …) can reuse the same helper rather than
+re-deriving this loop a third time.
+
+`threshold` is a new `edit_checkpointed` command taking the layer id and
+`level`. The frontend adds a **Threshold…** toolbar button next to Invert
+Colors, opening a small modal (same `modal-overlay`/`modal` pattern as
+Expand/Contract) with a single `level` slider (`1..=255`, defaulting to
+128) and a live numeric readout, styled like the brush Size/Flow sliders.
+
+**Verified two ways.** New `document.rs` tests cover the core
+above/below-level split against hand-picked luma values, confirming the
+BT.601 weights are actually applied (pure green crosses a threshold pure
+red doesn't, despite both being a single channel maxed out — a flat
+per-channel average would get this wrong), alpha staying untouched,
+confinement to an active selection, a zero level being rejected (matching
+Photoshop's own 1–255 range), a locked layer, and an unknown layer id.
+Live under Xvfb: added a colourful sample-image layer (a diagonal
+hue/lightness gradient) via a temporary probe button (removed before
+committing, `grep -n "TEMP\|PROBE"` returning nothing) → **Threshold…**
+→ Apply at the default level 128 — the gradient split cleanly into a
+crisp black/white diagonal boundary following the image's own luma
+contour, exactly where the darker and lighter halves of the gradient
+met, screenshotted before and after.
+
+**165 Rust tests total** (158 → 165). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

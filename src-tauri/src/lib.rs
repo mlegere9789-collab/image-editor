@@ -613,6 +613,14 @@ fn invert_colors(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, St
     edit_checkpointed(&state, |document| document.invert_colors(id))
 }
 
+/// Image > Adjustments > Threshold on layer `id`: converts each pixel to
+/// pure black or white based on luma against `level`. A whole, discrete
+/// action on its own, so it checkpoints itself.
+#[tauri::command]
+fn threshold(state: State<'_, AppState>, id: LayerId, level: u8) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.threshold(id, level))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -710,6 +718,7 @@ pub fn run() {
             flood_fill,
             gradient_fill,
             invert_colors,
+            threshold,
             select_rectangle,
             select_ellipse,
             select_all,

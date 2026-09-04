@@ -898,14 +898,19 @@ impl Document {
         }))
     }
 
-    /// Image > Adjustments > Invert: subtract each RGB channel from 255,
-    /// leaving alpha untouched — the same "flip every channel" transform
-    /// Photoshop's own Invert applies, with no intermediate curve. Confined
-    /// to the active selection and blocked by a locked layer, like every
-    /// other in-place pixel edit. Unlike Paint Bucket's flood-fill region,
-    /// this touches every pixel the selection includes rather than a
-    /// contiguous area, so — like Gradient — it iterates the whole canvas.
-    pub fn invert_colors(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+    /// Shared pixel-iteration for whole-layer, per-pixel adjustments
+    /// (Invert, Threshold, and any future Image > Adjustments entry that
+    /// transforms each pixel independently of its neighbours): visits every
+    /// pixel the active selection includes, lets `f` rewrite that pixel's
+    /// 4 bytes in place, and reports the touched region the same way
+    /// `flood_fill`/`gradient_fill` do. Confines to the selection and
+    /// blocks a locked layer — the two guards every other in-place pixel
+    /// edit already respects — so a caller never needs to repeat either.
+    fn adjust_layer_pixels(
+        &mut self,
+        id: LayerId,
+        mut f: impl FnMut([u8; 4]) -> [u8; 4],
+    ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width, self.height);
         let selection = self.selection;
         let layer = self.layer_mut(id)?;
@@ -922,9 +927,13 @@ impl Document {
                     }
                 }
                 let base = (py as usize * width as usize + px as usize) * CHANNELS;
-                for channel in 0..3 {
-                    layer.pixels[base + channel] = 255 - layer.pixels[base + channel];
-                }
+                let pixel = [
+                    layer.pixels[base],
+                    layer.pixels[base + 1],
+                    layer.pixels[base + 2],
+                    layer.pixels[base + 3],
+                ];
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&f(pixel));
 
                 touched = Some(match touched {
                     None => (px, py, px, py),
@@ -941,6 +950,31 @@ impl Document {
             x1: max_x + 1,
             y1: max_y + 1,
         }))
+    }
+
+    /// Image > Adjustments > Invert: subtract each RGB channel from 255,
+    /// leaving alpha untouched — the same "flip every channel" transform
+    /// Photoshop's own Invert applies, with no intermediate curve.
+    pub fn invert_colors(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.adjust_layer_pixels(id, |[r, g, b, a]| [255 - r, 255 - g, 255 - b, a])
+    }
+
+    /// Image > Adjustments > Threshold: converts a layer to pure black or
+    /// white per pixel, based on standard ITU-R BT.601 luma (`0.299R +
+    /// 0.587G + 0.114B`, the same weights Photoshop's own Threshold uses)
+    /// against `level` — at or above it, that pixel becomes white; below
+    /// it, black. Alpha untouched. `level` must be `1..=255`, matching the
+    /// range Photoshop's own dialog allows (a level of 0 would make every
+    /// pixel white unconditionally, which isn't a meaningful threshold).
+    pub fn threshold(&mut self, id: LayerId, level: u8) -> Result<Option<Rect>, String> {
+        if level == 0 {
+            return Err("Threshold level must be between 1 and 255.".to_string());
+        }
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let value = if luma.round() >= level as f32 { 255 } else { 0 };
+            [value, value, value, a]
+        })
     }
 }
 
@@ -1869,6 +1903,80 @@ mod tests {
     fn invert_colors_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.invert_colors(999).is_err());
+    }
+
+    #[test]
+    fn threshold_converts_each_pixel_to_pure_black_or_white_by_luma() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([200, 200, 200, 255]); // luma 200, above a mid threshold
+        pixels.extend([50, 50, 50, 255]); // luma 50, below it
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.threshold(id, 128).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn threshold_uses_the_standard_luma_weights_not_a_flat_average() {
+        // Pure green's luma (0.587 * 255 ≈ 149.685, rounds to 150) sits well
+        // above pure red's (0.299 * 255 ≈ 76.245, rounds to 76) despite both
+        // being a single channel maxed at 255 — proving the weighting is
+        // actually applied, not just "any channel bright enough".
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([255, 0, 0, 255]); // red: luma 76
+        pixels.extend([0, 255, 0, 255]); // green: luma 150
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.threshold(id, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn threshold_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[200, 200, 200, 77], 1, 1).unwrap();
+        doc.threshold(id, 128).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 77]);
+    }
+
+    #[test]
+    fn threshold_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [200u8, 200, 200, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.threshold(id, 128).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 200, 200, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn threshold_level_zero_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        let err = doc.threshold(id, 0).unwrap_err();
+        assert!(err.contains("between 1 and 255"), "{err}");
+    }
+
+    #[test]
+    fn threshold_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.threshold(id, 128).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn threshold_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.threshold(999, 128).is_err());
     }
 
     #[test]
