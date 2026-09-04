@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1010,6 +1010,46 @@ toward the original yellow/pink corner, matching the relative luma of
 each original colour, screenshotted before and after.
 
 **196 Rust tests total** (191 → 196). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Vibrance.** Image > Adjustments > Vibrance behaves like
+Hue/Saturation's own saturation slider, but weighted to protect
+already-saturated pixels — and, not incidentally, skin tones, usually
+the least saturated colours in a photo — from clipping to a garish
+maximum. `vibrance` scales saturation by `1 - current_saturation`
+(computed in the same RGB -> HSL space `hue_saturation` established): a
+pixel that's already fully saturated gets no boost (or cut) at all,
+while a near-grey pixel gets the full effect either direction; a
+`saturation` slider then applies uniformly on top, the same linear scale
+`hue_saturation`'s own saturation control uses. Both `-100..=100`,
+clamped rather than erroring on an out-of-range value.
+
+`Document::vibrance` reuses `rgb_to_hsl`/`hsl_to_rgb` directly rather
+than going through `adjust_layer_pixels` and a shared HSL step —
+it's the second HSL-based adjustment, after `hue_saturation` itself, and
+needed no new colour-space machinery at all. New `edit_checkpointed`
+command taking the layer id, `vibrance`, and `saturation`. The frontend
+adds a **Vibrance…** toolbar button opening a modal with two sliders,
+matching Photoshop's own dialog's two controls and ranges.
+
+**Verified two ways.** New `document.rs` tests cover a fully saturated
+pixel staying exactly unchanged under +100 vibrance (nothing left to
+boost), a lightly saturated pixel (hand-picked at saturation 0.2) boosted
+all the way to full saturation under the same +100, and — the clearest
+demonstration of the "protection" vibrance is for — the same -100
+vibrance leaving a fully saturated pixel completely untouched while
+driving the lightly saturated one all the way to grey, side by side in
+one test. Further tests cover the uniform `saturation` slider behaving
+identically to `hue_saturation`'s own, alpha staying untouched, an
+out-of-range slider saturating, confinement to an active selection, a
+locked layer, and an unknown layer id. Live under Xvfb: loaded the same
+colourful sample-image gradient layer via a temporary probe button
+(removed before committing, `grep -n "TEMP\|PROBE"` returning nothing) →
+**Vibrance…** → lowered Saturation to -70, applied — the vivid palette
+desaturated toward soft pastel tones across the whole gradient,
+screenshotted before and after.
+
+**205 Rust tests total** (196 → 205). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

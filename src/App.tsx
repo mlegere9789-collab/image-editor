@@ -111,6 +111,10 @@ export default function App() {
   const [saturation, setSaturation] = useState(0);
   const [lightness, setLightness] = useState(0);
 
+  const [showVibranceDialog, setShowVibranceDialog] = useState(false);
+  const [vibrance, setVibrance] = useState(0);
+  const [vibranceSaturation, setVibranceSaturation] = useState(0);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -252,6 +256,16 @@ export default function App() {
     await runCommand("hue_saturation", { id: selectedId, hue, saturation, lightness });
     setShowHueSaturationDialog(false);
   }, [runCommand, selectedId, hue, saturation, lightness]);
+
+  const applyVibrance = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("vibrance", {
+      id: selectedId,
+      vibrance,
+      saturation: vibranceSaturation,
+    });
+    setShowVibranceDialog(false);
+  }, [runCommand, selectedId, vibrance, vibranceSaturation]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -828,6 +842,14 @@ export default function App() {
           >
             Black &amp; White
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowVibranceDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Vibrance"
+          >
+            Vibrance…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1159,6 +1181,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyHueSaturation} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVibranceDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowVibranceDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Vibrance"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Vibrance</h2>
+            <label className="control">
+              <span className="control__label">
+                Vibrance
+                <span className="control__value">{vibrance}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={vibrance}
+                onChange={(event) => setVibrance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{vibranceSaturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={vibranceSaturation}
+                onChange={(event) => setVibranceSaturation(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowVibranceDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyVibrance} disabled={busy}>
                 Apply
               </button>
             </div>

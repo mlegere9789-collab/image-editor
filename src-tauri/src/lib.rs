@@ -662,6 +662,19 @@ fn black_and_white(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, 
     edit_checkpointed(&state, |document| document.black_and_white(id))
 }
 
+/// Image > Adjustments > Vibrance on layer `id`.
+#[tauri::command]
+fn vibrance(
+    state: State<'_, AppState>,
+    id: LayerId,
+    vibrance: i32,
+    saturation: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.vibrance(id, vibrance, saturation)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -764,6 +777,7 @@ pub fn run() {
             brightness_contrast,
             hue_saturation,
             black_and_white,
+            vibrance,
             select_rectangle,
             select_ellipse,
             select_all,

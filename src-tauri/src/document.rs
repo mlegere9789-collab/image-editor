@@ -1073,6 +1073,33 @@ impl Document {
             [luma, luma, luma, a]
         })
     }
+
+    /// Image > Adjustments > Vibrance: like [`Self::hue_saturation`]'s
+    /// saturation slider, but weighted to protect already-saturated
+    /// pixels (and, not incidentally, skin tones — usually the least
+    /// saturated colours in a photo) from clipping to a garish maximum.
+    /// `vibrance` scales saturation by `1 - current_saturation`, so a
+    /// pixel that's already fully saturated gets no boost at all while a
+    /// near-grey pixel gets the full effect; `saturation` then applies
+    /// uniformly on top, the same linear scale `hue_saturation` uses.
+    /// Both `-100..=100`, matching Photoshop's own dialog range, and
+    /// clamped rather than erroring on an out-of-range value.
+    pub fn vibrance(
+        &mut self,
+        id: LayerId,
+        vibrance: i32,
+        saturation: i32,
+    ) -> Result<Option<Rect>, String> {
+        let vibrance_factor = vibrance.clamp(-100, 100) as f32 / 100.0;
+        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let s = (s + vibrance_factor * (1.0 - s)).clamp(0.0, 1.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            [r, g, b, a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2430,6 +2457,97 @@ mod tests {
     fn black_and_white_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.black_and_white(999).is_err());
+    }
+
+    #[test]
+    fn vibrance_leaves_a_fully_saturated_pixel_unchanged() {
+        // Already at saturation 1.0, so vibrance's (1 - s) weighting gives
+        // it nothing left to boost.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.vibrance(id, 100, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn vibrance_boosts_a_lightly_saturated_pixel_toward_full_saturation() {
+        // (153, 102, 102) is hue 0, saturation 0.2, lightness 0.5. At
+        // vibrance +100, s_new = 0.2 + 1.0*(1 - 0.2) = 1.0 - full
+        // saturation, landing on pure red at that same lightness.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[153, 102, 102, 255], 1, 1).unwrap();
+        doc.vibrance(id, 100, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn negative_vibrance_protects_saturated_pixels_more_than_light_ones() {
+        // The same -100 vibrance leaves a fully saturated pixel untouched
+        // (protected) while driving a lightly saturated one all the way
+        // to grey - the asymmetric protection is the whole point of
+        // vibrance over a flat saturation slider.
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([255, 0, 0, 255]); // fully saturated
+        pixels.extend([153, 102, 102, 255]); // saturation 0.2
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.vibrance(id, -100, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn vibrances_saturation_slider_applies_uniformly_like_hue_saturations() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 255], 1, 1).unwrap();
+        doc.vibrance(id, 0, -100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn vibrance_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[153, 102, 102, 77], 1, 1).unwrap();
+        doc.vibrance(id, 50, 20).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn vibrance_sliders_are_clamped_to_their_range() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[153, 102, 102, 255], 1, 1).unwrap();
+        doc.vibrance(id, 9999, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn vibrance_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [153u8, 102, 102, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.vibrance(id, 100, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 0, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [153, 102, 102, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [153, 102, 102, 255]);
+    }
+
+    #[test]
+    fn vibrance_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.vibrance(id, 10, 10).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn vibrance_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.vibrance(999, 10, 10).is_err());
     }
 
     #[test]
