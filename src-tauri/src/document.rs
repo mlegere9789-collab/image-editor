@@ -1056,6 +1056,23 @@ impl Document {
             [r, g, b, a]
         })
     }
+
+    /// Image > Adjustments > Black & White: desaturates a layer to
+    /// greyscale using the same ITU-R BT.601 luma weights (`0.299R +
+    /// 0.587G + 0.114B`) [`Self::threshold`] uses, setting all three RGB
+    /// channels to that luma rather than thresholding it to pure black or
+    /// white. Alpha untouched. Photoshop's own Black & White dialog offers
+    /// six colour-range sliders (reds, yellows, greens, cyans, blues,
+    /// magentas) for a custom weighting; this uses one fixed, standard
+    /// weighting instead — a deliberate scope cut, the same kind Paint
+    /// Bucket's fixed tolerance and Posterize's UI-capped slider already
+    /// made in this project, not an oversight.
+    pub fn black_and_white(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.adjust_layer_pixels(id, |[r, g, b, a]| {
+            let luma = to_byte(0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b));
+            [luma, luma, luma, a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2361,6 +2378,58 @@ mod tests {
     fn hue_saturation_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.hue_saturation(999, 10, 10, 10).is_err());
+    }
+
+    #[test]
+    fn black_and_white_sets_every_channel_to_the_bt601_luma() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([255, 255, 255, 255]); // white: luma 255
+        pixels.extend([255, 0, 0, 255]); // red: luma 76
+        pixels.extend([0, 255, 0, 255]); // green: luma 150
+        let id = doc.add_layer("row", &pixels, 3, 1).unwrap();
+
+        doc.black_and_white(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [76, 76, 76, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn black_and_white_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 0, 0, 77], 1, 1).unwrap();
+        doc.black_and_white(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn black_and_white_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [255u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.black_and_white(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [76, 76, 76, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [76, 76, 76, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn black_and_white_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.black_and_white(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn black_and_white_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.black_and_white(999).is_err());
     }
 
     #[test]

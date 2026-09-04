@@ -656,6 +656,12 @@ fn hue_saturation(
     })
 }
 
+/// Image > Adjustments > Black & White on layer `id`.
+#[tauri::command]
+fn black_and_white(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.black_and_white(id))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -757,6 +763,7 @@ pub fn run() {
             posterize,
             brightness_contrast,
             hue_saturation,
+            black_and_white,
             select_rectangle,
             select_ellipse,
             select_all,

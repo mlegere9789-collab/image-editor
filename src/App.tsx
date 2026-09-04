@@ -217,6 +217,11 @@ export default function App() {
     void runCommand("invert_colors", { id: selectedId });
   }, [runCommand, selectedId]);
 
+  const blackAndWhite = useCallback(() => {
+    if (selectedId === null) return;
+    void runCommand("black_and_white", { id: selectedId });
+  }, [runCommand, selectedId]);
+
   const applyModifySelection = useCallback(async () => {
     if (modifyMode === null) return;
     const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
@@ -814,6 +819,14 @@ export default function App() {
             title="Image > Adjustments > Hue/Saturation"
           >
             Hue/Saturation…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={blackAndWhite}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Black & White"
+          >
+            Black &amp; White
           </button>
           <input
             type="color"

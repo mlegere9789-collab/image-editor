@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -975,6 +975,41 @@ purple/red/orange/green, exactly the expected result of a 60° rotation
 around the colour wheel, screenshotted before and after.
 
 **191 Rust tests total** (180 → 191). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Black & White.** Image > Adjustments > Black & White desaturates a
+layer to greyscale, setting all three RGB channels to the same ITU-R
+BT.601 luma `threshold` already computes (`0.299R + 0.587G + 0.114B`) —
+the difference from Threshold being that the luma is kept as a continuous
+tone rather than snapped to pure black or white. Alpha untouched.
+Photoshop's own Black & White dialog offers six colour-range sliders
+(reds, yellows, greens, cyans, blues, magentas) for a fully custom
+weighting; this uses one fixed, standard weighting instead — a deliberate
+scope cut in the same spirit as Paint Bucket's fixed tolerance and
+Posterize's UI-capped slider, not an oversight.
+
+`Document::black_and_white` is the sixth caller of `adjust_layer_pixels`
+and the simplest of the batch: no sliders, no clamping, just the luma
+computation reused via the shared `to_unit`/`to_byte` helpers
+[`composite.rs`] already provides. New `edit_checkpointed` command taking
+only the layer id. The frontend adds a **Black & White** toolbar button —
+a one-shot action with no dialog, the same pattern **Invert Colors**
+already established, since neither needs any parameter beyond which
+layer to act on.
+
+**Verified two ways.** New `document.rs` tests cover the luma computation
+against the same hand-verified byte values Threshold's own weighting
+tests used (white stays 255, pure red becomes 76, pure green becomes
+150), alpha staying untouched, confinement to an active selection, a
+locked layer, and an unknown layer id. Live under Xvfb: loaded the same
+colourful sample-image gradient layer via a temporary probe button
+(removed before committing, `grep -n "TEMP\|PROBE"` returning nothing) →
+**Black & White** — the multicoloured grid converted cleanly to a smooth
+greyscale gradient, darker toward the original blue corner and lighter
+toward the original yellow/pink corner, matching the relative luma of
+each original colour, screenshotted before and after.
+
+**196 Rust tests total** (191 → 196). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites
