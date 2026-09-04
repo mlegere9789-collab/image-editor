@@ -23,6 +23,11 @@ function hexToRgb(hex: string): [number, number, number] {
   return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
 }
 
+/** `[r, g, b]`, each `0..=255`, to `#rrggbb`. */
+function rgbToHex(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** A pointer event's position, in document pixel coordinates. */
 function toDocPoint(
   event: React.PointerEvent<HTMLImageElement>,
@@ -334,10 +339,29 @@ export default function App() {
 
   const canPaint = document !== null && selectedId !== null;
   const isMarqueeTool = tool === "selectRect" || tool === "selectEllipse";
+  const isEyedropper = tool === "eyedropper";
+
+  const sampleColorAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document) return;
+      const [x, y] = toDocPoint(event, document);
+      void invoke<[number, number, number, number]>("sample_color", {
+        x: Math.floor(x),
+        y: Math.floor(y),
+      })
+        .then(([r, g, b]) => setBrushColor(rgbToHex(r, g, b)))
+        .catch((err) => setError(String(err)));
+    },
+    [document],
+  );
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
+      if (isEyedropper) {
+        sampleColorAt(event);
+        return;
+      }
       if (isMarqueeTool) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const point = toDocPoint(event, document);
@@ -355,7 +379,7 @@ export default function App() {
       // before the stroke's first segment does.
       void checkpoint().then(() => applyStroke([point]));
     },
-    [document, isMarqueeTool, canPaint, checkpoint, applyStroke],
+    [document, isEyedropper, sampleColorAt, isMarqueeTool, canPaint, checkpoint, applyStroke],
   );
 
   const handlePointerMove = useCallback(
@@ -527,6 +551,15 @@ export default function App() {
           >
             Eraser
           </button>
+          <button
+            className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "eyedropper"}
+            onClick={() => setTool("eyedropper")}
+            title="Eyedropper: click the canvas to pick up its color"
+          >
+            Eyedropper
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -628,7 +661,7 @@ export default function App() {
           {compositeSrc && document && (
             <div className="canvas-wrap">
               <img
-                className={`canvas${(isMarqueeTool ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
+                className={`canvas${(isMarqueeTool || isEyedropper ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
                 src={compositeSrc}
                 alt="Flattened composite"
                 draggable={false}

@@ -17,7 +17,7 @@ use tauri::{Manager, State};
 
 use blend::BlendMode;
 use composite::Rect;
-use document::{Document, DocumentView, LayerId, MoveDirection, Stroke};
+use document::{Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS};
 
 /// Same order of magnitude as `png::MAX_FILE_BYTES` — a blank canvas this
 /// large would be as much of a memory problem as a PNG that big.
@@ -213,6 +213,29 @@ fn perform_redo(state: &AppState) -> Result<Snapshot, String> {
 fn export(document: &Document, path: &Path) -> Result<(), String> {
     let bytes = png::encode(&composite::flatten(document))?;
     std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+/// Eyedropper: the RGBA colour of the cached composite at document pixel
+/// `(x, y)` — what's actually visible on screen, the same convention
+/// Photoshop's own eyedropper defaults to (sampling the merged image, not
+/// one specific layer). Errors if nothing has been composited yet, or the
+/// point falls outside the canvas.
+fn sample_pixel_color(cache: &CompositeCache, x: u32, y: u32) -> Result<[u8; 4], String> {
+    let guard = cache.pixels.lock().map_err(|_| POISONED.to_string())?;
+    let composite = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    if x >= composite.width || y >= composite.height {
+        return Err(format!(
+            "({x}, {y}) is outside the {}x{} canvas.",
+            composite.width, composite.height
+        ));
+    }
+    let base = (y as usize * composite.width as usize + x as usize) * CHANNELS;
+    Ok([
+        composite.pixels[base],
+        composite.pixels[base + 1],
+        composite.pixels[base + 2],
+        composite.pixels[base + 3],
+    ])
 }
 
 /// Build the response the `composite://` protocol hands the webview: the
@@ -484,6 +507,11 @@ fn merge_down(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, Strin
     edit_checkpointed(&state, |document| document.merge_down(id).map(|_| None))
 }
 
+#[tauri::command]
+fn sample_color(state: State<'_, AppState>, x: u32, y: u32) -> Result<[u8; 4], String> {
+    sample_pixel_color(&state.composite, x, y)
+}
+
 /// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
 /// layer `id`, with normal `source-over` blending. `points` is the polyline
 /// since the previous pointer event, not the whole stroke — the frontend
@@ -613,6 +641,7 @@ pub fn run() {
             merge_visible,
             flatten_image,
             merge_down,
+            sample_color,
             paint_stroke,
             erase_stroke,
             select_rectangle,
@@ -675,6 +704,44 @@ mod tests {
                 .get(tauri::http::header::CONTENT_TYPE)
                 .unwrap(),
             "image/png"
+        );
+    }
+
+    #[test]
+    fn sampling_before_anything_is_composited_is_an_error() {
+        let cache = CompositeCache::default();
+        assert!(sample_pixel_color(&cache, 0, 0).is_err());
+    }
+
+    #[test]
+    fn sampling_outside_the_canvas_is_an_error() {
+        let state = AppState::default();
+        let mut document = Document::new(2, 2).unwrap();
+        document
+            .add_layer("solid", &[9, 8, 7, 255].repeat(4), 2, 2)
+            .unwrap();
+        snapshot(&state, &document, None).unwrap();
+
+        assert!(sample_pixel_color(&state.composite, 2, 0).is_err());
+        assert!(sample_pixel_color(&state.composite, 0, 2).is_err());
+    }
+
+    #[test]
+    fn sampling_reads_the_composited_colour_at_that_pixel() {
+        let state = AppState::default();
+        let mut document = Document::new(2, 1).unwrap();
+        let mut pixels = vec![255, 0, 0, 255]; // left pixel: red
+        pixels.extend([0, 0, 255, 255]); // right pixel: blue
+        document.add_layer("two-tone", &pixels, 2, 1).unwrap();
+        snapshot(&state, &document, None).unwrap();
+
+        assert_eq!(
+            sample_pixel_color(&state.composite, 0, 0).unwrap(),
+            [255, 0, 0, 255]
+        );
+        assert_eq!(
+            sample_pixel_color(&state.composite, 1, 0).unwrap(),
+            [0, 0, 255, 255]
         );
     }
 

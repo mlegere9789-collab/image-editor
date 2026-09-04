@@ -73,4 +73,4 @@ export type MoveDirection = "up" | "down";
 
 /** What a pointer drag on the canvas does: edit the selected layer, or
  * redefine the document's selection. */
-export type Tool = "brush" | "eraser" | "selectRect" | "selectEllipse";
+export type Tool = "brush" | "eraser" | "selectRect" | "selectEllipse" | "eyedropper";

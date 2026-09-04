@@ -175,6 +175,10 @@ body {
   cursor: crosshair;
 }
 
+.canvas--eyedropper {
+  cursor: copy;
+}
+
 /* A selection's marching-ants outline: four repeating-gradient "edges"
    (border-style: dashed itself has no animatable offset), animated in the
    direction that reads as ants marching clockwise. mix-blend-mode: difference

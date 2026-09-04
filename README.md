@@ -26,11 +26,10 @@ Desktop image editor, Tauri + Rust + React.
   inverted, or be restored after deselecting. *Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
-- **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down**: a
-  per-layer toggle that blocks paint/erase strokes onto that layer's
-  pixels, plus three ways to collapse the layer stack: every visible
-  layer, the whole stack, or one layer into the one below it. *Done,
-  described below.*
+- **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down /
+  Eyedropper**: a per-layer toggle that blocks paint/erase strokes onto
+  that layer's pixels, three ways to collapse the layer stack, and a tool
+  that picks up the color under the pointer. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -582,6 +581,34 @@ visually unchanged.
 **127 Rust tests total** (124 → 127). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+**Eyedropper.** Samples from the same source Photoshop's own eyedropper
+defaults to: the merged image, not one specific layer. `sample_pixel_color`
+reads straight out of `AppState`'s already-cached composite pixels (the
+same raw RGBA8 buffer the `composite://` protocol serves as PNG bytes) —
+no re-flatten needed, since every edit already keeps that cache current.
+Split into a plain function and a thin `sample_color` command around it,
+the same pattern `export`/`export_png` established, so it's directly unit
+testable. Errors if nothing has been composited yet (no document open) or
+the point falls outside the canvas. The frontend adds an **Eyedropper**
+toolbar button; clicking the canvas with it active samples that pixel and
+sets it as the brush color (`rgbToHex`, the inverse of the existing
+`hexToRgb`), without needing a layer selected — sampling reads the
+composite, not a specific layer's own pixels, so `Eyedropper` is enabled
+whenever a document is open rather than gated behind `canPaint`.
+
+**Verified two ways.** New `lib.rs` tests cover sampling before anything
+is composited being an error, sampling outside the canvas being an error
+in both dimensions, and sampling reading back the exact colour at a given
+pixel from a two-tone test image. Live under Xvfb: New… → switched to
+Eyedropper → clicked an untouched (transparent) part of the canvas — the
+color swatch changed from its default white to black, correctly reading
+back the `[0, 0, 0, 0]` a transparent pixel decodes to — → switched to
+Brush → painted a new dot, which came out black, proving the sampled
+color was actually picked up and not just displayed.
+
+**130 Rust tests total** (127 → 130). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -634,7 +661,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 127 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, undo/redo, pipeline
+cd src-tauri && cargo test      # 130 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, eyedropper, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -675,8 +702,8 @@ bounds (select all, invert and its confinement math, and reselect all
 included), a locked layer rejecting a stroke outright, merging visible
 layers reproducing the same composite as the layers it replaces, flattening
 discarding hidden layers' content entirely, merging one layer down into
-another respecting each one's own visibility, and end-to-end runs over
-the bundled samples. The frontend is a thin
+another respecting each one's own visibility, sampling the exact colour at
+a given pixel, and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 
