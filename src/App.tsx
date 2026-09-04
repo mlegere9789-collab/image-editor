@@ -698,6 +698,7 @@ export default function App() {
             void runCommand("move_layer", { id, direction })
           }
           onRemove={(id) => void runCommand("remove_layer", { id })}
+          onMergeVisible={() => void runCommand("merge_visible")}
         />
       </div>
 

@@ -469,6 +469,11 @@ fn move_layer(
     })
 }
 
+#[tauri::command]
+fn merge_visible(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.merge_visible().map(|_| None))
+}
+
 /// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
 /// layer `id`, with normal `source-over` blending. `points` is the polyline
 /// since the previous pointer event, not the whole stroke — the frontend
@@ -595,6 +600,7 @@ pub fn run() {
             set_layer_blend_mode,
             remove_layer,
             move_layer,
+            merge_visible,
             paint_stroke,
             erase_stroke,
             select_rectangle,

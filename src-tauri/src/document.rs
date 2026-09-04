@@ -404,6 +404,53 @@ impl Document {
         Ok(())
     }
 
+    /// Merge Visible: composite every visible layer into one new layer, in
+    /// place of the layers it replaces — hidden layers are left exactly
+    /// where they were, in their original relative order. The new layer
+    /// lands at the position of the bottommost layer it merged, is itself
+    /// visible, fully opaque, and blends Normal (its pixels are already
+    /// pre-blended, so nothing further needs to happen at composite time to
+    /// reproduce the same appearance). Errors with fewer than two visible
+    /// layers — there is nothing meaningful to merge.
+    pub fn merge_visible(&mut self) -> Result<LayerId, String> {
+        let visible_indices: Vec<usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|(_, layer)| layer.visible)
+            .map(|(index, _)| index)
+            .collect();
+        if visible_indices.len() < 2 {
+            return Err("Merge Visible needs at least two visible layers.".to_string());
+        }
+
+        let pixels = crate::composite::flatten_subset(self, &visible_indices).pixels;
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut merged = Some(Layer {
+            id,
+            name: "Merged".to_string(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            pixels,
+        });
+
+        let old_layers = std::mem::take(&mut self.layers);
+        self.layers = old_layers
+            .into_iter()
+            .filter_map(|layer| {
+                if layer.visible {
+                    merged.take()
+                } else {
+                    Some(layer)
+                }
+            })
+            .collect();
+        Ok(id)
+    }
+
     /// Apply `stroke` along the polyline `points` (document pixel coordinates,
     /// fractional) with the given `radius`, onto layer `id`'s own pixels — not
     /// the composite. A single point paints a dot; consecutive points are
@@ -788,6 +835,66 @@ mod tests {
         doc.move_layer(b, MoveDirection::Up).unwrap();
         doc.move_layer(a, MoveDirection::Down).unwrap();
         assert_eq!(ids(&doc), vec![a, b]);
+    }
+
+    #[test]
+    fn merge_visible_requires_at_least_two_visible_layers() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let err = doc.merge_visible().unwrap_err();
+        assert!(err.contains("at least two"), "{err}");
+
+        doc.add_layer("solo", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        assert!(doc.merge_visible().is_err());
+
+        let hidden = doc.add_layer("hidden", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        doc.set_visible(hidden, false).unwrap();
+        // `solo` is still the only visible layer — one visible layer plus
+        // any number of hidden ones is still not "at least two visible".
+        assert!(doc.merge_visible().is_err());
+    }
+
+    #[test]
+    fn merge_visible_combines_exactly_the_visible_layers() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("red", &solid(1, 1, [255, 0, 0, 255]), 1, 1)
+            .unwrap();
+        let hidden = doc
+            .add_layer("hidden", &solid(1, 1, [0, 255, 0, 255]), 1, 1)
+            .unwrap();
+        doc.set_visible(hidden, false).unwrap();
+        doc.add_layer("green half", &solid(1, 1, [0, 255, 0, 128]), 1, 1)
+            .unwrap();
+
+        let merged_id = doc.merge_visible().unwrap();
+
+        // `red` (bottommost of the two visible layers) and `green_half` are
+        // gone, replaced by the merged layer at `red`'s old position;
+        // `hidden` survived, untouched, still above it.
+        assert_eq!(ids(&doc), vec![merged_id, hidden]);
+        let merged = &doc.layers()[0];
+        assert!(merged.visible);
+        assert_eq!(merged.opacity, 1.0);
+        assert_eq!(merged.blend_mode, BlendMode::Normal);
+        // Half-alpha green over opaque red == the same source-over blend
+        // `flatten` would produce for just those two layers.
+        assert_eq!(merged.pixels, vec![127, 128, 0, 255]);
+        assert!(!doc.layers()[1].visible); // `hidden`, still hidden
+    }
+
+    #[test]
+    fn merge_visible_lands_at_the_bottommost_merged_layers_position() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("bottom", &solid(1, 1, [1; 4]), 1, 1).unwrap();
+        let middle_hidden = doc
+            .add_layer("middle hidden", &solid(1, 1, [2; 4]), 1, 1)
+            .unwrap();
+        doc.set_visible(middle_hidden, false).unwrap();
+        doc.add_layer("top", &solid(1, 1, [3; 4]), 1, 1).unwrap();
+
+        let merged_id = doc.merge_visible().unwrap();
+        // `bottom` and `top` (both visible) merge into one layer at
+        // `bottom`'s old position; `middle_hidden` keeps its place above it.
+        assert_eq!(ids(&doc), vec![merged_id, middle_hidden]);
     }
 
     #[test]

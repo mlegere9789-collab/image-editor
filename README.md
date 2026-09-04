@@ -26,8 +26,9 @@ Desktop image editor, Tauri + Rust + React.
   inverted, or be restored after deselecting. *Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
-- **Phase 10** — **Lock**: a per-layer toggle that blocks paint/erase
-  strokes onto that layer's pixels. *Done, described below.*
+- **Phase 10** — **Lock / Merge Visible**: a per-layer toggle that blocks
+  paint/erase strokes onto that layer's pixels, plus collapsing every
+  visible layer into one. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -486,6 +487,42 @@ paint again (blocked, `Layer "Layer 1" is locked.` banner, no new pixels)
 → uncheck lock → paint again (a second dot appears) — five single clicks,
 screenshotted at each step.
 
+**Merge Visible.** Collapses every visible layer into one, in place of the
+layers it replaces — hidden layers stay exactly where they were, in their
+original relative order. `composite.rs` gained `flatten_subset`, which
+flattens an arbitrary set of layer indices rather than every contributing
+layer; getting there meant factoring the blend accumulation itself out of
+`flatten`/`recomposite_region` into a shared `composite_layers_pixel` that
+just takes an iterator of layers, so `flatten`, `recomposite_region`, and
+`flatten_subset` all still share the one place that math lives, the same
+principle Phase 6 established for the first two. `Document::merge_visible`
+computes that flattened subset, then rebuilds the layer stack: the first
+visible layer's slot (bottom-to-top) gets the new merged layer, every other
+visible layer is dropped, and hidden layers pass through untouched. Errors
+with fewer than two visible layers — there is nothing meaningful to merge,
+matching Photoshop's own menu item being disabled. The new layer is fully
+opaque, Normal blend, and already-baked, so it reproduces the exact same
+composite the merged layers did, just as one layer instead of several.
+
+**Verified two ways.** `composite.rs`'s existing recompositing tests all
+still pass unchanged, confirming the `composite_layers_pixel` refactor
+didn't alter `flatten`'s or `recomposite_region`'s output. `document.rs`
+gained tests for the two-visible-layer minimum (including a lone visible
+layer plus any number of hidden ones still not qualifying), for merging
+combining exactly the visible layers with the exact source-over blend
+result `flatten` would have produced, and for the merged layer landing at
+the bottommost merged layer's position with a hidden layer in between kept
+in place. Live under Xvfb: New… → paint a dot on Layer 1 → add a second
+image layer (`rings.png`, via a direct `add_layer` call — no native file
+dialog needed since the path is just an argument) → Merge Visible — the
+layers panel dropped from two layers to one named "Merged", and the
+composite was visually unchanged, confirming the merge reproduced the
+same appearance rather than just replacing it with something that looked
+close.
+
+**121 Rust tests total** (118 → 121). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -538,7 +575,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 118 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, undo/redo, pipeline
+cd src-tauri && cargo test      # 121 tests: blend math, model, strokes, compositor (incl. merge visible), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -576,8 +613,9 @@ history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
 paths), starting a blank document at a chosen size (and its memory limit),
 rectangle/ellipse selections confining paint and erase strokes to their
 bounds (select all, invert and its confinement math, and reselect all
-included), a locked layer rejecting a stroke outright, and end-to-end runs
-over the bundled samples. The frontend is a thin
+included), a locked layer rejecting a stroke outright, merging visible
+layers reproducing the same composite as the layers it replaces, and
+end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

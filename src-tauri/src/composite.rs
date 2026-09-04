@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::{Document, CHANNELS};
+use crate::document::{Document, Layer, CHANNELS};
 
 /// A flattened RGBA8 image.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,9 +51,12 @@ pub fn flatten(document: &Document) -> Composite {
     let width = document.width();
     let height = document.height();
     let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+    let layers = document.layers();
     for y in 0..height {
         for x in 0..width {
-            write_pixel(&mut pixels, width, x, y, composite_pixel(document, x, y));
+            let pixel =
+                composite_layers_pixel(layers.iter().filter(|l| l.contributes()), width, x, y);
+            write_pixel(&mut pixels, width, x, y, pixel);
         }
     }
     Composite {
@@ -78,26 +81,59 @@ pub fn flatten(document: &Document) -> Composite {
 /// still go through a full [`flatten`].
 pub fn recomposite_region(document: &Document, rect: Rect, target: &mut [u8]) {
     let width = document.width();
+    let layers = document.layers();
     for y in rect.y0..rect.y1 {
         for x in rect.x0..rect.x1 {
-            write_pixel(target, width, x, y, composite_pixel(document, x, y));
+            let pixel =
+                composite_layers_pixel(layers.iter().filter(|l| l.contributes()), width, x, y);
+            write_pixel(target, width, x, y, pixel);
         }
     }
 }
 
-/// Composite one pixel `(x, y)` of `document`'s layer stack: non-premultiplied
-/// RGBA in `0.0..=1.0`. The single place the blend math lives, shared by
-/// [`flatten`] (every pixel) and [`recomposite_region`] (just a dirty rect) —
-/// iterating pixel-outer, layer-inner here is what makes that sharing
-/// possible; per pixel it applies each contributing layer in the same order
-/// [`flatten`] always has, so the two produce identical results.
-fn composite_pixel(document: &Document, x: u32, y: u32) -> [f32; 4] {
-    let width = document.width() as usize;
+/// Flatten just the layers at `indices` (bottom-to-top order, as in
+/// `document.layers()`) into one image, ignoring every other layer in the
+/// document entirely — including each included layer's own `visible` flag,
+/// since `indices` already says which ones to include. Opacity still
+/// applies, exactly like [`flatten`]. Used by
+/// [`crate::document::Document::merge_visible`] to pre-bake a subset of the
+/// stack into one new layer's pixels before those layers are removed.
+pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
+    let width = document.width();
+    let height = document.height();
+    let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+    let layers = document.layers();
+    for y in 0..height {
+        for x in 0..width {
+            let pixel = composite_layers_pixel(indices.iter().map(|&i| &layers[i]), width, x, y);
+            write_pixel(&mut pixels, width, x, y, pixel);
+        }
+    }
+    Composite {
+        width,
+        height,
+        pixels,
+    }
+}
+
+/// Composite one pixel `(x, y)` from `layers`, applied in the given
+/// iteration order: non-premultiplied RGBA in `0.0..=1.0`. The single place
+/// the blend math lives, shared by [`flatten`] (every contributing layer),
+/// [`recomposite_region`] (same layers, just a dirty rect), and
+/// [`flatten_subset`] (an arbitrary layer subset) — the caller decides which
+/// layers and in what order; this only does the accumulation.
+fn composite_layers_pixel<'a>(
+    layers: impl Iterator<Item = &'a Layer>,
+    width: u32,
+    x: u32,
+    y: u32,
+) -> [f32; 4] {
+    let width = width as usize;
     let base = (y as usize * width + x as usize) * CHANNELS;
 
     // Non-premultiplied RGBA, starting fully transparent.
     let mut backdrop = [0f32; 4];
-    for layer in document.layers().iter().filter(|layer| layer.contributes()) {
+    for layer in layers {
         let source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
         if source_alpha <= 0.0 {
             continue;
