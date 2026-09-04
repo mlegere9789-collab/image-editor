@@ -2192,6 +2192,9 @@ export default function App() {
           onFlattenImage={() => void runCommand("flatten_image")}
           onMergeDown={(id) => void runCommand("merge_down", { id })}
           onRasterize={(id) => void runCommand("rasterize_layer", { id })}
+          onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
+          onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
+          onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
         />
       </div>
 

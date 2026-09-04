@@ -1650,6 +1650,60 @@ it, and composites correctly.
 **286 Rust tests total** (283 → 286, 279 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 16 — Edit > Transform > Flip Horizontal / Flip Vertical / Rotate 180°
+
+Adds the three dimension-preserving members of Edit > Transform: Flip
+Horizontal, Flip Vertical, and Rotate 180°, each mirroring or rotating
+a single layer's own pixels in place. All three apply to the whole
+layer regardless of any active selection — modelled on Image > Image
+Rotation, which is likewise unaffected by a selection, rather than the
+selection-aware behaviour Edit > Transform can have on a normal layer
+in real Photoshop. Precisely constraining a flip or rotation to an
+arbitrary (possibly non-rectangular) selection shape would need a real
+pixel mask this project's shape+bounds selection system doesn't have —
+a deliberate scope cut, in the same spirit as Border's own inability to
+straddle a selection's original edge.
+
+`flip_layer_horizontal` and `flip_layer_vertical` swap pixels
+two-pointer style — column pairs for a horizontal flip, whole rows for
+a vertical one (`swap_with_slice` on a `split_at_mut` pair, no
+allocation) — leaving an unpaired middle row/column of an odd-sized
+layer untouched. `rotate_layer_180` is implemented directly as a
+single reversal of the whole pixel buffer: swapping the pixel at index
+`i` with the one at `total - 1 - i` is exactly the same transform as
+`(x, y) -> (width-1-x, height-1-y)` for a row-major buffer, so there's
+no need to compose a horizontal and a vertical flip. None of the three
+change a layer's dimensions — every layer stays document-sized, so all
+three are always well-defined — unlike a 90° rotation, which would
+need to swap width and height and so isn't offered here; the checklist
+entries for Rotate 90° Clockwise/Counter Clockwise stay unchecked with
+that reasoning noted directly in `docs/PHOTOSHOP_PARITY.md`, rather
+than silently skipped. All three error the same way every other
+pixel-rewriting command does: unknown layer id, or a locked layer.
+
+The frontend adds a **Flip H** / **Flip V** / **Rotate 180°** row of
+buttons to `LayerPanel`, right below **Rasterize Layer**.
+
+**Verified two ways.** New `document.rs` tests cover: a horizontal flip
+mirroring a 3-pixel row exactly (including the untouched middle pixel
+of the odd width), a vertical flip mirroring a 3-pixel column the same
+way, a 180° rotation mapping each of a 2×2 layer's four pixels to its
+diagonally opposite corner, and both a locked-layer and an
+unknown-layer error for each of the three commands. Live under Xvfb:
+created an 800×600 document, loaded the bundled colourful sample-image
+gradient as a layer, clicked **Flip H** — the gradient's blue corner
+moved from top-left to top-right exactly as expected — then **Flip V**
+on top of that, landing on the same result a straight 180° rotation of
+the original would produce (verified by eye against the corner
+colours). Started a fresh window and repeated with **Rotate 180°**
+directly on the untouched original: the top-left corner's colour
+became what had been the bottom-right corner's, and vice versa,
+confirming the single-pass buffer reversal produces the exact same
+result the two composed flips did.
+
+**295 Rust tests total** (286 → 295, 288 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

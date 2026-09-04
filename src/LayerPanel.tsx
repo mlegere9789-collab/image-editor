@@ -22,6 +22,9 @@ type Props = {
   onFlattenImage: () => void;
   onMergeDown: (id: number) => void;
   onRasterize: (id: number) => void;
+  onFlipHorizontal: (id: number) => void;
+  onFlipVertical: (id: number) => void;
+  onRotate180: (id: number) => void;
 };
 
 export default function LayerPanel({
@@ -41,6 +44,9 @@ export default function LayerPanel({
   onFlattenImage,
   onMergeDown,
   onRasterize,
+  onFlipHorizontal,
+  onFlipVertical,
+  onRotate180,
 }: Props) {
   // While the opacity slider is being dragged its value has to come from the
   // pointer, not from the last command that happened to land - otherwise the
@@ -209,6 +215,33 @@ export default function LayerPanel({
           >
             Rasterize Layer
           </button>
+
+          <div className="control control--row">
+            <button
+              className="button button--quiet"
+              disabled={disabled}
+              onClick={() => onFlipHorizontal(selected.id)}
+              title="Edit > Transform > Flip Horizontal"
+            >
+              Flip H
+            </button>
+            <button
+              className="button button--quiet"
+              disabled={disabled}
+              onClick={() => onFlipVertical(selected.id)}
+              title="Edit > Transform > Flip Vertical"
+            >
+              Flip V
+            </button>
+            <button
+              className="button button--quiet"
+              disabled={disabled}
+              onClick={() => onRotate180(selected.id)}
+              title="Edit > Transform > Rotate 180°"
+            >
+              Rotate 180°
+            </button>
+          </div>
 
           <button
             className="button button--danger"

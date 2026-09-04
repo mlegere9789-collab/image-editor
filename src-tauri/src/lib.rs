@@ -524,6 +524,30 @@ fn rasterize_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, 
     })
 }
 
+/// Edit > Transform > Flip Horizontal on layer `id`.
+#[tauri::command]
+fn flip_layer_horizontal(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.flip_layer_horizontal(id).map(|_| None)
+    })
+}
+
+/// Edit > Transform > Flip Vertical on layer `id`.
+#[tauri::command]
+fn flip_layer_vertical(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.flip_layer_vertical(id).map(|_| None)
+    })
+}
+
+/// Edit > Transform > Rotate 180° on layer `id`.
+#[tauri::command]
+fn rotate_layer_180(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rotate_layer_180(id).map(|_| None)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -913,6 +937,9 @@ pub fn run() {
             set_layer_visible,
             set_layer_locked,
             rasterize_layer,
+            flip_layer_horizontal,
+            flip_layer_vertical,
+            rotate_layer_180,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -628,6 +628,83 @@ impl Document {
         Ok(())
     }
 
+    /// Edit > Transform > Flip Horizontal: mirrors layer `id`'s own pixels
+    /// left-to-right, in place. Applies to the whole layer regardless of
+    /// any active selection — modelled on Image > Image Rotation, which is
+    /// likewise unaffected by a selection, rather than the selection-aware
+    /// behaviour Edit > Transform can have on a normal layer in real
+    /// Photoshop — a deliberate scope cut, since precisely constraining a
+    /// flip to an arbitrary (possibly non-rectangular) selection shape
+    /// would need a real mask. Document dimensions never change: every
+    /// layer stays document-sized, so a flip is always well-defined.
+    /// Errors if the layer is unknown or locked, same as every other
+    /// command that rewrites a layer's own pixels.
+    pub fn flip_layer_horizontal(&mut self, id: LayerId) -> Result<(), String> {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for row in 0..height {
+            let row_start = row * width * CHANNELS;
+            for col in 0..width / 2 {
+                let left = row_start + col * CHANNELS;
+                let right = row_start + (width - 1 - col) * CHANNELS;
+                for c in 0..CHANNELS {
+                    layer.pixels.swap(left + c, right + c);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Edit > Transform > Flip Vertical: mirrors layer `id`'s own pixels
+    /// top-to-bottom, in place. Same scope (whole layer, selection
+    /// ignored) and error conditions as [`Self::flip_layer_horizontal`].
+    pub fn flip_layer_vertical(&mut self, id: LayerId) -> Result<(), String> {
+        let width = self.width as usize;
+        let height = self.height as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let row_bytes = width * CHANNELS;
+        for row in 0..height / 2 {
+            let top = row * row_bytes;
+            let bottom = (height - 1 - row) * row_bytes;
+            let (a, b) = layer.pixels.split_at_mut(bottom);
+            a[top..top + row_bytes].swap_with_slice(&mut b[..row_bytes]);
+        }
+        Ok(())
+    }
+
+    /// Edit > Transform > Rotate 180°: rotates layer `id`'s own pixels by
+    /// half a turn, in place — equivalent to a horizontal flip followed by
+    /// a vertical one, implemented directly as a single reversal of the
+    /// whole pixel buffer (each pixel at index `i` swaps with the one at
+    /// `total - 1 - i`, which is exactly `(x, y) -> (width-1-x,
+    /// height-1-y)` for a row-major buffer). Same scope (whole layer,
+    /// selection ignored) and error conditions as
+    /// [`Self::flip_layer_horizontal`]. Document dimensions never change —
+    /// unlike a 90° rotation, which would need to swap width and height
+    /// and so isn't offered here (every layer must stay document-sized).
+    pub fn rotate_layer_180(&mut self, id: LayerId) -> Result<(), String> {
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let total_pixels = layer.pixels.len() / CHANNELS;
+        for i in 0..total_pixels / 2 {
+            let a = i * CHANNELS;
+            let b = (total_pixels - 1 - i) * CHANNELS;
+            for c in 0..CHANNELS {
+                layer.pixels.swap(a + c, b + c);
+            }
+        }
+        Ok(())
+    }
+
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
     /// that overshoots by a rounding step is not an error.
     pub fn set_opacity(&mut self, id: LayerId, opacity: f32) -> Result<(), String> {
@@ -1889,6 +1966,95 @@ mod tests {
     fn rasterizing_an_unknown_layer_is_an_error() {
         let (mut doc, _id) = doc_with_one_layer();
         assert!(doc.rasterize_layer(999).is_err());
+    }
+
+    #[test]
+    fn flip_horizontal_mirrors_pixels_left_to_right() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([10, 10, 10, 255]); // x=0
+        pixels.extend([20, 20, 20, 255]); // x=1 (odd width: no partner, stays put)
+        pixels.extend([30, 30, 30, 255]); // x=2
+        let id = doc.add_layer("row", &pixels, 3, 1).unwrap();
+
+        doc.flip_layer_horizontal(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [30, 30, 30, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [20, 20, 20, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [10, 10, 10, 255]);
+    }
+
+    #[test]
+    fn flip_horizontal_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.flip_layer_horizontal(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn flip_horizontal_on_an_unknown_layer_is_an_error() {
+        let (mut doc, _id) = doc_with_one_layer();
+        assert!(doc.flip_layer_horizontal(999).is_err());
+    }
+
+    #[test]
+    fn flip_vertical_mirrors_pixels_top_to_bottom() {
+        let mut doc = Document::new(1, 3).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([10, 10, 10, 255]); // y=0
+        pixels.extend([20, 20, 20, 255]); // y=1 (odd height: no partner)
+        pixels.extend([30, 30, 30, 255]); // y=2
+        let id = doc.add_layer("col", &pixels, 1, 3).unwrap();
+
+        doc.flip_layer_vertical(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [30, 30, 30, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [20, 20, 20, 255]);
+        assert_eq!(pixel(&doc, id, 0, 2), [10, 10, 10, 255]);
+    }
+
+    #[test]
+    fn flip_vertical_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.flip_layer_vertical(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn flip_vertical_on_an_unknown_layer_is_an_error() {
+        let (mut doc, _id) = doc_with_one_layer();
+        assert!(doc.flip_layer_vertical(999).is_err());
+    }
+
+    #[test]
+    fn rotate_180_maps_each_pixel_to_the_opposite_corner() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([1, 0, 0, 255]); // (0,0) = A
+        pixels.extend([2, 0, 0, 255]); // (1,0) = B
+        pixels.extend([3, 0, 0, 255]); // (0,1) = C
+        pixels.extend([4, 0, 0, 255]); // (1,1) = D
+        let id = doc.add_layer("square", &pixels, 2, 2).unwrap();
+
+        doc.rotate_layer_180(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [4, 0, 0, 255]); // was D
+        assert_eq!(pixel(&doc, id, 1, 0), [3, 0, 0, 255]); // was C
+        assert_eq!(pixel(&doc, id, 0, 1), [2, 0, 0, 255]); // was B
+        assert_eq!(pixel(&doc, id, 1, 1), [1, 0, 0, 255]); // was A
+    }
+
+    #[test]
+    fn rotate_180_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.rotate_layer_180(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn rotate_180_on_an_unknown_layer_is_an_error() {
+        let (mut doc, _id) = doc_with_one_layer();
+        assert!(doc.rotate_layer_180(999).is_err());
     }
 
     #[test]
