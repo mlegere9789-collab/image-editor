@@ -27,9 +27,10 @@ Desktop image editor, Tauri + Rust + React.
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
 - **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down /
-  Eyedropper**: a per-layer toggle that blocks paint/erase strokes onto
-  that layer's pixels, three ways to collapse the layer stack, and a tool
-  that picks up the color under the pointer. *Done, described below.*
+  Eyedropper / Paint Bucket**: a per-layer toggle that blocks paint/erase
+  strokes onto that layer's pixels, three ways to collapse the layer
+  stack, a tool that picks up the color under the pointer, and one that
+  flood-fills a connected region with it. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -609,6 +610,42 @@ color was actually picked up and not just displayed.
 **130 Rust tests total** (127 → 130). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+**Paint Bucket.** `Document::flood_fill` spreads from a seed pixel to its
+4-connected neighbours whose colour is within `tolerance` (per channel,
+`0..=255`) of the seed's own colour — the default "Contiguous" fill
+Photoshop's own Paint Bucket starts from — filling each with `color` via
+the same normal `source-over` blend `Stroke::Brush` already uses.
+Confined to the active selection and blocked by a locked layer, exactly
+like `stroke`; a seed pixel excluded by the selection fills nothing
+(`None`, not an error — the same as a stroke entirely outside a
+selection). Implemented as an explicit stack-based flood fill with a
+document-sized `visited` buffer, rather than recursion, to stay
+stack-safe on a large contiguous region. `flood_fill` is a new
+`edit_checkpointed` command — a whole discrete action on its own, not one
+step of a longer gesture the way a brush stroke is. The frontend adds a
+**Paint Bucket** toolbar button; Tolerance is fixed at a reasonable
+middle value (32) rather than exposing a second numeric control next to
+Flow — a deliberate scope cut, not an oversight, left for a later pass if
+it turns out to matter.
+
+**Verified two ways.** New `document.rs` tests cover a fill stopping at a
+differently-coloured pixel (proving 4-connectivity, not "any matching
+pixel in the document"), tolerance controlling how close a match must be
+(the same two-pixel case both excluded at zero tolerance and included at
+a wider one), confinement to the active selection even when the matching
+region continues beyond it, a seed outside the selection filling nothing,
+a locked layer rejecting the fill, and an out-of-bounds seed being an
+error. Live under Xvfb: New… → dragged a rectangular selection over part
+of the (uniformly transparent, and so — without the selection —
+otherwise entirely contiguous) canvas → Paint Bucket → clicked inside
+it — only the selected rectangle filled white, the rest of the
+otherwise-identical-colour canvas around it untouched, proving the fill
+actually stopped at the selection boundary rather than spreading through
+the whole contiguous region it would have reached unconfined.
+
+**136 Rust tests total** (130 → 136). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -661,7 +698,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 130 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, eyedropper, undo/redo, pipeline
+cd src-tauri && cargo test      # 136 tests: blend math, model, strokes (incl. flood fill), compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, eyedropper, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -703,7 +740,8 @@ included), a locked layer rejecting a stroke outright, merging visible
 layers reproducing the same composite as the layers it replaces, flattening
 discarding hidden layers' content entirely, merging one layer down into
 another respecting each one's own visibility, sampling the exact colour at
-a given pixel, and end-to-end runs over the bundled samples. The frontend is a thin
+a given pixel, a flood fill's 4-connectivity/tolerance/selection
+confinement, and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

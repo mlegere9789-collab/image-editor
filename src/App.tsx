@@ -340,6 +340,7 @@ export default function App() {
   const canPaint = document !== null && selectedId !== null;
   const isMarqueeTool = tool === "selectRect" || tool === "selectEllipse";
   const isEyedropper = tool === "eyedropper";
+  const isPaintBucket = tool === "paintBucket";
 
   const sampleColorAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -355,11 +356,37 @@ export default function App() {
     [document],
   );
 
+  // Photoshop exposes Tolerance as its own slider; this build fixes it at a
+  // reasonable middle value rather than adding a second numeric control
+  // next to Flow — a deliberate scope cut, not an oversight.
+  const PAINT_BUCKET_TOLERANCE = 32;
+
+  const fillAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document || selectedId === null) return;
+      const [x, y] = toDocPoint(event, document);
+      const [r, g, b] = hexToRgb(brushColor);
+      const alpha = Math.round(brushOpacity * 255);
+      void runCommand("flood_fill", {
+        id: selectedId,
+        x: Math.floor(x),
+        y: Math.floor(y),
+        color: [r, g, b, alpha],
+        tolerance: PAINT_BUCKET_TOLERANCE,
+      });
+    },
+    [document, selectedId, brushColor, brushOpacity, runCommand],
+  );
+
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       if (isEyedropper) {
         sampleColorAt(event);
+        return;
+      }
+      if (isPaintBucket) {
+        if (canPaint) fillAt(event);
         return;
       }
       if (isMarqueeTool) {
@@ -379,7 +406,17 @@ export default function App() {
       // before the stroke's first segment does.
       void checkpoint().then(() => applyStroke([point]));
     },
-    [document, isEyedropper, sampleColorAt, isMarqueeTool, canPaint, checkpoint, applyStroke],
+    [
+      document,
+      isEyedropper,
+      sampleColorAt,
+      isPaintBucket,
+      fillAt,
+      isMarqueeTool,
+      canPaint,
+      checkpoint,
+      applyStroke,
+    ],
   );
 
   const handlePointerMove = useCallback(
@@ -559,6 +596,15 @@ export default function App() {
             title="Eyedropper: click the canvas to pick up its color"
           >
             Eyedropper
+          </button>
+          <button
+            className={`button button--quiet${tool === "paintBucket" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "paintBucket"}
+            onClick={() => setTool("paintBucket")}
+            title="Paint Bucket: click to fill the connected region under the pointer"
+          >
+            Paint Bucket
           </button>
           <input
             type="color"

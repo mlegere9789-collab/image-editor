@@ -648,6 +648,117 @@ impl Document {
 
         Ok(Some(Rect { x0, y0, x1, y1 }))
     }
+
+    /// Paint Bucket: flood-fill from `(x, y)` with `color` (RGBA8, the same
+    /// normal `source-over` blending [`Stroke::Brush`] uses), spreading to
+    /// 4-connected neighbours whose colour is within `tolerance` (per
+    /// channel, `0..=255`) of the seed pixel's own colour — the default
+    /// "Contiguous" fill Photoshop's own Paint Bucket starts from. Confined
+    /// to the active selection and blocked by a locked layer, exactly like
+    /// [`Document::stroke`]. Returns the filled region's bounding box, or
+    /// `None` if the seed pixel itself is excluded by the selection (so
+    /// nothing was filled) — not an error, the same way a stroke entirely
+    /// outside the selection paints nothing without one either.
+    pub fn flood_fill(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        color: [u8; 4],
+        tolerance: u8,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width, self.height);
+        if x >= width || y >= height {
+            return Err(format!(
+                "({x}, {y}) is outside the {width}x{height} canvas."
+            ));
+        }
+        let selection = self.selection;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+
+        let in_selection = |px: u32, py: u32| {
+            selection
+                .map(|s| s.contains(px as f32 + 0.5, py as f32 + 0.5))
+                .unwrap_or(true)
+        };
+        if !in_selection(x, y) {
+            return Ok(None);
+        }
+
+        let pixel_at = |pixels: &[u8], px: u32, py: u32| -> [u8; 4] {
+            let base = (py as usize * width as usize + px as usize) * CHANNELS;
+            [
+                pixels[base],
+                pixels[base + 1],
+                pixels[base + 2],
+                pixels[base + 3],
+            ]
+        };
+        let matches_seed = |candidate: [u8; 4], seed: [u8; 4]| {
+            candidate
+                .iter()
+                .zip(seed.iter())
+                .all(|(&a, &b)| a.abs_diff(b) <= tolerance)
+        };
+
+        let seed_color = pixel_at(&layer.pixels, x, y);
+        let mut visited = vec![false; width as usize * height as usize];
+        visited[(y as usize * width as usize) + x as usize] = true;
+        let mut stack = vec![(x, y)];
+        let (mut x0, mut x1, mut y0, mut y1) = (x, x, y, y);
+
+        while let Some((px, py)) = stack.pop() {
+            let base = (py as usize * width as usize + px as usize) * CHANNELS;
+            let dest = pixel_at(&layer.pixels, px, py);
+            let source_alpha = to_unit(color[3]);
+            let dest_alpha = to_unit(dest[3]);
+            let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
+            for (channel, &source_byte) in color.iter().enumerate().take(3) {
+                let cs = to_unit(source_byte);
+                let cb = to_unit(dest[channel]);
+                let out = if out_alpha > 0.0 {
+                    (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha)) / out_alpha
+                } else {
+                    0.0
+                };
+                layer.pixels[base + channel] = to_byte(out);
+            }
+            layer.pixels[base + 3] = to_byte(out_alpha);
+
+            x0 = x0.min(px);
+            x1 = x1.max(px);
+            y0 = y0.min(py);
+            y1 = y1.max(py);
+
+            let neighbors = [
+                px.checked_sub(1).map(|nx| (nx, py)),
+                (px + 1 < width).then_some((px + 1, py)),
+                py.checked_sub(1).map(|ny| (px, ny)),
+                (py + 1 < height).then_some((px, py + 1)),
+            ];
+            for (nx, ny) in neighbors.into_iter().flatten() {
+                let idx = ny as usize * width as usize + nx as usize;
+                if visited[idx] {
+                    continue;
+                }
+                if in_selection(nx, ny) && matches_seed(pixel_at(&layer.pixels, nx, ny), seed_color)
+                {
+                    visited[idx] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+
+        Ok(Some(Rect {
+            x0,
+            y0,
+            x1: x1 + 1,
+            y1: y1 + 1,
+        }))
+    }
 }
 
 /// A tool [`Document::stroke`] applies.
@@ -1247,6 +1358,130 @@ mod tests {
     fn stroking_an_unknown_layer_is_an_error() {
         let (mut doc, _) = transparent_doc(3);
         assert!(doc.stroke(999, &[(1.0, 1.0)], 1.0, Stroke::Eraser).is_err());
+    }
+
+    /// A 4x1 document: red, red, blue, red — so a contiguous fill starting
+    /// at the left can reach pixel 1 but not pixel 3, which matches colour
+    /// but is cut off by the blue pixel breaking the 4-connected chain.
+    fn contiguity_test_doc() -> (Document, LayerId) {
+        let mut doc = Document::new(4, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([255, 0, 0, 255]); // 0: red
+        pixels.extend([255, 0, 0, 255]); // 1: red
+        pixels.extend([0, 0, 255, 255]); // 2: blue
+        pixels.extend([255, 0, 0, 255]); // 3: red, but unreachable
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn flood_fill_stops_at_a_differently_coloured_pixel() {
+        let (mut doc, id) = contiguity_test_doc();
+        let rect = doc
+            .flood_fill(id, 0, 0, [0, 255, 0, 255], 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 255, 255]); // blue: untouched
+        assert_eq!(pixel(&doc, id, 3, 0), [255, 0, 0, 255]); // unreachable: untouched
+    }
+
+    #[test]
+    fn flood_fill_tolerance_controls_how_close_a_match_must_be() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("pair", &[200, 0, 0, 255, 210, 0, 0, 255], 2, 1)
+            .unwrap();
+
+        // Zero tolerance: the 10-off neighbour does not match.
+        let rect = doc.flood_fill(id, 0, 0, [0, 255, 0, 255], 0).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+        assert_eq!(pixel(&doc, id, 1, 0), [210, 0, 0, 255]); // untouched
+
+        // With enough tolerance the same fill reaches both pixels.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("pair", &[200, 0, 0, 255, 210, 0, 0, 255], 2, 1)
+            .unwrap();
+        let rect = doc.flood_fill(id, 0, 0, [0, 255, 0, 255], 10).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn flood_fill_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc.add_layer("row", &solid(4, 1, [1; 4]), 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        let rect = doc
+            .flood_fill(id, 0, 0, [0, 255, 0, 255], 0)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        // Same colour, same contiguous run, but outside the selection.
+        assert_eq!(pixel(&doc, id, 2, 0), [1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn flood_fill_with_the_seed_outside_the_selection_fills_nothing() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc.add_layer("row", &solid(4, 1, [1; 4]), 4, 1).unwrap();
+        doc.select_rectangle(2.0, 0.0, 4.0, 1.0).unwrap();
+
+        let result = doc.flood_fill(id, 0, 0, [0, 255, 0, 255], 0).unwrap();
+        assert_eq!(result, None);
+        assert_eq!(pixel(&doc, id, 0, 0), [1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn flood_fill_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = contiguity_test_doc();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.flood_fill(id, 0, 0, [0, 255, 0, 255], 0).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn flood_fill_outside_the_canvas_is_an_error() {
+        let (mut doc, id) = contiguity_test_doc();
+        assert!(doc.flood_fill(id, 4, 0, [0, 255, 0, 255], 0).is_err());
+        assert!(doc.flood_fill(id, 0, 1, [0, 255, 0, 255], 0).is_err());
     }
 
     #[test]

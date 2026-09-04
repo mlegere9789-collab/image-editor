@@ -550,6 +550,23 @@ fn erase_stroke(
     })
 }
 
+/// Paint Bucket: flood-fill from `(x, y)` on layer `id` with `color`. A
+/// whole, discrete action on its own (not one step of a longer gesture, the
+/// way a brush stroke is), so it checkpoints itself.
+#[tauri::command]
+fn flood_fill(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    color: [u8; 4],
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.flood_fill(id, x, y, color, tolerance)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -644,6 +661,7 @@ pub fn run() {
             sample_color,
             paint_stroke,
             erase_stroke,
+            flood_fill,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -179,6 +179,10 @@ body {
   cursor: copy;
 }
 
+.canvas--paintBucket {
+  cursor: cell;
+}
+
 /* A selection's marching-ants outline: four repeating-gradient "edges"
    (border-style: dashed itself has no animatable offset), animated in the
    direction that reads as ants marching clockwise. mix-blend-mode: difference

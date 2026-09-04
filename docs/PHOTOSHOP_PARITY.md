@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**590 distinct capabilities tracked. Currently shipped: 15.**
+**590 distinct capabilities tracked. Currently shipped: 16.**
 
 ## PART I — EVERY TOOL
 
@@ -31,7 +31,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] BACKGROUND ERASER TOOL
 - [ ] MAGIC ERASER TOOL
 - [ ] GRADIENT TOOL
-- [ ] PAINT BUCKET TOOL
+- [x] PAINT BUCKET TOOL
 - [x] BRUSH TOOL
 - [x] PENCIL TOOL
 - [ ] COLOR REPLACEMENT TOOL
