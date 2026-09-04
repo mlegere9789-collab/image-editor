@@ -998,6 +998,34 @@ impl Document {
             [quantize(r), quantize(g), quantize(b), a]
         })
     }
+
+    /// Image > Adjustments > Brightness/Contrast: a flat per-channel
+    /// offset (`brightness`) plus a scale around the mid-grey point 128
+    /// (`contrast`), the same "legacy" formula widely used for this
+    /// adjustment: `factor = 259*(contrast+255) / (255*(259-contrast))`,
+    /// `output = factor*(value-128) + 128 + brightness`, clamped to
+    /// `0..=255`. Alpha untouched. Both sliders are clamped to
+    /// `-255..=255` before use (Photoshop's own dialog bounds them well
+    /// inside that range) rather than erroring on an out-of-range value —
+    /// there's no invalid input here, just one that saturates, the same
+    /// way a `u8` field would. `i32`, not a signed byte type, since Rust
+    /// has no 9-bit integer to hold `-255..=255` exactly.
+    pub fn brightness_contrast(
+        &mut self,
+        id: LayerId,
+        brightness: i32,
+        contrast: i32,
+    ) -> Result<Option<Rect>, String> {
+        let brightness = brightness.clamp(-255, 255) as f32;
+        let contrast = contrast.clamp(-255, 255) as f32;
+        let factor = 259.0 * (contrast + 255.0) / (255.0 * (259.0 - contrast));
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |v: u8| -> u8 {
+                (factor * (v as f32 - 128.0) + 128.0 + brightness).clamp(0.0, 255.0) as u8
+            };
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
@@ -2053,6 +2081,96 @@ mod tests {
     fn posterize_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.posterize(999, 4).is_err());
+    }
+
+    #[test]
+    fn brightness_contrast_of_zero_and_zero_is_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 128, 240, 77], 1, 1).unwrap();
+        doc.brightness_contrast(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 128, 240, 77]);
+    }
+
+    #[test]
+    fn brightness_shifts_every_channel_and_clamps_at_the_ceiling() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 220, 0, 255], 1, 1).unwrap();
+        doc.brightness_contrast(id, 50, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 255, 50, 255]);
+    }
+
+    #[test]
+    fn minimum_contrast_collapses_every_channel_to_mid_grey() {
+        // At contrast = -255 the scale factor is exactly 0, so every
+        // channel lands on 128 regardless of its original value.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.brightness_contrast(id, 0, -255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn minimum_contrast_plus_brightness_shifts_the_collapsed_grey() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.brightness_contrast(id, 20, -255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [148, 148, 148, 255]);
+    }
+
+    #[test]
+    fn maximum_contrast_pushes_values_toward_the_extremes() {
+        // At contrast = 255 the scale factor is 129.5: the midpoint (128)
+        // stays put, but a value just one step to either side of it
+        // clamps all the way to black or white.
+        let mut doc = Document::new(3, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([127, 127, 127, 255]);
+        pixels.extend([128, 128, 128, 255]);
+        pixels.extend([129, 129, 129, 255]);
+        let id = doc.add_layer("row", &pixels, 3, 1).unwrap();
+        doc.brightness_contrast(id, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn brightness_contrast_sliders_are_clamped_to_their_range() {
+        // An out-of-range brightness isn't an error, the same way an
+        // out-of-range value in a bounded numeric field just saturates.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 100, 100, 255], 1, 1).unwrap();
+        doc.brightness_contrast(id, 9999, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn brightness_contrast_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [100u8, 100, 100, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.brightness_contrast(id, 50, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 150, 150, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 150, 150, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 100, 100, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn brightness_contrast_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.brightness_contrast(id, 10, 10).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn brightness_contrast_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.brightness_contrast(999, 10, 10).is_err());
     }
 
     #[test]

@@ -102,6 +102,10 @@ export default function App() {
   const [showPosterizeDialog, setShowPosterizeDialog] = useState(false);
   const [posterizeLevels, setPosterizeLevels] = useState(4);
 
+  const [showBrightnessContrastDialog, setShowBrightnessContrastDialog] = useState(false);
+  const [brightness, setBrightness] = useState(0);
+  const [contrast, setContrast] = useState(0);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -226,6 +230,12 @@ export default function App() {
     await runCommand("posterize", { id: selectedId, levels: posterizeLevels });
     setShowPosterizeDialog(false);
   }, [runCommand, selectedId, posterizeLevels]);
+
+  const applyBrightnessContrast = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("brightness_contrast", { id: selectedId, brightness, contrast });
+    setShowBrightnessContrastDialog(false);
+  }, [runCommand, selectedId, brightness, contrast]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -778,6 +788,14 @@ export default function App() {
           >
             Posterize…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowBrightnessContrastDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Brightness/Contrast"
+          >
+            Brightness/Contrast…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -988,6 +1006,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPosterize} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBrightnessContrastDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBrightnessContrastDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Brightness/Contrast"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Brightness/Contrast</h2>
+            <label className="control">
+              <span className="control__label">
+                Brightness
+                <span className="control__value">{brightness}</span>
+              </span>
+              <input
+                type="range"
+                min={-150}
+                max={150}
+                value={brightness}
+                onChange={(event) => setBrightness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{contrast}</span>
+              </span>
+              <input
+                type="range"
+                min={-150}
+                max={150}
+                value={contrast}
+                onChange={(event) => setContrast(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBrightnessContrastDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyBrightnessContrast} disabled={busy}>
                 Apply
               </button>
             </div>

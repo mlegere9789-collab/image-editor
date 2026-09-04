@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -891,6 +891,46 @@ distinct colours instead of its own smooth shade, screenshotted before
 and after.
 
 **171 Rust tests total** (165 → 171). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Brightness/Contrast.** Image > Adjustments > Brightness/Contrast applies
+a flat per-channel offset (`brightness`) plus a scale around the mid-grey
+point 128 (`contrast`) — the same widely-used "legacy" formula many
+editors implement: `factor = 259*(contrast+255) / (255*(259-contrast))`,
+`output = factor*(value-128) + 128 + brightness`, clamped to `0..=255`.
+Alpha untouched, same as every other adjustment in this batch. Both
+sliders are clamped to `-255..=255` rather than erroring on an
+out-of-range value — there's no invalid input here, just one that
+saturates, the same way a bounded numeric field would.
+
+`Document::brightness_contrast` is the fourth caller of the
+`adjust_layer_pixels` helper, needing nothing new from it either — just a
+closure computing the scaled-and-shifted value per channel. New
+`edit_checkpointed` command taking the layer id, `brightness`, and
+`contrast` (both `i32`, since Rust has no 9-bit integer to hold
+`-255..=255` exactly). The frontend adds a **Brightness/Contrast…**
+toolbar button next to Posterize…, opening a modal with two sliders
+(`-150..=150`, Photoshop's own dialog range) — the UI narrows the range
+the same way Posterize's slider does, while the backend command itself
+still accepts the full `-255..=255`.
+
+**Verified two ways.** New `document.rs` tests cover the zero/zero no-op
+case, a positive brightness shifting every channel and clamping at 255,
+a contrast of exactly -255 collapsing every channel to mid-grey 128 (the
+scale factor is exactly zero at that extreme, a clean deterministic
+case), that same collapse shifted by a brightness offset, a contrast of
+exactly +255 pushing values on either side of 128 to pure black or white
+while 128 itself stays put, an out-of-range brightness saturating rather
+than erroring, confinement to an active selection, a locked layer, and
+an unknown layer id. Live under Xvfb: loaded the same colourful
+sample-image gradient layer via a temporary probe button (removed before
+committing, `grep -n "TEMP\|PROBE"` returning nothing) →
+**Brightness/Contrast…** → raised Contrast to 40, applied — the gradient
+became visibly more saturated with sharper colour separation between
+grid cells, exactly the expected effect of pushing values away from
+mid-grey, screenshotted before and after.
+
+**180 Rust tests total** (171 → 180). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

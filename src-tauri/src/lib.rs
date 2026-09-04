@@ -629,6 +629,19 @@ fn posterize(state: State<'_, AppState>, id: LayerId, levels: u8) -> Result<Snap
     edit_checkpointed(&state, |document| document.posterize(id, levels))
 }
 
+/// Image > Adjustments > Brightness/Contrast on layer `id`.
+#[tauri::command]
+fn brightness_contrast(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brightness: i32,
+    contrast: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.brightness_contrast(id, brightness, contrast)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -728,6 +741,7 @@ pub fn run() {
             invert_colors,
             threshold,
             posterize,
+            brightness_contrast,
             select_rectangle,
             select_ellipse,
             select_all,
