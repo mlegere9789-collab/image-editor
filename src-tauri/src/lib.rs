@@ -478,6 +478,21 @@ fn add_solid_color_layer(state: State<'_, AppState>, color: [u8; 4]) -> Result<S
     })
 }
 
+/// Layer > New Fill Layer > Gradient: add a new top layer filled with a
+/// linear gradient from `start_color` to `end_color` along the canvas's
+/// own top-left-to-bottom-right diagonal. Always named "Gradient Fill 1".
+#[tauri::command]
+fn add_gradient_layer(
+    state: State<'_, AppState>,
+    start_color: [u8; 4],
+    end_color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_gradient_layer("Gradient Fill 1", start_color, end_color);
+        Ok(None)
+    })
+}
+
 #[tauri::command]
 fn set_layer_visible(
     state: State<'_, AppState>,
@@ -894,6 +909,7 @@ pub fn run() {
             new_document,
             add_layer,
             add_solid_color_layer,
+            add_gradient_layer,
             set_layer_visible,
             set_layer_locked,
             rasterize_layer,

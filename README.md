@@ -1603,6 +1603,53 @@ composites correctly.
 **283 Rust tests total** (280 → 283, 276 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 15 — Layer > New Fill Layer > Gradient
+
+Layer > New Fill Layer > Gradient adds a new top layer filled with a
+linear gradient from a start colour to an end colour, running the
+canvas's own top-left-to-bottom-right diagonal. It reuses the exact
+same linear-interpolation math the Gradient tool's own `gradient_fill`
+already implements — `Document::add_gradient_layer` creates a brand new
+fully transparent layer via `add_solid_color_layer` (Phase 14) and then
+runs `gradient_fill` across it from `(0, 0)` to `(width, height)`.
+Photoshop's own Gradient Fill Layer dialog lets you configure angle,
+scale, gradient style (linear/radial/angle/reflected/diamond), and
+offset; this always uses a fixed linear diagonal — a deliberate scope
+cut, in the same spirit as Gradient Map's own fixed two-stop straight
+line. The function cannot fail: the freshly created layer is never
+locked, and a document's diagonal is always nonzero (a document can't
+be 0×0), so the two preconditions `gradient_fill` itself checks always
+hold — enforced with an `.expect()` documenting exactly why, rather
+than threading a `Result` through for an error that can't happen. The
+new layer is always named "Gradient Fill 1", matching "Color Fill 1"
+and "Layer 1"'s equally fixed naming.
+
+The frontend adds a **Gradient Fill…** toolbar button next to **Solid
+Color…**, opening a modal with two colour-picker swatches (Start Color,
+End Color) and an **Add Layer** button — the same two-colour dialog
+shape Gradient Map and Photo Filter already use, just producing a new
+layer instead of adjusting an existing one.
+
+**Verified two ways.** New `document.rs` tests cover: a gradient layer
+interpolating along the canvas diagonal at exactly the byte values
+`gradient_fill_interpolates_along_the_line` already established for a
+horizontal gradient (the same `t=0.25`/`t=0.75` fractions arise from a
+square canvas's diagonal as from a horizontal line, letting the two
+tests cross-check each other), the new layer being named correctly and
+pushed onto the top of the stack, and a fully transparent start/end
+colour leaving the new layer fully transparent (nothing to show through
+on a layer that starts out blank). Live under Xvfb: created an 800×600
+document, opened **Gradient Fill…**, left both colour pickers at their
+black/white defaults, and clicked **Add Layer** — a new "Gradient Fill
+1" layer appeared at the top of the layer panel and the canvas
+immediately displayed a smooth diagonal gradient running black at the
+top-left corner to white at the bottom-right, confirming the command
+reaches the backend, creates a real layer, runs the gradient fill on
+it, and composites correctly.
+
+**286 Rust tests total** (283 → 286, 279 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

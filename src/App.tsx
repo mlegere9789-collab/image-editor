@@ -212,6 +212,10 @@ export default function App() {
   const [showSolidColorFillDialog, setShowSolidColorFillDialog] = useState(false);
   const [solidColorFill, setSolidColorFill] = useState("#ffffff");
 
+  const [showGradientFillDialog, setShowGradientFillDialog] = useState(false);
+  const [gradientFillStart, setGradientFillStart] = useState("#000000");
+  const [gradientFillEnd, setGradientFillEnd] = useState("#ffffff");
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -470,6 +474,16 @@ export default function App() {
     await runCommand("add_solid_color_layer", { color: [r, g, b, 255] });
     setShowSolidColorFillDialog(false);
   }, [runCommand, solidColorFill]);
+
+  const applyGradientFill = useCallback(async () => {
+    const [r1, g1, b1] = hexToRgb(gradientFillStart);
+    const [r2, g2, b2] = hexToRgb(gradientFillEnd);
+    await runCommand("add_gradient_layer", {
+      startColor: [r1, g1, b1, 255],
+      endColor: [r2, g2, b2, 255],
+    });
+    setShowGradientFillDialog(false);
+  }, [runCommand, gradientFillStart, gradientFillEnd]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -839,6 +853,14 @@ export default function App() {
           title="Layer > New Fill Layer > Solid Color"
         >
           Solid Color…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowGradientFillDialog(true)}
+          disabled={busy || !hasDocument}
+          title="Layer > New Fill Layer > Gradient"
+        >
+          Gradient Fill…
         </button>
         <button
           className="button button--quiet"
@@ -1998,6 +2020,52 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySolidColorFill} disabled={busy}>
+                Add Layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGradientFillDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGradientFillDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Gradient Fill Layer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Gradient Fill Layer</h2>
+            <label className="control control--row">
+              <span className="control__label">Start Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={gradientFillStart}
+                onChange={(event) => setGradientFillStart(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">End Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={gradientFillEnd}
+                onChange={(event) => setGradientFillEnd(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGradientFillDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGradientFill} disabled={busy}>
                 Add Layer
               </button>
             </div>

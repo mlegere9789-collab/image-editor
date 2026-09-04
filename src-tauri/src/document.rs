@@ -561,6 +561,33 @@ impl Document {
         id
     }
 
+    /// Layer > New Fill Layer > Gradient: adds a new top layer filled with
+    /// a linear gradient from `start_color` at the top-left corner to
+    /// `end_color` at the bottom-right corner — the same linear-
+    /// interpolation math [`Self::gradient_fill`] (the Gradient tool)
+    /// already implements, applied once to a brand new, fully transparent
+    /// layer instead of onto existing pixels. Photoshop's own Gradient
+    /// Fill Layer dialog lets you configure angle, scale, gradient style
+    /// (linear/radial/angle/reflected/diamond), and offset; this always
+    /// runs a linear gradient along the canvas's own top-left-to-
+    /// bottom-right diagonal — a deliberate scope cut, in the same spirit
+    /// as Gradient Map's own fixed two-stop straight line. Cannot fail:
+    /// the new layer is never locked, and a document's diagonal is always
+    /// nonzero (a document can't be 0x0 — see [`Self::new`]), so the two
+    /// preconditions [`Self::gradient_fill`] itself checks always hold.
+    pub fn add_gradient_layer(
+        &mut self,
+        name: impl Into<String>,
+        start_color: [u8; 4],
+        end_color: [u8; 4],
+    ) -> LayerId {
+        let id = self.add_solid_color_layer(name, [0, 0, 0, 0]);
+        let to = (self.width as f32, self.height as f32);
+        self.gradient_fill(id, (0.0, 0.0), to, start_color, end_color)
+            .expect("a brand new layer is never locked, and a document's diagonal is nonzero");
+        id
+    }
+
     fn index_of(&self, id: LayerId) -> Result<usize, String> {
         self.layers
             .iter()
@@ -1742,6 +1769,40 @@ mod tests {
         let mut doc = Document::new(1, 1).unwrap();
         let id = doc.add_solid_color_layer("Color Fill 1", [0, 0, 0, 128]);
         assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 128]);
+    }
+
+    #[test]
+    fn a_gradient_layer_interpolates_along_the_canvas_diagonal() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc.add_gradient_layer("Gradient Fill 1", [0, 0, 0, 255], [255, 255, 255, 255]);
+        // Pixel centres (0.5, 0.5) and (1.5, 1.5) project to t=0.25 and
+        // t=0.75 along the (0,0)-(2,2) diagonal - the same fractions (and
+        // so the same byte values) gradient_fill_interpolates_along_the_line
+        // already established for a horizontal gradient.
+        assert_eq!(pixel(&doc, id, 0, 0), [64, 64, 64, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [191, 191, 191, 255]);
+    }
+
+    #[test]
+    fn a_gradient_layer_is_named_and_stacked_on_top() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("base", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        let id = doc.add_gradient_layer("Gradient Fill 1", [0, 0, 0, 255], [255, 255, 255, 255]);
+        let top = doc.layers().last().unwrap();
+        assert_eq!(top.id, id);
+        assert_eq!(top.name, "Gradient Fill 1");
+    }
+
+    #[test]
+    fn a_gradient_layer_honours_start_and_end_alpha() {
+        // The gradient is painted onto a brand new, fully transparent
+        // layer, so a fully transparent start/end colour leaves the layer
+        // fully transparent - there's nothing underneath on the new layer
+        // itself to show through.
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc.add_gradient_layer("Gradient Fill 1", [0, 0, 0, 0], [255, 255, 255, 0]);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 0);
     }
 
     #[test]
