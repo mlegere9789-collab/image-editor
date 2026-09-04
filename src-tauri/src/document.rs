@@ -705,6 +705,53 @@ impl Document {
         Ok(())
     }
 
+    /// Image > Image Rotation > 90° Clockwise / 90° Counter Clockwise:
+    /// rotates the entire document — every layer, and the canvas itself —
+    /// by a quarter turn, swapping width and height. Unlike
+    /// [`Self::flip_layer_horizontal`] and its siblings, which rotate or
+    /// mirror a single layer's own pixels in place, a 90° turn can't
+    /// preserve dimensions (a W×H canvas becomes H×W), so this necessarily
+    /// operates on the whole document rather than one layer — there is no
+    /// way to keep every layer document-sized without resizing the
+    /// document itself. Each layer's pixel buffer is rebuilt at the new
+    /// dimensions by pulling from the old one: for clockwise, new pixel
+    /// `(nx, ny)` comes from old pixel `(ny, old_height - 1 - nx)`; for
+    /// counter-clockwise, from `(old_width - 1 - ny, nx)` — the standard
+    /// "transpose, then reverse rows/columns" matrix rotation, derived and
+    /// hand-verified against a small lettered grid in this function's own
+    /// tests. Clears the active selection and whatever `reselect` would
+    /// have restored: a selection's bounds are meaningless against a
+    /// document whose dimensions just changed shape, and there is no
+    /// sensible way to carry it forward. Cannot fail — every layer is
+    /// exactly document-sized before and after, so there is nothing to
+    /// validate — even a document with no layers yet simply swaps its own
+    /// width and height.
+    pub fn rotate_document_90(&mut self, clockwise: bool) {
+        let (old_width, old_height) = (self.width, self.height);
+        let (new_width, new_height) = (old_height, old_width);
+        for layer in &mut self.layers {
+            let mut rotated = vec![0u8; new_width as usize * new_height as usize * CHANNELS];
+            for new_y in 0..new_height {
+                for new_x in 0..new_width {
+                    let (old_x, old_y) = if clockwise {
+                        (new_y, old_height - 1 - new_x)
+                    } else {
+                        (old_width - 1 - new_y, new_x)
+                    };
+                    let src = (old_y as usize * old_width as usize + old_x as usize) * CHANNELS;
+                    let dst = (new_y as usize * new_width as usize + new_x as usize) * CHANNELS;
+                    rotated[dst..dst + CHANNELS]
+                        .copy_from_slice(&layer.pixels[src..src + CHANNELS]);
+                }
+            }
+            layer.pixels = rotated;
+        }
+        self.width = new_width;
+        self.height = new_height;
+        self.selection = None;
+        self.last_selection = None;
+    }
+
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
     /// that overshoots by a rounding step is not an error.
     pub fn set_opacity(&mut self, id: LayerId, opacity: f32) -> Result<(), String> {
@@ -2055,6 +2102,115 @@ mod tests {
     fn rotate_180_on_an_unknown_layer_is_an_error() {
         let (mut doc, _id) = doc_with_one_layer();
         assert!(doc.rotate_layer_180(999).is_err());
+    }
+
+    #[test]
+    fn rotate_document_90_clockwise_matches_the_hand_derived_example() {
+        // A 2-wide x 3-tall grid:
+        //   A B
+        //   C D
+        //   E F
+        // rotated 90 clockwise becomes 3-wide x 2-tall:
+        //   E C A
+        //   F D B
+        let mut doc = Document::new(2, 3).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([1, 0, 0, 255]); // A
+        pixels.extend([2, 0, 0, 255]); // B
+        pixels.extend([3, 0, 0, 255]); // C
+        pixels.extend([4, 0, 0, 255]); // D
+        pixels.extend([5, 0, 0, 255]); // E
+        pixels.extend([6, 0, 0, 255]); // F
+        let id = doc.add_layer("grid", &pixels, 2, 3).unwrap();
+
+        doc.rotate_document_90(true);
+
+        assert_eq!((doc.width(), doc.height()), (3, 2));
+        assert_eq!(pixel(&doc, id, 0, 0), [5, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [3, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [1, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [6, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [4, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 1), [2, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rotate_document_90_counter_clockwise_matches_the_hand_derived_example() {
+        // The same A..F grid rotated 90 counter-clockwise instead becomes:
+        //   B D F
+        //   A C E
+        let mut doc = Document::new(2, 3).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([1, 0, 0, 255]); // A
+        pixels.extend([2, 0, 0, 255]); // B
+        pixels.extend([3, 0, 0, 255]); // C
+        pixels.extend([4, 0, 0, 255]); // D
+        pixels.extend([5, 0, 0, 255]); // E
+        pixels.extend([6, 0, 0, 255]); // F
+        let id = doc.add_layer("grid", &pixels, 2, 3).unwrap();
+
+        doc.rotate_document_90(false);
+
+        assert_eq!((doc.width(), doc.height()), (3, 2));
+        assert_eq!(pixel(&doc, id, 0, 0), [2, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [4, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [6, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [1, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [3, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 1), [5, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rotating_90_twice_clockwise_and_twice_counter_clockwise_returns_to_the_original() {
+        let mut doc = Document::new(2, 3).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([1, 0, 0, 255]);
+        pixels.extend([2, 0, 0, 255]);
+        pixels.extend([3, 0, 0, 255]);
+        pixels.extend([4, 0, 0, 255]);
+        pixels.extend([5, 0, 0, 255]);
+        pixels.extend([6, 0, 0, 255]);
+        let id = doc.add_layer("grid", &pixels, 2, 3).unwrap();
+
+        doc.rotate_document_90(true);
+        doc.rotate_document_90(true);
+        doc.rotate_document_90(true);
+        doc.rotate_document_90(true);
+        assert_eq!((doc.width(), doc.height()), (2, 3));
+        for (i, expected) in pixels.chunks_exact(4).enumerate() {
+            let (x, y) = ((i % 2) as u32, (i / 2) as u32);
+            assert_eq!(pixel(&doc, id, x, y), expected);
+        }
+
+        doc.rotate_document_90(false);
+        doc.rotate_document_90(false);
+        doc.rotate_document_90(false);
+        doc.rotate_document_90(false);
+        assert_eq!((doc.width(), doc.height()), (2, 3));
+        for (i, expected) in pixels.chunks_exact(4).enumerate() {
+            let (x, y) = ((i % 2) as u32, (i / 2) as u32);
+            assert_eq!(pixel(&doc, id, x, y), expected);
+        }
+    }
+
+    #[test]
+    fn rotating_90_swaps_the_document_dimensions_even_with_no_layers() {
+        let mut doc = Document::new(4, 7).unwrap();
+        doc.rotate_document_90(true);
+        assert_eq!((doc.width(), doc.height()), (7, 4));
+    }
+
+    #[test]
+    fn rotating_90_clears_the_selection_and_reselect_history() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.deselect();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+
+        doc.rotate_document_90(true);
+
+        assert_eq!(doc.selection(), None);
+        assert!(doc.reselect().is_err());
     }
 
     #[test]

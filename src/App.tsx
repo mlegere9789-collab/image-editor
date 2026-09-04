@@ -899,6 +899,25 @@ export default function App() {
           </button>
         </div>
 
+        <div className="tools" role="group" aria-label="Image rotation">
+          <button
+            className="button button--quiet"
+            onClick={() => void runCommand("rotate_document_90", { clockwise: true })}
+            disabled={busy || !hasDocument}
+            title="Image > Image Rotation > 90° Clockwise"
+          >
+            Rotate 90° CW
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void runCommand("rotate_document_90", { clockwise: false })}
+            disabled={busy || !hasDocument}
+            title="Image > Image Rotation > 90° Counter Clockwise"
+          >
+            Rotate 90° CCW
+          </button>
+        </div>
+
         <div className="tools" role="group" aria-label="Selection tool">
           <button
             className={`button button--quiet${tool === "selectRect" ? " button--active" : ""}`}

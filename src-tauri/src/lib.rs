@@ -548,6 +548,17 @@ fn rotate_layer_180(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot,
     })
 }
 
+/// Image > Image Rotation > 90° Clockwise / 90° Counter Clockwise: rotates
+/// the whole document (every layer, and the canvas itself), swapping
+/// width and height.
+#[tauri::command]
+fn rotate_document_90(state: State<'_, AppState>, clockwise: bool) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rotate_document_90(clockwise);
+        Ok(None)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -940,6 +951,7 @@ pub fn run() {
             flip_layer_horizontal,
             flip_layer_vertical,
             rotate_layer_180,
+            rotate_document_90,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

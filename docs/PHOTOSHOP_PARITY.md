@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**590 distinct capabilities tracked. Currently shipped: 47.**
+**590 distinct capabilities tracked. Currently shipped: 49.**
 
 ## PART I — EVERY TOOL
 
@@ -221,8 +221,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Perspective
 - [ ] Warp
 - [x] Rotate 180°
-- [ ] Rotate 90° Clockwise (deferred — would need to swap layer width/height, breaking the invariant that every layer stays document-sized; not yet worth a document-level resize just for this)
-- [ ] Rotate 90° Counter Clockwise (same reason as Rotate 90° Clockwise)
+- [x] Rotate 90° Clockwise (a document-level operation, not per-layer — resizes the whole document and every layer in it together, so the "every layer stays document-sized" invariant holds throughout; see Phase 17 in README.md)
+- [x] Rotate 90° Counter Clockwise (same implementation as Rotate 90° Clockwise, opposite direction)
 - [x] Flip Horizontal
 - [x] Flip Vertical
 - [ ] Transform Again

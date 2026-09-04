@@ -1704,6 +1704,60 @@ result the two composed flips did.
 **295 Rust tests total** (286 → 295, 288 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 17 — Image > Image Rotation > 90° Clockwise / 90° Counter Clockwise
+
+Phase 16's Rotate 180° stayed per-layer because a half turn preserves
+dimensions; a quarter turn can't (a W×H canvas becomes H×W), so Rotate
+90° needed a different shape of command entirely — one that resizes
+the whole document, not one layer. `Document::rotate_document_90`
+rebuilds every layer's pixel buffer at the swapped dimensions and
+updates the document's own `width`/`height` together, so the "every
+layer stays document-sized" invariant this project relies on
+throughout never breaks, even transiently. Each layer's new buffer is
+filled by pulling from the old one: for clockwise, new pixel `(nx,
+ny)` comes from old pixel `(ny, old_height - 1 - nx)`; for
+counter-clockwise, from `(old_width - 1 - ny, nx)` — the standard
+"transpose, then reverse rows/columns" matrix rotation. Both formulas
+were derived by hand against a small lettered 2×3 grid (documented
+directly in the function's own doc comment and its tests) rather than
+trusted from memory, and cross-checked by a round-trip test: four
+successive clockwise rotations, and separately four successive
+counter-clockwise ones, both return a layer to its exact original
+pixels and the document to its original dimensions.
+
+The active selection and whatever `reselect` would have restored are
+both cleared by a rotation: a selection's bounds are meaningless
+against a document whose dimensions just changed shape, and there's no
+sensible way to carry either forward. The operation cannot otherwise
+fail — every layer is exactly document-sized before and after by
+construction, so there's nothing to validate — even a document with no
+layers yet simply swaps its own width and height.
+
+The frontend adds a **Rotate 90° CW** / **Rotate 90° CCW** button pair
+to the main toolbar (not `LayerPanel`, since this acts on the whole
+document rather than one layer), gated on a document being open.
+
+**Verified two ways.** New `document.rs` tests cover: clockwise and
+counter-clockwise rotation each matching the hand-derived 2×3 example
+exactly, the four-rotations-returns-to-original round trip in both
+directions, a document with no layers still swapping its width and
+height, and a rotation clearing both the active selection and the
+reselect history. Live under Xvfb: created an 800×600 (landscape)
+document, loaded the bundled colourful sample-image gradient as a
+layer, and clicked **Rotate 90° CW** — the canvas immediately became a
+600×800 portrait (confirmed by the dimensions readout at the bottom of
+the window), with every corner's colour landing exactly where the
+hand-derived formula predicts (the original top-left blue corner
+moved to the new top-right, the original bottom-left teal corner
+became the new top-left, and so on for all four corners). Clicking
+**Rotate 90° CCW** immediately afterward rotated it straight back to
+the original 800×600 orientation with the original corner colours
+restored exactly, confirming the two directions are true inverses of
+each other.
+
+**300 Rust tests total** (295 → 300, 293 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
