@@ -27,10 +27,11 @@ Desktop image editor, Tauri + Rust + React.
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
 - **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down /
-  Eyedropper / Paint Bucket**: a per-layer toggle that blocks paint/erase
-  strokes onto that layer's pixels, three ways to collapse the layer
-  stack, a tool that picks up the color under the pointer, and one that
-  flood-fills a connected region with it. *Done, described below.*
+  Eyedropper / Paint Bucket / Gradient**: a per-layer toggle that blocks
+  paint/erase strokes onto that layer's pixels, three ways to collapse the
+  layer stack, a tool that picks up the color under the pointer, one that
+  flood-fills a connected region with it, and one that blends between two
+  colors along a dragged line. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -646,6 +647,43 @@ the whole contiguous region it would have reached unconfined.
 **136 Rust tests total** (130 → 136). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+**Gradient.** `Document::gradient_fill` blends a linear interpolation
+between two colors along a dragged line, over every pixel of a layer — or,
+with an active selection, just the pixels it includes. Each pixel's centre
+is projected onto the line (`((cx - x0) * dx + (cy - y0) * dy) / len_sq`,
+clamped to `0.0..=1.0`) to pick its place in the interpolation, then
+composited with the same normal `source-over` blend `Stroke::Brush` uses
+— so a pixel past either endpoint clamps to that endpoint's colour rather
+than extrapolating. Confined to the active selection and blocked by a
+locked layer, exactly like every other paint command; unlike Paint
+Bucket's bounded stroke/flood-fill region, a gradient can touch the whole
+canvas, so it iterates every pixel rather than a bounding box, skipping
+whatever a selection excludes. Errors if the two drag points coincide — a
+gradient needs a direction. `gradient_fill` is a new `edit_checkpointed`
+command, taking eight flat arguments rather than the two-tuple pairs the
+Rust API itself uses (`clippy::too_many_arguments` allowed at that one
+IPC boundary, since Tauri commands need JSON-flat parameters). The
+frontend adds a **Gradient** toolbar button and a second color picker for
+the end color, drag-to-commit like the marquee tools but with no live
+preview while dragging — a deliberate scope cut.
+
+**Verified two ways.** New `document.rs` tests cover the interpolation
+itself with hand-computed exact byte values (a 2-pixel gradient spanning
+the whole canvas, checking both pixel centres' exact projected `t` and
+resulting colour), clamping past either endpoint, confinement to an
+active selection, rejecting coincident points, a locked layer, and an
+unknown layer id. Live under Xvfb: New… → Gradient (white to black) →
+dragged corner to corner — a smooth, correctly-ordered white-to-black
+gradient filled the whole canvas. Undid it, drew a rectangular selection,
+repeated the same drag — only the selected rectangle showed the gradient
+(a lighter-to-darker grey slice of the same white-to-black line, matching
+where that rectangle falls along it), the canvas around it left
+untouched, confirming confinement without breaking the per-pixel
+projection math.
+
+**142 Rust tests total** (136 → 142). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -698,7 +736,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 136 tests: blend math, model, strokes (incl. flood fill), compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, eyedropper, undo/redo, pipeline
+cd src-tauri && cargo test      # 142 tests: blend math, model, strokes (incl. flood fill/gradient), compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, eyedropper, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -741,7 +779,8 @@ layers reproducing the same composite as the layers it replaces, flattening
 discarding hidden layers' content entirely, merging one layer down into
 another respecting each one's own visibility, sampling the exact colour at
 a given pixel, a flood fill's 4-connectivity/tolerance/selection
-confinement, and end-to-end runs over the bundled samples. The frontend is a thin
+confinement, a gradient's per-pixel interpolation with hand-computed exact
+byte values, and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

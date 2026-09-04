@@ -95,6 +95,13 @@ export default function App() {
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
+  const [gradientEndColor, setGradientEndColor] = useState("#000000");
+
+  // The gradient drag's live start point — a ref, not state, read directly
+  // at pointerup the same way `marqueeStart` below is; the gradient itself
+  // has no live preview while dragging (a deliberate scope cut, unlike the
+  // marquee tools' outline).
+  const gradientStart = useRef<[number, number] | null>(null);
 
   // A marquee drag's live start point (a ref, not state — read directly at
   // pointerup rather than through a closure that could be stale by then, the
@@ -341,6 +348,7 @@ export default function App() {
   const isMarqueeTool = tool === "selectRect" || tool === "selectEllipse";
   const isEyedropper = tool === "eyedropper";
   const isPaintBucket = tool === "paintBucket";
+  const isGradient = tool === "gradient";
 
   const sampleColorAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -389,6 +397,12 @@ export default function App() {
         if (canPaint) fillAt(event);
         return;
       }
+      if (isGradient) {
+        if (!canPaint) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        gradientStart.current = toDocPoint(event, document);
+        return;
+      }
       if (isMarqueeTool) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const point = toDocPoint(event, document);
@@ -412,6 +426,7 @@ export default function App() {
       sampleColorAt,
       isPaintBucket,
       fillAt,
+      isGradient,
       isMarqueeTool,
       canPaint,
       checkpoint,
@@ -458,9 +473,44 @@ export default function App() {
         }
         return;
       }
+      if (isGradient) {
+        const start = gradientStart.current;
+        gradientStart.current = null;
+        // A click with no drag has no direction — silently a no-op, the
+        // same reasoning the marquee tools use for a zero-area selection.
+        if (start && document && selectedId !== null) {
+          const [x0, y0] = start;
+          const [x1, y1] = toDocPoint(event, document);
+          if (x0 !== x1 || y0 !== y1) {
+            const [r, g, b] = hexToRgb(brushColor);
+            const alpha = Math.round(brushOpacity * 255);
+            const [er, eg, eb] = hexToRgb(gradientEndColor);
+            void runCommand("gradient_fill", {
+              id: selectedId,
+              x0,
+              y0,
+              x1,
+              y1,
+              startColor: [r, g, b, alpha],
+              endColor: [er, eg, eb, alpha],
+            });
+          }
+        }
+        return;
+      }
       lastPoint.current = null;
     },
-    [isMarqueeTool, document, tool, runCommand],
+    [
+      isMarqueeTool,
+      isGradient,
+      document,
+      tool,
+      runCommand,
+      selectedId,
+      brushColor,
+      brushOpacity,
+      gradientEndColor,
+    ],
   );
 
   const layers = document?.layers ?? [];
@@ -606,6 +656,15 @@ export default function App() {
           >
             Paint Bucket
           </button>
+          <button
+            className={`button button--quiet${tool === "gradient" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "gradient"}
+            onClick={() => setTool("gradient")}
+            title="Gradient: drag to blend from color to end color along that line"
+          >
+            Gradient
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -614,6 +673,16 @@ export default function App() {
             aria-label="Brush color"
             onChange={(event) => setBrushColor(event.target.value)}
           />
+          {tool === "gradient" && (
+            <input
+              type="color"
+              className="tools__color"
+              value={gradientEndColor}
+              disabled={!canPaint}
+              aria-label="Gradient end color"
+              onChange={(event) => setGradientEndColor(event.target.value)}
+            />
+          )}
           <label className="tools__slider">
             Size
             <input

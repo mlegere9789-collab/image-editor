@@ -567,6 +567,26 @@ fn flood_fill(
     })
 }
 
+/// Gradient (Linear): blends `start_color` to `end_color` from `(x0, y0)`
+/// to `(x1, y1)` on layer `id`. A whole, discrete action on its own, so it
+/// checkpoints itself, the same as [`flood_fill`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn gradient_fill(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    start_color: [u8; 4],
+    end_color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.gradient_fill(id, (x0, y0), (x1, y1), start_color, end_color)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -662,6 +682,7 @@ pub fn run() {
             paint_stroke,
             erase_stroke,
             flood_fill,
+            gradient_fill,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -759,6 +759,95 @@ impl Document {
             y1: y1 + 1,
         }))
     }
+
+    /// Gradient (Linear): blends a linear interpolation between
+    /// `start_color` and `end_color`, along the line from `from` to `to`,
+    /// over every pixel of layer `id` — or, with an active selection, just
+    /// the pixels it includes. Each pixel's position projected onto that
+    /// line (clamped to the segment) picks its place in the interpolation;
+    /// the blended colour is composited with the same normal `source-over`
+    /// math [`Stroke::Brush`] uses. Confined to the active selection and
+    /// blocked by a locked layer, exactly like every other paint command.
+    /// Errors if the two points coincide — a gradient needs a direction —
+    /// or the layer is unknown.
+    pub fn gradient_fill(
+        &mut self,
+        id: LayerId,
+        from: (f32, f32),
+        to: (f32, f32),
+        start_color: [u8; 4],
+        end_color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        let (x0, y0) = from;
+        let (x1, y1) = to;
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return Err("Gradient coordinates must be finite numbers.".to_string());
+        }
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len_sq = dx * dx + dy * dy;
+        if len_sq <= f32::EPSILON {
+            return Err("A gradient needs two distinct points.".to_string());
+        }
+
+        let (width, height) = (self.width, self.height);
+        let selection = self.selection;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+
+        let mut touched: Option<(u32, u32, u32, u32)> = None;
+        for py in 0..height {
+            for px in 0..width {
+                let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                if let Some(selection) = &selection {
+                    if !selection.contains(cx, cy) {
+                        continue;
+                    }
+                }
+                let t = (((cx - x0) * dx + (cy - y0) * dy) / len_sq).clamp(0.0, 1.0);
+
+                let base = (py as usize * width as usize + px as usize) * CHANNELS;
+                let dest_alpha = to_unit(layer.pixels[base + 3]);
+                let source_alpha = lerp(to_unit(start_color[3]), to_unit(end_color[3]), t);
+                let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
+                for channel in 0..3 {
+                    let cs = lerp(
+                        to_unit(start_color[channel]),
+                        to_unit(end_color[channel]),
+                        t,
+                    );
+                    let cb = to_unit(layer.pixels[base + channel]);
+                    let out = if out_alpha > 0.0 {
+                        (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha)) / out_alpha
+                    } else {
+                        0.0
+                    };
+                    layer.pixels[base + channel] = to_byte(out);
+                }
+                layer.pixels[base + 3] = to_byte(out_alpha);
+
+                touched = Some(match touched {
+                    None => (px, py, px, py),
+                    Some((min_x, min_y, max_x, max_y)) => {
+                        (min_x.min(px), min_y.min(py), max_x.max(px), max_y.max(py))
+                    }
+                });
+            }
+        }
+
+        Ok(touched.map(|(min_x, min_y, max_x, max_y)| Rect {
+            x0: min_x,
+            y0: min_y,
+            x1: max_x + 1,
+            y1: max_y + 1,
+        }))
+    }
+}
+
+/// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
 }
 
 /// A tool [`Document::stroke`] applies.
@@ -1185,13 +1274,17 @@ mod tests {
     }
 
     fn transparent_doc(size: u32) -> (Document, LayerId) {
-        let mut doc = Document::new(size, size).unwrap();
+        transparent_doc_wh(size, size)
+    }
+
+    fn transparent_doc_wh(width: u32, height: u32) -> (Document, LayerId) {
+        let mut doc = Document::new(width, height).unwrap();
         let id = doc
             .add_layer(
                 "layer",
-                &vec![0u8; (size * size) as usize * CHANNELS],
-                size,
-                size,
+                &vec![0u8; (width * height) as usize * CHANNELS],
+                width,
+                height,
             )
             .unwrap();
         (doc, id)
@@ -1482,6 +1575,115 @@ mod tests {
         let (mut doc, id) = contiguity_test_doc();
         assert!(doc.flood_fill(id, 4, 0, [0, 255, 0, 255], 0).is_err());
         assert!(doc.flood_fill(id, 0, 1, [0, 255, 0, 255], 0).is_err());
+    }
+
+    #[test]
+    fn gradient_fill_interpolates_along_the_line() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        let rect = doc
+            .gradient_fill(
+                id,
+                (0.0, 0.0),
+                (2.0, 0.0),
+                [0, 0, 0, 255],
+                [255, 255, 255, 255],
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        // Pixel centres at x=0.5 and x=1.5 project to t=0.25 and t=0.75
+        // along the 0..2 line — a quarter and three-quarters of the way
+        // from black to white.
+        assert_eq!(pixel(&doc, id, 0, 0), [64, 64, 64, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [191, 191, 191, 255]);
+    }
+
+    #[test]
+    fn gradient_fill_clamps_past_either_endpoint() {
+        let (mut doc, id) = transparent_doc_wh(3, 1);
+        // The line only spans the middle pixel; both outer pixels project
+        // past an endpoint and clamp to the colour there rather than
+        // extrapolating.
+        doc.gradient_fill(
+            id,
+            (1.0, 0.0),
+            (2.0, 0.0),
+            [10, 20, 30, 255],
+            [200, 210, 220, 255],
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 20, 30, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 210, 220, 255]);
+    }
+
+    #[test]
+    fn gradient_fill_is_confined_to_the_selection() {
+        let (mut doc, id) = transparent_doc_wh(4, 1);
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.gradient_fill(
+            id,
+            (0.0, 0.0),
+            (4.0, 0.0),
+            [255, 0, 0, 255],
+            [0, 0, 255, 255],
+        )
+        .unwrap();
+        // Outside the selection: untouched, despite being on the line.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn gradient_fill_with_coincident_points_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        let err = doc
+            .gradient_fill(
+                id,
+                (1.0, 1.0),
+                (1.0, 1.0),
+                [0, 0, 0, 255],
+                [255, 255, 255, 255],
+            )
+            .unwrap_err();
+        assert!(err.contains("two distinct points"), "{err}");
+    }
+
+    #[test]
+    fn gradient_fill_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc
+            .gradient_fill(
+                id,
+                (0.0, 0.0),
+                (2.0, 0.0),
+                [0, 0, 0, 255],
+                [255, 255, 255, 255],
+            )
+            .unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn gradient_fill_on_an_unknown_layer_is_an_error() {
+        let (mut doc, _) = transparent_doc_wh(2, 1);
+        assert!(doc
+            .gradient_fill(
+                999,
+                (0.0, 0.0),
+                (2.0, 0.0),
+                [0, 0, 0, 255],
+                [255, 255, 255, 255]
+            )
+            .is_err());
     }
 
     #[test]

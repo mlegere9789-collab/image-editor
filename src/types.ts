@@ -79,4 +79,5 @@ export type Tool =
   | "selectRect"
   | "selectEllipse"
   | "eyedropper"
-  | "paintBucket";
+  | "paintBucket"
+  | "gradient";
