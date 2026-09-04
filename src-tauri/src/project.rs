@@ -1,8 +1,8 @@
 //! A layered project file format that round-trips the full layer stack —
-//! order, name, visibility, opacity, and blend mode, plus each layer's own
-//! pixels — across a save and reopen. **Export PNG…** only ever wrote the
-//! flattened composite; nothing until now could save (and get back) the
-//! *editable* document.
+//! order, name, visibility, opacity, blend mode, and lock state, plus each
+//! layer's own pixels — across a save and reopen. **Export PNG…** only ever
+//! wrote the flattened composite; nothing until now could save (and get
+//! back) the *editable* document.
 //!
 //! Layout, chosen to reuse the PNG codec already in `png.rs` rather than
 //! inventing a second pixel format or pulling in an archive library:
@@ -11,7 +11,7 @@
 //! b"IEDP1"              5-byte magic + format version
 //! u32 LE                manifest length, in bytes
 //! <manifest JSON>        width, height, and each layer's name/visible/
-//!                        opacity/blend_mode/png_len, in stack order
+//!                        opacity/blend_mode/locked/png_len, in stack order
 //! <layer 0 PNG bytes><layer 1 PNG bytes>...
 //! ```
 //!
@@ -43,6 +43,10 @@ struct LayerManifest {
     visible: bool,
     opacity: f32,
     blend_mode: BlendMode,
+    /// `#[serde(default)]` so a project file saved before Lock existed
+    /// still loads — a missing field means "not locked", not an error.
+    #[serde(default)]
+    locked: bool,
     png_len: u32,
 }
 
@@ -58,6 +62,7 @@ pub fn save(document: &Document, path: &Path) -> Result<(), String> {
             visible: layer.visible,
             opacity: layer.opacity,
             blend_mode: layer.blend_mode,
+            locked: layer.locked,
             png_len: bytes.len() as u32,
         });
         layer_bytes.push(bytes);
@@ -145,6 +150,7 @@ pub fn load(path: &Path) -> Result<Document, String> {
         document.set_visible(id, layer.visible)?;
         document.set_opacity(id, layer.opacity)?;
         document.set_blend_mode(id, layer.blend_mode)?;
+        document.set_locked(id, layer.locked)?;
     }
 
     Ok(document)
@@ -179,6 +185,7 @@ mod tests {
         document.set_opacity(top, 0.5).unwrap();
         document.set_blend_mode(top, BlendMode::Multiply).unwrap();
         document.set_visible(bottom, false).unwrap();
+        document.set_locked(top, true).unwrap();
 
         let path = temp_path("project_rs_round_trip.iep");
         save(&document, &path).unwrap();
@@ -192,6 +199,7 @@ mod tests {
         assert!(!reloaded_bottom.visible);
         assert_eq!(reloaded_bottom.opacity, 1.0);
         assert_eq!(reloaded_bottom.blend_mode, BlendMode::Normal);
+        assert!(!reloaded_bottom.locked);
         assert_eq!(reloaded_bottom.pixels, solid(2, 2, [255, 0, 0, 255]));
 
         let reloaded_top = &reloaded.layers()[1];
@@ -199,7 +207,47 @@ mod tests {
         assert!(reloaded_top.visible);
         assert_eq!(reloaded_top.opacity, 0.5);
         assert_eq!(reloaded_top.blend_mode, BlendMode::Multiply);
+        assert!(reloaded_top.locked);
         assert_eq!(reloaded_top.pixels, solid(2, 2, [0, 255, 0, 200]));
+    }
+
+    #[test]
+    fn a_manifest_from_before_lock_existed_defaults_to_unlocked() {
+        // A project file saved before the `locked` field existed has no key
+        // for it in the manifest JSON at all — `#[serde(default)]` is what
+        // makes that still load instead of a hard parse error. Rebuilds the
+        // file with the key stripped from the manifest and a recomputed
+        // length prefix, since the manifest is free to change size — only
+        // the `png_len` values (untouched here) have to stay honest.
+        let mut document = Document::new(1, 1).unwrap();
+        document
+            .add_layer("solo", &solid(1, 1, [1, 2, 3, 255]), 1, 1)
+            .unwrap();
+        let path = temp_path("project_rs_pre_lock_format.iep");
+        save(&document, &path).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let manifest_start = MAGIC.len() + 4;
+        let manifest_len =
+            u32::from_le_bytes(bytes[MAGIC.len()..manifest_start].try_into().unwrap()) as usize;
+        let manifest_end = manifest_start + manifest_len;
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&bytes[manifest_start..manifest_end]).unwrap();
+        manifest["layers"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("locked");
+        let rewritten_manifest = serde_json::to_vec(&manifest).unwrap();
+
+        let mut rewritten_file = Vec::new();
+        rewritten_file.extend_from_slice(&bytes[..MAGIC.len()]);
+        rewritten_file.extend_from_slice(&(rewritten_manifest.len() as u32).to_le_bytes());
+        rewritten_file.extend_from_slice(&rewritten_manifest);
+        rewritten_file.extend_from_slice(&bytes[manifest_end..]); // layer PNG bytes, untouched
+        std::fs::write(&path, rewritten_file).unwrap();
+
+        let reloaded = load(&path).unwrap();
+        assert!(!reloaded.layers()[0].locked);
     }
 
     #[test]

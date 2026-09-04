@@ -26,6 +26,8 @@ Desktop image editor, Tauri + Rust + React.
   inverted, or be restored after deselecting. *Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
+- **Phase 10** — **Lock**: a per-layer toggle that blocks paint/erase
+  strokes onto that layer's pixels. *Done, described below.*
 
 ## Phase 1: document model and compositor
 
@@ -443,6 +445,47 @@ Deselect (outline disappears, Reselect changes from disabled to enabled)
 → Reselect (outline reappears, Deselect/Invert re-enable) — all four
 single clicks, screenshotted at each step.
 
+## Phase 10: layer lock
+
+`Layer` gains a `locked: bool` (Photoshop's "Lock image pixels" — the one
+lock sub-mode that actually protects against the edits this app can make).
+`Document::stroke` checks it right after resolving the target layer and
+errors (`Layer "<name>" is locked.`) before doing any coverage math at all,
+so a locked layer's pixels are provably untouched, not just visually
+unchanged. Compositing — visibility, opacity, blend mode, stacking order —
+is deliberately untouched by the flag: those aren't edits to the layer's
+own pixel data, so locking a layer still lets you hide it, retime it, or
+move it in the stack.
+
+`set_layer_locked` is a new `edit_checkpointed` command, the same pattern
+every other one-shot layer command uses. The frontend adds a lock checkbox
+to each row in the layers panel, right next to the existing visibility
+checkbox — checked state mirrors `LayerView.locked`, and a paint/erase
+attempt against a locked layer surfaces the backend's error through the
+same generic error banner every other command failure already uses, with
+no special-casing needed.
+
+Project files (`.iep`, Phase 7) round-trip `locked` too, alongside
+visibility/opacity/blend mode — `LayerManifest.locked` is
+`#[serde(default)]` so a project file saved before this phase, with no key
+for it at all in its manifest JSON, still loads as unlocked rather than
+failing to parse.
+
+**Verified two ways.** `document.rs` gained tests for the default
+(unlocked), for a locked layer rejecting a stroke outright (pixels
+provably untouched, not just unchanged), and for unlocking restoring
+normal painting. `project.rs` gained a round-trip test with a locked
+layer, plus a dedicated test that hand-rewrites a saved project file's
+manifest JSON to strip the `locked` key entirely (recomputing the u32
+length prefix that precedes it) and confirms it still loads, unlocked —
+proving the backward-compatibility path actually engages rather than just
+trusting `#[serde(default)]` to do the right thing untested. Live under
+Xvfb: New… → paint a dot (single click; `handlePointerDown` fires one
+`paint_stroke` per click even with no drag) → check the lock checkbox →
+paint again (blocked, `Layer "Layer 1" is locked.` banner, no new pixels)
+→ uncheck lock → paint again (a second dot appears) — five single clicks,
+screenshotted at each step.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -495,7 +538,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 114 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections (incl. select all/invert/reselect), undo/redo, pipeline
+cd src-tauri && cargo test      # 118 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -533,7 +576,8 @@ history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
 paths), starting a blank document at a chosen size (and its memory limit),
 rectangle/ellipse selections confining paint and erase strokes to their
 bounds (select all, invert and its confinement math, and reselect all
-included), and end-to-end runs over the bundled samples. The frontend is a thin
+included), a locked layer rejecting a stroke outright, and end-to-end runs
+over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

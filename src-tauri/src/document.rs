@@ -24,6 +24,12 @@ pub struct Layer {
     /// `0.0..=1.0`, multiplied into the layer's own alpha at composite time.
     pub opacity: f32,
     pub blend_mode: BlendMode,
+    /// Blocks paint/erase strokes onto this layer's pixels — Photoshop's
+    /// "Lock image pixels", the one lock sub-mode that actually protects
+    /// against the edits this app can make. Compositing (visibility,
+    /// opacity, blend mode, stacking order) is untouched by it: those
+    /// aren't edits to the layer's own pixel data.
+    pub locked: bool,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -37,6 +43,7 @@ pub struct LayerView {
     pub visible: bool,
     pub opacity: f32,
     pub blend_mode: BlendMode,
+    pub locked: bool,
 }
 
 impl Layer {
@@ -47,6 +54,7 @@ impl Layer {
             visible: self.visible,
             opacity: self.opacity,
             blend_mode: self.blend_mode,
+            locked: self.locked,
         }
     }
 
@@ -331,6 +339,7 @@ impl Document {
             visible: true,
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
+            locked: false,
             pixels,
         });
         Ok(id)
@@ -350,6 +359,13 @@ impl Document {
 
     pub fn set_visible(&mut self, id: LayerId, visible: bool) -> Result<(), String> {
         self.layer_mut(id)?.visible = visible;
+        Ok(())
+    }
+
+    /// Toggle Lock (image pixels) — see [`Layer::locked`] for exactly what
+    /// it blocks.
+    pub fn set_locked(&mut self, id: LayerId, locked: bool) -> Result<(), String> {
+        self.layer_mut(id)?.locked = locked;
         Ok(())
     }
 
@@ -428,6 +444,9 @@ impl Document {
         // is small (an enum plus four `u32`s), so this is cheap per call.
         let selection = self.selection;
         let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -660,6 +679,53 @@ mod tests {
         assert_eq!(view.opacity, 0.25);
         assert_eq!(view.blend_mode, BlendMode::Multiply);
         assert!(!doc.layers()[0].contributes());
+    }
+
+    #[test]
+    fn layers_default_to_unlocked_and_locking_round_trips() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(!doc.layers()[0].locked);
+
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.view().layers[0].locked);
+        doc.set_locked(id, false).unwrap();
+        assert!(!doc.view().layers[0].locked);
+    }
+
+    #[test]
+    fn a_locked_layer_rejects_a_stroke() {
+        let (mut doc, id) = transparent_doc(4);
+        doc.set_locked(id, true).unwrap();
+        let err = doc
+            .stroke(
+                id,
+                &[(2.0, 2.0)],
+                1.0,
+                Stroke::Brush {
+                    color: [255, 0, 0, 255],
+                },
+            )
+            .unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        // Untouched — the stroke was rejected outright, not clipped to nothing.
+        assert_eq!(pixel(&doc, id, 2, 2), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn unlocking_a_layer_allows_a_stroke_again() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.set_locked(id, true).unwrap();
+        doc.set_locked(id, false).unwrap();
+        doc.stroke(
+            id,
+            &[(4.0, 4.0)],
+            5.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 4, 4), [255, 0, 0, 255]);
     }
 
     #[test]

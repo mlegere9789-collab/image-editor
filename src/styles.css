@@ -311,7 +311,8 @@ body {
   background: rgb(76 141 255 / 14%);
 }
 
-.layer__eye {
+.layer__eye,
+.layer__lock {
   flex: none;
   cursor: pointer;
 }

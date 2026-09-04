@@ -417,6 +417,17 @@ fn set_layer_visible(
     })
 }
 
+#[tauri::command]
+fn set_layer_locked(
+    state: State<'_, AppState>,
+    id: LayerId,
+    locked: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_locked(id, locked).map(|_| None)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -579,6 +590,7 @@ pub fn run() {
             new_document,
             add_layer,
             set_layer_visible,
+            set_layer_locked,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

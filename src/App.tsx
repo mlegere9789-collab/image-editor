@@ -688,6 +688,7 @@ export default function App() {
           onToggleVisible={(id, visible) =>
             void runCommand("set_layer_visible", { id, visible })
           }
+          onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
           onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
           onOpacityDragStart={checkpoint}
           onBlendMode={(id, blendMode: BlendMode) =>

@@ -10,6 +10,7 @@ type Props = {
   disabled: boolean;
   onSelect: (id: number) => void;
   onToggleVisible: (id: number, visible: boolean) => void;
+  onToggleLocked: (id: number, locked: boolean) => void;
   onOpacity: (id: number, opacity: number) => void;
   /** Called once, when an opacity drag starts, so the whole drag undoes as
    * one step rather than one step per `onOpacity` call it makes. */
@@ -26,6 +27,7 @@ export default function LayerPanel({
   disabled,
   onSelect,
   onToggleVisible,
+  onToggleLocked,
   onOpacity,
   onOpacityDragStart,
   onBlendMode,
@@ -80,6 +82,16 @@ export default function LayerPanel({
                 aria-label={`${layer.visible ? "Hide" : "Show"} ${layer.name}`}
                 onClick={(event) => event.stopPropagation()}
                 onChange={(event) => onToggleVisible(layer.id, event.target.checked)}
+              />
+              <input
+                type="checkbox"
+                className="layer__lock"
+                checked={layer.locked}
+                disabled={disabled}
+                aria-label={`${layer.locked ? "Unlock" : "Lock"} ${layer.name}`}
+                title={layer.locked ? "Locked (paint/erase blocked)" : "Not locked"}
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => onToggleLocked(layer.id, event.target.checked)}
               />
               <span className="layer__name" title={layer.name}>
                 {layer.name}

@@ -26,6 +26,8 @@ export type LayerView = {
   /** 0..=1 */
   opacity: number;
   blendMode: BlendMode;
+  /** Lock (image pixels): blocks paint/erase strokes onto this layer. */
+  locked: boolean;
 };
 
 /** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase). */
