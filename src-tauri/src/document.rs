@@ -840,6 +840,19 @@ impl Document {
     pub fn cut(&mut self, id: LayerId) -> Result<(Clipboard, Option<Rect>), String> {
         let clipboard = self.copy(id)?;
         let bounds = clipboard.origin;
+        self.paint_region(id, bounds, [0, 0, 0, 0])?;
+        Ok((clipboard, Some(bounds)))
+    }
+
+    /// Overwrites every selection-covered pixel of layer `id` within
+    /// `bounds` with `color`, leaving pixels outside the selection (but
+    /// still inside `bounds`) untouched — the shared pixel-writing loop
+    /// behind [`Self::cut`] and [`Self::delete_selection`]
+    /// (`color = [0, 0, 0, 0]`, i.e. "clear to transparent") and
+    /// [`Self::fill_selection`] (any other colour). Errors if the layer is
+    /// locked, the same as every other command that rewrites a layer's own
+    /// pixels.
+    fn paint_region(&mut self, id: LayerId, bounds: Rect, color: [u8; 4]) -> Result<(), String> {
         let selection = self.selection;
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -854,10 +867,42 @@ impl Document {
                     continue;
                 }
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
-                layer.pixels[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 0]);
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
             }
         }
-        Ok((clipboard, Some(bounds)))
+        Ok(())
+    }
+
+    /// Edit > Delete (this app has no separate Edit > Clear: with no
+    /// dedicated "Background" layer type — every [`Layer`] here already
+    /// supports transparency, see the `PIXEL LAYER` entry in
+    /// `docs/PHOTOSHOP_PARITY.md` — Delete and Clear would do exactly the
+    /// same thing, so one command covers both menu items): clears layer
+    /// `id`'s pixels within the active selection (or the whole layer, with
+    /// none) to fully transparent, in place. Unlike [`Self::cut`], nothing
+    /// is captured to the clipboard first.
+    pub fn delete_selection(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let bounds = self.copy_bounds();
+        self.paint_region(id, bounds, [0, 0, 0, 0])?;
+        Ok(Some(bounds))
+    }
+
+    /// Edit > Fill: paints layer `id`'s pixels within the active selection
+    /// (or the whole layer, with none) with a single flat `color`,
+    /// replacing whatever was there — the same "paint at 100% opacity,
+    /// Normal blend, no live recipe" scope cut
+    /// [`Self::add_solid_color_layer`] already makes for a brand new
+    /// layer, just applied in place to an existing one instead. Unlike
+    /// [`Self::flood_fill`] (the Paint Bucket tool), this doesn't stop at a
+    /// colour boundary — it overwrites every selected pixel regardless of
+    /// what was under it, exactly like Photoshop's Edit > Fill with a
+    /// solid colour (foreground/background/custom colour are all just
+    /// "some RGBA value" at this layer, so there's a single `color`
+    /// parameter rather than a fill-source enum).
+    pub fn fill_selection(&mut self, id: LayerId, color: [u8; 4]) -> Result<Option<Rect>, String> {
+        let bounds = self.copy_bounds();
+        self.paint_region(id, bounds, color)?;
+        Ok(Some(bounds))
     }
 
     /// Edit > Paste — and, since this app has no scrollable viewport to
@@ -2547,6 +2592,127 @@ mod tests {
         target.paste(&clipboard, "Pasted");
 
         assert_eq!(target.layers()[0].pixels, vec![0u8; 4]);
+    }
+
+    #[test]
+    fn delete_selection_clears_only_the_selected_pixels() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [4, 5, 6, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let rect = doc.delete_selection(id).unwrap();
+
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            })
+        );
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(&pixels[idx(0, 0)..idx(0, 0) + 4], &[4, 5, 6, 255]);
+        assert_eq!(&pixels[idx(1, 1)..idx(1, 1) + 4], &[0, 0, 0, 0]);
+        assert_eq!(&pixels[idx(2, 2)..idx(2, 2) + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn delete_selection_with_no_selection_clears_the_whole_layer() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.delete_selection(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, vec![0u8; 16]);
+    }
+
+    #[test]
+    fn delete_selection_errors_on_a_locked_layer_and_leaves_it_untouched() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+
+        let err = doc.delete_selection(id).unwrap_err();
+
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn delete_selection_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.delete_selection(999).is_err());
+    }
+
+    #[test]
+    fn fill_selection_overwrites_only_the_selected_pixels_with_the_given_colour() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [4, 5, 6, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let rect = doc.fill_selection(id, [200, 100, 50, 255]).unwrap();
+
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            })
+        );
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(&pixels[idx(0, 0)..idx(0, 0) + 4], &[4, 5, 6, 255]);
+        assert_eq!(&pixels[idx(1, 1)..idx(1, 1) + 4], &[200, 100, 50, 255]);
+        assert_eq!(&pixels[idx(2, 2)..idx(2, 2) + 4], &[200, 100, 50, 255]);
+    }
+
+    #[test]
+    fn fill_selection_with_no_selection_fills_the_whole_layer() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.fill_selection(id, [1, 2, 3, 4]).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn fill_selection_respects_a_non_rectangular_selection() {
+        // Same 4x4 ellipse layout hand-derived for the copy-masking test:
+        // corners fall outside the inscribed ellipse, so they should be
+        // left at the original colour while the rest is overwritten.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("base", &solid(4, 4, [9, 9, 9, 255]), 4, 4)
+            .unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+
+        doc.fill_selection(id, [255, 0, 0, 255]).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        for &(x, y) in &[(0, 0), (3, 0), (0, 3), (3, 3)] {
+            assert_eq!(&pixels[idx(x, y)..idx(x, y) + 4], &[9, 9, 9, 255]);
+        }
+        assert_eq!(&pixels[idx(1, 1)..idx(1, 1) + 4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fill_selection_errors_on_a_locked_layer_and_leaves_it_untouched() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+
+        let err = doc.fill_selection(id, [1, 2, 3, 255]).unwrap_err();
+
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn fill_selection_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.fill_selection(999, [1, 2, 3, 255]).is_err());
     }
 
     #[test]

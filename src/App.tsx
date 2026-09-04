@@ -216,6 +216,9 @@ export default function App() {
   const [gradientFillStart, setGradientFillStart] = useState("#000000");
   const [gradientFillEnd, setGradientFillEnd] = useState("#ffffff");
 
+  const [showFillDialog, setShowFillDialog] = useState(false);
+  const [fillColor, setFillColor] = useState("#ffffff");
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -507,6 +510,18 @@ export default function App() {
   const pasteClipboard = useCallback(async () => {
     await runCommand("paste", {}, "top");
   }, [runCommand]);
+
+  const deleteSelection = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("delete_selection", { id: selectedId });
+  }, [runCommand, selectedId]);
+
+  const applyFill = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(fillColor);
+    await runCommand("fill_selection", { id: selectedId, color: [r, g, b, 255] });
+    setShowFillDialog(false);
+  }, [runCommand, selectedId, fillColor]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -960,6 +975,22 @@ export default function App() {
             title="Edit > Paste (always pastes back at its original position — see Edit > Paste Special > Paste in Place)"
           >
             Paste
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={deleteSelection}
+            disabled={busy || selectedId === null}
+            title="Edit > Delete"
+          >
+            Delete
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFillDialog(true)}
+            disabled={busy || selectedId === null}
+            title="Edit > Fill"
+          >
+            Fill…
           </button>
         </div>
 
@@ -2150,6 +2181,36 @@ export default function App() {
               </button>
               <button className="button" onClick={applyGradientFill} disabled={busy}>
                 Add Layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFillDialog && (
+        <div className="modal-overlay" onClick={() => setShowFillDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Fill"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Fill</h2>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={fillColor}
+                onChange={(event) => setFillColor(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFillDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyFill} disabled={busy}>
+                Fill
               </button>
             </div>
           </div>

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**590 distinct capabilities tracked. Currently shipped: 53.**
+**590 distinct capabilities tracked. Currently shipped: 55.**
 
 ## PART I — EVERY TOOL
 
@@ -321,8 +321,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Paste Special > Paste in Place (identical to plain Paste in this app — see README Phase 18)
 - [ ] Paste Special > Paste Into
 - [ ] Paste Special > Paste Outside
-- [ ] Delete
-- [ ] Fill
+- [x] Delete (also covers Edit > Clear — same command in this app, see README Phase 19)
+- [x] Fill (flat colour only, no pattern/history/content-aware source — see README Phase 19)
 - [ ] Content-Aware Fill from Selection
 - [ ] Delete and Fill Selection
 - [ ] Move Tool — Hover Layer Bounds

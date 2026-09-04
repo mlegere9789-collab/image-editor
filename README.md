@@ -1850,6 +1850,82 @@ copy/cut/paste round trip end to end through the UI.
 **311 Rust tests total** (300 → 311, 304 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 19 — Edit > Delete (and Clear) / Edit > Fill
+
+Two small, closely related commands that both reuse machinery Phase 18
+just built for Cut: the same "walk `bounds`, test each pixel against
+the active selection, overwrite the ones inside it" loop, just with a
+different destination colour. That loop was pulled out of `cut` into
+a new private `Document::paint_region(id, bounds, color)` helper, and
+`cut` now calls it instead of carrying its own copy — so this phase
+started with a small refactor (no behaviour change, covered by the
+existing Cut tests continuing to pass) before adding the two new
+public methods on top of it:
+
+- `delete_selection(id)` — Edit > Delete — calls `paint_region` with
+  `color = [0, 0, 0, 0]`: the active selection (or the whole layer,
+  with none) goes fully transparent. This app has no separate Edit >
+  Clear command: Clear only differs from Delete in real Photoshop when
+  the target is the special locked "Background" layer (Clear there
+  fills with the background colour instead of erasing, since a
+  Background layer can't hold transparency); every layer in this app
+  already supports transparency, so Delete and Clear would be
+  byte-for-byte identical here, and one command covers both menu
+  items.
+- `fill_selection(id, color)` — Edit > Fill — calls `paint_region`
+  with any `color`, overwriting the selection with a flat colour
+  instead of clearing it. This is deliberately not the same code path
+  as the existing `flood_fill` (Paint Bucket): Paint Bucket stops at a
+  colour boundary from a seed point, while Fill paints every selected
+  pixel unconditionally, matching Photoshop's own distinction between
+  the two. The colour source is a single RGBA value — no pattern,
+  history, or content-aware fill sources, and no blend-mode/opacity
+  options beyond 100% Normal — the same "paint once, flatly, no live
+  recipe" scope cut `add_solid_color_layer` (Phase 14) already made
+  for a brand new layer, just applied here to an existing one in
+  place.
+
+Both commands are confined to the selection's exact shape, not just
+its bounding box, the same as Copy/Cut: `paint_region` tests every
+pixel with `Selection::contains`, so filling or deleting through an
+ellipse or rounded-rectangle selection leaves the corners outside the
+shape untouched.
+
+The frontend adds **Delete** and **Fill…** buttons to the existing
+Copy/Cut/Paste toolbar group (both gated on a selected layer). Fill
+opens a small modal with a single colour swatch, mirroring the Solid
+Color Fill Layer dialog's own layout; Delete needs no dialog and acts
+immediately. Neither got a keyboard shortcut: an unmodified Delete/
+Backspace binding would fight with every text and number input already
+on the page (typing in the Fill colour field, a Levels input, etc.),
+so this stays a toolbar-only action — a deliberate, documented scope
+cut rather than an oversight.
+
+**Verified two ways.** New `document.rs` tests cover: deleting only
+the selected region and leaving the rest of the layer untouched (with
+the exact dirty rect asserted); deleting with no selection clearing
+the whole layer; deleting on a locked layer failing and leaving it
+byte-for-byte unchanged; filling only the selected region with the
+given colour while the rest is untouched; filling with no selection
+filling the whole layer; filling through a non-rectangular (ellipse)
+selection leaving the corners outside its shape at their original
+colour (reusing the same hand-derived 4×4 ellipse layout from Phase
+18's copy-masking test); and filling on a locked layer failing and
+leaving it unchanged — eight tests in all, plus the usual "unknown
+layer id is an error" case for each command. Live under Xvfb: opened
+the bundled colourful gradient sample, dragged a rectangular selection
+over its top-left 2×2 tile block, opened **Fill…**, and clicked
+**Fill** with the default white swatch — the selected block turned
+solid white while every pixel outside it kept its original gradient
+colour. Clicked **Delete** on the same still-active selection
+afterward and watched that same white block turn fully transparent
+(matching the same background colour Phase 18's Cut test produced),
+confirming both commands actually rewrite pixels rather than just
+updating some tracked state.
+
+**320 Rust tests total** (311 → 320, 313 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -610,6 +610,24 @@ fn paste(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Edit > Delete (also covers Edit > Clear — see
+/// [`document::Document::delete_selection`] for why one command is
+/// enough) on layer `id`.
+#[tauri::command]
+fn delete_selection(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.delete_selection(id))
+}
+
+/// Edit > Fill on layer `id` with a flat `color`.
+#[tauri::command]
+fn fill_selection(
+    state: State<'_, AppState>,
+    id: LayerId,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.fill_selection(id, color))
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -1006,6 +1024,8 @@ pub fn run() {
             copy,
             cut,
             paste,
+            delete_selection,
+            fill_selection,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
