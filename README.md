@@ -26,10 +26,11 @@ Desktop image editor, Tauri + Rust + React.
   inverted, or be restored after deselecting. *Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
-- **Phase 10** — **Lock / Merge Visible / Flatten Image**: a per-layer
-  toggle that blocks paint/erase strokes onto that layer's pixels, plus
-  collapsing the layer stack down to one layer, two ways. *Done, described
-  below.*
+- **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down**: a
+  per-layer toggle that blocks paint/erase strokes onto that layer's
+  pixels, plus three ways to collapse the layer stack: every visible
+  layer, the whole stack, or one layer into the one below it. *Done,
+  described below.*
 
 ## Phase 1: document model and compositor
 
@@ -550,6 +551,37 @@ content was discarded rather than silently merged back in.
 **124 Rust tests total** (121 → 124). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+**Merge Down.** The narrowest of the three collapse operations: combines
+one specific layer with the one directly below it in the stack, replacing
+both with a single new layer at that position — everything else in the
+stack is untouched. Unlike `merge_visible`'s `flatten_subset` (which
+deliberately ignores each included layer's own `visible` flag, since its
+caller already filtered to exactly the visible ones), `merge_down` filters
+its two candidate layers through `contributes()` first, so a hidden or
+zero-opacity layer among the two contributes nothing — the same rule
+`flatten` itself applies, rather than a special case just for this
+command. The merged layer takes the name of the layer it merged *into*
+(the one below), matching Photoshop's own Merge Down. `merge_down` is a
+new `edit_checkpointed` command taking the layer id to merge, alongside a
+**Merge Down** button in the layers panel's per-layer controls, disabled
+whenever the selected layer is already the bottom of the stack (the same
+condition **Move down** already used).
+
+**Verified two ways.** `document.rs` gained tests for merging the bottom
+layer being an error (nothing below it), for merging combining exactly two
+layers with the same source-over blend result the equivalent
+`merge_visible` case produces, and for a hidden layer among the two
+contributing nothing to the merge rather than blending in regardless. Live
+under Xvfb: the same two-layer test document as Merge Visible and Flatten
+Image — selected the top layer (`rings.png`), which enabled **Merge
+Down** (disabled while the bottom `Layer 1` was selected, since it has
+nothing below it), clicked it, and the layers panel dropped to one layer
+named "Layer 1" — the name of the layer merged into — with the composite
+visually unchanged.
+
+**127 Rust tests total** (124 → 127). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -602,7 +634,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 124 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, undo/redo, pipeline
+cd src-tauri && cargo test      # 127 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, merge down, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -642,8 +674,9 @@ rectangle/ellipse selections confining paint and erase strokes to their
 bounds (select all, invert and its confinement math, and reselect all
 included), a locked layer rejecting a stroke outright, merging visible
 layers reproducing the same composite as the layers it replaces, flattening
-discarding hidden layers' content entirely, and end-to-end runs over the
-bundled samples. The frontend is a thin
+discarding hidden layers' content entirely, merging one layer down into
+another respecting each one's own visibility, and end-to-end runs over
+the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

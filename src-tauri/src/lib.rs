@@ -479,6 +479,11 @@ fn flatten_image(state: State<'_, AppState>) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.flatten_image().map(|_| None))
 }
 
+#[tauri::command]
+fn merge_down(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.merge_down(id).map(|_| None))
+}
+
 /// Paint `color` (RGBA8) along `points` (document pixel coordinates) onto
 /// layer `id`, with normal `source-over` blending. `points` is the polyline
 /// since the previous pointer event, not the whole stroke — the frontend
@@ -607,6 +612,7 @@ pub fn run() {
             move_layer,
             merge_visible,
             flatten_image,
+            merge_down,
             paint_stroke,
             erase_stroke,
             select_rectangle,

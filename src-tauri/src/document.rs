@@ -476,6 +476,44 @@ impl Document {
         Ok(id)
     }
 
+    /// Merge Down: composite a layer with the one directly below it in the
+    /// stack, replacing both with one new layer at that position. Respects
+    /// each layer's own visibility and opacity exactly like `flatten` does —
+    /// a currently hidden or zero-opacity layer contributes nothing, the
+    /// same as it would if left alone, rather than always showing through
+    /// regardless. The merged layer takes the name of the layer it merged
+    /// *into* (the one below), matching Photoshop's own Merge Down. Errors
+    /// if `id` is unknown, or is already the bottom layer with nothing
+    /// below it to merge into.
+    pub fn merge_down(&mut self, id: LayerId) -> Result<LayerId, String> {
+        let index = self.index_of(id)?;
+        if index == 0 {
+            return Err(format!(
+                "\"{}\" has no layer below it to merge down into.",
+                self.layers[index].name
+            ));
+        }
+
+        let contributing: Vec<usize> = [index - 1, index]
+            .into_iter()
+            .filter(|&i| self.layers[i].contributes())
+            .collect();
+        let pixels = crate::composite::flatten_subset(self, &contributing).pixels;
+        let new_id = self.next_id;
+        self.next_id += 1;
+        let merged = Layer {
+            id: new_id,
+            name: self.layers[index - 1].name.clone(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            pixels,
+        };
+        self.layers.splice(index - 1..=index, [merged]);
+        Ok(new_id)
+    }
+
     /// Apply `stroke` along the polyline `points` (document pixel coordinates,
     /// fractional) with the given `radius`, onto layer `id`'s own pixels — not
     /// the composite. A single point paints a dot; consecutive points are
@@ -920,6 +958,54 @@ mod tests {
         // `bottom` and `top` (both visible) merge into one layer at
         // `bottom`'s old position; `middle_hidden` keeps its place above it.
         assert_eq!(ids(&doc), vec![merged_id, middle_hidden]);
+    }
+
+    #[test]
+    fn merge_down_on_the_bottom_layer_is_an_error() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let bottom = doc.add_layer("bottom", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        let err = doc.merge_down(bottom).unwrap_err();
+        assert!(err.contains("no layer below"), "{err}");
+    }
+
+    #[test]
+    fn merge_down_combines_a_layer_with_the_one_below_it() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("red", &solid(1, 1, [255, 0, 0, 255]), 1, 1)
+            .unwrap();
+        let green_half = doc
+            .add_layer("green half", &solid(1, 1, [0, 255, 0, 128]), 1, 1)
+            .unwrap();
+        let top = doc.add_layer("top", &solid(1, 1, [9; 4]), 1, 1).unwrap();
+
+        let merged_id = doc.merge_down(green_half).unwrap();
+
+        // `red` and `green half` collapse into one layer, named after `red`
+        // (the layer merged into); `top` is untouched, still above it.
+        assert_eq!(ids(&doc), vec![merged_id, top]);
+        let merged = &doc.layers()[0];
+        assert_eq!(merged.name, "red");
+        assert!(merged.visible);
+        assert_eq!(merged.opacity, 1.0);
+        // Same source-over blend as the equivalent `merge_visible` test.
+        assert_eq!(merged.pixels, vec![127, 128, 0, 255]);
+    }
+
+    #[test]
+    fn merge_down_respects_visibility_of_either_layer() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("bottom", &solid(1, 1, [10, 20, 30, 255]), 1, 1)
+            .unwrap();
+        let top = doc
+            .add_layer("top", &solid(1, 1, [255, 255, 255, 255]), 1, 1)
+            .unwrap();
+        doc.set_visible(top, false).unwrap();
+
+        doc.merge_down(top).unwrap();
+
+        // `top` was hidden, so it contributed nothing — the merged result
+        // is exactly `bottom`'s own pixels, not a blend with white.
+        assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
     }
 
     #[test]

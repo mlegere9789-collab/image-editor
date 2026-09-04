@@ -700,6 +700,7 @@ export default function App() {
           onRemove={(id) => void runCommand("remove_layer", { id })}
           onMergeVisible={() => void runCommand("merge_visible")}
           onFlattenImage={() => void runCommand("flatten_image")}
+          onMergeDown={(id) => void runCommand("merge_down", { id })}
         />
       </div>
 
