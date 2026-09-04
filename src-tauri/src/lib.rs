@@ -727,6 +727,30 @@ fn channel_mixer(
     edit_checkpointed(&state, |document| document.channel_mixer(id, matrix))
 }
 
+/// Image > Adjustments > Levels on layer `id`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn levels(
+    state: State<'_, AppState>,
+    id: LayerId,
+    input_black: u8,
+    input_white: u8,
+    gamma: i32,
+    output_black: u8,
+    output_white: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.levels(
+            id,
+            input_black,
+            input_white,
+            gamma,
+            output_black,
+            output_white,
+        )
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -834,6 +858,7 @@ pub fn run() {
             exposure,
             gradient_map,
             channel_mixer,
+            levels,
             select_rectangle,
             select_ellipse,
             select_all,

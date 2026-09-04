@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer / Levels (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1225,6 +1225,53 @@ result of swapping which input channel feeds which output, screenshotted
 before and after.
 
 **239 Rust tests total** (230 → 239). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Levels.** Image > Adjustments > Levels is the classic histogram remap:
+each RGB channel value is normalized against an input black/white range
+(`(value - input_black) / (input_white - input_black)`, clamped to
+`0.0..=1.0`), gamma-corrected (`normalized.powf(1.0 / gamma)`), and then
+remapped onto an output black/white range
+(`output_black + corrected * (output_white - output_black)`).
+`input_black`/`input_white`/`output_black`/`output_white` are all
+`0..=255` bytes; `gamma` is hundredths (`1..=999`, i.e. `0.01..=9.99`,
+Photoshop's own dialog range). At the defaults (`0`/`255` input,
+`1.00` gamma, `0`/`255` output) every step collapses to a no-op. Like
+Black & White's single fixed luma weighting, this always applies to the
+RGB composite channel rather than exposing Photoshop's own per-channel
+dropdown (Red/Green/Blue individually) — a deliberate scope cut, not an
+oversight. `input_white` is clamped to at least one greater than
+`input_black` rather than erroring or dividing by zero when a caller
+pushes the sliders to a zero-width input range. Alpha is untouched.
+
+`Document::levels` is the eleventh caller of `adjust_layer_pixels`. New
+`edit_checkpointed` command taking the layer id plus the five `u8`/`i32`
+parameters. The frontend adds a **Levels…** toolbar button opening a
+modal with five range sliders (Input Black, Input White, Gamma — shown
+as a `0.01`-precision multiplier like `1.00` rather than the raw
+hundredths integer — Output Black, Output White), reusing the same
+`.control` slider rows every other adjustment dialog in this phase
+already uses.
+
+**Verified two ways.** New `document.rs` tests cover the defaults being
+an exact no-op, narrowing the input range remapping a mid-value onto the
+correct point of the output range, a gamma of `2.00` applying the same
+square-root curve already exercised by Exposure's gamma test (input
+`64` → output `128`, cross-checked against that earlier test's identical
+result), narrowing the output range, `input_white` being clamped above
+`input_black` rather than dividing by zero, alpha staying untouched,
+confinement to an active selection, a locked layer, and an unknown layer
+id. Live under Xvfb: created an 800×600 document, loaded the same
+colourful sample-image gradient layer via a temporary probe button
+(removed before committing, `grep -n "TEMP\|PROBE"` returning nothing)
+→ **Levels…** → dragged Input White down from `255` to `156`, leaving
+gamma and the output range at their defaults → applied — the image's
+highlights visibly blew out to solid white across a much larger portion
+of the gradient and the overall image read noticeably brighter and more
+saturated, exactly the expected effect of narrowing the input white
+point, screenshotted before and after.
+
+**248 Rust tests total** (239 → 248). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

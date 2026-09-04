@@ -1229,6 +1229,49 @@ impl Document {
             [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2]), a]
         })
     }
+
+    /// Image > Adjustments > Levels: the classic histogram remap, applied
+    /// identically to all three RGB channels (Photoshop's own dialog also
+    /// lets you pick one channel at a time via a dropdown; this always
+    /// applies to the RGB composite channel — a deliberate scope cut, the
+    /// same kind Black & White's single fixed luma weighting already made
+    /// in this project). Each channel value goes through three steps:
+    /// normalize against the input black/white points (`(value -
+    /// input_black) / (input_white - input_black)`, clamped to
+    /// `0.0..=1.0`), apply a gamma curve (`normalized.powf(1.0 / gamma)`),
+    /// then remap onto the output black/white points (`output_black +
+    /// corrected * (output_white - output_black)`). `input_black`,
+    /// `input_white`, `output_black`, `output_white` are all `0..=255`;
+    /// `gamma` is hundredths (`1..=999`, i.e. `0.01..=9.99`, Photoshop's
+    /// own range). `input_white` is clamped to be at least one greater
+    /// than `input_black` — a zero-width input range has no meaningful
+    /// normalization — rather than erroring or dividing by zero. Alpha
+    /// untouched.
+    #[allow(clippy::too_many_arguments)]
+    pub fn levels(
+        &mut self,
+        id: LayerId,
+        input_black: u8,
+        input_white: u8,
+        gamma: i32,
+        output_black: u8,
+        output_white: u8,
+    ) -> Result<Option<Rect>, String> {
+        let input_black = input_black as f32;
+        let input_white = (input_white as f32).max(input_black + 1.0);
+        let exponent = 100.0 / gamma.clamp(1, 999) as f32;
+        let output_black = to_unit(output_black);
+        let output_white = to_unit(output_white);
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |c: u8| {
+                let normalized =
+                    ((c as f32 - input_black) / (input_white - input_black)).clamp(0.0, 1.0);
+                let corrected = normalized.powf(exponent);
+                to_byte(output_black + corrected * (output_white - output_black))
+            };
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -3003,6 +3046,103 @@ mod tests {
     fn channel_mixer_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.channel_mixer(999, IDENTITY_MATRIX).is_err());
+    }
+
+    #[test]
+    fn levels_at_defaults_is_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.levels(id, 0, 255, 100, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn levels_narrows_the_input_range() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([50, 50, 50, 255]); // at input_black: maps to 0
+        pixels.extend([200, 200, 200, 255]); // at input_white: maps to 255
+        pixels.extend([125, 125, 125, 255]); // exact midpoint: maps to 128
+        let id = doc.add_layer("row", &pixels, 3, 1).unwrap();
+
+        doc.levels(id, 50, 200, 100, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn levels_gamma_of_two_applies_a_square_root_curve() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[64, 64, 64, 255], 1, 1).unwrap();
+        doc.levels(id, 0, 255, 200, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn levels_narrows_the_output_range() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([0, 0, 0, 255]);
+        pixels.extend([255, 255, 255, 255]);
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.levels(id, 0, 255, 100, 50, 200).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn levels_input_white_is_clamped_above_input_black() {
+        // input_white (100) below input_black (200) would divide by a
+        // negative range; it's clamped to input_black + 1 instead of
+        // erroring, giving a step-like but still well-defined result.
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([200, 200, 200, 255]);
+        pixels.extend([255, 255, 255, 255]);
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.levels(id, 200, 100, 100, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn levels_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.levels(id, 0, 255, 100, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn levels_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [0u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.levels(id, 0, 255, 100, 50, 200).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn levels_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.levels(id, 0, 255, 100, 0, 255).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn levels_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.levels(999, 0, 255, 100, 0, 255).is_err());
     }
 
     #[test]

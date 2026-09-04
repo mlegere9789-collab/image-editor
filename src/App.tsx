@@ -141,6 +141,13 @@ export default function App() {
     IDENTITY_CHANNEL_MIXER,
   );
 
+  const [showLevelsDialog, setShowLevelsDialog] = useState(false);
+  const [levelsInputBlack, setLevelsInputBlack] = useState(0);
+  const [levelsInputWhite, setLevelsInputWhite] = useState(255);
+  const [levelsGamma, setLevelsGamma] = useState(100);
+  const [levelsOutputBlack, setLevelsOutputBlack] = useState(0);
+  const [levelsOutputWhite, setLevelsOutputWhite] = useState(255);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -338,6 +345,27 @@ export default function App() {
     await runCommand("channel_mixer", { id: selectedId, matrix: channelMixerMatrix });
     setShowChannelMixerDialog(false);
   }, [runCommand, selectedId, channelMixerMatrix]);
+
+  const applyLevels = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("levels", {
+      id: selectedId,
+      inputBlack: levelsInputBlack,
+      inputWhite: levelsInputWhite,
+      gamma: levelsGamma,
+      outputBlack: levelsOutputBlack,
+      outputWhite: levelsOutputWhite,
+    });
+    setShowLevelsDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    levelsInputBlack,
+    levelsInputWhite,
+    levelsGamma,
+    levelsOutputBlack,
+    levelsOutputWhite,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -954,6 +982,14 @@ export default function App() {
           >
             Channel Mixer…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowLevelsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Levels"
+          >
+            Levels…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1568,6 +1604,99 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyChannelMixer} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLevelsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLevelsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Levels"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Levels</h2>
+            <label className="control">
+              <span className="control__label">
+                Input Black
+                <span className="control__value">{levelsInputBlack}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={levelsInputBlack}
+                onChange={(event) => setLevelsInputBlack(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Input White
+                <span className="control__value">{levelsInputWhite}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={levelsInputWhite}
+                onChange={(event) => setLevelsInputWhite(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Gamma
+                <span className="control__value">{(levelsGamma / 100).toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={300}
+                value={levelsGamma}
+                onChange={(event) => setLevelsGamma(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Output Black
+                <span className="control__value">{levelsOutputBlack}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={levelsOutputBlack}
+                onChange={(event) => setLevelsOutputBlack(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Output White
+                <span className="control__value">{levelsOutputWhite}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={levelsOutputWhite}
+                onChange={(event) => setLevelsOutputWhite(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLevelsDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyLevels} disabled={busy}>
                 Apply
               </button>
             </div>
