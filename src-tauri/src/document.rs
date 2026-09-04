@@ -296,6 +296,45 @@ fn median_at(
     median
 }
 
+/// A tiny, dependency-free pseudo-random generator (Marsaglia's
+/// xorshift32) for [`Document::add_noise`]. Chosen over pulling in the
+/// `rand` crate for one reason that matters more than statistical
+/// quality here: it is *fully deterministic for a given seed*, so a test
+/// can seed it, work out the first few draws by hand (or in a separate
+/// script), and assert the exact bytes the filter produces — the same
+/// "hand-verified expected values" bar every other filter in this
+/// project meets. Photoshop's own Add Noise is deliberately different on
+/// every run; the frontend gets the same effect by sending a fresh seed
+/// each time, so determinism lives in the tests, not in the UI.
+struct XorShift32 {
+    state: u32,
+}
+
+impl XorShift32 {
+    /// xorshift's one hard rule is a nonzero state (zero is a fixed
+    /// point), so a zero seed is swapped for an arbitrary constant rather
+    /// than producing a generator stuck on 0 forever.
+    fn new(seed: u32) -> Self {
+        Self {
+            state: if seed == 0 { 0x9E37_79B9 } else { seed },
+        }
+    }
+
+    fn next_u32(&mut self) -> u32 {
+        let mut x = self.state;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        self.state = x;
+        x
+    }
+
+    /// A draw mapped onto `-1.0..=1.0`.
+    fn next_unit(&mut self) -> f32 {
+        (self.next_u32() as f32 / u32::MAX as f32) * 2.0 - 1.0
+    }
+}
+
 impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
@@ -1332,6 +1371,78 @@ impl Document {
                     if (original as i32 - m as i32).abs() >= threshold {
                         layer.pixels[dst + c] = m;
                     }
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Noise > Add Noise: perturbs every pixel in the active
+    /// selection (or the whole layer, with none) by a random offset of
+    /// up to `amount * 255` levels, drawn from a [`XorShift32`] seeded
+    /// with `seed`. Photoshop's three controls map directly: `amount`
+    /// is its Amount dial as a fraction of the full range (Photoshop
+    /// shows 0.1–400%; `1.0` here is 100%); `gaussian` selects its
+    /// Gaussian distribution instead of Uniform, approximated as the
+    /// mean of three uniform draws (an Irwin–Hall bell curve — the same
+    /// "close enough, no extra maths" simplification `box_blur` makes
+    /// versus a true Gaussian kernel); `monochromatic` applies one
+    /// offset to R, G, and B together so the grain is grey rather than
+    /// coloured. Alpha is never touched: noise is a colour effect, not a
+    /// transparency one. Draws are consumed in row-major order over the
+    /// selection's bounding box, skipping pixels the selection excludes
+    /// (which consume nothing), one draw per channel — or per pixel when
+    /// monochromatic, or three per channel/pixel when Gaussian — so the
+    /// exact output for a seed is fully specified and testable. Errors
+    /// on a non-finite or non-positive `amount` or a locked/unknown
+    /// layer.
+    pub fn add_noise(
+        &mut self,
+        id: LayerId,
+        amount: f32,
+        gaussian: bool,
+        monochromatic: bool,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err(format!(
+                "Noise amount must be a positive number, got {amount}."
+            ));
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let mut rng = XorShift32::new(seed);
+        let draw = |rng: &mut XorShift32| {
+            if gaussian {
+                (rng.next_unit() + rng.next_unit() + rng.next_unit()) / 3.0
+            } else {
+                rng.next_unit()
+            }
+        };
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let shared = if monochromatic {
+                    Some(draw(&mut rng))
+                } else {
+                    None
+                };
+                for c in 0..3 {
+                    let unit = shared.unwrap_or_else(|| draw(&mut rng));
+                    let offset = unit * amount * 255.0;
+                    layer.pixels[dst + c] = (layer.pixels[dst + c] as f32 + offset)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -3695,6 +3806,113 @@ mod tests {
         let pixels = &doc.layers()[0].pixels;
         assert_eq!(pixels[idx(0, 0)], 20);
         assert_eq!(pixels[idx(2, 2)], 80);
+    }
+
+    // Add Noise: every expected byte below comes from the first draws of
+    // xorshift32 seeded with 1 — 270369, 67634689, 2647435461, ... —
+    // mapped to [-1, 1] (-0.99987, -0.96851, +0.23281, -0.85676, +0.11698,
+    // -0.65285, -0.70550, -0.79709, -0.06618, ...), scaled by amount*255
+    // and added to a flat 128 grey. The generator's own first outputs are
+    // pinned separately so a change to either half shows up on its own.
+
+    #[test]
+    fn xorshift32_produces_the_documented_sequence_and_survives_a_zero_seed() {
+        let mut rng = XorShift32::new(1);
+        assert_eq!(rng.next_u32(), 270_369);
+        assert_eq!(rng.next_u32(), 67_634_689);
+        assert_eq!(rng.next_u32(), 2_647_435_461);
+        let mut zero = XorShift32::new(0);
+        assert_ne!(zero.next_u32(), 0);
+    }
+
+    fn grey_2x2() -> (Document, LayerId) {
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(2, 2, [128, 128, 128, 255]), 2, 2)
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn add_noise_uniform_colour_matches_the_seeded_draws_exactly() {
+        let (mut doc, id) = grey_2x2();
+        doc.add_noise(id, 0.25, false, false, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Pixel 0 consumes draws 1-3: 128 + (-63.74, -61.74, +14.84) rounded.
+        assert_eq!(&p[0..4], &[64, 66, 143, 255]);
+        // Pixel 1 consumes draws 4-6: 128 + (-54.62, +7.46, -41.62).
+        assert_eq!(&p[4..8], &[73, 135, 86, 255]);
+        // Pixel 2 consumes draws 7-9: 128 + (-44.98, -50.81, -4.22).
+        assert_eq!(&p[8..12], &[83, 77, 124, 255]);
+    }
+
+    #[test]
+    fn add_noise_monochromatic_applies_one_draw_to_all_three_channels() {
+        let (mut doc, id) = grey_2x2();
+        doc.add_noise(id, 0.25, false, true, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], &[64, 64, 64, 255]);
+        assert_eq!(&p[4..8], &[66, 66, 66, 255]);
+        assert_eq!(&p[8..12], &[143, 143, 143, 255]);
+    }
+
+    #[test]
+    fn add_noise_gaussian_averages_three_draws_per_channel() {
+        let (mut doc, id) = grey_2x2();
+        doc.add_noise(id, 0.25, true, false, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // R = mean(draws 1-3) = -0.5785 -> 128 - 36.88; G = mean(4-6) =
+        // -0.4642 -> 128 - 29.59; B = mean(7-9) = -0.5229 -> 128 - 33.34.
+        assert_eq!(&p[0..4], &[91, 98, 95, 255]);
+    }
+
+    #[test]
+    fn add_noise_clamps_to_the_byte_range() {
+        let (mut doc, id) = grey_2x2();
+        doc.add_noise(id, 1.0, false, false, 1).unwrap();
+        // 128 - 255 and 128 - 247 both clamp to 0; 128 + 59 = 187.
+        assert_eq!(&doc.layers()[0].pixels[0..4], &[0, 0, 187, 255]);
+    }
+
+    #[test]
+    fn add_noise_is_deterministic_per_seed_and_differs_across_seeds() {
+        let (mut a, ida) = grey_2x2();
+        let (mut b, idb) = grey_2x2();
+        let (mut c, idc) = grey_2x2();
+        a.add_noise(ida, 0.5, true, false, 42).unwrap();
+        b.add_noise(idb, 0.5, true, false, 42).unwrap();
+        c.add_noise(idc, 0.5, true, false, 43).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+        assert_ne!(a.layers()[0].pixels, c.layers()[0].pixels);
+    }
+
+    #[test]
+    fn add_noise_is_confined_to_the_selection() {
+        let (mut doc, id) = grey_2x2();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap(); // just pixel 0
+        doc.add_noise(id, 0.25, false, false, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], &[64, 66, 143, 255]);
+        assert_eq!(&p[4..8], &[128, 128, 128, 255]);
+        assert_eq!(&p[12..16], &[128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn add_noise_rejects_a_non_positive_or_non_finite_amount() {
+        let (mut doc, id) = grey_2x2();
+        assert!(doc.add_noise(id, 0.0, false, false, 1).is_err());
+        assert!(doc.add_noise(id, -0.5, false, false, 1).is_err());
+        assert!(doc.add_noise(id, f32::NAN, false, false, 1).is_err());
+    }
+
+    #[test]
+    fn add_noise_on_a_locked_or_unknown_layer_is_an_error() {
+        let (mut doc, id) = grey_2x2();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.add_noise(id, 0.25, false, false, 1).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [128, 128, 128, 255]));
+        assert!(doc.add_noise(999, 0.25, false, false, 1).is_err());
     }
 
     #[test]

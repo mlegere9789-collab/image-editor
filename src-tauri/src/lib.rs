@@ -723,6 +723,22 @@ fn dust_and_scratches(
     })
 }
 
+/// Filter > Noise > Add Noise on layer `id`. The frontend sends a fresh
+/// `seed` on every apply so repeated applications differ, as in Photoshop.
+#[tauri::command]
+fn add_noise(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: f32,
+    gaussian: bool,
+    monochromatic: bool,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_noise(id, amount, gaussian, monochromatic, seed)
+    })
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1153,6 +1169,7 @@ pub fn run() {
             median,
             despeckle,
             dust_and_scratches,
+            add_noise,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -2349,6 +2349,69 @@ a textbook rank-filter artefact rather than a bug.
 **362 Rust tests total** (355 → 362, 355 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 27 — Filter > Noise > Add Noise (Uniform / Gaussian / Monochromatic)
+
+The first filter that needs randomness, which raised a question every
+other filter got to skip: how do you hand-verify the exact bytes of a
+random effect? The answer is to make the randomness deterministic per
+seed. Rather than pull in the `rand` crate, `document.rs` gains a
+20-line `XorShift32` (Marsaglia's xorshift32) whose entire value here is
+that a test can seed it, compute the first few draws in a separate
+script, and assert the filter's exact output — the same "hand-verified
+expected values" bar every other phase meets. Photoshop's Add Noise is
+deliberately different every time you run it; this app gets the same
+behaviour by having the frontend send a fresh seed on every Apply, so
+the determinism lives in the tests, not in the user's experience.
+
+`Document::add_noise(id, amount, gaussian, monochromatic, seed)` maps
+Photoshop's three controls directly. `amount` is its Amount dial as a
+fraction of the full range (1.0 = 100%); each channel is offset by a
+draw in −1..=1 scaled by `amount · 255`, rounded, and clamped to the
+byte range. `gaussian` swaps the Uniform distribution for a bell curve,
+approximated as the mean of three uniform draws (an Irwin–Hall
+approximation — the same "close enough, no extra maths" simplification
+`box_blur` makes versus a true Gaussian kernel). `monochromatic` uses a
+single draw for R, G, and B together, so the grain is grey rather than
+coloured. Alpha is never touched. Draws are consumed in a fully
+specified order — row-major over the selection's bounding box, skipping
+excluded pixels (which consume nothing), one draw per channel, or per
+pixel when monochromatic, or three per channel/pixel when Gaussian — so
+the exact output for a seed is defined, which is what makes the tests
+possible. A zero seed is swapped for a fixed nonzero constant, since
+xorshift's one hard rule is that zero is a fixed point.
+
+The frontend adds an **Add Noise…** dialog with an Amount slider
+(1–100%), a Distribution select (Uniform / Gaussian), and a
+Monochromatic checkbox, after Dust & Scratches in the adjustments
+toolbar; each Apply generates a new seed.
+
+**Verified two ways.** Nine new `document.rs` tests. The generator's
+own first outputs for seed 1 are pinned separately (270 369,
+67 634 689, 2 647 435 461 — also derived by hand, then confirmed with a
+Python re-implementation) so a regression in the PRNG and one in the
+filter show up independently. Those draws map to −0.99987, −0.96851,
++0.23281, −0.85676, … and, at 25% amount on a flat 128 grey, give
+exactly `[64, 66, 143]`, `[73, 135, 86]`, `[83, 77, 124]` for the first
+three pixels in colour mode; `[64,64,64]`, `[66,66,66]`, `[143,143,143]`
+in monochromatic mode (one draw per pixel); and `[91, 98, 95]` for the
+first pixel in Gaussian mode (each channel the mean of three
+consecutive draws) — all asserted byte-for-byte, with alpha 255
+throughout. Further tests pin clamping at 100% amount (128 − 255 → 0,
+128 + 59 → 187), determinism (the same seed twice gives identical
+buffers, a different seed does not), selection confinement (unselected
+pixels stay exactly 128), and the amount / locked-layer / unknown-layer
+error cases — all passing on first run. Live under Xvfb, on the bundled
+gradient sample: **Add Noise…** at 39% Uniform turned every tile into
+dense rainbow speckle (each channel jittering independently), and after
+an undo the same amount with **Monochromatic** ticked gave neutral grey
+grain that kept every tile's hue intact — the two looks Photoshop's own
+checkbox toggles between. The Gaussian option's exact behaviour is
+pinned by its unit test rather than toggled live: it lives in a native
+`<select>`, which the headless harness can't reliably drive.
+
+**371 Rust tests total** (362 → 371, 364 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

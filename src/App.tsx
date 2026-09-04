@@ -238,6 +238,11 @@ export default function App() {
   const [dustRadius, setDustRadius] = useState(1);
   const [dustThreshold, setDustThreshold] = useState(0);
 
+  const [showAddNoiseDialog, setShowAddNoiseDialog] = useState(false);
+  const [noiseAmount, setNoiseAmount] = useState(10);
+  const [noiseGaussian, setNoiseGaussian] = useState(false);
+  const [noiseMonochromatic, setNoiseMonochromatic] = useState(false);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -594,6 +599,21 @@ export default function App() {
     });
     setShowDustAndScratchesDialog(false);
   }, [runCommand, selectedId, dustRadius, dustThreshold]);
+
+  const applyAddNoise = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, so re-applying gives different grain — the
+    // backend itself is deterministic per seed (that's what its tests rely on).
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("add_noise", {
+      id: selectedId,
+      amount: noiseAmount / 100,
+      gaussian: noiseGaussian,
+      monochromatic: noiseMonochromatic,
+      seed,
+    });
+    setShowAddNoiseDialog(false);
+  }, [runCommand, selectedId, noiseAmount, noiseGaussian, noiseMonochromatic]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1470,6 +1490,14 @@ export default function App() {
             title="Filter > Noise > Dust & Scratches"
           >
             Dust &amp; Scratches…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowAddNoiseDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Noise > Add Noise"
+          >
+            Add Noise…
           </button>
           <input
             type="color"
@@ -2665,6 +2693,65 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDustAndScratches} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAddNoiseDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAddNoiseDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Add Noise"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Noise &gt; Add Noise</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{noiseAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={noiseAmount}
+                onChange={(event) => setNoiseAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Distribution</span>
+              <select
+                value={noiseGaussian ? "gaussian" : "uniform"}
+                onChange={(event) => setNoiseGaussian(event.target.value === "gaussian")}
+              >
+                <option value="uniform">Uniform</option>
+                <option value="gaussian">Gaussian</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Monochromatic</span>
+              <input
+                type="checkbox"
+                checked={noiseMonochromatic}
+                onChange={(event) => setNoiseMonochromatic(event.target.checked)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAddNoiseDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyAddNoise} disabled={busy}>
                 Apply
               </button>
             </div>

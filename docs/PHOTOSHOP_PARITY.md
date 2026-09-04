@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 69.**
+**593 distinct capabilities tracked. Currently shipped: 73.**
 
 ## PART I — EVERY TOOL
 
@@ -495,10 +495,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Unsharp Mask (built on the existing box_blur convolution as its low-pass filter, with an Amount/Radius/Threshold dialog — see README Phase 22)
 - [ ] Protect Detail
 - [ ] Sample All Layers — Sharpen
-- [ ] Add Noise
-- [ ] Uniform Noise
-- [ ] Gaussian Noise
-- [ ] Monochromatic Noise
+- [x] Add Noise (seeded xorshift32 noise with Amount / Distribution / Monochromatic controls — see README Phase 27)
+- [x] Uniform Noise (Add Noise's Uniform distribution — see README Phase 27)
+- [x] Gaussian Noise (Add Noise's Gaussian distribution, an Irwin–Hall mean-of-three approximation — see README Phase 27)
+- [x] Monochromatic Noise (Add Noise's Monochromatic option, one offset shared by R/G/B — see README Phase 27)
 - [x] Despeckle (one-click 3x3 median — see README Phase 26)
 - [x] Dust & Scratches (median with Photoshop's Threshold gate — see README Phase 26)
 - [x] Median (per-channel neighbourhood median, radius dialog — see README Phase 26)
