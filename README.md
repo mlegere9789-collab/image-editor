@@ -1996,6 +1996,64 @@ happened to be.
 **325 Rust tests total** (320 → 325, 318 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 21 — Layer > Duplicate Layer
+
+While surveying `docs/PHOTOSHOP_PARITY.md` for the next candidate, it
+turned up that Duplicate Layer — Photoshop's Ctrl/Cmd+J, one of the
+most reached-for Layer menu commands there is — was simply missing
+from the ~500-item audit the checklist was extracted from at the start
+of this project, even though closely related commands (Merge Down,
+Merge Visible, Flatten, Rasterize) were all tracked and already
+shipped. Rather than build it "for free" and leave the tracked total
+silently wrong, `docs/PHOTOSHOP_PARITY.md` gained a new line for it
+directly under RASTERIZE in PART III, with a note explaining the gap —
+bumping the denominator from 590 to 591 distinct capabilities tracked,
+not just the shipped count.
+
+`Document::duplicate_layer(id)` clones the target layer's pixels and
+every attribute (visibility, opacity, blend mode, lock state) as a new
+layer inserted directly above the original — Photoshop's own
+placement, not necessarily the very top of the stack, which is what
+every other "add a layer" command in this app (`add_layer`,
+`add_solid_color_layer`, `add_gradient_layer`) does instead. The whole
+`Layer` struct is cloned rather than its fields copied out by hand, so
+a future field added to `Layer` is duplicated correctly without this
+function needing to change. The duplicate's name is the original's
+with `" copy"` appended, matching Photoshop's own default naming
+before a user renames it. The only failure mode is an unknown layer
+id; duplicating a locked layer is fine, and the duplicate itself
+starts out locked too, matching the original.
+
+Because a duplicate doesn't always land at the top of the stack, this
+phase also had to extend the frontend's own `runCommand` selection
+logic: previously the only special case was `selectAfter: "top"`
+(select whatever ends up topmost), which is wrong here whenever the
+duplicated layer wasn't already the top one. `runCommand` now also
+accepts `selectAfter: { above: <id> }`, which finds where `<id>` (the
+layer that was just duplicated) ended up in the *new* layer list and
+selects whatever landed directly above it — exactly the newly created
+duplicate, by construction, regardless of where in the stack the
+original sat. The frontend adds a **Duplicate Layer** button to the
+layer panel's per-layer controls, right after Rasterize Layer.
+
+**Verified two ways.** New `document.rs` tests cover: a duplicate
+landing directly above its original in a three-layer stack (not at the
+top, since the original wasn't the top layer either) with a distinct
+id from the original; every attribute (opacity, blend mode, lock
+state) and the exact pixel buffer surviving the copy, with `" copy"`
+appended to the name; the original layer being completely untouched
+after duplicating it; and the usual "unknown layer id is an error"
+case. Live under Xvfb: opened the bundled gradient sample (one layer,
+"sample.png"), clicked **Duplicate Layer**, and watched a new
+"sample.png copy" layer appear directly above the original in the
+layer panel, already selected (confirming the new `{ above }`
+selection logic picked the actual duplicate, not just whatever ended
+up on top) — the layer count and the newly-enabled Merge Down button
+both confirmed a second, real layer now exists.
+
+**329 Rust tests total** (325 → 329, 322 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -258,7 +258,11 @@ export default function App() {
   const lastPoint = useRef<[number, number] | null>(null);
 
   const runCommand = useCallback(
-    async (command: string, args: Record<string, unknown> = {}, selectAfter?: "top") => {
+    async (
+      command: string,
+      args: Record<string, unknown> = {},
+      selectAfter?: "top" | { above: number },
+    ) => {
       const ticket = ++requestId.current;
       setBusy(true);
       try {
@@ -274,6 +278,12 @@ export default function App() {
         const { layers } = snapshot.document;
         setSelectedId((current) => {
           if (selectAfter === "top") return layers[layers.length - 1]?.id ?? null;
+          if (selectAfter && typeof selectAfter === "object") {
+            // A layer that was just inserted directly above `above` (e.g.
+            // Duplicate Layer) rather than at the very top of the stack.
+            const index = layers.findIndex((layer) => layer.id === selectAfter.above);
+            if (index !== -1) return layers[index + 1]?.id ?? layers[index]?.id ?? null;
+          }
           // Keep the selection unless that layer is gone.
           if (current !== null && layers.some((layer) => layer.id === current)) return current;
           return layers[layers.length - 1]?.id ?? null;
@@ -2390,6 +2400,7 @@ export default function App() {
             void runCommand("move_layer", { id, direction })
           }
           onRemove={(id) => void runCommand("remove_layer", { id })}
+          onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
           onMergeVisible={() => void runCommand("merge_visible")}
           onFlattenImage={() => void runCommand("flatten_image")}
           onMergeDown={(id) => void runCommand("merge_down", { id })}

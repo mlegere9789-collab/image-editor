@@ -18,6 +18,7 @@ type Props = {
   onBlendMode: (id: number, mode: BlendMode) => void;
   onMove: (id: number, direction: MoveDirection) => void;
   onRemove: (id: number) => void;
+  onDuplicate: (id: number) => void;
   onMergeVisible: () => void;
   onFlattenImage: () => void;
   onMergeDown: (id: number) => void;
@@ -40,6 +41,7 @@ export default function LayerPanel({
   onBlendMode,
   onMove,
   onRemove,
+  onDuplicate,
   onMergeVisible,
   onFlattenImage,
   onMergeDown,
@@ -214,6 +216,15 @@ export default function LayerPanel({
             title="Layer > Rasterize — every layer here is already pixels, so this always succeeds as a no-op"
           >
             Rasterize Layer
+          </button>
+
+          <button
+            className="button button--quiet"
+            disabled={disabled}
+            onClick={() => onDuplicate(selected.id)}
+            title="Layer > Duplicate Layer"
+          >
+            Duplicate Layer
           </button>
 
           <div className="control control--row">

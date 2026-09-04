@@ -664,6 +664,14 @@ fn remove_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, Str
     edit_checkpointed(&state, |document| document.remove_layer(id).map(|_| None))
 }
 
+/// Layer > Duplicate Layer on layer `id`.
+#[tauri::command]
+fn duplicate_layer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.duplicate_layer(id).map(|_| None)
+    })
+}
+
 #[tauri::command]
 fn move_layer(
     state: State<'_, AppState>,
@@ -1036,6 +1044,7 @@ pub fn run() {
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
+            duplicate_layer,
             move_layer,
             merge_visible,
             flatten_image,

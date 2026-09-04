@@ -1033,6 +1033,29 @@ impl Document {
         Ok(())
     }
 
+    /// Layer > Duplicate Layer: adds a copy of layer `id`'s pixels and
+    /// attributes (visibility, opacity, blend mode, lock state) as a new
+    /// layer directly above the original — Photoshop's own placement, not
+    /// necessarily the very top of the stack (see [`Self::add_layer`] and
+    /// friends for "always on top" instead). The duplicate's name is the
+    /// original's with " copy" appended, the same convention Photoshop
+    /// itself uses before any renaming. Clones the whole [`Layer`] rather
+    /// than listing its fields out by hand, so a future field added to
+    /// `Layer` is duplicated correctly by construction. Errors only if
+    /// `id` is unknown; duplicating a locked layer is fine (the new layer
+    /// starts out locked too, matching the original — nothing about the
+    /// original is touched either way).
+    pub fn duplicate_layer(&mut self, id: LayerId) -> Result<LayerId, String> {
+        let index = self.index_of(id)?;
+        let mut duplicate = self.layers[index].clone();
+        let new_id = self.next_id;
+        self.next_id += 1;
+        duplicate.id = new_id;
+        duplicate.name = format!("{} copy", duplicate.name);
+        self.layers.insert(index + 1, duplicate);
+        Ok(new_id)
+    }
+
     /// Move a layer one step through the stack. Moving the top layer up (or the
     /// bottom layer down) is a no-op rather than an error — it is what a UI
     /// button press at the end of the stack should do.
@@ -3078,6 +3101,52 @@ mod tests {
         let b = doc.add_layer("b", &solid(1, 1, [0; 4]), 1, 1).unwrap();
         doc.remove_layer(a).unwrap();
         assert_eq!(ids(&doc), vec![b]);
+    }
+
+    #[test]
+    fn duplicate_layer_lands_directly_above_the_original_not_at_the_top() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let a = doc.add_layer("a", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        let b = doc.add_layer("b", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        let c = doc.add_layer("c", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+
+        let dup = doc.duplicate_layer(a).unwrap();
+
+        assert_eq!(ids(&doc), vec![a, dup, b, c]);
+        assert_ne!(dup, a);
+    }
+
+    #[test]
+    fn duplicate_layer_copies_pixels_and_attributes_and_appends_copy_to_the_name() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_opacity(id, 0.5).unwrap();
+        doc.set_blend_mode(id, BlendMode::Multiply).unwrap();
+        doc.set_locked(id, true).unwrap();
+
+        let dup = doc.duplicate_layer(id).unwrap();
+
+        let duplicate = doc.layers().iter().find(|l| l.id == dup).unwrap();
+        assert_eq!(duplicate.name, "base copy");
+        assert_eq!(duplicate.pixels, solid(2, 2, [10, 20, 30, 255]));
+        assert_eq!(duplicate.opacity, 0.5);
+        assert_eq!(duplicate.blend_mode, BlendMode::Multiply);
+        assert!(duplicate.locked);
+        assert!(duplicate.visible);
+    }
+
+    #[test]
+    fn duplicate_layer_does_not_modify_the_original() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.duplicate_layer(id).unwrap();
+        let original = doc.layers().iter().find(|l| l.id == id).unwrap();
+        assert_eq!(original.name, "base");
+        assert_eq!(original.pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn duplicate_layer_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.duplicate_layer(999).is_err());
     }
 
     fn ids(doc: &Document) -> Vec<LayerId> {
