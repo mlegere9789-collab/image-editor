@@ -1180,6 +1180,50 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Filter > Blur > Blur: Photoshop's one-click "just soften it a
+    /// touch" preset — a [`Self::box_blur`] at the smallest possible
+    /// radius (1, a 3x3 window), no dialog. Photoshop's own Blur is a
+    /// fixed 3x3 kernel with a slightly heavier centre weight; this app's
+    /// flat 3x3 mean is the same "one pixel of softening" at the same
+    /// scale, the same flat-versus-weighted simplification `box_blur`
+    /// itself already makes.
+    pub fn blur(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.box_blur(id, 1)
+    }
+
+    /// Filter > Blur > Blur More: Photoshop documents this as "three to
+    /// four times stronger than Blur" — here a [`Self::box_blur`] of
+    /// radius 3 (a 7x7 window), i.e. three pixels of softening on every
+    /// side instead of one.
+    pub fn blur_more(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.box_blur(id, 3)
+    }
+
+    /// Filter > Sharpen > Sharpen: the one-click counterpart of
+    /// [`Self::unsharp_mask`] — radius 1, a gentle 50% amount, and no
+    /// threshold, so every pixel gets a light contrast boost against its
+    /// immediate neighbours.
+    pub fn sharpen(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.unsharp_mask(id, 1, 0.5, 0)
+    }
+
+    /// Filter > Sharpen > Sharpen More: [`Self::sharpen`] at double the
+    /// strength (100% amount), matching Photoshop's own "a stronger
+    /// Sharpen" description.
+    pub fn sharpen_more(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.unsharp_mask(id, 1, 1.0, 0)
+    }
+
+    /// Filter > Sharpen > Sharpen Edges: Photoshop's "sharpen only where
+    /// there's a real edge, leave smooth areas alone" preset. That is
+    /// precisely what [`Self::unsharp_mask`]'s threshold is for, so this
+    /// is Sharpen More's strength gated behind a threshold of 20 — a
+    /// pixel has to differ from its blurred surroundings by at least 20
+    /// levels (out of 255) on a channel before that channel is touched.
+    pub fn sharpen_edges(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.unsharp_mask(id, 1, 1.0, 20)
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -3355,6 +3399,86 @@ mod tests {
     fn motion_blur_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.motion_blur(999, 0.0, 1).is_err());
+    }
+
+    // The five one-click presets are thin wrappers, so each test pins the
+    // preset to a value already hand-derived for the underlying filter at
+    // those exact parameters (or derives the one new case, Blur More's
+    // radius 3, by the same edge-clamping arithmetic).
+
+    #[test]
+    fn blur_is_a_radius_one_box_blur() {
+        let (mut doc, id) = ramped_3x3();
+        doc.blur(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Same corner value as box_blur_averages_a_neighbourhood_with_edge_clamping.
+        assert_eq!(pixels[idx(0, 0)], 23);
+        assert_eq!(pixels[idx(1, 1)], 50);
+    }
+
+    #[test]
+    fn blur_more_is_a_radius_three_box_blur() {
+        let (mut doc, id) = ramped_3x3();
+        doc.blur_more(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Radius 3 on a 3x3 layer: for the top-left corner, offsets -3..=3
+        // clamp to row/col 0 four times, 1 once, and 2 twice (weights
+        // 4/1/2, summing to 7 per axis, 49 samples). With red = 10*(3r+c+1):
+        // sum = 10 * (3*5*7 + 7*5 + 49) = 1890, and 1890/49 = 38.
+        assert_eq!(pixels[idx(0, 0)], 38);
+        // Centre: weights 3/1/3 per axis: 10 * (3*7*7 + 7*7 + 49) = 2450,
+        // 2450/49 = 50 exactly — its own original value, by symmetry.
+        assert_eq!(pixels[idx(1, 1)], 50);
+    }
+
+    #[test]
+    fn sharpen_is_a_half_strength_unsharp_mask() {
+        let (mut doc, id) = ramped_3x3();
+        doc.sharpen(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Same values as unsharp_mask_boosts_contrast_using_the_same_box_blur_as_its_low_pass.
+        assert_eq!(pixels[idx(0, 0)], 4);
+        assert_eq!(pixels[idx(2, 2)], 97);
+    }
+
+    #[test]
+    fn sharpen_more_is_a_full_strength_unsharp_mask() {
+        let (mut doc, id) = ramped_3x3();
+        doc.sharpen_more(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // 10 + (-13 * 1.0) = -3, clamped to 0; 90 + (14 * 1.0) = 104.
+        assert_eq!(pixels[idx(0, 0)], 0);
+        assert_eq!(pixels[idx(2, 2)], 104);
+    }
+
+    #[test]
+    fn sharpen_edges_leaves_pixels_below_the_edge_threshold_alone() {
+        let (mut doc, id) = ramped_3x3();
+        doc.sharpen_edges(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Both corners' |diff| (13 and 14) sit under the threshold of 20,
+        // so unlike Sharpen More they are untouched.
+        assert_eq!(pixels[idx(0, 0)], 10);
+        assert_eq!(pixels[idx(2, 2)], 90);
+    }
+
+    #[test]
+    fn presets_propagate_the_underlying_filters_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.blur(id).is_err());
+        assert!(doc.blur_more(id).is_err());
+        assert!(doc.sharpen(id).is_err());
+        assert!(doc.sharpen_more(id).is_err());
+        assert!(doc.sharpen_edges(id).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.blur(999).is_err());
+        assert!(empty.sharpen_edges(999).is_err());
     }
 
     #[test]

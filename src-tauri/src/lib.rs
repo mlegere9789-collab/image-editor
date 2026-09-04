@@ -668,6 +668,36 @@ fn unsharp_mask(
     })
 }
 
+/// Filter > Blur > Blur on layer `id`.
+#[tauri::command]
+fn blur(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.blur(id))
+}
+
+/// Filter > Blur > Blur More on layer `id`.
+#[tauri::command]
+fn blur_more(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.blur_more(id))
+}
+
+/// Filter > Sharpen > Sharpen on layer `id`.
+#[tauri::command]
+fn sharpen(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.sharpen(id))
+}
+
+/// Filter > Sharpen > Sharpen More on layer `id`.
+#[tauri::command]
+fn sharpen_more(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.sharpen_more(id))
+}
+
+/// Filter > Sharpen > Sharpen Edges on layer `id`.
+#[tauri::command]
+fn sharpen_edges(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.sharpen_edges(id))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1090,6 +1120,11 @@ pub fn run() {
             box_blur,
             unsharp_mask,
             motion_blur,
+            blur,
+            blur_more,
+            sharpen,
+            sharpen_more,
+            sharpen_edges,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

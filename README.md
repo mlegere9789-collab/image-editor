@@ -2231,6 +2231,62 @@ Copy" layer with no new hole, Paste still disabled.
 **349 Rust tests total** (343 → 349, 342 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 25 — Filter > Blur / Blur More and Filter > Sharpen / Sharpen More / Sharpen Edges
+
+Photoshop's five no-dialog, one-click filters, and the first increment
+where every new command is a thin fixed-parameter wrapper over filters
+that already exist. Phases 20 and 22 built the two general tools —
+`box_blur(radius)` and `unsharp_mask(radius, amount, threshold)` — and
+each preset is one call into them with Photoshop's own intent baked in:
+
+| Preset | Built as | Photoshop's description |
+| --- | --- | --- |
+| Blur | `box_blur(1)` | "softens by one pixel" |
+| Blur More | `box_blur(3)` | "three to four times stronger than Blur" |
+| Sharpen | `unsharp_mask(1, 0.5, 0)` | a light, everywhere boost |
+| Sharpen More | `unsharp_mask(1, 1.0, 0)` | "a stronger Sharpen" |
+| Sharpen Edges | `unsharp_mask(1, 1.0, 20)` | "sharpens only where there's an edge" |
+
+Sharpen Edges is the interesting one: Photoshop's "leave smooth areas
+alone" behaviour is precisely what Unsharp Mask's threshold already
+does, so it's Sharpen More gated behind a threshold of 20 levels rather
+than a new edge detector. Photoshop's Blur uses a lightly
+centre-weighted 3×3 kernel where this app's is a flat 3×3 mean — the
+same flat-versus-weighted simplification `box_blur` itself already
+makes, restated here rather than hidden. All five inherit selection
+confinement, lock checking, and error handling from the underlying
+filter; nothing new touches pixels.
+
+The frontend adds five buttons — **Blur**, **Blur More**, **Sharpen**,
+**Sharpen More**, **Sharpen Edges** — after Motion Blur in the
+adjustments toolbar row, each firing its command directly with no
+dialog, as in Photoshop.
+
+**Verified two ways.** Because each preset is a wrapper, its test pins
+the preset to a value already hand-derived for the underlying filter at
+exactly those parameters — a deliberate cross-check that the wiring
+really lands on the intended parameters rather than merely "does
+something": Blur reproduces the box-blur corner value 23; Sharpen the
+unsharp-mask corner value 4 and bottom-right 97; Sharpen More the
+full-strength 0 (clamped) and 104; Sharpen Edges leaves both corners at
+10 and 90 because their |diff| of 13 and 14 sit under the threshold of
+20. Blur More is the one genuinely new derivation: at radius 3 on the
+3×3 ramped layer, offsets −3..=3 clamp onto row/column 0 four times, 1
+once and 2 twice (per-axis weights 4/1/2, 49 samples), so the top-left
+corner is 10·(3·5·7 + 7·5 + 49)/49 = 1890/49 = 38, and the centre's
+symmetric 3/1/3 weighting gives 2450/49 = 50 exactly. A final test
+confirms every preset propagates a locked-layer or unknown-layer error
+from the filter beneath it. Live under Xvfb, on the bundled gradient
+sample: **Blur More** softened every grid line into a wide haze in one
+click; **Sharpen** (after an undo) snapped them back crisp with a faint
+halo; **Sharpen More** produced a clearly darker halo band along every
+line; and **Sharpen Edges** sharpened the lines while the smooth
+gradient inside each tile stayed visibly untouched — the threshold
+doing its job on real content.
+
+**355 Rust tests total** (349 → 355, 348 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

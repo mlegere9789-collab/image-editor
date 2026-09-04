@@ -1376,6 +1376,52 @@ export default function App() {
           >
             Motion Blur…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("blur", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Blur (one-click, radius 1)"
+          >
+            Blur
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("blur_more", { id: selectedId })
+            }
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Blur More (one-click, radius 3)"
+          >
+            Blur More
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("sharpen", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Filter > Sharpen > Sharpen (one-click, 50%)"
+          >
+            Sharpen
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("sharpen_more", { id: selectedId })
+            }
+            disabled={busy || !canPaint}
+            title="Filter > Sharpen > Sharpen More (one-click, 100%)"
+          >
+            Sharpen More
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("sharpen_edges", { id: selectedId })
+            }
+            disabled={busy || !canPaint}
+            title="Filter > Sharpen > Sharpen Edges (one-click, 100% gated behind an edge threshold of 20)"
+          >
+            Sharpen Edges
+          </button>
           <input
             type="color"
             className="tools__color"

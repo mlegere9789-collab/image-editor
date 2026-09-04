@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 61.**
+**593 distinct capabilities tracked. Currently shipped: 66.**
 
 ## PART I — EVERY TOOL
 
@@ -473,8 +473,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Equalize Entire Image Based On Selected Area
 - [ ] Match Color
 - [ ] Replace Color
-- [ ] Blur Filter
-- [ ] Blur More
+- [x] Blur Filter (one-click preset: box blur at radius 1 — see README Phase 25)
+- [x] Blur More (one-click preset: box blur at radius 3 — see README Phase 25)
 - [ ] Gaussian Blur
 - [x] Box Blur (flat mean, clamp-to-edge sampling — see README Phase 20)
 - [x] Motion Blur (nearest-neighbour directional sampling built on the same box-blur sampling machinery, angle + distance dialog — see README Phase 23)
@@ -488,9 +488,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Tilt-Shift
 - [ ] Path Blur
 - [ ] Spin Blur
-- [ ] Sharpen
-- [ ] Sharpen Edges
-- [ ] Sharpen More
+- [x] Sharpen (one-click preset: unsharp mask at radius 1, 50%, no threshold — see README Phase 25)
+- [x] Sharpen Edges (one-click preset: unsharp mask at radius 1, 100%, threshold 20 — see README Phase 25)
+- [x] Sharpen More (one-click preset: unsharp mask at radius 1, 100%, no threshold — see README Phase 25)
 - [ ] Smart Sharpen
 - [x] Unsharp Mask (built on the existing box_blur convolution as its low-pass filter, with an Amount/Radius/Threshold dialog — see README Phase 22)
 - [ ] Protect Detail
