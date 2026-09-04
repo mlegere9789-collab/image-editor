@@ -19,6 +19,7 @@ type Props = {
   onMove: (id: number, direction: MoveDirection) => void;
   onRemove: (id: number) => void;
   onMergeVisible: () => void;
+  onFlattenImage: () => void;
 };
 
 export default function LayerPanel({
@@ -35,6 +36,7 @@ export default function LayerPanel({
   onMove,
   onRemove,
   onMergeVisible,
+  onFlattenImage,
 }: Props) {
   // While the opacity slider is being dragged its value has to come from the
   // pointer, not from the last command that happened to land - otherwise the
@@ -112,6 +114,17 @@ export default function LayerPanel({
           title="Merge every visible layer into one"
         >
           Merge Visible
+        </button>
+      )}
+
+      {layers.length >= 1 && (
+        <button
+          className="button button--quiet"
+          disabled={disabled}
+          onClick={onFlattenImage}
+          title="Combine every layer into one, discarding hidden layers"
+        >
+          Flatten Image
         </button>
       )}
 

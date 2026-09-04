@@ -26,9 +26,10 @@ Desktop image editor, Tauri + Rust + React.
   inverted, or be restored after deselecting. *Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
   that file for what's next.*
-- **Phase 10** — **Lock / Merge Visible**: a per-layer toggle that blocks
-  paint/erase strokes onto that layer's pixels, plus collapsing every
-  visible layer into one. *Done, described below.*
+- **Phase 10** — **Lock / Merge Visible / Flatten Image**: a per-layer
+  toggle that blocks paint/erase strokes onto that layer's pixels, plus
+  collapsing the layer stack down to one layer, two ways. *Done, described
+  below.*
 
 ## Phase 1: document model and compositor
 
@@ -523,6 +524,32 @@ close.
 **121 Rust tests total** (118 → 121). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+**Flatten Image.** The same `flatten_subset`/`composite_layers_pixel`
+groundwork Merge Visible needed made this the smaller of the two: unlike
+Merge Visible, Flatten Image composites *every* layer regardless of
+visibility (so it's just `composite::flatten`, not a computed subset) and
+discards every layer afterward rather than sparing hidden ones — the whole
+stack becomes one new layer named `"Background"`, matching what Photoshop
+calls the result of its own Flatten Image. Errors only when the document
+has no layers at all to flatten. `Document::flatten_image` is a handful of
+lines given `flatten` already existed; the actual design cost was already
+paid by Merge Visible's refactor just above.
+
+**Verified two ways.** `document.rs` gained tests for flattening an empty
+document being an error, for a hidden layer's pixels being discarded
+entirely rather than merely staying invisible (only the visible layer's
+colour survives in the flattened result, matching what `flatten()` itself
+would produce), and for flattening a single-layer document being a visual
+no-op. Live under Xvfb: with the same two-layer document Merge Visible was
+verified on, hid the `rings.png` layer first (composite fell back to just
+the painted dot, `Merge Visible` correctly disabled at one visible layer)
+then clicked **Flatten Image** — one layer left, named "Background", and
+the composite still showed only the dot, confirming the hidden layer's
+content was discarded rather than silently merged back in.
+
+**124 Rust tests total** (121 → 124). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -575,7 +602,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 121 tests: blend math, model, strokes, compositor (incl. merge visible), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, undo/redo, pipeline
+cd src-tauri && cargo test      # 124 tests: blend math, model, strokes, compositor (incl. merge visible/flatten image), dirty-region recompositing, protocol, export, project files (incl. layer lock), new document, selections (incl. select all/invert/reselect), layer lock, merge visible, flatten image, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -614,8 +641,9 @@ paths), starting a blank document at a chosen size (and its memory limit),
 rectangle/ellipse selections confining paint and erase strokes to their
 bounds (select all, invert and its confinement math, and reselect all
 included), a locked layer rejecting a stroke outright, merging visible
-layers reproducing the same composite as the layers it replaces, and
-end-to-end runs over the bundled samples. The frontend is a thin
+layers reproducing the same composite as the layers it replaces, flattening
+discarding hidden layers' content entirely, and end-to-end runs over the
+bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

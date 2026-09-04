@@ -451,6 +451,31 @@ impl Document {
         Ok(id)
     }
 
+    /// Flatten Image: composite every layer — visible or not — into a
+    /// single new `"Background"` layer, discarding the rest of the stack
+    /// entirely. Unlike [`Document::merge_visible`], hidden layers do not
+    /// survive: this is meant to produce the one flattened layer a finished
+    /// document reduces to, not to preserve work in progress. Errors only
+    /// when there are no layers to flatten at all.
+    pub fn flatten_image(&mut self) -> Result<LayerId, String> {
+        if self.layers.is_empty() {
+            return Err("Nothing to flatten.".to_string());
+        }
+        let pixels = crate::composite::flatten(self).pixels;
+        let id = self.next_id;
+        self.next_id += 1;
+        self.layers = vec![Layer {
+            id,
+            name: "Background".to_string(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            pixels,
+        }];
+        Ok(id)
+    }
+
     /// Apply `stroke` along the polyline `points` (document pixel coordinates,
     /// fractional) with the given `radius`, onto layer `id`'s own pixels — not
     /// the composite. A single point paints a dot; consecutive points are
@@ -895,6 +920,47 @@ mod tests {
         // `bottom` and `top` (both visible) merge into one layer at
         // `bottom`'s old position; `middle_hidden` keeps its place above it.
         assert_eq!(ids(&doc), vec![merged_id, middle_hidden]);
+    }
+
+    #[test]
+    fn flattening_an_empty_document_is_an_error() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let err = doc.flatten_image().unwrap_err();
+        assert!(err.contains("Nothing to flatten"), "{err}");
+    }
+
+    #[test]
+    fn flatten_image_discards_hidden_layers_unlike_merge_visible() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("red", &solid(1, 1, [255, 0, 0, 255]), 1, 1)
+            .unwrap();
+        let hidden = doc
+            .add_layer("hidden", &solid(1, 1, [0, 255, 0, 255]), 1, 1)
+            .unwrap();
+        doc.set_visible(hidden, false).unwrap();
+
+        let id = doc.flatten_image().unwrap();
+
+        assert_eq!(ids(&doc), vec![id]);
+        let flattened = &doc.layers()[0];
+        assert_eq!(flattened.name, "Background");
+        assert!(flattened.visible);
+        assert_eq!(flattened.opacity, 1.0);
+        assert_eq!(flattened.blend_mode, BlendMode::Normal);
+        // Only the visible red layer contributed — matches flatten()'s own
+        // "hidden layers don't contribute" rule, and the hidden layer's
+        // pixels are gone from the document entirely, not just invisible.
+        assert_eq!(flattened.pixels, vec![255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn flattening_a_single_layer_document_is_a_no_op_visually() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("solo", &solid(1, 1, [9, 8, 7, 255]), 1, 1)
+            .unwrap();
+        doc.flatten_image().unwrap();
+        assert_eq!(ids(&doc).len(), 1);
+        assert_eq!(doc.layers()[0].pixels, vec![9, 8, 7, 255]);
     }
 
     #[test]
