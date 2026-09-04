@@ -99,6 +99,9 @@ export default function App() {
   const [showThresholdDialog, setShowThresholdDialog] = useState(false);
   const [thresholdLevel, setThresholdLevel] = useState(128);
 
+  const [showPosterizeDialog, setShowPosterizeDialog] = useState(false);
+  const [posterizeLevels, setPosterizeLevels] = useState(4);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -217,6 +220,12 @@ export default function App() {
     await runCommand("threshold", { id: selectedId, level: thresholdLevel });
     setShowThresholdDialog(false);
   }, [runCommand, selectedId, thresholdLevel]);
+
+  const applyPosterize = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("posterize", { id: selectedId, levels: posterizeLevels });
+    setShowPosterizeDialog(false);
+  }, [runCommand, selectedId, posterizeLevels]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -761,6 +770,14 @@ export default function App() {
           >
             Threshold…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPosterizeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Posterize"
+          >
+            Posterize…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -930,6 +947,47 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyThreshold} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPosterizeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPosterizeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Posterize"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Posterize</h2>
+            <label className="control">
+              <span className="control__label">
+                Levels
+                <span className="control__value">{posterizeLevels}</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={64}
+                value={posterizeLevels}
+                onChange={(event) => setPosterizeLevels(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPosterizeDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPosterize} disabled={busy}>
                 Apply
               </button>
             </div>

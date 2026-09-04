@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold (adjustments)
+## Phase 11 — Invert / Threshold / Posterize (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -850,6 +850,47 @@ contour, exactly where the darker and lighter halves of the gradient
 met, screenshotted before and after.
 
 **165 Rust tests total** (158 → 165). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Posterize.** Image > Adjustments > Posterize quantizes each RGB channel
+independently down to a given number of evenly spaced tones (Photoshop's
+own dialog defaults to 4), leaving alpha untouched — the third and, for
+now, last entry in this batch of `adjust_layer_pixels`-based adjustments.
+Each channel value snaps to the nearest of `levels` steps spanning
+`0..=255`: `step = 255 / (levels - 1)`, `output = round(round(value /
+step) * step)`. `levels` must be at least 2 (one level would collapse
+every channel to a single flat value, which isn't a meaningful posterize,
+and isn't what Photoshop's own dialog — minimum 2 — allows either).
+
+`Document::posterize` is the third caller of the `adjust_layer_pixels`
+helper Threshold introduced, and needed nothing new from it — just its
+own per-channel quantization closure, the same shape `invert_colors` and
+`threshold` already established. `posterize` is a new `edit_checkpointed`
+command taking the layer id and `levels`. The frontend adds a
+**Posterize…** toolbar button next to Threshold…, opening the same kind
+of small modal with a single `levels` slider — capped at 64 in the UI
+(Photoshop's own dialog technically allows up to 255, but the visually
+useful range for a genuine posterize effect is a small handful of levels;
+the backend command itself still accepts the full `2..=255` range,
+matching every other place in this project where the UI narrows a control
+without narrowing the underlying API — Paint Bucket's fixed tolerance is
+the same pattern).
+
+**Verified two ways.** New `document.rs` tests cover the core
+quantization against hand-computed exact byte values (including a
+partially-transparent pixel, confirming alpha stays untouched), 2-level
+posterize collapsing a channel to pure black or white, a 1-level request
+being rejected (matching Photoshop's own 2-level minimum), confinement to
+an active selection, a locked layer, and an unknown layer id. Live under
+Xvfb: added the same colourful sample-image gradient layer used to verify
+Threshold, via the same temporary probe button (removed before
+committing, `grep -n "TEMP\|PROBE"` returning nothing) → **Posterize…** →
+Apply at the default 4 levels — the smooth diagonal gradient split into
+crisp, flat-colored bands, each grid cell landing in one of a handful of
+distinct colours instead of its own smooth shade, screenshotted before
+and after.
+
+**171 Rust tests total** (165 → 171). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

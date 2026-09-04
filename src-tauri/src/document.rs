@@ -976,6 +976,28 @@ impl Document {
             [value, value, value, a]
         })
     }
+
+    /// Image > Adjustments > Posterize: quantizes each RGB channel
+    /// independently down to `levels` evenly spaced tones (Photoshop's own
+    /// dialog defaults to 4), leaving alpha untouched. Each channel value
+    /// snaps to the nearest of `levels` steps spanning `0..=255` — `step =
+    /// 255 / (levels - 1)`, `output = round(round(value / step) * step)` —
+    /// so `levels == 2` reduces a channel to pure black or white and
+    /// `levels == 256` would reproduce it exactly (though `levels` is a
+    /// `u8`, so 255 is the practical ceiling). `levels` must be at least 2:
+    /// one level would collapse every channel to the same flat value,
+    /// which isn't what Photoshop's own dialog (minimum 2) considers a
+    /// meaningful posterize.
+    pub fn posterize(&mut self, id: LayerId, levels: u8) -> Result<Option<Rect>, String> {
+        if levels < 2 {
+            return Err("Posterize levels must be at least 2.".to_string());
+        }
+        let step = 255.0 / (levels as f32 - 1.0);
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
+            [quantize(r), quantize(g), quantize(b), a]
+        })
+    }
 }
 
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
@@ -1977,6 +1999,60 @@ mod tests {
     fn threshold_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.threshold(999, 128).is_err());
+    }
+
+    #[test]
+    fn posterize_quantizes_each_channel_to_the_nearest_of_n_evenly_spaced_steps() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 140, 255, 200], 1, 1).unwrap();
+        doc.posterize(id, 4).unwrap();
+        // step = 255 / 3 = 85: 100 -> 85 (round(1.176) = 1), 140 -> 170
+        // (round(1.647) = 2), 255 -> 255 (round(3.0) = 3). Alpha untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [85, 170, 255, 200]);
+    }
+
+    #[test]
+    fn posterize_of_two_levels_produces_pure_black_or_white_per_channel() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[50, 220, 10, 255], 1, 1).unwrap();
+        doc.posterize(id, 2).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn posterize_of_one_level_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        let err = doc.posterize(id, 1).unwrap_err();
+        assert!(err.contains("at least 2"), "{err}");
+    }
+
+    #[test]
+    fn posterize_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [50u8, 50, 50, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.posterize(id, 2).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn posterize_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.posterize(id, 4).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn posterize_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.posterize(999, 4).is_err());
     }
 
     #[test]
