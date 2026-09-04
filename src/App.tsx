@@ -171,12 +171,14 @@ export default function App() {
   const undo = useCallback(() => void runCommand("undo"), [runCommand]);
   const redo = useCallback(() => void runCommand("redo"), [runCommand]);
   const deselect = useCallback(() => void runCommand("deselect"), [runCommand]);
+  const reselect = useCallback(() => void runCommand("reselect"), [runCommand]);
   const selectAll = useCallback(() => void runCommand("select_all"), [runCommand]);
   const invertSelection = useCallback(
     () => void runCommand("invert_selection"),
     [runCommand],
   );
   const hasSelection = document?.selection != null;
+  const canReselect = document?.canReselect ?? false;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -188,9 +190,12 @@ export default function App() {
       } else if ((key === "z" && event.shiftKey) || key === "y") {
         event.preventDefault();
         if (canRedo && !busy) redo();
-      } else if (key === "d") {
+      } else if (key === "d" && !event.shiftKey) {
         event.preventDefault();
         if (hasSelection && !busy) deselect();
+      } else if (key === "d" && event.shiftKey) {
+        event.preventDefault();
+        if (canReselect && !busy) reselect();
       } else if (key === "a") {
         event.preventDefault();
         if (document !== null && !busy) selectAll();
@@ -209,6 +214,8 @@ export default function App() {
     redo,
     hasSelection,
     deselect,
+    canReselect,
+    reselect,
     document,
     selectAll,
     invertSelection,
@@ -492,6 +499,14 @@ export default function App() {
             title="Deselect (Ctrl/Cmd+D)"
           >
             Deselect
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={reselect}
+            disabled={busy || !canReselect}
+            title="Reselect (Ctrl/Cmd+Shift+D)"
+          >
+            Reselect
           </button>
         </div>
 

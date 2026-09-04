@@ -20,11 +20,12 @@ Desktop image editor, Tauri + Rust + React.
   PNG. *Done, described below.*
 - **Phase 8** — **New…**: start a blank document at a chosen size instead of
   needing to open a file first. *Done, described below.*
-- **Phase 9** — **Rect Select / Ellipse Select / Select All / Invert**: the
-  first selection tools — paint/erase strokes are now confined to the
-  active selection, which can cover the whole canvas or be inverted. *Done,
-  described below. Part of a much larger [full-parity
-  roadmap](docs/PHOTOSHOP_PARITY.md) — see that file for what's next.*
+- **Phase 9** — **Rect Select / Ellipse Select / Select All / Invert /
+  Reselect**: the first selection tools — paint/erase strokes are now
+  confined to the active selection, which can cover the whole canvas, be
+  inverted, or be restored after deselecting. *Done, described below. Part
+  of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
+  that file for what's next.*
 
 ## Phase 1: document model and compositor
 
@@ -415,6 +416,33 @@ call — the apparent failure on the first attempt at this trace turned out
 to be React StrictMode invoking the same effect twice in dev, calling
 `invert_selection` twice and cancelling itself out, not a real bug.
 
+**Reselect.** `Document` gained a second field, `last_selection`, kept
+separate from the active `selection` rather than folded into it: `deselect`
+moves whatever was active into `last_selection` before clearing it, and
+`reselect` (Select > Reselect) restores it, erroring ("Nothing to
+reselect.") if there isn't one — again matching Photoshop's own disabled
+menu item rather than a no-op. Deliberately narrow: `last_selection` only
+updates on `deselect`, not on every selection change, so reselecting after
+replacing one selection with another (without deselecting first) is not
+supported — the common case this serves is "I deselected and want that
+exact selection back," not a full selection-history stack. `DocumentView`
+exposes this as a plain `canReselect: bool` rather than leaking
+`last_selection` itself, since the frontend only ever needs to know whether
+the button should be enabled. Bound to Ctrl/Cmd+Shift+D — which meant
+fixing the existing Deselect handler, which matched Ctrl/Cmd+D regardless
+of Shift and would otherwise have eaten this shortcut too.
+
+Verified the same two ways: `document.rs` gained tests for reselecting
+with nothing ever deselected being an error (including right after making
+a selection, without a deselect in between — reselect restores what
+`deselect` cleared, not "whatever was ever selected"), for a deselect/
+reselect round trip restoring the exact prior selection, and for
+reselect being available again after a second deselect/reselect cycle.
+Live, through the real running app under Xvfb: New… → Select All →
+Deselect (outline disappears, Reselect changes from disabled to enabled)
+→ Reselect (outline reappears, Deselect/Invert re-enable) — all four
+single clicks, screenshotted at each step.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -467,7 +495,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 111 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections (incl. select all/invert), undo/redo, pipeline
+cd src-tauri && cargo test      # 114 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections (incl. select all/invert/reselect), undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -504,8 +532,8 @@ exporting a document round-trips through PNG intact, undo/redo (checkpoint,
 history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
 paths), starting a blank document at a chosen size (and its memory limit),
 rectangle/ellipse selections confining paint and erase strokes to their
-bounds (select all, invert, and the confinement math for an inverted
-selection included), and end-to-end runs over the bundled samples. The frontend is a thin
+bounds (select all, invert and its confinement math, and reselect all
+included), and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

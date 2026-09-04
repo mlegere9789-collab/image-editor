@@ -67,6 +67,10 @@ pub struct Document {
     /// All" state: every command that respects a selection treats a `None`
     /// document as unrestricted.
     selection: Option<Selection>,
+    /// The selection `deselect` most recently cleared, kept around for
+    /// `reselect` (Select > Reselect) to restore. Not touched by making a
+    /// new selection while one is already active — only by `deselect`.
+    last_selection: Option<Selection>,
 }
 
 /// The shape of the region a [`Selection`] covers within its bounding box.
@@ -168,6 +172,8 @@ pub struct DocumentView {
     /// `None` when nothing is selected — the frontend draws no marching-ants
     /// outline and every stroke is unrestricted.
     pub selection: Option<SelectionView>,
+    /// Whether `reselect` has something to restore right now.
+    pub can_reselect: bool,
 }
 
 impl Document {
@@ -182,6 +188,7 @@ impl Document {
             layers: Vec::new(),
             next_id: 1,
             selection: None,
+            last_selection: None,
         })
     }
 
@@ -203,6 +210,7 @@ impl Document {
             height: self.height,
             layers: self.layers.iter().map(Layer::view).collect(),
             selection: self.selection,
+            can_reselect: self.last_selection.is_some(),
         }
     }
 
@@ -259,8 +267,23 @@ impl Document {
     }
 
     /// Clear the selection — every stroke goes back to being unrestricted.
+    /// Remembers what was cleared, for `reselect` to restore.
     pub fn deselect(&mut self) {
-        self.selection = None;
+        if let Some(selection) = self.selection.take() {
+            self.last_selection = Some(selection);
+        }
+    }
+
+    /// Select > Reselect: restore the selection `deselect` most recently
+    /// cleared. An error if there is nothing to restore — same as
+    /// Photoshop, which disables the menu item rather than making
+    /// "reselect nothing" mean "select nothing".
+    pub fn reselect(&mut self) -> Result<(), String> {
+        self.selection = Some(
+            self.last_selection
+                .ok_or_else(|| "Nothing to reselect.".to_string())?,
+        );
+        Ok(())
     }
 
     pub fn selection(&self) -> Option<Selection> {
@@ -1012,6 +1035,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pixel(&doc, id, 0, 4), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn reselecting_with_nothing_previously_deselected_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.reselect().is_err());
+
+        // Selecting and then reselecting without ever deselecting is also an
+        // error — reselect restores what `deselect` cleared, not "whatever
+        // was ever selected".
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        assert!(doc.reselect().is_err());
+    }
+
+    #[test]
+    fn reselect_restores_what_deselect_cleared() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        let original = doc.selection().unwrap();
+        doc.deselect();
+        assert_eq!(doc.selection(), None);
+
+        doc.reselect().unwrap();
+        assert_eq!(doc.selection(), Some(original));
+    }
+
+    #[test]
+    fn reselect_is_available_again_after_a_second_deselect() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        doc.deselect();
+        doc.reselect().unwrap();
+        doc.deselect();
+        doc.reselect().unwrap();
     }
 
     #[test]

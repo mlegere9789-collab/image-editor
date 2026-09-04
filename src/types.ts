@@ -46,6 +46,8 @@ export type DocumentView = {
   layers: LayerView[];
   /** `null` when nothing is selected: no outline, every stroke unrestricted. */
   selection: Selection | null;
+  /** Whether Select > Reselect has something to restore right now. */
+  canReselect: boolean;
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */

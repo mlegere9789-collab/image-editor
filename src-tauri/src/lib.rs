@@ -370,6 +370,15 @@ fn invert_selection(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Select > Reselect: restore the selection `deselect` most recently cleared.
+#[tauri::command]
+fn reselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.reselect()?;
+        Ok(None)
+    })
+}
+
 /// Clear the selection.
 #[tauri::command]
 fn deselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -580,6 +589,7 @@ pub fn run() {
             select_ellipse,
             select_all,
             invert_selection,
+            reselect,
             deselect,
             export_png,
             save_project,
