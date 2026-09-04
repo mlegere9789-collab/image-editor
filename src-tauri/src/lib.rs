@@ -757,6 +757,20 @@ fn curves(state: State<'_, AppState>, id: LayerId, points: [u8; 5]) -> Result<Sn
     edit_checkpointed(&state, |document| document.curves(id, points))
 }
 
+/// Image > Adjustments > Color Balance on layer `id`.
+#[tauri::command]
+fn color_balance(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shadows: [i32; 3],
+    midtones: [i32; 3],
+    highlights: [i32; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.color_balance(id, shadows, midtones, highlights)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -866,6 +880,7 @@ pub fn run() {
             channel_mixer,
             levels,
             curves,
+            color_balance,
             select_rectangle,
             select_ellipse,
             select_all,

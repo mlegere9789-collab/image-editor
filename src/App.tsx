@@ -155,6 +155,11 @@ export default function App() {
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
+  const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
+  const [colorBalanceShadows, setColorBalanceShadows] = useState<number[]>([0, 0, 0]);
+  const [colorBalanceMidtones, setColorBalanceMidtones] = useState<number[]>([0, 0, 0]);
+  const [colorBalanceHighlights, setColorBalanceHighlights] = useState<number[]>([0, 0, 0]);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -383,6 +388,24 @@ export default function App() {
     await runCommand("curves", { id: selectedId, points: curvePoints });
     setShowCurvesDialog(false);
   }, [runCommand, selectedId, curvePoints]);
+
+  const setColorBalanceValue = useCallback(
+    (setter: (updater: (values: number[]) => number[]) => void, index: number, value: number) => {
+      setter((values) => values.map((v, i) => (i === index ? value : v)));
+    },
+    [],
+  );
+
+  const applyColorBalance = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("color_balance", {
+      id: selectedId,
+      shadows: colorBalanceShadows,
+      midtones: colorBalanceMidtones,
+      highlights: colorBalanceHighlights,
+    });
+    setShowColorBalanceDialog(false);
+  }, [runCommand, selectedId, colorBalanceShadows, colorBalanceMidtones, colorBalanceHighlights]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1014,6 +1037,14 @@ export default function App() {
             title="Image > Adjustments > Curves"
           >
             Curves…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowColorBalanceDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Color Balance"
+          >
+            Color Balance…
           </button>
           <input
             type="color"
@@ -1771,6 +1802,81 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCurves} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorBalanceDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorBalanceDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Balance"
+            style={{ width: 420 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Color Balance</h2>
+            <table className="channel-mixer">
+              <thead>
+                <tr>
+                  <th />
+                  <th>Cyan↔Red</th>
+                  <th>Magenta↔Green</th>
+                  <th>Yellow↔Blue</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    ["Shadows", colorBalanceShadows, setColorBalanceShadows],
+                    ["Midtones", colorBalanceMidtones, setColorBalanceMidtones],
+                    ["Highlights", colorBalanceHighlights, setColorBalanceHighlights],
+                  ] as const
+                ).map(([label, values, setter]) => (
+                  <tr key={label}>
+                    <th>{label}</th>
+                    {values.map((value, index) => (
+                      <td key={index}>
+                        <input
+                          type="number"
+                          min={-100}
+                          max={100}
+                          value={value}
+                          onChange={(event) =>
+                            setColorBalanceValue(setter, index, Number(event.target.value))
+                          }
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setColorBalanceShadows([0, 0, 0]);
+                  setColorBalanceMidtones([0, 0, 0]);
+                  setColorBalanceHighlights([0, 0, 0]);
+                }}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorBalanceDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorBalance} disabled={busy}>
                 Apply
               </button>
             </div>

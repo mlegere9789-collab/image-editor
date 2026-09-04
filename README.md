@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer / Levels / Curves (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer / Levels / Curves / Color Balance (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1321,6 +1321,71 @@ of crushing only the middle of the tone curve while leaving its ends
 anchored, screenshotted before and after.
 
 **256 Rust tests total** (248 → 256, 249 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
+**Color Balance.** Image > Adjustments > Color Balance shifts each RGB
+channel by an amount that depends on how shadow-like, midtone-like, or
+highlight-like a pixel's luminance is — the classic three-range tonal
+adjustment, applied via nine sliders (Shadows/Midtones/Highlights ×
+Cyan↔Red/Magenta↔Green/Yellow↔Blue). Photoshop's own version blends its
+three ranges with a proprietary lookup curve and offers a "Preserve
+Luminosity" option that re-normalizes lightness after the shift; both
+are deliberate scope cuts here (consistent with Photo Filter already
+omitting Preserve Luminosity), in favour of a simple, fully documented,
+and exactly testable blending scheme: BT.601 luma (the same weighting
+Threshold and Black & White already use, here left on its natural
+`0.0..=255.0` byte scale) is split into shadow/midtone/highlight weights
+with two linear ramps that never overlap and always sum to exactly
+`1.0` — `shadow_weight = clamp((127 - luma) / 127, 0, 1)` (`1.0` at luma
+`0`, `0.0` from luma `127` up), `highlight_weight = clamp((luma - 128) /
+127, 0, 1)` (`0.0` up to luma `128`, `1.0` at luma `255`), and
+`midtone_weight = 1.0 - shadow_weight - highlight_weight` (exactly `1.0`
+at luma `127` and `128`, tapering to `0.0` at both ends). The 127/128
+split means a pixel at exactly luma `127` or `128` is 100% midtone —
+useful for hand-computing exact expected test values, and the reason
+this scheme was chosen over the more natural-looking but fraction-prone
+`luma / 255.0` normalization Levels and Curves use elsewhere. Each
+range's three per-channel sliders (`-100..=100`, Photoshop's own range)
+are blended by a pixel's three weights and added directly to the
+channel byte, then clamped. No Preserve Luminosity. Alpha untouched.
+
+`Document::color_balance` is the thirteenth caller of
+`adjust_layer_pixels`. New `edit_checkpointed` command taking the layer
+id plus three `[i32; 3]` arrays (shadows, midtones, highlights), each
+`[cyan↔red, magenta↔green, yellow↔blue]` mapping directly onto
+`[R, G, B]`. The frontend adds a **Color Balance…** toolbar button
+opening a modal with a 3×3 grid of number inputs (one row per tonal
+range, one column per channel pair) reusing the `.channel-mixer` table
+styling Channel Mixer already established, plus a **Reset** button
+zeroing all nine values.
+
+**Verified two ways.** New `document.rs` tests cover the all-zero
+defaults being an exact no-op, a pure-shadow pixel (luma `0`) receiving
+only the shadow sliders' shift, a pure-midtone pixel (luma `127`,
+sitting exactly on both linear ramps' flat zero region) receiving only
+the midtone sliders' shift, a pure-highlight pixel (luma `255`)
+receiving only the highlight sliders' shift (incidentally also
+exercising clamping at the `255` ceiling), the sliders being clamped to
+`-100..=100`, alpha staying untouched, confinement to an active
+selection, a locked layer, and an unknown layer id. Live under Xvfb:
+created an 800×600 document, loaded the bundled colourful sample-image
+gradient layer via a temporary probe button (removed before committing,
+`grep -n "TEMP\|PROBE"` returning nothing), opened Color Balance, set
+Shadows Cyan↔Red to `100` and Highlights Magenta↔Green to `100`, and
+applied — the canvas visibly changed (the dark shadow corner picked up
+a warmer, more violet cast and the pale highlight region picked up a
+visible tint), confirming the command reaches the canvas end to end.
+Because the on-screen canvas is a downscaled, interpolated render of
+the document and a screenshot-pixel spot check on it turned out to be
+unreliable for pinning exact per-channel signs, the precise
+shadow-reddens / highlight-greens behaviour was additionally verified
+directly against `Document::color_balance` applied to the real bundled
+`sample.png` at five coordinates outside the UI entirely, confirming
+each shifted channel's before/after byte values match the documented
+formula exactly (e.g. a shadow pixel's red channel `20 → 84` at luma
+≈45, matching `20 + shadow_weight × 100` to the nearest byte).
+
+**265 Rust tests total** (256 → 265, 258 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
 ## Prerequisites

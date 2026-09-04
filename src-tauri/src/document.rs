@@ -1303,6 +1303,52 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Image > Adjustments > Color Balance: shifts each RGB channel by an
+    /// amount that depends on how shadow-like, midtone-like, or
+    /// highlight-like a pixel's luminance is. Photoshop's own version
+    /// blends its three tonal ranges with a proprietary lookup curve and
+    /// offers a "Preserve Luminosity" option that re-normalizes lightness
+    /// after the shift; both are deliberate scope cuts here (consistent
+    /// with Photo Filter already omitting Preserve Luminosity), in favour
+    /// of a simple, fully documented, and exactly testable blending
+    /// scheme: BT.601 luma (`0.0..=255.0`, the same weighting Threshold
+    /// and Black & White already use) is split into shadow/midtone/
+    /// highlight weights with two linear ramps that never overlap and
+    /// always sum to exactly `1.0` — `shadow_weight = clamp((127 - luma)
+    /// / 127, 0, 1)` (`1.0` at luma `0`, `0.0` from luma `127` up),
+    /// `highlight_weight = clamp((luma - 128) / 127, 0, 1)` (`0.0` up to
+    /// luma `128`, `1.0` at luma `255`), and `midtone_weight = 1.0 -
+    /// shadow_weight - highlight_weight` (exactly `1.0` at luma `127` and
+    /// `128`, tapering to `0.0` at both ends). Each range's three
+    /// per-channel sliders (`-100..=100`, Photoshop's own range,
+    /// cyan-red/magenta-green/yellow-blue mapping directly onto
+    /// R/G/B) are blended by that pixel's three weights and added
+    /// directly to the channel byte, then clamped. No Preserve
+    /// Luminosity. Alpha untouched.
+    pub fn color_balance(
+        &mut self,
+        id: LayerId,
+        shadows: [i32; 3],
+        midtones: [i32; 3],
+        highlights: [i32; 3],
+    ) -> Result<Option<Rect>, String> {
+        let shadows = shadows.map(|v| v.clamp(-100, 100) as f32);
+        let midtones = midtones.map(|v| v.clamp(-100, 100) as f32);
+        let highlights = highlights.map(|v| v.clamp(-100, 100) as f32);
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let shadow_w = ((127.0 - luma) / 127.0).clamp(0.0, 1.0);
+            let highlight_w = ((luma - 128.0) / 127.0).clamp(0.0, 1.0);
+            let midtone_w = 1.0 - shadow_w - highlight_w;
+            let apply = |v: u8, c: usize| {
+                let shift =
+                    shadow_w * shadows[c] + midtone_w * midtones[c] + highlight_w * highlights[c];
+                (v as f32 + shift).round().clamp(0.0, 255.0) as u8
+            };
+            [apply(r, 0), apply(g, 1), apply(b, 2), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -3251,6 +3297,102 @@ mod tests {
     fn curves_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.curves(999, IDENTITY_CURVE).is_err());
+    }
+
+    #[test]
+    fn color_balance_at_zero_is_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.color_balance(id, [0, 0, 0], [0, 0, 0], [0, 0, 0])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn color_balance_shifts_pure_shadows() {
+        // Luma 0 (pure black) is 100% shadow weight, 0% midtone/highlight.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.color_balance(id, [40, 20, 10], [0, 0, 0], [0, 0, 0])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [40, 20, 10, 255]);
+    }
+
+    #[test]
+    fn color_balance_shifts_pure_midtones() {
+        // Luma 127 (r=g=b=127) is 100% midtone weight: the shadow ramp
+        // has reached 0 by luma 127 and the highlight ramp hasn't started
+        // until luma 128.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[127, 127, 127, 255], 1, 1).unwrap();
+        doc.color_balance(id, [0, 0, 0], [10, -10, 5], [0, 0, 0])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [137, 117, 132, 255]);
+    }
+
+    #[test]
+    fn color_balance_shifts_pure_highlights() {
+        // Luma 255 (pure white) is 100% highlight weight. Also exercises
+        // clamping: 255 + 15 saturates at 255.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 255, 255, 255], 1, 1).unwrap();
+        doc.color_balance(id, [0, 0, 0], [0, 0, 0], [-30, 15, -5])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [225, 255, 250, 255]);
+    }
+
+    #[test]
+    fn color_balance_sliders_are_clamped_to_plus_minus_100() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.color_balance(id, [500, -500, 0], [0, 0, 0], [0, 0, 0])
+            .unwrap();
+        // 500 clamps to 100 (0 + 100 = 100); -500 clamps to -100 (0 - 100
+        // clamps again, at the byte floor, to 0).
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_balance_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.color_balance(id, [0, 0, 0], [0, 0, 0], [0, 0, 0])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn color_balance_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [0u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.color_balance(id, [50, 0, 0], [0, 0, 0], [0, 0, 0])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 0, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_balance_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc
+            .color_balance(id, [0, 0, 0], [0, 0, 0], [0, 0, 0])
+            .unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn color_balance_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc
+            .color_balance(999, [0, 0, 0], [0, 0, 0], [0, 0, 0])
+            .is_err());
     }
 
     #[test]
