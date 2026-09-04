@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer / Levels (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer / Levels / Curves (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1273,6 +1273,55 @@ point, screenshotted before and after.
 
 **248 Rust tests total** (239 → 248). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
+
+**Curves.** Image > Adjustments > Curves applies a tone curve identically
+to all three RGB channels — the same RGB-composite-only scope cut Levels
+already makes, rather than Photoshop's own per-channel Red/Green/Blue
+dropdown. Photoshop's own Curves dialog is an interactive editor with an
+arbitrary number of freely draggable points connected by a smooth spline;
+here the curve is fixed to five control points at evenly spaced input
+positions (`0`, `64`, `128`, `192`, `255`) whose five output values are
+each independently adjustable via a slider, and adjacent points are
+connected by straight line segments rather than a spline — a second
+deliberate scope cut, invisible for modest adjustments and only really
+apparent on extreme ones, in exchange for a curve that's driven entirely
+by ordinary sliders (matching every other adjustment dialog in this
+phase) and trivially unit-testable, rather than needing a canvas-based
+drag-and-drop point editor. At the identity mapping (output equal to
+input at all five positions) every value reproduces exactly, because each
+segment's output span exactly matches its input span. Alpha untouched.
+
+`Document::curves` is the twelfth caller of `adjust_layer_pixels`. New
+`edit_checkpointed` command taking the layer id plus a `[u8; 5]` of
+output values (IPC-flat as a fixed-size array, the same approach Channel
+Mixer's `3×4` matrix already established). The frontend adds a
+**Curves…** toolbar button opening a modal with five range sliders
+labelled by their fixed input position ("Input 0", "Input 64", … "Input
+255"), each showing and controlling that point's output value, plus a
+**Reset** button restoring the identity curve — the same
+`.modal`/`.modal__actions` structure and Reset-button convention Channel
+Mixer already established.
+
+**Verified two ways.** New `document.rs` tests cover the identity curve
+being an exact no-op, a control point's output value reproducing exactly
+at its own input position, linear interpolation between two control
+points landing on the exact expected halfway value, flattening a whole
+input range to a constant output by setting three consecutive points to
+the same value, alpha staying untouched, confinement to an active
+selection, a locked layer, and an unknown layer id. Live under Xvfb:
+created an 800×600 document, loaded the same colourful sample-image
+gradient layer via a temporary probe button (removed before committing,
+`grep -n "TEMP\|PROBE"` returning nothing) → **Curves…** → dragged the
+"Input 128" point down from `128` to `35`, leaving the other four points
+at their identity defaults → applied — the midtone band of the gradient
+(the rows straddling the original mid-grey) visibly darkened into deep
+blue/purple while the shadow and highlight rows at the top and bottom
+stayed close to their original brightness, exactly the expected effect
+of crushing only the middle of the tone curve while leaving its ends
+anchored, screenshotted before and after.
+
+**256 Rust tests total** (248 → 256, 249 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
 
 ## Prerequisites
 

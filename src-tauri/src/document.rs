@@ -1272,6 +1272,37 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Image > Adjustments > Curves: a tone curve applied identically to
+    /// all three RGB channels (like [`Document::levels`], always the RGB
+    /// composite channel rather than Photoshop's own per-channel
+    /// Red/Green/Blue dropdown — a deliberate scope cut). Photoshop's own
+    /// dialog is an interactive editor with an arbitrary number of
+    /// draggable points connected by a smooth spline; here the curve is
+    /// fixed to five control points at evenly spaced input positions (`0`,
+    /// `64`, `128`, `192`, `255`) whose five output values are each
+    /// independently adjustable, connected by straight line segments
+    /// rather than a spline — another deliberate scope cut, invisible for
+    /// modest adjustments and only really apparent on extreme ones, in
+    /// exchange for a vastly simpler and more directly testable
+    /// implementation. `points[i]` is the output value for input `XS[i]`;
+    /// at the identity mapping (`[0, 64, 128, 192, 255]`) every input
+    /// value reproduces exactly, since each segment's output span exactly
+    /// matches its input span. Alpha untouched.
+    pub fn curves(&mut self, id: LayerId, points: [u8; 5]) -> Result<Option<Rect>, String> {
+        const XS: [f32; 5] = [0.0, 64.0, 128.0, 192.0, 255.0];
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |c: u8| {
+                let x = c as f32;
+                let seg = ((x / 64.0) as usize).min(3);
+                let (x0, x1) = (XS[seg], XS[seg + 1]);
+                let (y0, y1) = (points[seg] as f32, points[seg + 1] as f32);
+                let t = (x - x0) / (x1 - x0);
+                (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
+            };
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2958,6 +2989,7 @@ mod tests {
     }
 
     const IDENTITY_MATRIX: [[i32; 4]; 3] = [[100, 0, 0, 0], [0, 100, 0, 0], [0, 0, 100, 0]];
+    const IDENTITY_CURVE: [u8; 5] = [0, 64, 128, 192, 255];
 
     #[test]
     fn channel_mixer_identity_matrix_is_a_no_op() {
@@ -3143,6 +3175,82 @@ mod tests {
     fn levels_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.levels(999, 0, 255, 100, 0, 255).is_err());
+    }
+
+    #[test]
+    fn curves_at_identity_is_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.curves(id, IDENTITY_CURVE).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn curves_control_points_reproduce_exactly_at_their_input_position() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.curves(id, [0, 64, 200, 192, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn curves_interpolates_linearly_between_control_points() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[96, 96, 96, 255], 1, 1).unwrap();
+        // Between input 64 (output 64) and input 128 (output 200): halfway
+        // across the input span lands halfway across the output span too.
+        doc.curves(id, [0, 64, 200, 192, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [132, 132, 132, 255]);
+    }
+
+    #[test]
+    fn curves_can_flatten_a_range_to_a_constant() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([80, 80, 80, 255]);
+        pixels.extend([180, 180, 180, 255]);
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.curves(id, [0, 150, 150, 150, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 150, 150, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn curves_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.curves(id, IDENTITY_CURVE).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn curves_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [80u8, 80, 80, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.curves(id, [0, 150, 150, 150, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 150, 150, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 150, 150, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [80, 80, 80, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [80, 80, 80, 255]);
+    }
+
+    #[test]
+    fn curves_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.curves(id, IDENTITY_CURVE).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn curves_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.curves(999, IDENTITY_CURVE).is_err());
     }
 
     #[test]

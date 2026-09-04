@@ -25,6 +25,10 @@ const IDENTITY_CHANNEL_MIXER = [
   [0, 0, 100, 0],
 ];
 
+/** Output values for the five fixed Curves control points at input
+ * positions 0, 64, 128, 192, 255. This is the no-op curve. */
+const IDENTITY_CURVE = [0, 64, 128, 192, 255];
+
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
 function hexToRgb(hex: string): [number, number, number] {
   const value = Number.parseInt(hex.slice(1), 16);
@@ -147,6 +151,9 @@ export default function App() {
   const [levelsGamma, setLevelsGamma] = useState(100);
   const [levelsOutputBlack, setLevelsOutputBlack] = useState(0);
   const [levelsOutputWhite, setLevelsOutputWhite] = useState(255);
+
+  const [showCurvesDialog, setShowCurvesDialog] = useState(false);
+  const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
@@ -366,6 +373,16 @@ export default function App() {
     levelsOutputBlack,
     levelsOutputWhite,
   ]);
+
+  const setCurvePoint = useCallback((index: number, value: number) => {
+    setCurvePoints((points) => points.map((p, i) => (i === index ? value : p)));
+  }, []);
+
+  const applyCurves = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("curves", { id: selectedId, points: curvePoints });
+    setShowCurvesDialog(false);
+  }, [runCommand, selectedId, curvePoints]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -989,6 +1006,14 @@ export default function App() {
             title="Image > Adjustments > Levels"
           >
             Levels…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCurvesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Curves"
+          >
+            Curves…
           </button>
           <input
             type="color"
@@ -1697,6 +1722,55 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyLevels} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCurvesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCurvesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Curves"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Curves</h2>
+            {curvePoints.map((value, index) => (
+              <label className="control" key={index}>
+                <span className="control__label">
+                  Input {IDENTITY_CURVE[index]}
+                  <span className="control__value">{value}</span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={value}
+                  onChange={(event) => setCurvePoint(index, Number(event.target.value))}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setCurvePoints(IDENTITY_CURVE)}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCurvesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCurves} disabled={busy}>
                 Apply
               </button>
             </div>
