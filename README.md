@@ -2119,6 +2119,64 @@ than a no-op.
 **336 Rust tests total** (329 → 336, 329 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 23 — Filter > Blur > Motion Blur
+
+The third filter built on the box-blur convolution shape this project
+now has, and the first to change that shape rather than reuse it
+outright: instead of averaging a square neighbourhood, Motion Blur
+averages a straight line of samples through each pixel, along a
+chosen direction. `box_blur_at`'s own sample-then-average loop was
+split into two pieces to make this possible without duplicating the
+averaging logic: a new `average_samples(source, doc_width, samples)`
+takes any iterator of `(x, y)` coordinates and does the summing and
+dividing, and `box_blur_at` now just builds a square iterator and
+hands it off (a pure refactor — the existing box-blur tests pass
+unmodified with their exact same hand-derived values). The new
+`motion_blur_at` builds a *line* of coordinates instead: `2 * distance
++ 1` samples at integer steps from `-distance` to `distance` along
+`(cos(angle), sin(angle))`, each offset rounded to the nearest whole
+pixel (not a true anti-aliased line — the same hard-edged, no-
+antialiasing scope cut this project's selection system already makes)
+and clamped to the layer's own edges exactly like `box_blur_at`'s
+square window is.
+
+`Document::motion_blur(id, angle, distance)` walks the active
+selection (or the whole layer) and, for every pixel, replaces it with
+`motion_blur_at`'s directional average — all four channels, un-
+premultiplied, the same scope cut `box_blur` and `unsharp_mask` both
+already make. `angle` is in degrees, 0° horizontal, matching
+Photoshop's own dial; `distance` behaves like `box_blur`'s own
+`radius` (how far the line extends on *each* side of the pixel, so the
+streak is `2 * distance + 1` pixels long) rather than Photoshop's
+single "total streak length" number — the same "close enough, not a
+pixel-for-pixel port of Photoshop's maths" simplification `box_blur`'s
+own `radius` already makes. Errors on a zero distance, a non-finite
+angle, or a locked/unknown layer.
+
+The frontend adds a **Motion Blur…** button next to Unsharp Mask, with
+an Angle slider (-180° to 180°) and a Distance slider (1–60px).
+
+**Verified two ways.** New `document.rs` tests reuse the ramped 3×3
+test layer a third time: at 0° (horizontal), motion blur reduces to a
+1-D box average along each row, giving the same shape of hand-derived
+values as the square box-blur tests — the left edge clamps to
+`(10+10+20)/3 = 13`, the middle column averages back to its own
+original `20` exactly (symmetric window), and the right edge clamps to
+`(20+30+30)/3 = 26`; at 90° (vertical), the identical maths applies
+down a column instead of along a row (`20`, `40`, `60`). A third test
+confines the effect to a single-pixel selection and confirms
+everything else is untouched; zero-distance, non-finite-angle, locked-
+layer, and unknown-layer error cases round out the seven tests, all
+passing on first run. Live under Xvfb: opened the bundled gradient
+sample and applied **Motion Blur…** at its defaults (0°, 10px) — every
+*vertical* white grid line between tiles was smeared away completely
+along the horizontal blur direction, while every *horizontal* grid
+line stayed perfectly sharp, visually confirming the blur really is
+directional rather than a disguised box blur.
+
+**343 Rust tests total** (336 → 343, 336 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

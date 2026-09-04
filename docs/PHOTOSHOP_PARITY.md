@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**591 distinct capabilities tracked. Currently shipped: 58.**
+**591 distinct capabilities tracked. Currently shipped: 59.**
 
 ## PART I — EVERY TOOL
 
@@ -475,7 +475,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Blur More
 - [ ] Gaussian Blur
 - [x] Box Blur (flat mean, clamp-to-edge sampling — see README Phase 20)
-- [ ] Motion Blur
+- [x] Motion Blur (nearest-neighbour directional sampling built on the same box-blur sampling machinery, angle + distance dialog — see README Phase 23)
 - [ ] Radial Blur
 - [ ] Shape Blur
 - [ ] Surface Blur

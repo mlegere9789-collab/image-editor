@@ -191,24 +191,67 @@ fn box_blur_at(
     col: u32,
     radius: i64,
 ) -> [u8; CHANNELS] {
+    let samples = (-radius..=radius).flat_map(|dy| {
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        (-radius..=radius).map(move |dx| {
+            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+            (sx, sy)
+        })
+    });
+    average_samples(source, doc_width, samples)
+}
+
+/// The flat average of `source`'s (a document-sized RGBA8 buffer,
+/// `doc_width` pixels wide) pixels at each `(x, y)` coordinate in
+/// `samples`, with no weighting — every sample counts equally regardless
+/// of how many times its coordinate repeats (which is exactly how
+/// clamp-to-edge sampling is meant to behave: an edge pixel sampled twice
+/// really does count twice). Shared building block behind [`box_blur_at`]
+/// (a square neighbourhood) and [`motion_blur_at`] (a line of samples
+/// along a direction).
+fn average_samples(
+    source: &[u8],
+    doc_width: usize,
+    samples: impl Iterator<Item = (usize, usize)>,
+) -> [u8; CHANNELS] {
     let mut sums = [0u32; CHANNELS];
     let mut count = 0u32;
-    for dy in -radius..=radius {
-        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
-        for dx in -radius..=radius {
-            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
-            let base = (sy * doc_width + sx) * CHANNELS;
-            for (c, sum) in sums.iter_mut().enumerate() {
-                *sum += source[base + c] as u32;
-            }
-            count += 1;
+    for (sx, sy) in samples {
+        let base = (sy * doc_width + sx) * CHANNELS;
+        for (c, sum) in sums.iter_mut().enumerate() {
+            *sum += source[base + c] as u32;
         }
+        count += 1;
     }
     let mut averaged = [0u8; CHANNELS];
     for (out, sum) in averaged.iter_mut().zip(&sums) {
         *out = (sum / count) as u8;
     }
     averaged
+}
+
+/// Like [`box_blur_at`], but the window is a straight line through
+/// `(col, row)` instead of a square: `2 * half + 1` samples at integer
+/// steps `t` from `-half` to `half`, each offset by `t * (dx, dy)` and
+/// rounded to the nearest pixel (nearest-neighbour, not a true
+/// anti-aliased line — the same "hard-edged, no anti-aliasing" scope cut
+/// this project's selection system already makes). `(dx, dy)` is expected
+/// to be a unit vector; passing a non-unit vector just scales the streak
+/// length. Clamps to the layer's edges exactly like [`box_blur_at`].
+fn motion_blur_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (u32, u32),
+    (dx, dy): (f32, f32),
+    half: i64,
+) -> [u8; CHANNELS] {
+    let samples = (-half..=half).map(|t| {
+        let sx = (col as i64 + (t as f32 * dx).round() as i64).clamp(0, width - 1) as usize;
+        let sy = (row as i64 + (t as f32 * dy).round() as i64).clamp(0, height - 1) as usize;
+        (sx, sy)
+    });
+    average_samples(source, doc_width, samples)
 }
 
 impl Selection {
@@ -1099,6 +1142,68 @@ impl Document {
                             .clamp(0.0, 255.0) as u8
                     };
                 }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
+    /// of averaging a square neighbourhood, it averages a straight line of
+    /// samples through each pixel, along `angle` degrees (0° is
+    /// horizontal, increasing anticlockwise, matching Photoshop's own
+    /// dial) — built on [`motion_blur_at`], the directional counterpart of
+    /// [`box_blur_at`]. `distance` behaves like `box_blur`'s own `radius`
+    /// parameter rather than Photoshop's single "total streak length"
+    /// number: it's how far the sampled line extends on *each side* of
+    /// the pixel, so the streak is `2 * distance + 1` samples long — the
+    /// same "close enough, not a pixel-for-pixel port of Photoshop's own
+    /// dialog maths" simplification `box_blur`'s own `radius` already
+    /// makes relative to Photoshop's blur filters. Off-angle samples land
+    /// on the nearest whole pixel rather than being anti-aliased between
+    /// two — a documented limitation, not a bug, consistent with this
+    /// project's hard-edged selection system. Errors on a zero distance or
+    /// a locked/unknown layer.
+    pub fn motion_blur(
+        &mut self,
+        id: LayerId,
+        angle: f32,
+        distance: u32,
+    ) -> Result<Option<Rect>, String> {
+        if distance == 0 {
+            return Err("Motion blur distance must be at least 1 pixel.".to_string());
+        }
+        if !angle.is_finite() {
+            return Err(format!("Motion blur angle must be a number, got {angle}."));
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let radians = angle.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let half = distance as i64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let averaged = motion_blur_at(
+                    &source,
+                    doc_width,
+                    (width, height),
+                    (row, col),
+                    (cos, sin),
+                    half,
+                );
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&averaged);
             }
         }
         Ok(Some(bounds))
@@ -3058,6 +3163,84 @@ mod tests {
     fn unsharp_mask_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.unsharp_mask(999, 1, 1.0, 0).is_err());
+    }
+
+    #[test]
+    fn motion_blur_at_zero_degrees_averages_along_the_row() {
+        let (mut doc, id) = ramped_3x3();
+
+        doc.motion_blur(id, 0.0, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Left edge repeats col 0: (10+10+20)/3 = 40/3 = 13 (truncating).
+        assert_eq!(pixels[idx(0, 0)], 13);
+        // Middle column's window is the whole row, symmetric around it:
+        // (10+20+30)/3 = 20 exactly, its own original value.
+        assert_eq!(pixels[idx(1, 0)], 20);
+        // Right edge repeats col 2: (20+30+30)/3 = 80/3 = 26.
+        assert_eq!(pixels[idx(2, 0)], 26);
+    }
+
+    #[test]
+    fn motion_blur_at_ninety_degrees_averages_along_the_column() {
+        let (mut doc, id) = ramped_3x3();
+
+        doc.motion_blur(id, 90.0, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Same shape of maths as the horizontal test, down column 0 instead
+        // of along row 0: (10+10+40)/3 = 20.
+        assert_eq!(pixels[idx(0, 0)], 20);
+        // Middle row: (10+40+70)/3 = 40 exactly.
+        assert_eq!(pixels[idx(0, 1)], 40);
+        // Bottom edge repeats row 2: (40+70+70)/3 = 60.
+        assert_eq!(pixels[idx(0, 2)], 60);
+    }
+
+    #[test]
+    fn motion_blur_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap(); // just the top-left pixel
+
+        doc.motion_blur(id, 0.0, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(pixels[idx(0, 0)], 13);
+        // Everywhere else on the same row (and elsewhere) is untouched.
+        assert_eq!(pixels[idx(1, 0)], 20);
+        assert_eq!(pixels[idx(2, 0)], 30);
+        assert_eq!(pixels[idx(0, 1)], 40);
+    }
+
+    #[test]
+    fn motion_blur_with_zero_distance_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        let err = doc.motion_blur(id, 0.0, 0).unwrap_err();
+        assert!(err.contains("at least 1"), "{err}");
+    }
+
+    #[test]
+    fn motion_blur_rejects_a_non_finite_angle() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.motion_blur(id, f32::NAN, 1).is_err());
+    }
+
+    #[test]
+    fn motion_blur_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.motion_blur(id, 0.0, 1).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn motion_blur_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.motion_blur(999, 0.0, 1).is_err());
     }
 
     #[test]

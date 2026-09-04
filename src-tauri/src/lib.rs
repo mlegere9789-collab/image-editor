@@ -648,6 +648,17 @@ fn unsharp_mask(
     })
 }
 
+/// Filter > Blur > Motion Blur on layer `id`.
+#[tauri::command]
+fn motion_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    angle: f32,
+    distance: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.motion_blur(id, angle, distance))
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -1056,6 +1067,7 @@ pub fn run() {
             fill_selection,
             box_blur,
             unsharp_mask,
+            motion_blur,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -227,6 +227,10 @@ export default function App() {
   const [unsharpMaskAmount, setUnsharpMaskAmount] = useState(100);
   const [unsharpMaskThreshold, setUnsharpMaskThreshold] = useState(4);
 
+  const [showMotionBlurDialog, setShowMotionBlurDialog] = useState(false);
+  const [motionBlurAngle, setMotionBlurAngle] = useState(0);
+  const [motionBlurDistance, setMotionBlurDistance] = useState(10);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -557,6 +561,16 @@ export default function App() {
     });
     setShowUnsharpMaskDialog(false);
   }, [runCommand, selectedId, unsharpMaskRadius, unsharpMaskAmount, unsharpMaskThreshold]);
+
+  const applyMotionBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("motion_blur", {
+      id: selectedId,
+      angle: motionBlurAngle,
+      distance: motionBlurDistance,
+    });
+    setShowMotionBlurDialog(false);
+  }, [runCommand, selectedId, motionBlurAngle, motionBlurDistance]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1320,6 +1334,14 @@ export default function App() {
             title="Filter > Sharpen > Unsharp Mask"
           >
             Unsharp Mask…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMotionBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Motion Blur"
+          >
+            Motion Blur…
           </button>
           <input
             type="color"
@@ -2369,6 +2391,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyUnsharpMask} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMotionBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMotionBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Motion Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Motion Blur</h2>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{motionBlurAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={motionBlurAngle}
+                onChange={(event) => setMotionBlurAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Distance
+                <span className="control__value">{motionBlurDistance}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={60}
+                value={motionBlurDistance}
+                onChange={(event) => setMotionBlurDistance(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMotionBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyMotionBlur} disabled={busy}>
                 Apply
               </button>
             </div>
