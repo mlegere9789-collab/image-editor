@@ -473,3 +473,25 @@ body {
   gap: 8px;
   margin-top: 4px;
 }
+
+.channel-mixer {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.channel-mixer th,
+.channel-mixer td {
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.channel-mixer input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}

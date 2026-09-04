@@ -715,6 +715,18 @@ fn gradient_map(
     })
 }
 
+/// Image > Adjustments > Channel Mixer on layer `id`: `matrix[c]` is
+/// `[r_coeff, g_coeff, b_coeff, constant]` for output channel `c` (R, G,
+/// B in that order).
+#[tauri::command]
+fn channel_mixer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    matrix: [[i32; 4]; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.channel_mixer(id, matrix))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -821,6 +833,7 @@ pub fn run() {
             photo_filter,
             exposure,
             gradient_map,
+            channel_mixer,
             select_rectangle,
             select_ellipse,
             select_all,

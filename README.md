@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map / Channel Mixer (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1177,6 +1177,54 @@ colours, confirming the two-colour line degenerates correctly to a plain
 greyscale map at its default extremes, screenshotted before and after.
 
 **230 Rust tests total** (223 → 230). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Channel Mixer.** Image > Adjustments > Channel Mixer builds each output
+channel as a weighted sum of all three input channels plus a constant —
+`output_c = r*matrix[c][0] + g*matrix[c][1] + b*matrix[c][2] +
+matrix[c][3]`, one row of the matrix per output channel, clamped to
+`0..=255`. The three per-channel coefficients are percentages
+(`-200..=200`, i.e. `-2.00..=2.00`, Photoshop's own range) and the
+constant is a direct `-200..=200` byte-scale offset — both clamped rather
+than erroring on an out-of-range value. The identity matrix
+(`[[100,0,0,0], [0,100,0,0], [0,0,100,0]]`) is a no-op; moving a row's
+own 100-weight onto a different input channel swaps channels outright,
+and a negative weight inverts a channel's contribution — this one
+command subsumes the plain channel-swap and channel-invert tricks
+Photoshop users often reach for Channel Mixer to do, without needing
+separate commands for them.
+
+`Document::channel_mixer` is the tenth caller of `adjust_layer_pixels`
+and the first to take a full matrix rather than a handful of scalar
+sliders. New `edit_checkpointed` command taking the layer id and the
+`3×4` matrix (`[[i32; 4]; 3]`, IPC-flat as nested fixed-size arrays). The
+frontend adds a **Channel Mixer…** toolbar button opening a modal with a
+compact `R`/`G`/`B`-by-`R`/`G`/`B`/`Constant` grid of twelve number
+inputs (plain numbers rather than sliders, since a 3×4 grid of sliders
+wouldn't fit any reasonably sized dialog) and a **Reset** button that
+restores the identity matrix — the same shared `.modal`/`.modal__actions`
+structure every other dialog in this phase uses, widened for this one
+via an inline style since the grid needs more than the usual 280px.
+
+**Verified two ways.** New `document.rs` tests cover the identity matrix
+being an exact no-op, a hand-picked matrix building each output channel
+as the documented weighted sum (including a fractional 50% coefficient
+landing on an exact clean value), an all-zero-coefficient matrix with
+just a constant producing a flat colour regardless of input, a negative
+coefficient inverting a channel's contribution (checked at both ends of
+the input range), an out-of-range coefficient saturating at the slider
+clamp and the resulting output still clamping to a valid byte, alpha
+staying untouched, confinement to an active selection, a locked layer,
+and an unknown layer id. Live under Xvfb: loaded the same colourful
+sample-image gradient layer via a temporary probe button (removed before
+committing, `grep -n "TEMP\|PROBE"` returning nothing) → **Channel
+Mixer…** → set the R row to `[0, 100, 0, 0]` and the G row to `[100, 0,
+0, 0]` (a full R↔G channel swap) → applied — the palette visibly shifted
+from blue/purple/pink to blue/teal/green/magenta, exactly the expected
+result of swapping which input channel feeds which output, screenshotted
+before and after.
+
+**239 Rust tests total** (230 → 239). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

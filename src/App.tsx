@@ -17,6 +17,14 @@ import type {
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 const PROJECT_FILTER = [{ name: "Image Editor Project", extensions: ["iep"] }];
 
+/** One row per output channel (R, G, B); each row is
+ * [rCoeff, gCoeff, bCoeff, constant]. This is the no-op matrix. */
+const IDENTITY_CHANNEL_MIXER = [
+  [100, 0, 0, 0],
+  [0, 100, 0, 0],
+  [0, 0, 100, 0],
+];
+
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
 function hexToRgb(hex: string): [number, number, number] {
   const value = Number.parseInt(hex.slice(1), 16);
@@ -127,6 +135,11 @@ export default function App() {
   const [showGradientMapDialog, setShowGradientMapDialog] = useState(false);
   const [gradientMapShadow, setGradientMapShadow] = useState("#000000");
   const [gradientMapHighlight, setGradientMapHighlight] = useState("#ffffff");
+
+  const [showChannelMixerDialog, setShowChannelMixerDialog] = useState(false);
+  const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
+    IDENTITY_CHANNEL_MIXER,
+  );
 
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
@@ -313,6 +326,18 @@ export default function App() {
     });
     setShowGradientMapDialog(false);
   }, [runCommand, selectedId, gradientMapShadow, gradientMapHighlight]);
+
+  const setChannelMixerCell = useCallback((row: number, col: number, value: number) => {
+    setChannelMixerMatrix((matrix) =>
+      matrix.map((r, ri) => (ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r)),
+    );
+  }, []);
+
+  const applyChannelMixer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("channel_mixer", { id: selectedId, matrix: channelMixerMatrix });
+    setShowChannelMixerDialog(false);
+  }, [runCommand, selectedId, channelMixerMatrix]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -921,6 +946,14 @@ export default function App() {
           >
             Gradient Map…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowChannelMixerDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Channel Mixer"
+          >
+            Channel Mixer…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1469,6 +1502,72 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGradientMap} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChannelMixerDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowChannelMixerDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Channel Mixer"
+            style={{ width: 420 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Channel Mixer</h2>
+            <table className="channel-mixer">
+              <thead>
+                <tr>
+                  <th />
+                  <th>R</th>
+                  <th>G</th>
+                  <th>B</th>
+                  <th>Constant</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(["R", "G", "B"] as const).map((label, row) => (
+                  <tr key={label}>
+                    <th>{label}</th>
+                    {channelMixerMatrix[row].map((value, col) => (
+                      <td key={col}>
+                        <input
+                          type="number"
+                          min={col === 3 ? -200 : -200}
+                          max={200}
+                          value={value}
+                          onChange={(event) =>
+                            setChannelMixerCell(row, col, Number(event.target.value))
+                          }
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setChannelMixerMatrix(IDENTITY_CHANNEL_MIXER)}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowChannelMixerDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyChannelMixer} disabled={busy}>
                 Apply
               </button>
             </div>

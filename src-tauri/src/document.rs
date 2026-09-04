@@ -1191,6 +1191,44 @@ impl Document {
             [map(0), map(1), map(2), a]
         })
     }
+
+    /// Image > Adjustments > Channel Mixer: builds each output channel as
+    /// a weighted sum of all three input channels plus a constant —
+    /// `output_c = r*matrix[c][0] + g*matrix[c][1] + b*matrix[c][2] +
+    /// matrix[c][3]`, one row of `matrix` per output channel (`R`, `G`,
+    /// `B` in that order), clamped to `0..=255`. The three per-channel
+    /// coefficients are percentages (`-200..=200`, i.e. `-2.00..=2.00`,
+    /// Photoshop's own range) and the constant is a direct `-200..=200`
+    /// byte-scale offset — both clamped rather than erroring on an
+    /// out-of-range value. The identity matrix (`[[100,0,0,0],
+    /// [0,100,0,0], [0,0,100,0]]`) is a no-op; swapping a row's own
+    /// 100-weight onto a different input channel swaps channels outright,
+    /// and negative weights invert a channel's contribution — this one
+    /// command subsumes plain channel-swap and channel-invert tricks
+    /// Photoshop users often reach for Channel Mixer to do. Alpha
+    /// untouched.
+    pub fn channel_mixer(
+        &mut self,
+        id: LayerId,
+        matrix: [[i32; 4]; 3],
+    ) -> Result<Option<Rect>, String> {
+        let matrix: Vec<[f32; 4]> = matrix
+            .iter()
+            .map(|row| {
+                [
+                    row[0].clamp(-200, 200) as f32 / 100.0,
+                    row[1].clamp(-200, 200) as f32 / 100.0,
+                    row[2].clamp(-200, 200) as f32 / 100.0,
+                    row[3].clamp(-200, 200) as f32 / 255.0,
+                ]
+            })
+            .collect();
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let (ru, gu, bu) = (to_unit(r), to_unit(g), to_unit(b));
+            let mix = |row: &[f32; 4]| to_byte(ru * row[0] + gu * row[1] + bu * row[2] + row[3]);
+            [mix(&matrix[0]), mix(&matrix[1]), mix(&matrix[2]), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2874,6 +2912,97 @@ mod tests {
     fn gradient_map_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.gradient_map(999, [0, 0, 0], [255, 255, 255]).is_err());
+    }
+
+    const IDENTITY_MATRIX: [[i32; 4]; 3] = [[100, 0, 0, 0], [0, 100, 0, 0], [0, 0, 100, 0]];
+
+    #[test]
+    fn channel_mixer_identity_matrix_is_a_no_op() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        doc.channel_mixer(id, IDENTITY_MATRIX).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_builds_each_output_as_a_weighted_sum_of_inputs() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 200, 255], 1, 1).unwrap();
+        // R output = G input, G output = R input, B output = 50% of B input.
+        let matrix = [[0, 100, 0, 0], [100, 0, 0, 0], [0, 0, 50, 0]];
+        doc.channel_mixer(id, matrix).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 10, 100, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_constant_alone_produces_a_flat_colour() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 255], 1, 1).unwrap();
+        let matrix = [[0, 0, 0, 200], [0, 0, 0, 200], [0, 0, 0, 200]];
+        doc.channel_mixer(id, matrix).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_negative_coefficients_invert_the_channels_contribution() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([0, 50, 60, 255]);
+        pixels.extend([255, 50, 60, 255]);
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+        let matrix = [[-100, 0, 0, 100], [0, 100, 0, 0], [0, 0, 100, 0]];
+        doc.channel_mixer(id, matrix).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 50, 60, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 50, 60, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_coefficients_and_output_are_both_clamped() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 0, 0, 255], 1, 1).unwrap();
+        // An out-of-range coefficient (9999) clamps to 200 (2.00x), and
+        // 2.00 * 128/255 still overflows 1.0, clamping the final output.
+        let matrix = [[9999, 0, 0, 0], [0, 100, 0, 0], [0, 0, 100, 0]];
+        doc.channel_mixer(id, matrix).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 200, 60, 77], 1, 1).unwrap();
+        doc.channel_mixer(id, IDENTITY_MATRIX).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn channel_mixer_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [10u8, 200, 60, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        let matrix = [[0, 0, 0, 200], [0, 0, 0, 200], [0, 0, 0, 200]];
+        doc.channel_mixer(id, matrix).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 200, 200, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [10, 200, 60, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [10, 200, 60, 255]);
+    }
+
+    #[test]
+    fn channel_mixer_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.channel_mixer(id, IDENTITY_MATRIX).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn channel_mixer_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.channel_mixer(999, IDENTITY_MATRIX).is_err());
     }
 
     #[test]
