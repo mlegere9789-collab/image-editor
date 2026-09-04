@@ -171,6 +171,11 @@ export default function App() {
   const undo = useCallback(() => void runCommand("undo"), [runCommand]);
   const redo = useCallback(() => void runCommand("redo"), [runCommand]);
   const deselect = useCallback(() => void runCommand("deselect"), [runCommand]);
+  const selectAll = useCallback(() => void runCommand("select_all"), [runCommand]);
+  const invertSelection = useCallback(
+    () => void runCommand("invert_selection"),
+    [runCommand],
+  );
   const hasSelection = document?.selection != null;
 
   useEffect(() => {
@@ -186,11 +191,28 @@ export default function App() {
       } else if (key === "d") {
         event.preventDefault();
         if (hasSelection && !busy) deselect();
+      } else if (key === "a") {
+        event.preventDefault();
+        if (document !== null && !busy) selectAll();
+      } else if (key === "i" && event.shiftKey) {
+        event.preventDefault();
+        if (hasSelection && !busy) invertSelection();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canUndo, canRedo, busy, undo, redo, hasSelection, deselect]);
+  }, [
+    canUndo,
+    canRedo,
+    busy,
+    undo,
+    redo,
+    hasSelection,
+    deselect,
+    document,
+    selectAll,
+    invertSelection,
+  ]);
 
   useEffect(() => {
     invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
@@ -449,6 +471,22 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={selectAll}
+            disabled={busy || !hasDocument}
+            title="Select All (Ctrl/Cmd+A)"
+          >
+            Select All
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={invertSelection}
+            disabled={busy || !hasSelection}
+            title="Invert Selection (Ctrl/Cmd+Shift+I)"
+          >
+            Invert
+          </button>
+          <button
+            className="button button--quiet"
             onClick={deselect}
             disabled={busy || !hasSelection}
             title="Deselect (Ctrl/Cmd+D)"
@@ -602,12 +640,25 @@ export default function App() {
                 />
               )}
               {!marqueePreview && document.selection && (
-                <div
-                  className={`selection-outline${
-                    document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
-                  }`}
-                  style={overlayStyle(document.selection.bounds, document)}
-                />
+                <>
+                  <div
+                    className={`selection-outline${
+                      document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
+                    }`}
+                    style={overlayStyle(document.selection.bounds, document)}
+                  />
+                  {document.selection.inverted && (
+                    // Select > Inverse selects everywhere *outside* the shape above —
+                    // a second outline around the whole canvas marks that outer edge.
+                    <div
+                      className="selection-outline"
+                      style={overlayStyle(
+                        { x0: 0, y0: 0, x1: document.width, y1: document.height },
+                        document,
+                      )}
+                    />
+                  )}
+                </>
               )}
             </div>
           )}

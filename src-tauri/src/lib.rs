@@ -352,6 +352,24 @@ fn select_ellipse(
     })
 }
 
+/// Select the entire canvas.
+#[tauri::command]
+fn select_all(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_all()?;
+        Ok(None)
+    })
+}
+
+/// Select > Inverse: swap selected and unselected pixels.
+#[tauri::command]
+fn invert_selection(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.invert_selection()?;
+        Ok(None)
+    })
+}
+
 /// Clear the selection.
 #[tauri::command]
 fn deselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -560,6 +578,8 @@ pub fn run() {
             erase_stroke,
             select_rectangle,
             select_ellipse,
+            select_all,
+            invert_selection,
             deselect,
             export_png,
             save_project,

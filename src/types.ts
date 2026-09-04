@@ -35,6 +35,8 @@ export type SelectionShape = "rectangle" | "ellipse";
 export type Selection = {
   shape: SelectionShape;
   bounds: { x0: number; y0: number; x1: number; y1: number };
+  /** Select > Inverse: selects everywhere *except* `shape`. */
+  inverted: boolean;
 };
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */

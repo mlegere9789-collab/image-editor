@@ -89,6 +89,11 @@ pub enum SelectionShape {
 pub struct Selection {
     pub shape: SelectionShape,
     pub bounds: Rect,
+    /// Selects everywhere *except* the shape — Select > Inverse. Kept as a
+    /// flag on the existing shape+bounds representation rather than a new
+    /// variant: "the whole canvas minus a rectangle" is still exactly
+    /// expressible by flipping one boolean, no mask needed.
+    pub inverted: bool,
 }
 
 impl Selection {
@@ -96,18 +101,18 @@ impl Selection {
     /// [`Document::stroke`] already samples at — falls inside this selection.
     fn contains(&self, px: f32, py: f32) -> bool {
         let Rect { x0, y0, x1, y1 } = self.bounds;
-        if px < x0 as f32 || px >= x1 as f32 || py < y0 as f32 || py >= y1 as f32 {
-            return false;
-        }
-        match self.shape {
-            SelectionShape::Rectangle => true,
-            SelectionShape::Ellipse => {
-                let (cx, cy) = ((x0 as f32 + x1 as f32) / 2.0, (y0 as f32 + y1 as f32) / 2.0);
-                let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
-                let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
-                nx * nx + ny * ny <= 1.0
-            }
-        }
+        let in_bounds = !(px < x0 as f32 || px >= x1 as f32 || py < y0 as f32 || py >= y1 as f32);
+        let in_shape = in_bounds
+            && match self.shape {
+                SelectionShape::Rectangle => true,
+                SelectionShape::Ellipse => {
+                    let (cx, cy) = ((x0 as f32 + x1 as f32) / 2.0, (y0 as f32 + y1 as f32) / 2.0);
+                    let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
+                    let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
+                    nx * nx + ny * ny <= 1.0
+                }
+            };
+        in_shape != self.inverted
     }
 }
 
@@ -209,6 +214,7 @@ impl Document {
         self.selection = Some(Selection {
             shape: SelectionShape::Rectangle,
             bounds,
+            inverted: false,
         });
         Ok(())
     }
@@ -220,7 +226,35 @@ impl Document {
         self.selection = Some(Selection {
             shape: SelectionShape::Ellipse,
             bounds,
+            inverted: false,
         });
+        Ok(())
+    }
+
+    /// Select the entire canvas — a rectangle spanning the whole document.
+    pub fn select_all(&mut self) -> Result<(), String> {
+        self.selection = Some(Selection {
+            shape: SelectionShape::Rectangle,
+            bounds: Rect {
+                x0: 0,
+                y0: 0,
+                x1: self.width,
+                y1: self.height,
+            },
+            inverted: false,
+        });
+        Ok(())
+    }
+
+    /// Select > Inverse: swap selected and unselected pixels. An error if
+    /// nothing is currently selected — same as Photoshop, which disables the
+    /// menu item rather than making "invert nothing" mean "select nothing".
+    pub fn invert_selection(&mut self) -> Result<(), String> {
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        selection.inverted = !selection.inverted;
         Ok(())
     }
 
@@ -888,6 +922,7 @@ mod tests {
                     x1: 6,
                     y1: 6
                 },
+                inverted: false,
             })
         );
     }
@@ -912,6 +947,71 @@ mod tests {
         assert!(doc.selection().is_some());
         doc.deselect();
         assert_eq!(doc.selection(), None);
+    }
+
+    #[test]
+    fn select_all_covers_the_whole_canvas() {
+        let mut doc = Document::new(10, 6).unwrap();
+        doc.select_all().unwrap();
+        assert_eq!(
+            doc.selection(),
+            Some(Selection {
+                shape: SelectionShape::Rectangle,
+                bounds: Rect {
+                    x0: 0,
+                    y0: 0,
+                    x1: 10,
+                    y1: 6
+                },
+                inverted: false,
+            })
+        );
+    }
+
+    #[test]
+    fn inverting_with_nothing_selected_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.invert_selection().is_err());
+    }
+
+    #[test]
+    fn inverting_twice_returns_to_the_original_selection() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        let original = doc.selection().unwrap();
+        doc.invert_selection().unwrap();
+        assert!(doc.selection().unwrap().inverted);
+        doc.invert_selection().unwrap();
+        assert_eq!(doc.selection(), Some(original));
+    }
+
+    #[test]
+    fn an_inverted_selection_confines_a_stroke_to_outside_its_bounds() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.select_rectangle(3.0, 0.0, 6.0, 9.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.stroke(
+            id,
+            &[(4.0, 4.0)], // dead centre of the (now unselected) rectangle
+            1.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        // Inside the original rectangle: still unselected, so untouched.
+        assert_eq!(pixel(&doc, id, 4, 4), [0, 0, 0, 0]);
+
+        doc.stroke(
+            id,
+            &[(0.5, 4.0)], // outside the original rectangle: selected once inverted
+            1.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 4), [255, 0, 0, 255]);
     }
 
     #[test]

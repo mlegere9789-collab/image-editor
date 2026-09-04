@@ -20,8 +20,9 @@ Desktop image editor, Tauri + Rust + React.
   PNG. *Done, described below.*
 - **Phase 8** — **New…**: start a blank document at a chosen size instead of
   needing to open a file first. *Done, described below.*
-- **Phase 9** — **Rect Select / Ellipse Select**: the first selection tools —
-  paint/erase strokes are now confined to the active selection. *Done,
+- **Phase 9** — **Rect Select / Ellipse Select / Select All / Invert**: the
+  first selection tools — paint/erase strokes are now confined to the
+  active selection, which can cover the whole canvas or be inverted. *Done,
   described below. Part of a much larger [full-parity
   roadmap](docs/PHOTOSHOP_PARITY.md) — see that file for what's next.*
 
@@ -388,6 +389,32 @@ app: the resulting screenshot showed a stroke drawn across the full canvas
 width but visibly painted *only* inside the selection's bounds, pixel-exact
 with what the Rust confinement tests already predicted.
 
+**Select All / Invert.** `Selection` gained one field, `inverted: bool`
+(`Selection::contains` XORs shape-membership with it), rather than a new
+representation — "the whole canvas minus a shape" is still exactly
+expressible by flipping one boolean, no mask needed. `select_all` sets a
+rectangle spanning the whole canvas; `invert_selection` flips `inverted` on
+whatever selection is already active and errors ("Nothing is selected.") if
+there isn't one, matching Photoshop's own Select > Inverse, which is
+disabled rather than a no-op when nothing is selected. Both are
+`edit_checkpointed` commands, bound to Ctrl/Cmd+A and Ctrl/Cmd+Shift+I. The
+frontend draws a second marching-ants outline around the full canvas
+whenever the active selection is inverted, alongside the shape's own
+outline, so an inverted selection reads visually as "everywhere but this."
+
+Verified the same two ways as the rest of this phase: `document.rs` gained
+tests for `select_all`, for inverting with nothing selected being an error,
+for a double-invert returning to the original selection, and for an
+inverted selection confining a stroke to *outside* its bounds. Live,
+through the real running app under Xvfb: single-click UI verification
+(New…, Select All, Invert) confirmed the buttons enable/disable correctly
+and the full-canvas outline appears; a direct `invoke()` trace of
+`invert_selection` alone, added and removed as a temporary debug probe,
+confirmed the Tauri command layer flips `inverted` correctly on a single
+call — the apparent failure on the first attempt at this trace turned out
+to be React StrictMode invoking the same effect twice in dev, calling
+`invert_selection` twice and cancelling itself out, not a real bug.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -440,7 +467,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 107 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections, undo/redo, pipeline
+cd src-tauri && cargo test      # 111 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections (incl. select all/invert), undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -477,7 +504,8 @@ exporting a document round-trips through PNG intact, undo/redo (checkpoint,
 history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
 paths), starting a blank document at a chosen size (and its memory limit),
 rectangle/ellipse selections confining paint and erase strokes to their
-bounds, and end-to-end runs over the bundled samples. The frontend is a thin
+bounds (select all, invert, and the confinement math for an inverted
+selection included), and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 
