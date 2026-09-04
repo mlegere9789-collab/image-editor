@@ -603,6 +603,16 @@ export default function App() {
       } else if (key === "v") {
         event.preventDefault();
         if (document !== null && canPaste && !busy) void pasteClipboard();
+      } else if (key === "j" && !event.shiftKey) {
+        event.preventDefault();
+        if (selectedId !== null && !busy) {
+          void runCommand("new_layer_via_copy", { id: selectedId }, "top");
+        }
+      } else if (key === "j" && event.shiftKey) {
+        event.preventDefault();
+        if (selectedId !== null && !busy) {
+          void runCommand("new_layer_via_cut", { id: selectedId }, "top");
+        }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -625,6 +635,7 @@ export default function App() {
     cutSelection,
     canPaste,
     pasteClipboard,
+    runCommand,
   ]);
 
   useEffect(() => {
@@ -1040,6 +1051,28 @@ export default function App() {
             title="Edit > Fill"
           >
             Fill…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("new_layer_via_copy", { id: selectedId }, "top")
+            }
+            disabled={busy || selectedId === null}
+            title="Layer > New > Layer via Copy (Ctrl/Cmd+J) — copies the selection onto a new layer without touching the clipboard"
+          >
+            Layer via Copy
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("new_layer_via_cut", { id: selectedId }, "top")
+            }
+            disabled={busy || selectedId === null}
+            title="Layer > New > Layer via Cut (Ctrl/Cmd+Shift+J) — moves the selection onto a new layer without touching the clipboard"
+          >
+            Layer via Cut
           </button>
         </div>
 

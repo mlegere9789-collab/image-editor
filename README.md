@@ -2177,6 +2177,60 @@ directional rather than a disguised box blur.
 **343 Rust tests total** (336 → 343, 336 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 24 — Layer > New > Layer via Copy / Layer via Cut
+
+Photoshop's Ctrl/Cmd+J and Ctrl/Cmd+Shift+J: with a selection active,
+lift just the selected pixels onto a brand-new layer — copying them
+(the source stays as it was) or cutting them (the source is left with a
+transparent hole). Like Duplicate Layer in Phase 21, neither was a
+tracked line in the original audit `docs/PHOTOSHOP_PARITY.md` was
+extracted from, so both were added there as their own lines under PART
+III (591 → 593 tracked) rather than shipped uncounted.
+
+The whole point of these commands, versus simply pressing Copy and then
+Paste, is that they never go through the clipboard — the user's real
+clipboard contents survive, and nothing the user previously copied can
+leak in. That fell out almost for free from Phase 18's design: the
+clipboard lives on `AppState` in `lib.rs`, not on `Document`, and
+`Document::copy` / `Document::cut` merely *return* a `Clipboard` value —
+storing it is the Tauri command's job. So `Document::new_layer_via_copy`
+is literally `self.copy(id)?` followed by `self.paste(&clipboard, name)`,
+and `new_layer_via_cut` is `self.cut(id)?` followed by the same `paste`,
+with the `Clipboard` value living and dying inside the call. No new
+pixel math anywhere: selection masking (ellipses, rounded rectangles,
+borders, inversion), lock checking, and the paste-at-original-coordinates
+placement are all inherited from the already-tested primitives. The
+inherited lock semantics are deliberately asymmetric and are pinned by
+tests: `via_copy` succeeds on a locked layer (nothing is written to it),
+`via_cut` errors and leaves both the document and the layer stack
+untouched. Both new layers land at the top of the stack — the same
+simplification plain Paste already makes rather than Duplicate Layer's
+"directly above the source" placement.
+
+The frontend adds **Layer via Copy** and **Layer via Cut** buttons to
+the Clipboard toolbar group, plus the Ctrl/Cmd+J and Ctrl/Cmd+Shift+J
+shortcuts alongside the existing C/X/V bindings; the new layers are
+named "Layer via Copy" / "Layer via Cut", Photoshop's own defaults.
+
+**Verified two ways.** Six new `document.rs` tests: via-copy produces a
+new layer holding exactly the selected region (transparent outside it)
+while the source layer is byte-for-byte untouched; via-cut produces the
+same new layer *and* clears the selected region on the source (with the
+exact dirty rect asserted), leaving the unselected pixels alone; via-copy
+succeeding on a locked layer versus via-cut refusing one and leaving the
+layer count and pixels unchanged; and the unknown-layer error for each.
+Live under Xvfb: opened the bundled gradient sample, dragged a rectangle
+over the top-left tiles and clicked **Layer via Cut** — a new "Layer via
+Cut" layer appeared on top, already selected, and the **Paste** button
+stayed disabled throughout, the visible proof the clipboard was never
+touched. Hiding that new layer exposed the transparent hole cut from
+`sample.png` exactly under the selection; re-showing it, reselecting
+the source layer and clicking **Layer via Copy** added a third "Layer via
+Copy" layer with no new hole, Paste still disabled.
+
+**349 Rust tests total** (343 → 349, 342 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

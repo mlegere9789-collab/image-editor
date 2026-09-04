@@ -1029,6 +1029,39 @@ impl Document {
         id
     }
 
+    /// Layer > New > Layer via Copy (Ctrl/Cmd+J on a selection): copies
+    /// layer `id`'s selected pixels (or the whole layer, with none, same
+    /// as [`Self::copy`]) straight onto a new top layer, without going
+    /// through the clipboard at all — unlike copying and pasting through
+    /// Edit's own menu items, this never touches, or is affected by,
+    /// whatever the user already had copied. Exactly [`Self::copy`] then
+    /// [`Self::paste`] composed together locally; succeeds on a locked
+    /// layer, since nothing about the source layer is written.
+    pub fn new_layer_via_copy(
+        &mut self,
+        id: LayerId,
+        name: impl Into<String>,
+    ) -> Result<LayerId, String> {
+        let clipboard = self.copy(id)?;
+        Ok(self.paste(&clipboard, name))
+    }
+
+    /// Layer > New > Layer via Cut (Ctrl/Cmd+Shift+J on a selection):
+    /// [`Self::new_layer_via_copy`], but the selected pixels are removed
+    /// from the source layer first, the same "copy, then delete" relation
+    /// [`Self::cut`] has to [`Self::copy`] — and, like `cut`, this errors
+    /// (rather than silently doing nothing) if the source layer is
+    /// locked, since it does write to it.
+    pub fn new_layer_via_cut(
+        &mut self,
+        id: LayerId,
+        name: impl Into<String>,
+    ) -> Result<(LayerId, Option<Rect>), String> {
+        let (clipboard, rect) = self.cut(id)?;
+        let new_id = self.paste(&clipboard, name);
+        Ok((new_id, rect))
+    }
+
     /// Filter > Blur > Box Blur: averages every channel of each pixel in
     /// the active selection (or the whole layer, with none) with its
     /// neighbours in a `(2*radius+1)`-square window, clamped to the
@@ -2874,6 +2907,87 @@ mod tests {
         target.paste(&clipboard, "Pasted");
 
         assert_eq!(target.layers()[0].pixels, vec![0u8; 4]);
+    }
+
+    #[test]
+    fn new_layer_via_copy_adds_the_selected_pixels_as_a_new_layer_and_leaves_the_source_alone() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [4, 5, 6, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let new_id = doc.new_layer_via_copy(id, "Layer via Copy").unwrap();
+
+        assert_ne!(new_id, id);
+        assert_eq!(doc.layers().len(), 2);
+        let new_layer = doc.layers().iter().find(|l| l.id == new_id).unwrap();
+        assert_eq!(new_layer.name, "Layer via Copy");
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(&new_layer.pixels[idx(0, 0)..idx(0, 0) + 4], &[0, 0, 0, 0]);
+        assert_eq!(&new_layer.pixels[idx(1, 1)..idx(1, 1) + 4], &[4, 5, 6, 255]);
+        // The source layer is completely untouched -- this is Copy, not Cut.
+        let source = doc.layers().iter().find(|l| l.id == id).unwrap();
+        assert_eq!(source.pixels, solid(3, 3, [4, 5, 6, 255]));
+    }
+
+    #[test]
+    fn new_layer_via_copy_succeeds_on_a_locked_layer() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.new_layer_via_copy(id, "Layer via Copy").is_ok());
+    }
+
+    #[test]
+    fn new_layer_via_copy_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.new_layer_via_copy(999, "Layer via Copy").is_err());
+    }
+
+    #[test]
+    fn new_layer_via_cut_adds_the_selected_pixels_as_a_new_layer_and_clears_the_source() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [4, 5, 6, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let (new_id, rect) = doc.new_layer_via_cut(id, "Layer via Cut").unwrap();
+
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            })
+        );
+        let new_layer = doc.layers().iter().find(|l| l.id == new_id).unwrap();
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(&new_layer.pixels[idx(1, 1)..idx(1, 1) + 4], &[4, 5, 6, 255]);
+        // Unlike Copy, the source layer's selected region is now transparent.
+        let source = doc.layers().iter().find(|l| l.id == id).unwrap();
+        assert_eq!(&source.pixels[idx(0, 0)..idx(0, 0) + 4], &[4, 5, 6, 255]);
+        assert_eq!(&source.pixels[idx(1, 1)..idx(1, 1) + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn new_layer_via_cut_errors_on_a_locked_layer_and_leaves_it_untouched() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+
+        let err = doc.new_layer_via_cut(id, "Layer via Cut").unwrap_err();
+
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn new_layer_via_cut_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.new_layer_via_cut(999, "Layer via Cut").is_err());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**591 distinct capabilities tracked. Currently shipped: 59.**
+**593 distinct capabilities tracked. Currently shipped: 61.**
 
 ## PART I — EVERY TOOL
 
@@ -107,6 +107,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] FLATTEN IMAGE
 - [x] RASTERIZE (a genuine no-op command — every `Layer` in this app is already a pixel buffer, so there is nothing to convert *from*; validates the layer id and otherwise touches nothing, matching Photoshop's own behaviour of disabling Rasterize once a layer is already pixels)
 - [x] DUPLICATE LAYER (Ctrl/Cmd+J — missing from the original ~500-item audit this checklist was extracted from; added here as its own tracked line, bumping the total from 590 to 591, rather than shipping it uncounted — see README Phase 21)
+- [x] NEW LAYER VIA COPY (Ctrl/Cmd+J with a selection — copies the selected pixels onto a new layer without touching the clipboard; also missing from the original audit, added as its own tracked line (591 → 592) — see README Phase 24)
+- [x] NEW LAYER VIA CUT (Ctrl/Cmd+Shift+J with a selection — the same, but the source pixels are removed; also missing from the original audit, added as its own tracked line (592 → 593) — see README Phase 24)
 - [ ] CONVERT TO SMART OBJECT
 - [ ] CREATE SMART OBJECT FROM LAYERS
 

@@ -610,6 +610,26 @@ fn paste(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Layer > New > Layer via Copy on layer `id`: unlike [`copy`]/[`paste`],
+/// this never touches the clipboard at all.
+#[tauri::command]
+fn new_layer_via_copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document
+            .new_layer_via_copy(id, "Layer via Copy")
+            .map(|_| None)
+    })
+}
+
+/// Layer > New > Layer via Cut on layer `id`.
+#[tauri::command]
+fn new_layer_via_cut(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let (_, rect) = document.new_layer_via_cut(id, "Layer via Cut")?;
+        Ok(rect)
+    })
+}
+
 /// Edit > Delete (also covers Edit > Clear — see
 /// [`document::Document::delete_selection`] for why one command is
 /// enough) on layer `id`.
@@ -1063,6 +1083,8 @@ pub fn run() {
             copy,
             cut,
             paste,
+            new_layer_via_copy,
+            new_layer_via_cut,
             delete_selection,
             fill_selection,
             box_blur,
