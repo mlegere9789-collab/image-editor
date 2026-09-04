@@ -30,8 +30,14 @@ export type LayerView = {
   locked: boolean;
 };
 
-/** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase). */
-export type SelectionShape = "rectangle" | "ellipse";
+/** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase).
+ * `RoundedRectangle` is a struct variant, so serde's default external
+ * tagging serializes it as `{ roundedRectangle: { radius } }` rather than a
+ * bare string like the two unit variants. */
+export type SelectionShape =
+  | "rectangle"
+  | "ellipse"
+  | { roundedRectangle: { radius: number } };
 
 /** Mirrors `Selection` (aka `SelectionView`) in src-tauri/src/document.rs. */
 export type Selection = {

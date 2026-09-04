@@ -87,6 +87,12 @@ pub struct Document {
 pub enum SelectionShape {
     Rectangle,
     Ellipse,
+    /// A rectangle with corners rounded to `radius` pixels — the result of
+    /// [`Document::smooth_selection`] on a `Rectangle` (or already-rounded)
+    /// selection. Never produced any other way.
+    RoundedRectangle {
+        radius: u32,
+    },
 }
 
 /// A hard-edged (no feather, no anti-aliasing) region of the document that
@@ -122,6 +128,19 @@ impl Selection {
                     let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
                     let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
                     nx * nx + ny * ny <= 1.0
+                }
+                SelectionShape::RoundedRectangle { radius } => {
+                    // Clamp (px, py) onto the rectangle inset by `radius` on
+                    // every side, then require the point be within `radius`
+                    // of that clamped point. On a flat edge this reduces to
+                    // an ordinary straight-edge distance check; in a corner
+                    // square it checks distance to that corner's rounding
+                    // circle. Standard rounded-rect hit test.
+                    let r = radius as f32;
+                    let cx = px.clamp(x0 as f32 + r, x1 as f32 - r);
+                    let cy = py.clamp(y0 as f32 + r, y1 as f32 - r);
+                    let (dx, dy) = (px - cx, py - cy);
+                    dx * dx + dy * dy <= r * r
                 }
             };
         in_shape != self.inverted
@@ -325,6 +344,42 @@ impl Document {
             x1: x1 as u32,
             y1: y1 as u32,
         };
+        Ok(())
+    }
+
+    /// Select > Modify > Smooth: rounds a rectangular selection's corners.
+    /// Photoshop's own Smooth operates on arbitrary, possibly irregular
+    /// selections by rounding off jagged edges and filling small gaps in a
+    /// pixel-mask representation; since this selection system represents a
+    /// selection as a shape plus its bounding box rather than a mask (see
+    /// [`Selection`]'s own doc comment), the well-defined analogue for a
+    /// `Rectangle` (or already-`RoundedRectangle`) selection is to round its
+    /// corners by `radius` pixels — exactly what "smoothing" means when
+    /// there are no jagged pixels to begin with. Applied to an `Ellipse`
+    /// selection this is a no-op: an ellipse's boundary is already smooth
+    /// everywhere, so rounding its nonexistent corners changes nothing.
+    /// `radius` is clamped to at most half the shorter side of the
+    /// selection's bounding box — beyond that a corner radius has no
+    /// further visual effect, since the rectangle is already as rounded as
+    /// it can get. An error if nothing is selected, or `radius` is zero.
+    pub fn smooth_selection(&mut self, radius: u32) -> Result<(), String> {
+        if radius == 0 {
+            return Err("Smooth radius must be greater than zero pixels.".to_string());
+        }
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        if matches!(
+            selection.shape,
+            SelectionShape::Rectangle | SelectionShape::RoundedRectangle { .. }
+        ) {
+            let b = selection.bounds;
+            let half_short_side = (b.x1 - b.x0).min(b.y1 - b.y0) / 2;
+            selection.shape = SelectionShape::RoundedRectangle {
+                radius: radius.min(half_short_side),
+            };
+        }
         Ok(())
     }
 
@@ -3630,6 +3685,92 @@ mod tests {
                 y1: 17
             }
         );
+    }
+
+    #[test]
+    fn smooth_rounds_a_rectangles_corners() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(2.0, 2.0, 18.0, 18.0).unwrap();
+        doc.smooth_selection(4).unwrap();
+        let selection = doc.selection().unwrap();
+        assert_eq!(
+            selection.shape,
+            SelectionShape::RoundedRectangle { radius: 4 }
+        );
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 2,
+                y0: 2,
+                x1: 18,
+                y1: 18
+            }
+        );
+    }
+
+    #[test]
+    fn smooth_clamps_the_radius_to_half_the_shorter_side() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 15.0, 10.0).unwrap(); // 10 wide, 5 tall
+        doc.smooth_selection(100).unwrap();
+        assert_eq!(
+            doc.selection().unwrap().shape,
+            SelectionShape::RoundedRectangle { radius: 2 } // half of 5, floored
+        );
+    }
+
+    #[test]
+    fn smooth_on_an_ellipse_selection_is_a_no_op() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_ellipse(2.0, 2.0, 18.0, 18.0).unwrap();
+        let before = doc.selection().unwrap();
+        doc.smooth_selection(4).unwrap();
+        assert_eq!(doc.selection().unwrap(), before);
+    }
+
+    #[test]
+    fn smooth_with_zero_radius_is_an_error() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(2.0, 2.0, 18.0, 18.0).unwrap();
+        assert!(doc.smooth_selection(0).is_err());
+    }
+
+    #[test]
+    fn smoothing_with_nothing_selected_is_an_error() {
+        let mut doc = Document::new(20, 20).unwrap();
+        assert!(doc.smooth_selection(4).is_err());
+    }
+
+    #[test]
+    fn a_rounded_rectangle_selection_excludes_only_its_corners() {
+        let (mut doc, id) = transparent_doc(10);
+        doc.select_rectangle(0.0, 0.0, 10.0, 10.0).unwrap();
+        doc.smooth_selection(3).unwrap();
+
+        // A true corner pixel: outside the rounding circle.
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+
+        // The flat left edge, mid-height: still selected, unlike an ellipse -
+        // rounding only cuts the corners, not the whole boundary.
+        doc.stroke(
+            id,
+            &[(0.5, 5.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 5), [255, 255, 255, 255]);
     }
 
     #[test]

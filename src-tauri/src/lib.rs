@@ -411,6 +411,15 @@ fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapsho
     })
 }
 
+/// Select > Modify > Smooth: round the selection's corners by `radius` pixels.
+#[tauri::command]
+fn smooth_selection(state: State<'_, AppState>, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.smooth_selection(radius)?;
+        Ok(None)
+    })
+}
+
 /// Select > Reselect: restore the selection `deselect` most recently cleared.
 #[tauri::command]
 fn reselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -887,6 +896,7 @@ pub fn run() {
             invert_selection,
             expand_selection,
             contract_selection,
+            smooth_selection,
             reselect,
             deselect,
             export_png,

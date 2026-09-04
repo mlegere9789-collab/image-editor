@@ -10,6 +10,7 @@ import type {
   DocumentView,
   HistoryState,
   MoveDirection,
+  SelectionShape,
   Snapshot,
   Tool,
 } from "./types";
@@ -28,6 +29,16 @@ const IDENTITY_CHANNEL_MIXER = [
 /** Output values for the five fixed Curves control points at input
  * positions 0, 64, 128, 192, 255. This is the no-op curve. */
 const IDENTITY_CURVE = [0, 64, 128, 192, 255];
+
+/** Heading/label text for the Expand/Contract/Smooth shared dialog. */
+const MODIFY_SELECTION_LABELS: Record<
+  "expand" | "contract" | "smooth",
+  { heading: string; control: string }
+> = {
+  expand: { heading: "Expand selection", control: "Expand By (px)" },
+  contract: { heading: "Contract selection", control: "Contract By (px)" },
+  smooth: { heading: "Smooth selection", control: "Smooth Radius (px)" },
+};
 
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
 function hexToRgb(hex: string): [number, number, number] {
@@ -64,6 +75,25 @@ function overlayStyle(
     width: `${((bounds.x1 - bounds.x0) / doc.width) * 100}%`,
     height: `${((bounds.y1 - bounds.y0) / doc.height) * 100}%`,
   };
+}
+
+/** Border radius for a `roundedRectangle` selection outline. Expressed as
+ * independent horizontal/vertical percentages (CSS's `x% / y%` border-radius
+ * syntax) of the outline element's own width/height, so the displayed
+ * corners track the true pixel radius even though the element itself is
+ * laid out in percentages, not pixels. */
+function selectionRadiusStyle(
+  shape: SelectionShape,
+  bounds: { x0: number; y0: number; x1: number; y1: number },
+): React.CSSProperties {
+  if (typeof shape !== "object") return {};
+  const { radius } = shape.roundedRectangle;
+  const width = bounds.x1 - bounds.x0;
+  const height = bounds.y1 - bounds.y0;
+  if (radius <= 0 || width <= 0 || height <= 0) return {};
+  const horizontal = (radius / width) * 100;
+  const vertical = (radius / height) * 100;
+  return { borderRadius: `${horizontal}% / ${vertical}%`, overflow: "hidden" };
 }
 
 /** The two arbitrary drag corners of an in-progress marquee, normalized into
@@ -103,9 +133,9 @@ export default function App() {
   const [newWidth, setNewWidth] = useState(800);
   const [newHeight, setNewHeight] = useState(600);
 
-  // Select > Modify > Expand/Contract share one dialog: `null` means closed,
-  // otherwise which of the two backend commands Apply should send.
-  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | null>(null);
+  // Select > Modify > Expand/Contract/Smooth share one dialog: `null` means
+  // closed, otherwise which of the three backend commands Apply should send.
+  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | "smooth" | null>(null);
   const [modifyAmount, setModifyAmount] = useState(4);
 
   const [showThresholdDialog, setShowThresholdDialog] = useState(false);
@@ -273,8 +303,12 @@ export default function App() {
 
   const applyModifySelection = useCallback(async () => {
     if (modifyMode === null) return;
-    const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
-    await runCommand(command, { amount: modifyAmount });
+    if (modifyMode === "smooth") {
+      await runCommand("smooth_selection", { radius: modifyAmount });
+    } else {
+      const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
+      await runCommand(command, { amount: modifyAmount });
+    }
     setModifyMode(null);
   }, [runCommand, modifyMode, modifyAmount]);
 
@@ -874,6 +908,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setModifyMode("smooth")}
+            disabled={busy || !hasSelection}
+            title="Select > Modify > Smooth"
+          >
+            Smooth…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={deselect}
             disabled={busy || !hasSelection}
             title="Deselect (Ctrl/Cmd+D)"
@@ -1147,16 +1189,12 @@ export default function App() {
           <div
             className="modal"
             role="dialog"
-            aria-label={modifyMode === "expand" ? "Expand selection" : "Contract selection"}
+            aria-label={MODIFY_SELECTION_LABELS[modifyMode].heading}
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">
-              {modifyMode === "expand" ? "Expand selection" : "Contract selection"}
-            </h2>
+            <h2 className="modal__heading">{MODIFY_SELECTION_LABELS[modifyMode].heading}</h2>
             <label className="control">
-              <span className="control__label">
-                {modifyMode === "expand" ? "Expand By (px)" : "Contract By (px)"}
-              </span>
+              <span className="control__label">{MODIFY_SELECTION_LABELS[modifyMode].control}</span>
               <input
                 type="number"
                 min={1}
@@ -1935,7 +1973,10 @@ export default function App() {
                     className={`selection-outline${
                       document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
                     }`}
-                    style={overlayStyle(document.selection.bounds, document)}
+                    style={{
+                      ...overlayStyle(document.selection.bounds, document),
+                      ...selectionRadiusStyle(document.selection.shape, document.selection.bounds),
+                    }}
                   />
                   {document.selection.inverted && (
                     // Select > Inverse selects everywhere *outside* the shape above —

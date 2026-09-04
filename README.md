@@ -1388,6 +1388,75 @@ formula exactly (e.g. a shadow pixel's red channel `20 → 84` at luma
 **265 Rust tests total** (256 → 265, 258 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 12 — Select > Modify > Smooth (rounded-rectangle selections)
+
+Select > Modify > Smooth rounds a selection's corners. Photoshop's own
+Smooth operates on arbitrary, possibly irregular selections by rounding
+off jagged edges and filling small gaps in a pixel-mask representation.
+This project's selection system represents a selection as a shape plus
+its bounding box rather than a mask (`Rectangle` or `Ellipse`, plus an
+`inverted` flag) — cheap to clone and exact for those two shapes, but
+with no notion of "jagged pixels" to smooth away. The well-defined
+analogue on a `Rectangle` selection is to round its corners by a given
+radius, which is exactly what a third `SelectionShape::RoundedRectangle
+{ radius }` variant adds. Applied to an `Ellipse` selection, Smooth is a
+no-op: an ellipse's boundary is already smooth everywhere, so rounding
+its nonexistent corners changes nothing — a deliberate scope cut in the
+same spirit as every other adjustment in this project that trims
+Photoshop's full generality down to a single well-defined behaviour.
+`radius` is clamped to at most half the shorter side of the selection's
+bounding box, since a larger corner radius has no further visual effect
+once the rectangle is already as rounded as it can get (a "stadium"
+shape). Smooth is an error if nothing is selected, or if `radius` is
+zero.
+
+Containment for the new shape is a standard rounded-rectangle hit test:
+clamp the query point onto the rectangle inset by `radius` on every
+side, then require the point be within `radius` of that clamped point.
+On a flat edge (away from any corner) this reduces to an ordinary
+straight-edge distance check, so — unlike an ellipse — a rounded
+rectangle's flat sides stay selected right up to their original
+boundary; only the four corner regions get cut away. `SelectionShape`
+being a mixed enum (two unit variants, one struct variant) serializes
+under serde's default external tagging as `"rectangle"` / `"ellipse"`
+for the old two, and `{ roundedRectangle: { radius } }` for the new one
+— no extra derive attributes needed.
+
+`Document::smooth_selection` is a new top-level command alongside the
+existing `expand_selection`/`contract_selection`, exposed in the
+frontend as a **Smooth…** toolbar button that reuses the same shared
+Expand/Contract dialog (a small heading/label lookup table now keys off
+all three modes instead of a binary ternary) and sends a `radius`
+parameter instead of `amount`. The marching-ants selection outline gains
+a `selectionRadiusStyle` helper that expresses the pixel radius as CSS's
+independent horizontal/vertical border-radius percentages (`x% / y%`),
+so the displayed rounded corners track the true pixel radius even
+though the outline element itself is laid out in percentages, not
+pixels, of the canvas.
+
+**Verified two ways.** New `document.rs` tests cover: smoothing a
+rectangle producing the expected `RoundedRectangle` shape with unchanged
+bounds, the radius being clamped to half the shorter side, smoothing an
+ellipse being an exact no-op, a zero radius being an error, smoothing
+with nothing selected being an error, and — mirroring the existing
+ellipse-corner-exclusion test — a rounded rectangle excluding a true
+corner pixel from a brush stroke while still including a pixel on the
+flat middle of an edge (demonstrating rounding only cuts the corners,
+not the whole boundary, unlike an ellipse). Live under Xvfb: created an
+800×600 document, used **Select All** to get a full-canvas rectangle
+selection (a live pointer-drag on an empty canvas proved unreliable to
+drive headlessly and isn't this feature's concern), opened **Smooth…**,
+set the radius to `60`, and applied — the marching-ants outline visibly
+grew rounded corners while its flat edges stayed straight, exactly the
+CSS helper's intent. Switched to the Brush tool and clicked once inside
+a corner that the rounding had cut away (no paint landed — correctly
+blocked) and once in the selection's centre (a paint dot appeared),
+confirming paint confinement respects the new shape exactly as the unit
+tests already proved algebraically.
+
+**271 Rust tests total** (265 → 271, 264 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
