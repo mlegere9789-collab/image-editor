@@ -78,6 +78,8 @@ export type Tool =
   | "eraser"
   | "selectRect"
   | "selectEllipse"
+  | "selectRow"
+  | "selectColumn"
   | "eyedropper"
   | "paintBucket"
   | "gradient";

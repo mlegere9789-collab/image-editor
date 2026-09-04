@@ -346,9 +346,23 @@ export default function App() {
 
   const canPaint = document !== null && selectedId !== null;
   const isMarqueeTool = tool === "selectRect" || tool === "selectEllipse";
+  const isLineSelect = tool === "selectRow" || tool === "selectColumn";
   const isEyedropper = tool === "eyedropper";
   const isPaintBucket = tool === "paintBucket";
   const isGradient = tool === "gradient";
+
+  const selectLineAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document) return;
+      const [x, y] = toDocPoint(event, document);
+      const bounds =
+        tool === "selectRow"
+          ? { x0: 0, y0: Math.floor(y), x1: document.width, y1: Math.floor(y) + 1 }
+          : { x0: Math.floor(x), y0: 0, x1: Math.floor(x) + 1, y1: document.height };
+      void runCommand("select_rectangle", bounds);
+    },
+    [document, tool, runCommand],
+  );
 
   const sampleColorAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -397,6 +411,10 @@ export default function App() {
         if (canPaint) fillAt(event);
         return;
       }
+      if (isLineSelect) {
+        selectLineAt(event);
+        return;
+      }
       if (isGradient) {
         if (!canPaint) return;
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -426,6 +444,8 @@ export default function App() {
       sampleColorAt,
       isPaintBucket,
       fillAt,
+      isLineSelect,
+      selectLineAt,
       isGradient,
       isMarqueeTool,
       canPaint,
@@ -586,6 +606,24 @@ export default function App() {
             onClick={() => setTool("selectEllipse")}
           >
             Ellipse Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectRow"}
+            onClick={() => setTool("selectRow")}
+            title="Single Row Marquee: selects one full-width, 1px-tall row"
+          >
+            Single Row
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectColumn" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectColumn"}
+            onClick={() => setTool("selectColumn")}
+            title="Single Column Marquee: selects one full-height, 1px-wide column"
+          >
+            Single Column
           </button>
           <button
             className="button button--quiet"
@@ -776,7 +814,7 @@ export default function App() {
           {compositeSrc && document && (
             <div className="canvas-wrap">
               <img
-                className={`canvas${(isMarqueeTool || isEyedropper ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
+                className={`canvas${(isMarqueeTool || isLineSelect || isEyedropper ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
                 src={compositeSrc}
                 alt="Flattened composite"
                 draggable={false}

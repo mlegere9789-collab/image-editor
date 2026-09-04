@@ -175,6 +175,14 @@ body {
   cursor: crosshair;
 }
 
+.canvas--selectRow {
+  cursor: row-resize;
+}
+
+.canvas--selectColumn {
+  cursor: col-resize;
+}
+
 .canvas--eyedropper {
   cursor: copy;
 }

@@ -449,7 +449,7 @@ Deselect (outline disappears, Reselect changes from disabled to enabled)
 → Reselect (outline reappears, Deselect/Invert re-enable) — all four
 single clicks, screenshotted at each step.
 
-## Phase 10: layer lock
+## Phase 10 — Lock / Merge Visible / Flatten Image / Merge Down / Eyedropper / Paint Bucket / Gradient / Single Row & Column Marquee
 
 `Layer` gains a `locked: bool` (Photoshop's "Lock image pixels" — the one
 lock sub-mode that actually protects against the edits this app can make).
@@ -683,6 +683,44 @@ projection math.
 
 **142 Rust tests total** (136 → 142). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
+
+**Single Row Marquee / Single Column Marquee.** Photoshop's two
+one-pixel-thick marquee variants — a full-width, 1px-tall row and a
+full-height, 1px-wide column, each placed at the click point rather than
+dragged out. Both reuse the already-existing `select_rectangle` command
+outright: `selectLineAt` computes a `Rect` that spans the whole canvas in
+one axis and pins a single pixel in the other (`{x0: 0, y0: floor(y), x1:
+width, y1: floor(y) + 1}` for a row; the transposed shape for a column) and
+calls `select_rectangle` with it, so there is no new Rust code at all —
+the selection model, `contains()`, stroke/fill confinement, and Reselect
+all already work correctly for a 1px-tall or 1px-wide rectangle without
+any change. The frontend adds `isLineSelect` (`tool === "selectRow" ||
+tool === "selectColumn"`) as a third `handlePointerDown` mode alongside
+the existing eyedropper/paint-bucket single-click tools — it fires a
+single `select_rectangle` call on pointerdown and returns, with no
+drag/pointerup handling needed since the position is exactly the click
+point. **Single Row** and **Single Column** toolbar buttons sit next to
+Rect/Ellipse Select in the existing Selection tool group, and the
+canvas's cursor-gating (`hasDocument`, not `canPaint` — like the other
+selection tools, no layer needs to be selected to draw a selection) and
+per-tool cursor CSS (`row-resize` / `col-resize`, distinguishing them at a
+glance from the marquee tools' `crosshair`) follow the same pattern as
+every other tool.
+
+**Verified two ways.** No new Rust surface exists to unit-test — this
+increment is a pure frontend composition of an already-thoroughly-tested
+command, so its correctness rests entirely on `select_rectangle`'s
+existing coverage plus live behavior. Live under Xvfb: New… (800×600) →
+**Single Row** → clicked mid-canvas — a hairline marching-ants outline
+appeared spanning the full canvas width at exactly the clicked row, with
+**Reselect** newly enabled. Switched to **Single Column** → clicked
+elsewhere on the canvas — the previous row selection was replaced by a
+hairline outline spanning the full canvas height at exactly the clicked
+column. Both screenshotted and visually confirmed pixel-precise against
+the click position.
+
+**142 Rust tests total** (unchanged — frontend-only increment). `cargo fmt`,
+`clippy`, `cargo test`, and `npm run build` all clean.
 
 ## Prerequisites
 
