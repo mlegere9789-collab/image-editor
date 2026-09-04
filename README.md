@@ -2287,6 +2287,68 @@ doing its job on real content.
 **355 Rust tests total** (349 → 355, 348 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 26 — Filter > Noise > Median / Despeckle / Dust & Scratches
+
+The first *rank* filter, and a different kind of neighbourhood operation
+from every blur so far: instead of averaging a window, a median filter
+sorts it and keeps the middle sample. That one change is why it does
+what blurs can't — an isolated speck (dust, a hot pixel,
+salt-and-pepper noise) never survives to the middle of the sorted list,
+so it vanishes outright, while a genuine edge keeps a value from one
+side or the other rather than a smeared blend. A new free function,
+`median_at`, samples the same `(2·radius+1)`-square, edge-clamped window
+`box_blur_at` uses, but collects each channel's samples into its own
+list, sorts it, and takes the middle element; the window always holds
+an odd number of samples, so there is a true middle and no averaging of
+two neighbours is ever needed.
+
+Three commands sit on top of it. `Document::dust_and_scratches(id,
+radius, threshold)` is the general one: a channel is replaced by its
+neighbourhood median only when it differs from that median by at least
+`threshold` levels, which is exactly Photoshop's Threshold control —
+a real speck differs a lot and is removed, fine low-contrast texture
+differs only slightly and is left alone. `Document::median(id, radius)`
+is that with a threshold of 0 (replace everything), and is implemented
+*on top of* `dust_and_scratches` rather than the other way round for
+that reason. `Document::despeckle(id)` is `median` at radius 1: a 3×3
+median is the textbook implementation of Photoshop's own description
+of Despeckle ("detects edges and blurs everything except them"). All
+three inherit the pre-pass snapshot, selection confinement, lock
+checks, and the "all four channels independently" scope cut from the
+blur filters.
+
+The frontend adds a **Median…** dialog (radius 1–16), a one-click
+**Despeckle** button, and a **Dust & Scratches…** dialog (radius 1–16,
+threshold 0–255) after the sharpen presets in the adjustments toolbar.
+
+**Verified two ways.** Seven new `document.rs` tests reuse the ramped
+3×3 layer whose box-blur windows were already derived by hand, so every
+median can be checked against a known sample list: the centre's window
+is all nine values 10..=90 and its 5th is 50; the top-left corner's
+edge-clamped samples (10,10,20,10,10,20,40,40,50) sort to
+10,10,10,10,20,20,40,40,50 with a 5th of 20 — where the mean gave 23,
+the median lands on an actual sampled value — and the bottom-right
+corner's sort to a 5th of 80 (the mean gave 76). A dedicated test puts
+a single 255 speck in a flat field of 100 and confirms the median
+throws it away entirely (100) where a box blur would only have dimmed
+it to 117. The threshold test relies on both corners differing from
+their medians by exactly 10: a threshold of 11 protects them, a
+threshold of 10 (inclusive boundary) replaces them. Selection
+confinement, zero-radius, locked-layer and unknown-layer errors, and
+Despeckle-equals-radius-1-median round out the set, all passing on
+first run. Live under Xvfb, on the bundled gradient sample: **Despeckle**
+(and **Dust & Scratches** at its defaults, which is the same 3×3
+median) visibly thinned the white grid lines — the sample's lines are
+about two pixels wide, so a 3×3 window can't quite out-vote them —
+while **Median…** at 2px (a 5×5 window) erased every grid line
+completely, left the colour gradient entirely unblurred, and kept only
+a tiny white dot at each line crossing: at an intersection the white
+cross fills 16 of the 25 samples and so legitimately wins the median,
+a textbook rank-filter artefact rather than a bug.
+
+**362 Rust tests total** (355 → 362, 355 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

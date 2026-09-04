@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 66.**
+**593 distinct capabilities tracked. Currently shipped: 69.**
 
 ## PART I — EVERY TOOL
 
@@ -499,9 +499,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Uniform Noise
 - [ ] Gaussian Noise
 - [ ] Monochromatic Noise
-- [ ] Despeckle
-- [ ] Dust & Scratches
-- [ ] Median
+- [x] Despeckle (one-click 3x3 median — see README Phase 26)
+- [x] Dust & Scratches (median with Photoshop's Threshold gate — see README Phase 26)
+- [x] Median (per-channel neighbourhood median, radius dialog — see README Phase 26)
 - [ ] Reduce Noise
 - [ ] High Pass
 - [ ] Maximum

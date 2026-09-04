@@ -231,6 +231,13 @@ export default function App() {
   const [motionBlurAngle, setMotionBlurAngle] = useState(0);
   const [motionBlurDistance, setMotionBlurDistance] = useState(10);
 
+  const [showMedianDialog, setShowMedianDialog] = useState(false);
+  const [medianRadius, setMedianRadius] = useState(1);
+
+  const [showDustAndScratchesDialog, setShowDustAndScratchesDialog] = useState(false);
+  const [dustRadius, setDustRadius] = useState(1);
+  const [dustThreshold, setDustThreshold] = useState(0);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -571,6 +578,22 @@ export default function App() {
     });
     setShowMotionBlurDialog(false);
   }, [runCommand, selectedId, motionBlurAngle, motionBlurDistance]);
+
+  const applyMedian = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("median", { id: selectedId, radius: medianRadius });
+    setShowMedianDialog(false);
+  }, [runCommand, selectedId, medianRadius]);
+
+  const applyDustAndScratches = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("dust_and_scratches", {
+      id: selectedId,
+      radius: dustRadius,
+      threshold: dustThreshold,
+    });
+    setShowDustAndScratchesDialog(false);
+  }, [runCommand, selectedId, dustRadius, dustThreshold]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1421,6 +1444,32 @@ export default function App() {
             title="Filter > Sharpen > Sharpen Edges (one-click, 100% gated behind an edge threshold of 20)"
           >
             Sharpen Edges
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMedianDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Noise > Median"
+          >
+            Median…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("despeckle", { id: selectedId })
+            }
+            disabled={busy || !canPaint}
+            title="Filter > Noise > Despeckle (one-click, 3x3 median)"
+          >
+            Despeckle
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDustAndScratchesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Noise > Dust & Scratches"
+          >
+            Dust &amp; Scratches…
           </button>
           <input
             type="color"
@@ -2524,6 +2573,98 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyMotionBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMedianDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMedianDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Median"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Noise &gt; Median</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{medianRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={medianRadius}
+                onChange={(event) => setMedianRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowMedianDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyMedian} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDustAndScratchesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDustAndScratchesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Dust & Scratches"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Noise &gt; Dust &amp; Scratches</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{dustRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={dustRadius}
+                onChange={(event) => setDustRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Threshold
+                <span className="control__value">{dustThreshold}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={dustThreshold}
+                onChange={(event) => setDustThreshold(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDustAndScratchesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDustAndScratches} disabled={busy}>
                 Apply
               </button>
             </div>

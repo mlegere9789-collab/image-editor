@@ -254,6 +254,48 @@ fn motion_blur_at(
     average_samples(source, doc_width, samples)
 }
 
+/// The per-channel *median* (not mean) of `source`'s pixels in the same
+/// `(2*radius+1)`-square, edge-clamped window [`box_blur_at`] uses. Each
+/// channel is sorted independently and its middle sample taken — the
+/// window always holds an odd number of samples, so there's a true
+/// middle and no averaging of two neighbours is ever needed. Repeated
+/// edge samples count as many times as they're sampled, exactly as in
+/// `box_blur_at`. A median filter is the classic way to remove isolated
+/// specks (dust, hot pixels, salt-and-pepper noise) without softening
+/// edges the way a mean does: an outlier never survives to the middle of
+/// the sorted list, while a genuine edge — where roughly half the window
+/// is one colour and half another — keeps a value from one side or the
+/// other rather than a smeared blend.
+fn median_at(
+    source: &[u8],
+    doc_width: usize,
+    width: i64,
+    height: i64,
+    row: u32,
+    col: u32,
+    radius: i64,
+) -> [u8; CHANNELS] {
+    let side = (2 * radius + 1) as usize;
+    let mut channels: [Vec<u8>; CHANNELS] =
+        std::array::from_fn(|_| Vec::with_capacity(side * side));
+    for dy in -radius..=radius {
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        for dx in -radius..=radius {
+            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+            let base = (sy * doc_width + sx) * CHANNELS;
+            for (c, samples) in channels.iter_mut().enumerate() {
+                samples.push(source[base + c]);
+            }
+        }
+    }
+    let mut median = [0u8; CHANNELS];
+    for (out, samples) in median.iter_mut().zip(channels.iter_mut()) {
+        samples.sort_unstable();
+        *out = samples[samples.len() / 2];
+    }
+    median
+}
+
 impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
@@ -1222,6 +1264,78 @@ impl Document {
     /// levels (out of 255) on a channel before that channel is touched.
     pub fn sharpen_edges(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
         self.unsharp_mask(id, 1, 1.0, 20)
+    }
+
+    /// Filter > Noise > Median: replaces every channel of each pixel in
+    /// the active selection (or the whole layer, with none) with the
+    /// median of its `(2*radius+1)`-square neighbourhood — see
+    /// [`median_at`] for why a median removes specks without softening
+    /// edges the way [`Self::box_blur`]'s mean does. Same edge-clamping,
+    /// same pre-pass snapshot (so already-filtered pixels never feed
+    /// later ones), same "all four channels, un-premultiplied" scope cut
+    /// as the blur filters. Errors on a zero radius or a locked/unknown
+    /// layer.
+    pub fn median(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        self.dust_and_scratches(id, radius, 0)
+    }
+
+    /// Filter > Noise > Despeckle: Photoshop's one-click "remove the
+    /// specks, keep the edges" filter, described in its own docs as
+    /// detecting edges and blurring everything except them. A radius-1
+    /// (3x3) median is the textbook implementation of exactly that
+    /// behaviour — outliers vanish, edges survive — so this is
+    /// [`Self::median`] at radius 1, with no dialog.
+    pub fn despeckle(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.median(id, 1)
+    }
+
+    /// Filter > Noise > Dust & Scratches: [`Self::median`] with
+    /// Photoshop's Threshold control — a channel is only replaced by its
+    /// neighbourhood median when it differs from that median by at
+    /// least `threshold` levels, so a genuine speck (which differs a
+    /// lot) is removed while fine, low-contrast texture (which differs
+    /// only slightly) is left alone. A threshold of 0 replaces every
+    /// pixel and is exactly `median`, which is why `median` is
+    /// implemented on top of this rather than the other way round.
+    /// Errors on a zero radius or a locked/unknown layer.
+    pub fn dust_and_scratches(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        threshold: u8,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Median radius must be at least 1 pixel.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        let threshold = threshold as i32;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let median = median_at(&source, doc_width, width, height, row, col, r);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (c, &m) in median.iter().enumerate() {
+                    let original = source[dst + c];
+                    if (original as i32 - m as i32).abs() >= threshold {
+                        layer.pixels[dst + c] = m;
+                    }
+                }
+            }
+        }
+        Ok(Some(bounds))
     }
 
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
@@ -3479,6 +3593,108 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.blur(999).is_err());
         assert!(empty.sharpen_edges(999).is_err());
+    }
+
+    #[test]
+    fn median_replaces_each_channel_with_its_neighbourhood_median() {
+        let (mut doc, id) = ramped_3x3();
+
+        doc.median(id, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Centre: all nine values 10..=90, middle (5th of 9) is 50.
+        assert_eq!(pixels[idx(1, 1)], 50);
+        // Top-left corner's edge-clamped window is the same nine samples
+        // the box-blur test derives (10,10,20,10,10,20,40,40,50); sorted
+        // that is 10,10,10,10,20,20,40,40,50 and the 5th is 20 — where the
+        // mean gave 23, the median stays on an actual sampled value.
+        assert_eq!(pixels[idx(0, 0)], 20);
+        // Bottom-right: samples 50,60,60,80,90,90,80,90,90 sort to
+        // 50,60,60,80,80,90,90,90,90 — 5th is 80 (the mean gave 76).
+        assert_eq!(pixels[idx(2, 2)], 80);
+        // Green/blue are uniformly 0 and alpha uniformly 255: a median of
+        // identical samples is that sample, so both pass through exactly.
+        assert_eq!(pixels[idx(0, 0) + 1], 0);
+        assert_eq!(pixels[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn median_removes_an_isolated_speck_but_a_mean_would_only_dim_it() {
+        // A flat 3x3 field of 100 with one 255 speck in the middle: the
+        // median throws the outlier away entirely (100), whereas box_blur
+        // would have smeared it to (8*100 + 255)/9 = 117.
+        let mut doc = Document::new(3, 3).unwrap();
+        let mut pixels = solid(3, 3, [100, 100, 100, 255]);
+        let centre = |x: usize, y: usize| (y * 3 + x) * 4;
+        pixels[centre(1, 1)] = 255;
+        let id = doc.add_layer("speck", &pixels, 3, 3).unwrap();
+
+        doc.median(id, 1).unwrap();
+
+        assert_eq!(doc.layers()[0].pixels[centre(1, 1)], 100);
+    }
+
+    #[test]
+    fn median_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap(); // just the top-left pixel
+
+        doc.median(id, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(pixels[idx(0, 0)], 20);
+        assert_eq!(pixels[idx(1, 0)], 20); // untouched original
+        assert_eq!(pixels[idx(2, 2)], 90); // untouched original
+    }
+
+    #[test]
+    fn median_with_zero_radius_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        let err = doc.median(id, 0).unwrap_err();
+        assert!(err.contains("at least 1"), "{err}");
+    }
+
+    #[test]
+    fn median_on_a_locked_or_unknown_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.median(id, 1).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        assert!(doc.median(999, 1).is_err());
+        assert!(doc.despeckle(999).is_err());
+        assert!(doc.dust_and_scratches(999, 1, 0).is_err());
+    }
+
+    #[test]
+    fn despeckle_is_a_radius_one_median() {
+        let (mut doc, id) = ramped_3x3();
+        doc.despeckle(id).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(pixels[idx(0, 0)], 20);
+        assert_eq!(pixels[idx(2, 2)], 80);
+    }
+
+    #[test]
+    fn dust_and_scratches_threshold_gates_replacement() {
+        // Both corners differ from their median by exactly 10 levels
+        // (10 vs 20, 90 vs 80): a threshold of 11 protects them, a
+        // threshold of 10 (the boundary, inclusive) replaces them.
+        let (mut doc, id) = ramped_3x3();
+        doc.dust_and_scratches(id, 1, 11).unwrap();
+        let pixels = doc.layers()[0].pixels.clone();
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(pixels[idx(0, 0)], 10);
+        assert_eq!(pixels[idx(2, 2)], 90);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.dust_and_scratches(id, 1, 10).unwrap();
+        let pixels = &doc.layers()[0].pixels;
+        assert_eq!(pixels[idx(0, 0)], 20);
+        assert_eq!(pixels[idx(2, 2)], 80);
     }
 
     #[test]

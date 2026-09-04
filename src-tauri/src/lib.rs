@@ -698,6 +698,31 @@ fn sharpen_edges(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, St
     edit_checkpointed(&state, |document| document.sharpen_edges(id))
 }
 
+/// Filter > Noise > Median on layer `id`.
+#[tauri::command]
+fn median(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.median(id, radius))
+}
+
+/// Filter > Noise > Despeckle on layer `id`.
+#[tauri::command]
+fn despeckle(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.despeckle(id))
+}
+
+/// Filter > Noise > Dust & Scratches on layer `id`.
+#[tauri::command]
+fn dust_and_scratches(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    threshold: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.dust_and_scratches(id, radius, threshold)
+    })
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1125,6 +1150,9 @@ pub fn run() {
             sharpen,
             sharpen_more,
             sharpen_edges,
+            median,
+            despeckle,
+            dust_and_scratches,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
