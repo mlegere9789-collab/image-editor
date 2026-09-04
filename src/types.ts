@@ -28,11 +28,22 @@ export type LayerView = {
   blendMode: BlendMode;
 };
 
+/** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase). */
+export type SelectionShape = "rectangle" | "ellipse";
+
+/** Mirrors `Selection` (aka `SelectionView`) in src-tauri/src/document.rs. */
+export type Selection = {
+  shape: SelectionShape;
+  bounds: { x0: number; y0: number; x1: number; y1: number };
+};
+
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */
 export type DocumentView = {
   width: number;
   height: number;
   layers: LayerView[];
+  /** `null` when nothing is selected: no outline, every stroke unrestricted. */
+  selection: Selection | null;
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
@@ -54,5 +65,6 @@ export type Snapshot = HistoryState & {
 
 export type MoveDirection = "up" | "down";
 
-/** The two ways a pointer drag on the canvas can edit the selected layer. */
-export type Tool = "brush" | "eraser";
+/** What a pointer drag on the canvas does: edit the selected layer, or
+ * redefine the document's selection. */
+export type Tool = "brush" | "eraser" | "selectRect" | "selectEllipse";

@@ -139,12 +139,27 @@ body {
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
+.canvas-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+  /* A pointer drag across the canvas is a tool gesture, never a native
+     "select this image" gesture — without this, WebKitGTK renders its own
+     full-image selection highlight over any click-drag. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .canvas {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
   touch-action: none;
+  -webkit-user-drag: none;
 }
 
 .canvas--brush {
@@ -153,6 +168,47 @@ body {
 
 .canvas--eraser {
   cursor: cell;
+}
+
+.canvas--selectRect,
+.canvas--selectEllipse {
+  cursor: crosshair;
+}
+
+/* A selection's marching-ants outline: four repeating-gradient "edges"
+   (border-style: dashed itself has no animatable offset), animated in the
+   direction that reads as ants marching clockwise. mix-blend-mode: difference
+   keeps it visible against either theme or any image colour underneath,
+   rather than picking one fixed outline colour that could vanish into a
+   similarly-coloured canvas. */
+.selection-outline {
+  position: absolute;
+  pointer-events: none;
+  mix-blend-mode: difference;
+  background-image:
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+  background-size: 8px 1.5px, 8px 1.5px, 1.5px 8px, 1.5px 8px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  animation: marching-ants 0.5s linear infinite;
+}
+
+.selection-outline--ellipse {
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+@keyframes marching-ants {
+  to {
+    background-position:
+      8px 0,
+      -8px 100%,
+      0 -8px,
+      100% 8px;
+  }
 }
 
 .notice {

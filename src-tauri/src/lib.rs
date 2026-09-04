@@ -319,6 +319,48 @@ fn new_document(state: State<'_, AppState>, width: u32, height: u32) -> Result<S
     create_new_document(&state, width, height)
 }
 
+/// Replace the selection with an axis-aligned rectangle. Corners can be given
+/// in either order, as a drag can go any direction. A whole, discrete action
+/// on its own (not one step of a longer gesture), so it checkpoints itself —
+/// the same as every other one-shot command below.
+#[tauri::command]
+fn select_rectangle(
+    state: State<'_, AppState>,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_rectangle(x0, y0, x1, y1)?;
+        Ok(None)
+    })
+}
+
+/// Replace the selection with an ellipse inscribed in the given bounding box.
+#[tauri::command]
+fn select_ellipse(
+    state: State<'_, AppState>,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_ellipse(x0, y0, x1, y1)?;
+        Ok(None)
+    })
+}
+
+/// Clear the selection.
+#[tauri::command]
+fn deselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.deselect();
+        Ok(None)
+    })
+}
+
 /// Add `path` as a new top layer of the open document. The document keeps its
 /// original size: a smaller image is pasted at the origin, a larger one clipped.
 #[tauri::command]
@@ -516,6 +558,9 @@ pub fn run() {
             move_layer,
             paint_stroke,
             erase_stroke,
+            select_rectangle,
+            select_ellipse,
+            deselect,
             export_png,
             save_project,
             open_project,

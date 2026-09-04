@@ -63,6 +63,86 @@ pub struct Document {
     /// Bottom-to-top.
     layers: Vec<Layer>,
     next_id: LayerId,
+    /// `None` means no active selection — the same as Photoshop's "Select
+    /// All" state: every command that respects a selection treats a `None`
+    /// document as unrestricted.
+    selection: Option<Selection>,
+}
+
+/// The shape of the region a [`Selection`] covers within its bounding box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionShape {
+    Rectangle,
+    Ellipse,
+}
+
+/// A hard-edged (no feather, no anti-aliasing) region of the document that
+/// paint/erase strokes are clipped to. Represented as a shape plus its
+/// bounding box rather than a document-sized mask — cheap to clone (every
+/// `stroke()` call needs its own copy, see below) and exact for the two
+/// shapes this supports today. A freehand/lasso selection, once added, would
+/// need an actual mask and probably a third variant here rather than
+/// replacing this representation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Selection {
+    pub shape: SelectionShape,
+    pub bounds: Rect,
+}
+
+impl Selection {
+    /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
+    /// [`Document::stroke`] already samples at — falls inside this selection.
+    fn contains(&self, px: f32, py: f32) -> bool {
+        let Rect { x0, y0, x1, y1 } = self.bounds;
+        if px < x0 as f32 || px >= x1 as f32 || py < y0 as f32 || py >= y1 as f32 {
+            return false;
+        }
+        match self.shape {
+            SelectionShape::Rectangle => true,
+            SelectionShape::Ellipse => {
+                let (cx, cy) = ((x0 as f32 + x1 as f32) / 2.0, (y0 as f32 + y1 as f32) / 2.0);
+                let (rx, ry) = ((x1 - x0) as f32 / 2.0, (y1 - y0) as f32 / 2.0);
+                let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
+                nx * nx + ny * ny <= 1.0
+            }
+        }
+    }
+}
+
+/// The subset of a [`Selection`] the UI needs to draw its outline.
+pub type SelectionView = Selection;
+
+/// Turn two arbitrary drag corners into a selection's bounding box: sorted
+/// into min/max, clamped to the document, and rejected if it covers no
+/// pixels (a click with no drag).
+fn normalize_selection_bounds(
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    width: u32,
+    height: u32,
+) -> Result<Rect, String> {
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return Err("Selection coordinates must be finite numbers.".to_string());
+    }
+    let (min_x, max_x) = (x0.min(x1), x0.max(x1));
+    let (min_y, max_y) = (y0.min(y1), y0.max(y1));
+    let cx0 = (min_x.floor().max(0.0) as u32).min(width);
+    let cy0 = (min_y.floor().max(0.0) as u32).min(height);
+    let cx1 = (max_x.ceil().max(0.0) as u32).min(width);
+    let cy1 = (max_y.ceil().max(0.0) as u32).min(height);
+    if cx0 >= cx1 || cy0 >= cy1 {
+        return Err("A selection must cover at least one pixel.".to_string());
+    }
+    Ok(Rect {
+        x0: cx0,
+        y0: cy0,
+        x1: cx1,
+        y1: cy1,
+    })
 }
 
 /// Where a layer should move in the stack.
@@ -80,6 +160,9 @@ pub struct DocumentView {
     pub height: u32,
     /// Bottom-to-top, matching the model. The UI reverses this for display.
     pub layers: Vec<LayerView>,
+    /// `None` when nothing is selected — the frontend draws no marching-ants
+    /// outline and every stroke is unrestricted.
+    pub selection: Option<SelectionView>,
 }
 
 impl Document {
@@ -93,6 +176,7 @@ impl Document {
             height,
             layers: Vec::new(),
             next_id: 1,
+            selection: None,
         })
     }
 
@@ -113,7 +197,40 @@ impl Document {
             width: self.width,
             height: self.height,
             layers: self.layers.iter().map(Layer::view).collect(),
+            selection: self.selection,
         }
+    }
+
+    /// Replace the selection with an axis-aligned rectangle spanning the two
+    /// corners `(x0, y0)` and `(x1, y1)` — in either order, as a drag can go
+    /// any direction.
+    pub fn select_rectangle(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) -> Result<(), String> {
+        let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
+        self.selection = Some(Selection {
+            shape: SelectionShape::Rectangle,
+            bounds,
+        });
+        Ok(())
+    }
+
+    /// Replace the selection with an ellipse inscribed in the bounding box
+    /// spanning `(x0, y0)` and `(x1, y1)`.
+    pub fn select_ellipse(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) -> Result<(), String> {
+        let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
+        self.selection = Some(Selection {
+            shape: SelectionShape::Ellipse,
+            bounds,
+        });
+        Ok(())
+    }
+
+    /// Clear the selection — every stroke goes back to being unrestricted.
+    pub fn deselect(&mut self) {
+        self.selection = None;
+    }
+
+    pub fn selection(&self) -> Option<Selection> {
+        self.selection
     }
 
     /// Number of bytes in a document-sized RGBA8 buffer.
@@ -250,6 +367,9 @@ impl Document {
         }
 
         let (width, height) = (self.width, self.height);
+        // Copied out before borrowing `self.layers` mutably below — `Selection`
+        // is small (an enum plus four `u32`s), so this is cheap per call.
+        let selection = self.selection;
         let layer = self.layer_mut(id)?;
 
         let mut min_x = f32::INFINITY;
@@ -289,7 +409,12 @@ impl Document {
                     let cx = (x0 as usize + col) as f32 + 0.5;
                     let distance = point_segment_distance(cx, cy, a, b);
                     // A soft 1px edge rather than a hard aliased circle.
-                    let c = (radius - distance + 0.5).clamp(0.0, 1.0);
+                    let mut c = (radius - distance + 0.5).clamp(0.0, 1.0);
+                    if let Some(selection) = &selection {
+                        if !selection.contains(cx, cy) {
+                            c = 0.0;
+                        }
+                    }
                     let slot = &mut coverage[row * box_width + col];
                     if c > *slot {
                         *slot = c;
@@ -740,5 +865,134 @@ mod tests {
     fn stroking_an_unknown_layer_is_an_error() {
         let (mut doc, _) = transparent_doc(3);
         assert!(doc.stroke(999, &[(1.0, 1.0)], 1.0, Stroke::Eraser).is_err());
+    }
+
+    #[test]
+    fn a_new_document_has_no_selection() {
+        let doc = Document::new(4, 4).unwrap();
+        assert_eq!(doc.selection(), None);
+    }
+
+    #[test]
+    fn selecting_a_rectangle_clamps_to_the_document_and_sorts_corners() {
+        let mut doc = Document::new(10, 10).unwrap();
+        // Drag from bottom-right to top-left, past both edges.
+        doc.select_rectangle(-5.0, -5.0, 6.0, 6.0).unwrap();
+        assert_eq!(
+            doc.selection(),
+            Some(Selection {
+                shape: SelectionShape::Rectangle,
+                bounds: Rect {
+                    x0: 0,
+                    y0: 0,
+                    x1: 6,
+                    y1: 6
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn a_zero_area_selection_is_rejected() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.select_rectangle(3.0, 3.0, 3.0, 3.0).is_err());
+        assert!(doc.select_ellipse(3.0, 3.0, 3.0, 8.0).is_err()); // zero width
+    }
+
+    #[test]
+    fn non_finite_selection_coordinates_are_rejected() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.select_rectangle(f32::NAN, 0.0, 5.0, 5.0).is_err());
+    }
+
+    #[test]
+    fn deselect_clears_the_selection() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(0.0, 0.0, 5.0, 5.0).unwrap();
+        assert!(doc.selection().is_some());
+        doc.deselect();
+        assert_eq!(doc.selection(), None);
+    }
+
+    #[test]
+    fn a_rectangle_selection_confines_a_stroke_to_its_bounds() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.select_rectangle(4.0, 0.0, 9.0, 9.0).unwrap();
+        doc.stroke(
+            id,
+            &[(4.0, 4.0)],
+            5.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        // Inside the selection: painted.
+        assert_eq!(pixel(&doc, id, 6, 4), [255, 0, 0, 255]);
+        // Same brush stroke, but left of x=4: outside the selection, untouched
+        // even though it is well within the brush's radius.
+        assert_eq!(pixel(&doc, id, 1, 4), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn an_ellipse_selection_excludes_its_bounding_box_corners() {
+        let (mut doc, id) = transparent_doc(9);
+        doc.select_ellipse(0.0, 0.0, 9.0, 9.0).unwrap();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)], // a bounding-box corner: outside the inscribed circle
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+
+        doc.stroke(
+            id,
+            &[(4.5, 4.5)], // dead centre: well inside the inscribed circle
+            1.0,
+            Stroke::Brush {
+                color: [255, 255, 255, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 4, 4), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn eraser_strokes_are_also_confined_to_the_selection() {
+        let mut doc = Document::new(9, 1).unwrap();
+        let id = doc
+            .add_layer("l", &solid(9, 1, [1, 2, 3, 255]), 9, 1)
+            .unwrap();
+        doc.select_rectangle(5.0, 0.0, 9.0, 1.0).unwrap();
+        // A stroke well clear of both endpoints at the two sample points below,
+        // so each one gets full brush coverage rather than the soft-edge
+        // falloff near a stroke's own ends.
+        doc.stroke(id, &[(0.0, 0.0), (8.0, 0.0)], 1.0, Stroke::Eraser)
+            .unwrap();
+        // Outside the selection: alpha untouched.
+        assert_eq!(pixel(&doc, id, 2, 0)[3], 255);
+        // Inside the selection: erased.
+        assert_eq!(pixel(&doc, id, 7, 0)[3], 0);
+    }
+
+    #[test]
+    fn with_no_selection_a_stroke_is_unrestricted() {
+        // Same geometry as the confinement test above, minus the select
+        // call: without an active selection every stroke paints normally.
+        let (mut doc, id) = transparent_doc(9);
+        doc.stroke(
+            id,
+            &[(1.0, 4.0)],
+            2.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 4), [255, 0, 0, 255]);
     }
 }

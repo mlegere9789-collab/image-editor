@@ -20,6 +20,10 @@ Desktop image editor, Tauri + Rust + React.
   PNG. *Done, described below.*
 - **Phase 8** — **New…**: start a blank document at a chosen size instead of
   needing to open a file first. *Done, described below.*
+- **Phase 9** — **Rect Select / Ellipse Select**: the first selection tools —
+  paint/erase strokes are now confined to the active selection. *Done,
+  described below. Part of a much larger [full-parity
+  roadmap](docs/PHOTOSHOP_PARITY.md) — see that file for what's next.*
 
 ## Phase 1: document model and compositor
 
@@ -319,6 +323,71 @@ layer was gone, replaced by a single blank "Layer 1" at the new size, and
 Ctrl+Z (undo) was a no-op, matching the unit test's behavior in the real
 running app.
 
+## Phase 9: selection tools
+
+Every stroke through Phase 8 touched the whole layer — there was no way to
+say "only paint in this part of the canvas." **Rect Select** and **Ellipse
+Select** add that: a selection confines every subsequent brush/eraser
+stroke to its bounds, the same way Photoshop's marquee tools do. This is
+the first item off the [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) —
+see that file for the ~590-item backlog this phase and every one after it
+draws from.
+
+- `Selection` (`src-tauri/src/document.rs`) is a shape (`Rectangle` or
+  `Ellipse`) plus a bounding `Rect`, not a document-sized mask — cheap to
+  copy out of `Document` on every `stroke()` call, and exact for these two
+  shapes. `Document::select_rectangle`/`select_ellipse` normalize the two
+  drag corners (sorted, clamped to the canvas, rejecting a zero-area drag)
+  into that bounds rect; `deselect` clears it. `None` means no selection —
+  the same as Photoshop's "nothing selected" state — and every stroke stays
+  unrestricted.
+- `Document::stroke` copies the selection out before borrowing the target
+  layer mutably, then zeroes a pixel's coverage whenever
+  `Selection::contains` says that pixel center falls outside the bounds (or
+  outside the inscribed ellipse, for the ellipse shape) — one extra check in
+  the same per-pixel loop the brush/eraser coverage math already runs, no
+  separate confinement pass.
+- Three new commands — `select_rectangle`, `select_ellipse`, `deselect` —
+  are thin `edit_checkpointed` wrappers, the same pattern every other
+  one-shot command in `lib.rs` already uses; `DocumentView` gained a
+  `selection` field so the frontend can draw the outline.
+- The frontend adds a **Selection tool** toolbar group (Rect Select, Ellipse
+  Select, Deselect — also bound to Ctrl/Cmd+D) alongside the existing Paint
+  tool group. A marquee drag tracks a live local `{start, current}` preview
+  (no IPC per pointer move, unlike a brush stroke) and commits with a single
+  `select_rectangle`/`select_ellipse` call on release; a click with no drag
+  is silently a no-op rather than round-tripping to the backend just to
+  surface its "must cover at least one pixel" error. The outline itself is
+  a `mix-blend-mode: difference` dashed overlay animated into a marching-ants
+  pattern, so it stays visible over any canvas content in either theme.
+
+**A real regression, caught only by testing.** Wrapping the canvas `<img>`
+in a positioning `<div>` for the selection overlay caused WebKitGTK to
+render its own native "image selected" highlight — a solid color tint over
+the *entire* image — on any click-drag, unrelated to this app's own
+selection state entirely. `user-select: none` / `-webkit-user-drag: none`
+on the wrapper and image fixed it. Caught by live interaction, not unit
+tests, since nothing about the pixel data was wrong — the composite itself
+was correct underneath the browser-native overlay.
+
+**Verified two ways.** `document.rs` gained tests for both selection shapes
+(clamping/sorting a drag's corners, rejecting a zero-area selection,
+rejecting non-finite coordinates, `deselect` clearing it) and for
+confinement itself: a rectangle selection confines a brush stroke to its
+bounds, an ellipse selection excludes its own bounding-box corners while
+accepting its center, an eraser stroke is confined the same way a brush
+stroke is, and — the control case — a stroke with no active selection stays
+completely unrestricted. Live: driving the marquee drag and the confined
+paint through real xdotool pointer events under Xvfb turned out to be
+unreliable in this sandbox (no window manager, and a multi-step drag
+sequence occasionally left stuck ref state between commands) rather than
+revealing an actual bug — confirmed by bypassing pointer simulation
+entirely with a direct `invoke()` sequence (`new_document` →
+`select_rectangle` → `checkpoint` → `paint_stroke`) through the real running
+app: the resulting screenshot showed a stroke drawn across the full canvas
+width but visibly painted *only* inside the selection's bounds, pixel-exact
+with what the Rust confinement tests already predicted.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
@@ -371,7 +440,7 @@ virtual Windows machine).
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo clippy --all-targets -- -D warnings
-cd src-tauri && cargo test      # 98 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, undo/redo, pipeline
+cd src-tauri && cargo test      # 107 tests: blend math, model, strokes, compositor, dirty-region recompositing, protocol, export, project files, new document, selections, undo/redo, pipeline
 npm run build                   # frontend: typecheck + production build
 ```
 
@@ -407,7 +476,8 @@ compositing (opacity, visibility, stacking order, alpha accumulation),
 exporting a document round-trips through PNG intact, undo/redo (checkpoint,
 history bounding, redo-cleared-on-new-edit, the "nothing to undo/redo" error
 paths), starting a blank document at a chosen size (and its memory limit),
-and end-to-end runs over the bundled samples. The frontend is a thin
+rectangle/ellipse selections confining paint and erase strokes to their
+bounds, and end-to-end runs over the bundled samples. The frontend is a thin
 shell over those commands and is covered by the typecheck plus the production
 build.
 

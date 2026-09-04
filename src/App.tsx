@@ -35,6 +35,39 @@ function toDocPoint(
   ];
 }
 
+/** A doc-pixel rectangle as a percentage-based overlay style, positioned
+ * relative to the canvas image it's drawn over. */
+function overlayStyle(
+  bounds: { x0: number; y0: number; x1: number; y1: number },
+  doc: DocumentView,
+): React.CSSProperties {
+  return {
+    left: `${(bounds.x0 / doc.width) * 100}%`,
+    top: `${(bounds.y0 / doc.height) * 100}%`,
+    width: `${((bounds.x1 - bounds.x0) / doc.width) * 100}%`,
+    height: `${((bounds.y1 - bounds.y0) / doc.height) * 100}%`,
+  };
+}
+
+/** The two arbitrary drag corners of an in-progress marquee, normalized into
+ * a bounds rectangle and clamped to the canvas — purely for the live
+ * preview outline; the backend does its own authoritative clamping once the
+ * drag ends. */
+function marqueeBounds(
+  start: [number, number],
+  current: [number, number],
+  doc: DocumentView,
+): { x0: number; y0: number; x1: number; y1: number } {
+  const [sx, sy] = start;
+  const [cx, cy] = current;
+  return {
+    x0: Math.max(0, Math.min(sx, cx)),
+    y0: Math.max(0, Math.min(sy, cy)),
+    x1: Math.min(doc.width, Math.max(sx, cx)),
+    y1: Math.min(doc.height, Math.max(sy, cy)),
+  };
+}
+
 export default function App() {
   const [document, setDocument] = useState<DocumentView | null>(null);
   // `null` until the first snapshot lands. The composite's actual bytes never
@@ -57,6 +90,18 @@ export default function App() {
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
+
+  // A marquee drag's live start point (a ref, not state — read directly at
+  // pointerup rather than through a closure that could be stale by then, the
+  // same reasoning `lastPoint` below uses for brush strokes). `marqueePreview`
+  // exists only to re-render the live outline as the drag moves; the actual
+  // select_rectangle/select_ellipse call at drag-end recomputes its corners
+  // from the ref and the pointerup event directly.
+  const marqueeStart = useRef<[number, number] | null>(null);
+  const [marqueePreview, setMarqueePreview] = useState<{
+    start: [number, number];
+    current: [number, number];
+  } | null>(null);
 
   // Dragging the opacity slider fires many overlapping commands. Each one is
   // tagged, and only the newest response is allowed to land, so a slow render
@@ -125,6 +170,8 @@ export default function App() {
 
   const undo = useCallback(() => void runCommand("undo"), [runCommand]);
   const redo = useCallback(() => void runCommand("redo"), [runCommand]);
+  const deselect = useCallback(() => void runCommand("deselect"), [runCommand]);
+  const hasSelection = document?.selection != null;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -136,11 +183,14 @@ export default function App() {
       } else if ((key === "z" && event.shiftKey) || key === "y") {
         event.preventDefault();
         if (canRedo && !busy) redo();
+      } else if (key === "d") {
+        event.preventDefault();
+        if (hasSelection && !busy) deselect();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [canUndo, canRedo, busy, undo, redo]);
+  }, [canUndo, canRedo, busy, undo, redo, hasSelection, deselect]);
 
   useEffect(() => {
     invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
@@ -254,10 +304,19 @@ export default function App() {
   );
 
   const canPaint = document !== null && selectedId !== null;
+  const isMarqueeTool = tool === "selectRect" || tool === "selectEllipse";
 
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
-      if (!canPaint || !document) return;
+      if (!document) return;
+      if (isMarqueeTool) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const point = toDocPoint(event, document);
+        marqueeStart.current = point;
+        setMarqueePreview({ start: point, current: point });
+        return;
+      }
+      if (!canPaint) return;
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = toDocPoint(event, document);
       lastPoint.current = point;
@@ -267,26 +326,52 @@ export default function App() {
       // before the stroke's first segment does.
       void checkpoint().then(() => applyStroke([point]));
     },
-    [canPaint, document, checkpoint, applyStroke],
+    [document, isMarqueeTool, canPaint, checkpoint, applyStroke],
   );
 
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
-      if (lastPoint.current === null || !document) return;
+      if (!document) return;
+      if (isMarqueeTool) {
+        if (marqueeStart.current === null) return;
+        setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
+        return;
+      }
+      if (lastPoint.current === null) return;
       const point = toDocPoint(event, document);
       const previous = lastPoint.current;
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, applyStroke],
+    [document, isMarqueeTool, applyStroke],
   );
 
-  const endStroke = useCallback((event: React.PointerEvent<HTMLImageElement>) => {
-    lastPoint.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
+  const endStroke = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (isMarqueeTool) {
+        const start = marqueeStart.current;
+        marqueeStart.current = null;
+        setMarqueePreview(null);
+        if (start && document) {
+          const [x0, y0] = start;
+          const [x1, y1] = toDocPoint(event, document);
+          // A click with no drag has no area to select — silently a no-op,
+          // rather than round-tripping to the backend just to show its
+          // "must cover at least one pixel" error for an everyday click.
+          if (x0 !== x1 || y0 !== y1) {
+            const command = tool === "selectRect" ? "select_rectangle" : "select_ellipse";
+            void runCommand(command, { x0, y0, x1, y1 });
+          }
+        }
+        return;
+      }
+      lastPoint.current = null;
+    },
+    [isMarqueeTool, document, tool, runCommand],
+  );
 
   const layers = document?.layers ?? [];
   const compositeSrc = generation !== null ? `composite://composite.png?g=${generation}` : null;
@@ -342,6 +427,33 @@ export default function App() {
             title="Redo (Ctrl/Cmd+Shift+Z)"
           >
             Redo
+          </button>
+        </div>
+
+        <div className="tools" role="group" aria-label="Selection tool">
+          <button
+            className={`button button--quiet${tool === "selectRect" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectRect"}
+            onClick={() => setTool("selectRect")}
+          >
+            Rect Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectEllipse" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectEllipse"}
+            onClick={() => setTool("selectEllipse")}
+          >
+            Ellipse Select
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={deselect}
+            disabled={busy || !hasSelection}
+            title="Deselect (Ctrl/Cmd+D)"
+          >
+            Deselect
           </button>
         </div>
 
@@ -460,25 +572,44 @@ export default function App() {
               </p>
             </div>
           )}
-          {compositeSrc && (
-            <img
-              className={`canvas${canPaint ? ` canvas--${tool}` : ""}`}
-              src={compositeSrc}
-              alt="Flattened composite"
-              draggable={false}
-              onDragStart={(event) => event.preventDefault()}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={endStroke}
-              onPointerCancel={endStroke}
-              onPointerLeave={(event) => {
-                // Pointer capture keeps delivering move/up here even once the
-                // cursor leaves the element, but a mouse that was never
-                // pressed on the canvas has no capture to keep the stroke
-                // alive — treat leaving as the end of the stroke either way.
-                if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
-              }}
-            />
+          {compositeSrc && document && (
+            <div className="canvas-wrap">
+              <img
+                className={`canvas${(isMarqueeTool ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
+                src={compositeSrc}
+                alt="Flattened composite"
+                draggable={false}
+                onDragStart={(event) => event.preventDefault()}
+                onPointerDown={handlePointerDown}
+                onPointerMove={handlePointerMove}
+                onPointerUp={endStroke}
+                onPointerCancel={endStroke}
+                onPointerLeave={(event) => {
+                  // Pointer capture keeps delivering move/up here even once the
+                  // cursor leaves the element, but a mouse that was never
+                  // pressed on the canvas has no capture to keep the stroke
+                  // alive — treat leaving as the end of the stroke either way.
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
+                }}
+              />
+              {marqueePreview && (
+                <div
+                  className={`selection-outline${tool === "selectEllipse" ? " selection-outline--ellipse" : ""}`}
+                  style={overlayStyle(
+                    marqueeBounds(marqueePreview.start, marqueePreview.current, document),
+                    document,
+                  )}
+                />
+              )}
+              {!marqueePreview && document.selection && (
+                <div
+                  className={`selection-outline${
+                    document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
+                  }`}
+                  style={overlayStyle(document.selection.bounds, document)}
+                />
+              )}
+            </div>
           )}
         </main>
 

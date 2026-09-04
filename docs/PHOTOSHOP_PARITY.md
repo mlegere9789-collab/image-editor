@@ -1,0 +1,619 @@
+# Photoshop Parity Checklist
+
+Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
+
+**590 distinct capabilities tracked. Currently shipped: 6.**
+
+## PART I — EVERY TOOL
+
+- [ ] MOVE TOOL
+- [ ] ARTBOARD TOOL
+- [x] RECTANGULAR MARQUEE TOOL
+- [x] ELLIPTICAL MARQUEE TOOL
+- [ ] SINGLE ROW MARQUEE TOOL
+- [ ] SINGLE COLUMN MARQUEE TOOL
+- [ ] LASSO TOOL
+- [ ] POLYGONAL LASSO TOOL
+- [ ] MAGNETIC LASSO TOOL
+- [ ] OBJECT SELECTION TOOL
+- [ ] QUICK SELECTION TOOL
+- [ ] MAGIC WAND TOOL
+- [ ] SELECTION BRUSH TOOL
+- [ ] REMOVE TOOL
+- [ ] HEALING BRUSH TOOL
+- [ ] SPOT HEALING BRUSH TOOL
+- [ ] PATCH TOOL
+- [ ] CONTENT-AWARE MOVE TOOL
+- [ ] RED EYE TOOL
+- [ ] CLONE STAMP TOOL
+- [ ] PATTERN STAMP TOOL
+- [x] ERASER TOOL
+- [ ] BACKGROUND ERASER TOOL
+- [ ] MAGIC ERASER TOOL
+- [ ] GRADIENT TOOL
+- [ ] PAINT BUCKET TOOL
+- [x] BRUSH TOOL
+- [x] PENCIL TOOL
+- [ ] COLOR REPLACEMENT TOOL
+- [ ] MIXER BRUSH TOOL
+- [ ] HISTORY BRUSH TOOL
+- [ ] ART HISTORY BRUSH TOOL
+- [ ] DODGE TOOL
+- [ ] BURN TOOL
+- [ ] SPONGE TOOL
+- [ ] BLUR TOOL
+- [ ] SHARPEN TOOL
+- [ ] SMUDGE TOOL
+- [ ] PEN TOOL
+- [ ] FREEFORM PEN TOOL
+- [ ] CURVATURE PEN TOOL
+- [ ] ADD ANCHOR POINT TOOL
+- [ ] DELETE ANCHOR POINT TOOL
+- [ ] CONVERT POINT TOOL
+- [ ] HORIZONTAL TYPE TOOL
+- [ ] VERTICAL TYPE TOOL
+- [ ] PATH SELECTION TOOL
+- [ ] DIRECT SELECTION TOOL
+- [ ] RECTANGLE TOOL
+- [ ] ELLIPSE TOOL
+- [ ] TRIANGLE TOOL
+- [ ] POLYGON TOOL
+- [ ] STAR TOOL
+- [ ] LINE TOOL
+- [ ] CUSTOM SHAPE TOOL
+- [ ] FRAME TOOL
+- [ ] EYEDROPPER TOOL
+- [ ] COLOR SAMPLER TOOL
+- [ ] RULER TOOL
+- [ ] NOTE TOOL
+- [ ] COUNT TOOL
+
+## PART II — EVERY MAJOR SELECTION SYSTEM
+
+- [ ] SELECT ALL
+- [x] DESELECT
+- [ ] RESELECT
+- [ ] INVERSE
+- [ ] COLOR RANGE
+- [ ] FOCUS AREA
+- [ ] SKY SELECTION
+- [ ] SUBJECT SELECTION
+- [ ] SELECT PEOPLE
+- [ ] MODIFY > BORDER
+- [ ] MODIFY > SMOOTH
+- [ ] MODIFY > EXPAND
+- [ ] MODIFY > CONTRACT
+- [ ] MODIFY > FEATHER
+- [ ] GROW
+- [ ] SIMILAR
+- [ ] SELECT AND MASK
+
+## PART III — EVERY MAJOR LAYER SYSTEM
+
+- [ ] PIXEL LAYER
+- [ ] GROUP
+- [ ] TEXT LAYER
+- [ ] SHAPE LAYER
+- [ ] ADJUSTMENT LAYER
+- [ ] FILL LAYER
+- [ ] SMART OBJECT
+- [ ] LAYER MASK
+- [ ] VECTOR MASK
+- [ ] CLIPPING MASK
+- [ ] LINK LAYERS
+- [ ] LOCK
+- [ ] MERGE LAYERS
+- [ ] MERGE VISIBLE
+- [ ] FLATTEN IMAGE
+- [ ] RASTERIZE
+- [ ] CONVERT TO SMART OBJECT
+- [ ] CREATE SMART OBJECT FROM LAYERS
+
+## PART IV — LAYER STYLES
+
+- [ ] BEVEL & EMBOSS
+- [ ] CONTOUR
+- [ ] TEXTURE
+- [ ] STROKE
+- [ ] INNER SHADOW
+- [ ] INNER GLOW
+- [ ] SATIN
+- [ ] COLOR OVERLAY
+- [ ] GRADIENT OVERLAY
+- [ ] PATTERN OVERLAY
+- [ ] OUTER GLOW
+- [ ] DROP SHADOW
+
+## PART V — ADJUSTMENTS
+
+- [ ] BRIGHTNESS/CONTRAST
+- [ ] LEVELS
+- [ ] CURVES
+- [ ] EXPOSURE
+- [ ] VIBRANCE
+- [ ] HUE/SATURATION
+- [ ] COLOR BALANCE
+- [ ] BLACK & WHITE
+- [ ] PHOTO FILTER
+- [ ] CHANNEL MIXER
+- [ ] COLOR LOOKUP
+- [ ] INVERT
+- [ ] POSTERIZE
+- [ ] THRESHOLD
+- [ ] GRADIENT MAP
+- [ ] SELECTIVE COLOR
+
+## PART VI — FILL LAYERS
+
+- [ ] SOLID COLOR
+- [ ] GRADIENT
+- [ ] PATTERN
+
+## PART XXX — NON-OBVIOUS THINGS PHOTOSHOP CAN DO
+
+- [ ] Turn a photograph into linework
+- [ ] Turn a photograph into a site-analysis diagram
+- [ ] Turn CAD/PDF drawings into presentation graphics
+- [ ] Make a photograph look hand-rendered
+- [ ] Create an architectural collage
+- [ ] Change seasons
+- [ ] Change time of day
+- [ ] Change weather
+- [ ] Change materials
+- [ ] Remove an entire crowd
+
+## PART XXXVII — THE 39th SYSTEM: “WHAT SHOULD I USE?”
+
+- [ ] Content-Aware Fill
+- [ ] Generative Fill
+- [ ] Generative Expand
+- [ ] Generate Background
+- [ ] Generate Similar
+- [ ] Harmonize
+- [ ] Generative Upscale
+- [ ] Generate Image
+- [ ] Reference Images
+- [ ] Prompt to Edit
+- [ ] AI Model Picker
+- [ ] Generative Layers
+- [ ] Firefly Boards Integration
+- [ ] AI Assisted Editor
+- [ ] AI On-Device Model
+- [ ] Contextual Task Bar
+- [ ] Discover Panel
+- [ ] Quick Actions
+- [ ] Rich Tooltips
+- [ ] Custom Toolbar
+- [ ] Tool Presets
+- [ ] Preset Manager
+- [ ] Adjustment Presets
+- [ ] Gradient Presets
+- [ ] Pattern Presets
+- [ ] Custom Shapes
+- [ ] Define Pattern
+- [ ] Define Brush Preset
+- [ ] Paint Symmetry
+- [ ] Layer Comps
+- [ ] Smart Guides
+- [ ] Guide Layout
+- [ ] New Guide
+- [ ] Lock Workspace
+- [ ] Custom Menus
+- [ ] Keyboard Shortcuts customization
+- [ ] Workspaces
+- [ ] Panel Docking
+- [ ] Panel Groups
+- [ ] Collapsed Icon Panels
+- [ ] Floating Panels
+- [ ] Panel Stacking
+- [ ] Photoshop Cloud Documents
+- [ ] Search Your Cloud Files
+- [ ] Invite to Edit
+- [ ] Share for Review
+- [ ] Content Credentials
+- [ ] Creative Cloud Libraries
+- [ ] Adobe Fonts integration
+- [ ] Free Transform
+- [ ] Scale
+- [ ] Rotate
+- [ ] Skew
+- [ ] Distort
+- [ ] Perspective
+- [ ] Warp
+- [ ] Rotate 180°
+- [ ] Rotate 90° Clockwise
+- [ ] Rotate 90° Counter Clockwise
+- [ ] Flip Horizontal
+- [ ] Flip Vertical
+- [ ] Transform Again
+- [ ] Free Transform + Warp Mode
+- [ ] Reference Point Locator
+- [ ] Relative Positioning
+- [ ] X Position
+- [ ] Y Position
+- [ ] Maintain Aspect Ratio
+- [ ] Content-Aware Scale
+- [ ] Content-Aware Scale — Amount
+- [ ] Content-Aware Scale — Protect
+- [ ] Content-Aware Scale — Protect Skin Tones
+- [ ] Content-Aware Scale — Reference Point Location
+- [ ] Content-Aware Scale — Reference Point Position
+- [ ] Content-Aware Scale — Scaling Percentage
+- [ ] Content-Aware Scale — Commit Transform
+- [ ] Content-Aware Scale — Cancel Transform
+- [ ] Perspective Warp
+- [ ] Perspective Warp — Layout Mode
+- [ ] Perspective Warp — Warp Mode
+- [ ] Perspective Warp — Plane Quads
+- [ ] Perspective Warp — Connected Planes
+- [ ] Perspective Warp — Unconnected Planes
+- [ ] Perspective Warp — Straighten Edge
+- [ ] Perspective Warp — Auto Level
+- [ ] Perspective Warp — Auto Straighten Vertical Lines
+- [ ] Perspective Warp — Auto Warp to Horizontal and Vertical
+- [ ] Perspective Warp — Commit Perspective Warp
+- [ ] Perspective Warp — Cancel
+- [ ] Puppet Warp
+- [ ] Puppet Warp — Mesh
+- [ ] Puppet Warp — Mode: Distort
+- [ ] Puppet Warp — Density
+- [ ] Puppet Warp — Expansion
+- [ ] Puppet Warp — Show Mesh
+- [ ] Puppet Warp — Pins
+- [ ] Puppet Warp — Pin Depth
+- [ ] Puppet Warp — Remove All Pins
+- [ ] Cylindrical Transform Warp
+- [ ] New Selection
+- [ ] Add to Selection
+- [ ] Subtract from Selection
+- [ ] Intersect with Selection
+- [ ] Anti-aliasing
+- [ ] Feather — Selection Tool Option
+- [ ] Select and Mask — Refine Edge
+- [ ] Select and Mask — Edge Detection
+- [ ] Select and Mask — Radius
+- [ ] Select and Mask — Smart Radius
+- [ ] Select and Mask — Smooth
+- [ ] Select and Mask — Feather
+- [ ] Select and Mask — Contrast
+- [ ] Select and Mask — Shift Edge
+- [ ] Select and Mask — Decontaminate Colors
+- [ ] Select and Mask — Output Settings
+- [ ] Select and Mask — Output To
+- [ ] Select > Modify > Expand
+- [ ] Select > Modify > Contract
+- [ ] Color Range — Sampled Colors
+- [ ] Color Range — Fuzziness
+- [ ] Color Range — Localized Color Clusters
+- [ ] Color Range — Range
+- [ ] Color Range — Selection Preview
+- [ ] Color Range — Invert
+- [ ] Color Range — Skin Tones
+- [ ] Select Subject
+- [ ] Select Subject — Device Processing
+- [ ] Select Subject — Cloud Processing
+- [ ] Remove Background
+- [ ] Select People — Individual Person Selection
+- [ ] Select People — Person Components
+- [ ] Select People — Hair Selection
+- [ ] Refine Hair
+- [ ] Mask All Objects
+- [ ] Object Selection — Rectangle Mode
+- [ ] Object Selection — Lasso Mode
+- [ ] Object Selection — Add
+- [ ] Object Selection — Subtract
+- [ ] Object Selection — Object Finder
+- [ ] Object Selection — Object Finder Refresh
+- [ ] Object Selection — Hard Edge
+- [ ] Quick Selection — Brush Size
+- [ ] Quick Selection — Hardness
+- [ ] Selection Brush Tool — Opacity
+- [ ] Selection Brush Tool — Add Mode
+- [ ] Selection Brush Tool — Subtract Mode
+- [ ] Selection Brush Tool — Brush Selection
+- [ ] Selection Brush Tool — Circle Selection
+- [ ] Move Selection
+- [ ] Transform Selection
+- [ ] Copy
+- [ ] Copy Merged
+- [ ] Cut
+- [ ] Paste
+- [ ] Paste Special > Paste in Place
+- [ ] Paste Special > Paste Into
+- [ ] Paste Special > Paste Outside
+- [ ] Delete
+- [ ] Fill
+- [ ] Content-Aware Fill from Selection
+- [ ] Delete and Fill Selection
+- [ ] Move Tool — Hover Layer Bounds
+- [ ] Layer Auto-Select
+- [ ] Layer Auto-Select — Layer
+- [ ] Layer Auto-Select — Group
+- [ ] Show Transform Controls
+- [ ] Select > Modify > Border
+- [ ] Select > Modify > Smooth
+- [ ] Select > Grow
+- [ ] Select > Similar
+- [ ] Save Selection
+- [ ] Calculations
+- [ ] Calculations — Source 1
+- [ ] Calculations — Source 1 Layer
+- [ ] Calculations — Source 1 Channel
+- [ ] Calculations — Source 1 Invert
+- [ ] Calculations — Source 2
+- [ ] Calculations — Source 2 Layer
+- [ ] Calculations — Source 2 Channel
+- [ ] Calculations — Source 2 Invert
+- [ ] Calculations — Blending
+- [ ] Add Blending Mode
+- [ ] Subtract Blending Mode
+- [ ] Calculations — Opacity
+- [ ] Calculations — Mask
+- [ ] Calculations — Mask Image
+- [ ] Calculations — Mask Layer
+- [ ] Calculations — Mask Channel
+- [ ] Calculations — Mask Invert
+- [ ] Calculations — Result: New Document
+- [ ] Calculations — Result: New Channel
+- [ ] Calculations — Result: Selection
+- [ ] Apply Image
+- [ ] Apply Image — Source
+- [ ] Apply Image — Source Layer
+- [ ] Apply Image — Merged
+- [ ] Apply Image — Source Channel
+- [ ] Apply Image — Invert
+- [ ] Apply Image — Blending
+- [ ] Apply Image — Opacity
+- [ ] Apply Image — Preserve Transparency
+- [ ] Apply Image — Mask
+- [ ] Apply Image — Mask Image
+- [ ] Apply Image — Mask Layer
+- [ ] Apply Image — Mask Channel
+- [ ] Apply Image — Transparency Mask
+- [ ] Apply Image — Mask Invert
+- [ ] Apply Image — Preview
+- [ ] Spot Channel
+- [ ] New Spot Channel
+- [ ] Spot Channel Color
+- [ ] Color Libraries
+- [ ] Spot Channel Solidity
+- [ ] Convert Alpha Channel to Spot Channel
+- [ ] Merge Spot Channel
+- [ ] Spot Channel Overprinting Order
+- [ ] Alpha Channel Reordering
+- [ ] Alpha Channel Renaming
+- [ ] Channel Thumbnail Options
+- [ ] Channel Selection for Editing
+- [ ] Composite Channel
+- [ ] RGB Color Mode
+- [ ] CMYK Color Mode
+- [ ] Grayscale Mode
+- [ ] Bitmap Mode
+- [ ] Indexed Color Mode
+- [ ] Duotone Mode
+- [ ] Multichannel Mode
+- [ ] Lab Color Mode
+- [ ] 8 Bits/Channel
+- [ ] 16 Bits/Channel
+- [ ] 32 Bits/Channel
+- [ ] HDR Support
+- [ ] HDR Histogram
+- [ ] OpenColorIO
+- [ ] Enable OpenColorIO Features
+- [ ] OpenColorIO Settings
+- [ ] OpenColorIO Configuration
+- [ ] OpenColorIO Working Space
+- [ ] OpenColorIO Panel
+- [ ] ACES Color Management
+- [ ] OCIO Input Color Space Assignment
+- [ ] ICC Color Profiles
+- [ ] Monitor Profile
+- [ ] Input Device Profile
+- [ ] Output Device Profile
+- [ ] Document Profile
+- [ ] Assign Profile
+- [ ] Don't Color Manage This Document
+- [ ] Working RGB
+- [ ] Convert to Profile
+- [ ] Conversion Engine
+- [ ] Rendering Intent
+- [ ] Black Point Compensation
+- [ ] Use Dither
+- [ ] Color Settings
+- [ ] Working Spaces
+- [ ] Color Management Policies
+- [ ] Preserve Embedded Profiles
+- [ ] Convert to Working Space
+- [ ] Profile Mismatch Warnings
+- [ ] Ask When Opening
+- [ ] Ask When Pasting
+- [ ] Missing Profile Warning
+- [ ] Embed Color Profile
+- [ ] Proof Setup
+- [ ] Proof Colors
+- [ ] Gamut Warning
+- [ ] Color Blindness Proofing
+- [ ] Simulate Paper Color
+- [ ] Simulate Black Ink
+- [ ] Color & Vibrance
+- [ ] Solid Color Fill
+- [ ] Gradient Fill
+- [ ] Pattern Fill
+- [ ] Input Levels — Black Point
+- [ ] Input Levels — Midtone/Gamma
+- [ ] Input Levels — White Point
+- [ ] Output Levels — Black
+- [ ] Output Levels — White
+- [ ] Levels Channel Selection
+- [ ] Levels Black Point Eyedropper
+- [ ] Levels Gray Point Eyedropper
+- [ ] Levels White Point Eyedropper
+- [ ] Levels Auto
+- [ ] Levels Auto Options
+- [ ] Curves Point Mode
+- [ ] Curves Pencil/Draw Mode
+- [ ] Curves On-Image Adjustment Tool
+- [ ] Curves Black Point
+- [ ] Curves Gray Point
+- [ ] Curves White Point
+- [ ] Curves Show Clipping
+- [ ] Curves Show Channel Overlays
+- [ ] Curves Histogram
+- [ ] Curves Baseline
+- [ ] Curves Intersection Line
+- [ ] Curves Auto
+- [ ] Auto Tone
+- [ ] Auto Contrast
+- [ ] Auto Color
+- [ ] Equalize
+- [ ] Equalize Selected Area Only
+- [ ] Equalize Entire Image Based On Selected Area
+- [ ] Match Color
+- [ ] Replace Color
+- [ ] Blur Filter
+- [ ] Blur More
+- [ ] Gaussian Blur
+- [ ] Box Blur
+- [ ] Motion Blur
+- [ ] Radial Blur
+- [ ] Shape Blur
+- [ ] Surface Blur
+- [ ] Lens Blur
+- [ ] Blur Gallery
+- [ ] Field Blur
+- [ ] Iris Blur
+- [ ] Tilt-Shift
+- [ ] Path Blur
+- [ ] Spin Blur
+- [ ] Sharpen
+- [ ] Sharpen Edges
+- [ ] Sharpen More
+- [ ] Smart Sharpen
+- [ ] Unsharp Mask
+- [ ] Protect Detail
+- [ ] Sample All Layers — Sharpen
+- [ ] Add Noise
+- [ ] Uniform Noise
+- [ ] Gaussian Noise
+- [ ] Monochromatic Noise
+- [ ] Despeckle
+- [ ] Dust & Scratches
+- [ ] Median
+- [ ] Reduce Noise
+- [ ] High Pass
+- [ ] Maximum
+- [ ] Minimum
+- [ ] Offset
+- [ ] Custom
+- [ ] Liquify
+- [ ] Forward Warp Tool
+- [ ] Pucker Tool
+- [ ] Bloat Tool
+- [ ] Twirl Tool
+- [ ] Reconstruct Tool
+- [ ] Freeze Mask Tool
+- [ ] Thaw Mask Tool
+- [ ] Liquify Mesh
+- [ ] Face-Aware Liquify
+- [ ] Lens Correction
+- [ ] Adaptive Wide Angle
+- [ ] Vanishing Point
+- [ ] Smart Filters
+- [ ] Colored PencilFilter Gallery → Artistic. Simulates an image drawn with colored pencil, emphasizing edges and paper-like areas.
+- [ ] CutoutSimplifies an image into broad, poster-like areas of flat color, producing a cut-paper/graphic appearance.
+- [ ] Dry BrushSimulates a dry-brush painting technique, reducing detail while emphasizing broad strokes.
+- [ ] Film GrainAdds photographic-looking grain while preserving the overall tonal structure.
+- [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
+- [ ] Neon GlowAdds a colored glow around image details, creating a neon-like effect.
+- [ ] Paint DaubsConverts image detail into visible painted dabs.
+- [ ] Palette KnifeSimplifies imagery into broad strokes resembling paint applied with a palette knife.
+- [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
+- [ ] Poster EdgesCombines simplified color areas with strong edge definition to create a posterized graphic effect.
+- [ ] Rough PastelsSimulates pastel artwork on a textured surface.
+- [ ] Smudge StickSoftens and smears image detail to imitate a smudged drawing or painting.
+- [ ] SpongeCreates a mottled, sponge-painted appearance.
+- [ ] UnderpaintingCreates an effect resembling an image painted over an underlying textured surface.
+- [ ] WatercolorSimulates watercolor painting by simplifying detail and creating brush/pigment-like areas.
+- [ ] Accented EdgesEmphasizes edges with brush-like strokes, producing a hand-rendered appearance.
+- [ ] Angled StrokesCreates directional brush strokes that follow an angular orientation.
+- [ ] CrosshatchCreates intersecting strokes resembling crosshatching in drawing.
+- [ ] Dark StrokesEmphasizes darker portions of the image with directional strokes.
+- [ ] Ink OutlinesCreates an ink-drawing effect by emphasizing image edges.
+- [ ] SpatterSimulates sprayed or splattered paint.
+- [ ] Sprayed StrokesCreates a sprayed-brush appearance using directional strokes.
+- [ ] Sumi-eSimulates Japanese ink-wash painting, emphasizing broad tonal brushwork.
+- [ ] Diffuse GlowCreates a glowing, photographic diffusion effect by spreading highlights and reducing sharpness.
+- [ ] GlassMakes the image appear as though viewed through textured or distorted glass.
+- [ ] Ocean RippleCreates wave-like distortions resembling an image viewed through rippling water.
+- [ ] Bas ReliefCreates a raised-relief appearance, emphasizing tonal transitions as though carved or embossed.
+- [ ] Chalk & CharcoalConverts imagery into a chalk-and-charcoal drawing appearance.
+- [ ] ChromeCreates a polished metallic/chrome-like tonal effect.
+- [ ] Conté CrayonSimulates drawing with Conté crayon on textured paper.
+- [ ] Graphic PenConverts image detail into pen-like strokes.
+- [ ] Halftone PatternCreates a printed halftone appearance using dots, circles, lines, or other patterning.
+- [ ] Note PaperCreates an image resembling artwork printed or embossed on paper.
+- [ ] PhotocopySimulates the appearance of a photocopied image with simplified tonal information.
+- [ ] PlasterCreates a raised plaster-like surface effect.
+- [ ] ReticulationSimulates photographic reticulation/grain-like surface structure.
+- [ ] StampReduces imagery to a simplified stamped graphic.
+- [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
+- [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
+- [ ] Glowing EdgesDetects strong edges and surrounds them with a luminous/neon-like effect.
+- [ ] SolarizeCombines positive and negative tonal characteristics to create the classic solarization effect.
+- [ ] TilesBreaks an image into displaced tile-like sections.
+- [ ] Trace ContourIdentifies major brightness transitions and draws contour-like lines along them.
+- [ ] WindCreates horizontal streaks resembling wind blowing across the image.
+- [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
+- [ ] GrainAdds simulated grain texture to an image.
+- [ ] Mosaic TilesCreates a tile-based surface appearance with grout-like separation.
+- [ ] PatchworkBreaks the image into square regions based on local colors and tonal relief.
+- [ ] Stained GlassReconstructs the image as adjacent colored cells resembling stained glass.
+- [ ] TexturizerApplies a texture to the image, including built-in texture types or a loaded texture file.
+- [ ] Neural Filters
+- [ ] Featured Neural Filters
+- [ ] Beta Neural Filters
+- [ ] Wait List Neural Filters
+- [ ] Smart Portrait
+- [ ] Skin Smoothing
+- [ ] Super Zoom
+- [ ] JPEG Artifacts Removal
+- [ ] Colorize
+- [ ] Style Transfer
+- [ ] Makeup Transfer
+- [ ] Photo Restoration
+- [ ] Landscape Mixer
+- [ ] Depth Blur
+- [ ] Color Transfer
+- [ ] Current Layer — Neural Filter Output
+- [ ] New Layer — Neural Filter Output
+- [ ] New Layer Masked — Neural Filter Output
+- [ ] Smart Filter — Neural Filter Output
+- [ ] New Document — Neural Filter Output
+- [ ] Camera Raw Filter
+- [ ] Camera Raw Histogram
+- [ ] RGB Levels
+- [ ] Shadow Clipping
+- [ ] Temperature
+- [ ] Tint
+- [ ] Highlights
+- [ ] Shadows
+- [ ] Clarity
+- [ ] Saturation — Camera Raw
+- [ ] Parametric Curve
+- [ ] Point Curve
+- [ ] Targeted Adjustment Tool
+- [ ] Color Mixer
+- [ ] Point Color
+- [ ] Color Grading
+- [ ] Optics
+- [ ] Defringe
+- [ ] Geometry
+- [ ] Constrain Crop
+- [ ] Masking
+- [ ] Subject Mask
+- [ ] Radial Gradient
+- [ ] Color Range Mask
+- [ ] Remove Tool — Camera Raw
+- [ ] Heal — Camera Raw
+- [ ] Clone — Camera Raw
+- [ ] Generative Remove — Camera Raw

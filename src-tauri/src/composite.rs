@@ -16,6 +16,8 @@
 //! layers do not accumulate 8-bit rounding error. Values are quantized to `u8`
 //! once, at the end.
 
+use serde::{Deserialize, Serialize};
+
 use crate::document::{Document, CHANNELS};
 
 /// A flattened RGBA8 image.
@@ -29,7 +31,7 @@ pub struct Composite {
 
 /// An axis-aligned pixel rectangle, `x0..x1` by `y0..y1` (half-open),
 /// already clamped to a document's bounds — see [`recomposite_region`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x0: u32,
     pub y0: u32,
