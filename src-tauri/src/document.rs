@@ -551,6 +551,22 @@ impl Document {
         Ok(())
     }
 
+    /// Layer > Rasterize > Type / Shape / Smart Object / Layer Style / ...:
+    /// converts a vector, text, or smart-object layer into an ordinary
+    /// pixel layer. Every [`Layer`] in this app is already a document-sized
+    /// RGBA8 pixel buffer — there is no vector, text, shape, or
+    /// smart-object layer type to convert *from* (see the `PIXEL LAYER`
+    /// entry in `docs/PHOTOSHOP_PARITY.md`) — so this is always a true
+    /// no-op that touches nothing. It still validates that `id` names a
+    /// real layer, the same "No layer with id N" error every other layer
+    /// command gives for an unknown id, exactly matching Photoshop's own
+    /// behaviour of disabling Rasterize entirely (rather than silently
+    /// accepting the click) once a layer is already pixels.
+    pub fn rasterize_layer(&mut self, id: LayerId) -> Result<(), String> {
+        self.layer_mut(id)?;
+        Ok(())
+    }
+
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
     /// that overshoots by a rounding step is not an error.
     pub fn set_opacity(&mut self, id: LayerId, opacity: f32) -> Result<(), String> {
@@ -1726,6 +1742,30 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pixel(&doc, id, 4, 4), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rasterizing_an_existing_layer_is_a_no_op() {
+        let (mut doc, id) = doc_with_one_layer();
+        let before = doc.view();
+        doc.rasterize_layer(id).unwrap();
+        assert_eq!(doc.view(), before);
+    }
+
+    #[test]
+    fn rasterizing_a_locked_layer_still_succeeds() {
+        // Rasterize never touches pixels, so the pixel lock is irrelevant to
+        // it - unlike every paint/adjustment command, which rejects a
+        // locked layer outright.
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        doc.rasterize_layer(id).unwrap();
+    }
+
+    #[test]
+    fn rasterizing_an_unknown_layer_is_an_error() {
+        let (mut doc, _id) = doc_with_one_layer();
+        assert!(doc.rasterize_layer(999).is_err());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**590 distinct capabilities tracked. Currently shipped: 39.**
+**590 distinct capabilities tracked. Currently shipped: 40.**
 
 ## PART I — EVERY TOOL
 
@@ -105,7 +105,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] MERGE LAYERS
 - [x] MERGE VISIBLE
 - [x] FLATTEN IMAGE
-- [ ] RASTERIZE
+- [x] RASTERIZE (a genuine no-op command — every `Layer` in this app is already a pixel buffer, so there is nothing to convert *from*; validates the layer id and otherwise touches nothing, matching Photoshop's own behaviour of disabling Rasterize once a layer is already pixels)
 - [ ] CONVERT TO SMART OBJECT
 - [ ] CREATE SMART OBJECT FROM LAYERS
 

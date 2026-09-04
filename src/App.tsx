@@ -2069,6 +2069,7 @@ export default function App() {
           onMergeVisible={() => void runCommand("merge_visible")}
           onFlattenImage={() => void runCommand("flatten_image")}
           onMergeDown={(id) => void runCommand("merge_down", { id })}
+          onRasterize={(id) => void runCommand("rasterize_layer", { id })}
         />
       </div>
 

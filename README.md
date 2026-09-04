@@ -1514,6 +1514,51 @@ exactly as the unit tests already proved algebraically.
 **277 Rust tests total** (271 → 277, 270 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 13 — Layer > Rasterize (a genuine no-op)
+
+Layer > Rasterize converts a vector, text, or smart-object layer into an
+ordinary pixel layer. Every `Layer` in this app has been a document-sized
+RGBA8 pixel buffer since Phase 1 — there is no vector, text, shape, or
+smart-object layer type to convert *from* (the same fact `PIXEL LAYER`
+in `docs/PHOTOSHOP_PARITY.md` already records as trivially true) — so
+`Document::rasterize_layer` is always a genuine no-op. Rather than
+leaving this unimplemented or checking the parity box off with only a
+documentation note, it ships as a real, tested, UI-reachable command:
+it validates that the given id names an existing layer (the same "No
+layer with id N" error every other layer command gives for an unknown
+id) and otherwise touches nothing at all — no pixels, no dirty rect, no
+document state — exactly matching Photoshop's own behaviour of
+disabling the Rasterize command entirely once a layer is already
+pixels, rather than silently accepting the click and doing something
+unexpected.
+
+Unlike every paint or adjustment command in this project, Rasterize
+does not check the layer's pixel lock: since it never touches pixels,
+whether the layer is locked is irrelevant to it, and a locked layer
+rasterizes successfully just like an unlocked one. The Tauri command
+wrapper still checkpoints it through the usual `edit_checkpointed`
+path, for consistency with how every other layer command is wired
+in, even though undoing a Rasterize is invisible by construction.
+
+The frontend adds a **Rasterize Layer** button to `LayerPanel`,
+alongside the existing Merge Down button, wired straight through to the
+new command with no dialog — there is nothing to configure.
+
+**Verified two ways.** New `document.rs` tests cover: rasterizing an
+existing layer leaving the whole document view byte-for-byte identical,
+rasterizing a locked layer still succeeding (the one place in this
+project a locked layer accepts a command that would otherwise be
+blocked), and rasterizing an unknown layer id being an error. Live
+under Xvfb: created an 800×600 document, clicked **Rasterize Layer** in
+the layer panel — no error notice appeared, the layer stayed present
+with its name and content unchanged, and Undo became available (the
+command was checkpointed like any other), confirming the command
+reaches the backend and returns successfully with zero visible effect,
+exactly as designed.
+
+**280 Rust tests total** (277 → 280, 273 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

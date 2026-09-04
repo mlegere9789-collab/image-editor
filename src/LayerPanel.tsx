@@ -21,6 +21,7 @@ type Props = {
   onMergeVisible: () => void;
   onFlattenImage: () => void;
   onMergeDown: (id: number) => void;
+  onRasterize: (id: number) => void;
 };
 
 export default function LayerPanel({
@@ -39,6 +40,7 @@ export default function LayerPanel({
   onMergeVisible,
   onFlattenImage,
   onMergeDown,
+  onRasterize,
 }: Props) {
   // While the opacity slider is being dragged its value has to come from the
   // pointer, not from the last command that happened to land - otherwise the
@@ -197,6 +199,15 @@ export default function LayerPanel({
             title="Merge this layer with the one below it"
           >
             Merge Down
+          </button>
+
+          <button
+            className="button button--quiet"
+            disabled={disabled}
+            onClick={() => onRasterize(selected.id)}
+            title="Layer > Rasterize — every layer here is already pixels, so this always succeeds as a no-op"
+          >
+            Rasterize Layer
           </button>
 
           <button
