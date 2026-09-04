@@ -191,6 +191,21 @@ impl Selection {
 /// The subset of a [`Selection`] the UI needs to draw its outline.
 pub type SelectionView = Selection;
 
+/// What [`Document::copy`]/[`Document::cut`] hand back for
+/// [`Document::paste`] to restore later: the copied region's own pixels
+/// (already masked to the selection's exact shape, not just its bounding
+/// box — see [`Document::extract`]) plus where it sat in the document it
+/// was copied from. Opaque outside this module — `lib.rs` only stores and
+/// forwards it, never inspects its fields.
+#[derive(Debug, Clone)]
+pub struct Clipboard {
+    origin: Rect,
+    width: u32,
+    height: u32,
+    /// `width * height * CHANNELS` bytes, row-major, relative to `origin`.
+    pixels: Vec<u8>,
+}
+
 /// Turn two arbitrary drag corners into a selection's bounding box: sorted
 /// into min/max, clamped to the document, and rejected if it covers no
 /// pixels (a click with no drag).
@@ -750,6 +765,144 @@ impl Document {
         self.height = new_height;
         self.selection = None;
         self.last_selection = None;
+    }
+
+    fn layer(&self, id: LayerId) -> Result<&Layer, String> {
+        let index = self.index_of(id)?;
+        Ok(&self.layers[index])
+    }
+
+    /// The region [`Self::copy`]/[`Self::cut`] act on: the active
+    /// selection's bounding box, or the whole canvas when nothing is
+    /// selected — Photoshop's own "no selection means everything" rule for
+    /// Edit > Copy and Edit > Cut.
+    fn copy_bounds(&self) -> Rect {
+        self.selection.map(|s| s.bounds).unwrap_or(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        })
+    }
+
+    /// `layer`'s pixels within `bounds`, masked by the active selection's
+    /// actual shape (not just its bounding box): a pixel inside `bounds`
+    /// but outside a non-rectangular selection (an ellipse, a rounded
+    /// rectangle, a bordered ring, an inverted selection, ...) comes out
+    /// fully transparent rather than copied, exactly as a paste of that
+    /// same shape would look pasted onto an empty layer.
+    fn extract(&self, layer: &Layer, bounds: Rect) -> Clipboard {
+        let width = bounds.x1 - bounds.x0;
+        let height = bounds.y1 - bounds.y0;
+        let doc_width = self.width as usize;
+        let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
+        for row in 0..height {
+            for col in 0..width {
+                let px = bounds.x0 + col;
+                let py = bounds.y0 + row;
+                let keep = self
+                    .selection
+                    .map_or(true, |s| s.contains(px as f32 + 0.5, py as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let src = (py as usize * doc_width + px as usize) * CHANNELS;
+                let dst = (row as usize * width as usize + col as usize) * CHANNELS;
+                pixels[dst..dst + CHANNELS].copy_from_slice(&layer.pixels[src..src + CHANNELS]);
+            }
+        }
+        Clipboard {
+            origin: bounds,
+            width,
+            height,
+            pixels,
+        }
+    }
+
+    /// Edit > Copy: captures layer `id`'s pixels within the active
+    /// selection (or the whole canvas, with none) into a [`Clipboard`],
+    /// ready for [`Self::paste`]. Doesn't touch the document at all, so
+    /// there's nothing to checkpoint and, unlike every command that
+    /// rewrites pixels, no lock check — copying from a locked layer is
+    /// fine, the same as in Photoshop.
+    pub fn copy(&self, id: LayerId) -> Result<Clipboard, String> {
+        let layer = self.layer(id)?;
+        let bounds = self.copy_bounds();
+        Ok(self.extract(layer, bounds))
+    }
+
+    /// Edit > Cut: [`Self::copy`], then clears the copied pixels (to fully
+    /// transparent) from layer `id` — Photoshop's own "copy, then delete"
+    /// behaviour. Only the cleared region is reported dirty. Errors if the
+    /// layer is locked; the copy itself never fails once the layer id is
+    /// valid, so a locked layer leaves both the document and the caller's
+    /// existing clipboard untouched.
+    pub fn cut(&mut self, id: LayerId) -> Result<(Clipboard, Option<Rect>), String> {
+        let clipboard = self.copy(id)?;
+        let bounds = clipboard.origin;
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        Ok((clipboard, Some(bounds)))
+    }
+
+    /// Edit > Paste — and, since this app has no scrollable viewport to
+    /// paste into the middle of, also Edit > Paste Special > Paste in
+    /// Place: adds `clipboard`'s pixels as a new top layer, positioned at
+    /// the same document coordinates they were copied from. Clipped
+    /// against the *current* document's own size, which can differ from
+    /// the one the clipboard was copied out of — like Photoshop's own
+    /// clipboard, it survives switching documents (see `AppState::clipboard`
+    /// in `lib.rs`, kept outside per-document undo/redo history) and
+    /// operations like [`Self::rotate_document_90`] that change a
+    /// document's dimensions mid-flight. Cannot fail: a paste that lands
+    /// partly or fully outside the current canvas simply produces a new
+    /// layer with that much less visible on it, the same as pasting into a
+    /// too-small canvas in real Photoshop.
+    pub fn paste(&mut self, clipboard: &Clipboard, name: impl Into<String>) -> LayerId {
+        let mut pixels = vec![0u8; self.buffer_len()];
+        let doc_width = self.width as usize;
+        for row in 0..clipboard.height {
+            let py = clipboard.origin.y0 + row;
+            if py >= self.height {
+                break;
+            }
+            for col in 0..clipboard.width {
+                let px = clipboard.origin.x0 + col;
+                if px >= self.width {
+                    continue;
+                }
+                let src = (row as usize * clipboard.width as usize + col as usize) * CHANNELS;
+                let dst = (py as usize * doc_width + px as usize) * CHANNELS;
+                pixels[dst..dst + CHANNELS].copy_from_slice(&clipboard.pixels[src..src + CHANNELS]);
+            }
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        self.layers.push(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            pixels,
+        });
+        id
     }
 
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
@@ -2211,6 +2364,189 @@ mod tests {
 
         assert_eq!(doc.selection(), None);
         assert!(doc.reselect().is_err());
+    }
+
+    #[test]
+    fn copy_without_a_selection_captures_the_whole_layer() {
+        let (doc, id) = doc_with_one_layer();
+        let clipboard = doc.copy(id).unwrap();
+        assert_eq!((clipboard.width, clipboard.height), (2, 2));
+        assert_eq!(
+            clipboard.origin,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+        assert_eq!(clipboard.pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn copy_with_a_rectangular_selection_captures_only_that_region() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [1, 2, 3, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let clipboard = doc.copy(id).unwrap();
+
+        assert_eq!((clipboard.width, clipboard.height), (2, 2));
+        assert_eq!(
+            clipboard.origin,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert_eq!(clipboard.pixels, solid(2, 2, [1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn copy_masks_pixels_outside_a_non_rectangular_selection() {
+        // A 4x4 canvas with an ellipse inscribed in the whole selection
+        // bounds: hand-derived against `shape_contains`'s own math
+        // (centre (2,2), radii (2,2)) — the four corner pixel-centres land
+        // outside the ellipse, the rest of the border band and the whole
+        // interior land inside it.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("base", &solid(4, 4, [5, 6, 7, 255]), 4, 4)
+            .unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+
+        let clipboard = doc.copy(id).unwrap();
+        assert_eq!((clipboard.width, clipboard.height), (4, 4));
+
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        for &(x, y) in &[(0, 0), (3, 0), (0, 3), (3, 3)] {
+            assert_eq!(&clipboard.pixels[idx(x, y)..idx(x, y) + 4], &[0, 0, 0, 0]);
+        }
+        for &(x, y) in &[(1, 0), (2, 0), (0, 1), (1, 1), (2, 2), (1, 3), (2, 3)] {
+            assert_eq!(&clipboard.pixels[idx(x, y)..idx(x, y) + 4], &[5, 6, 7, 255]);
+        }
+    }
+
+    #[test]
+    fn copy_succeeds_on_a_locked_layer() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.copy(id).is_ok());
+    }
+
+    #[test]
+    fn copy_errors_on_an_unknown_layer() {
+        let doc = Document::new(2, 2).unwrap();
+        assert!(doc.copy(999).is_err());
+    }
+
+    #[test]
+    fn cut_clears_only_the_selected_pixels_and_reports_that_rect_dirty() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("base", &solid(3, 3, [4, 5, 6, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+
+        let (clipboard, rect) = doc.cut(id).unwrap();
+
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            })
+        );
+        assert_eq!(clipboard.pixels, solid(2, 2, [4, 5, 6, 255]));
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Untouched: outside the selected bottom-right 2x2.
+        assert_eq!(&pixels[idx(0, 0)..idx(0, 0) + 4], &[4, 5, 6, 255]);
+        assert_eq!(&pixels[idx(2, 0)..idx(2, 0) + 4], &[4, 5, 6, 255]);
+        assert_eq!(&pixels[idx(0, 2)..idx(0, 2) + 4], &[4, 5, 6, 255]);
+        // Cleared: the selected region itself.
+        assert_eq!(&pixels[idx(1, 1)..idx(1, 1) + 4], &[0, 0, 0, 0]);
+        assert_eq!(&pixels[idx(2, 2)..idx(2, 2) + 4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn cut_errors_on_a_locked_layer_and_leaves_it_untouched() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+
+        let err = doc.cut(id).unwrap_err();
+
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn cut_errors_on_an_unknown_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.cut(999).is_err());
+    }
+
+    #[test]
+    fn paste_adds_a_new_top_layer_at_the_original_coordinates() {
+        let mut doc = Document::new(3, 3).unwrap();
+        doc.add_layer("base", &solid(3, 3, [1, 1, 1, 255]), 3, 3)
+            .unwrap();
+        let id = doc
+            .add_layer("subject", &solid(3, 3, [9, 8, 7, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        let clipboard = doc.copy(id).unwrap();
+
+        let pasted = doc.paste(&clipboard, "Pasted");
+
+        assert_eq!(doc.layers().len(), 3);
+        let layer = doc.layers().iter().find(|l| l.id == pasted).unwrap();
+        assert_eq!(layer.name, "Pasted");
+        assert_eq!(layer.pixels.len(), 3 * 3 * 4);
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Outside the copied region: transparent, not the base layer's colour
+        // — a pasted layer starts empty everywhere the clipboard didn't cover.
+        assert_eq!(&layer.pixels[idx(0, 0)..idx(0, 0) + 4], &[0, 0, 0, 0]);
+        assert_eq!(&layer.pixels[idx(1, 1)..idx(1, 1) + 4], &[9, 8, 7, 255]);
+        assert_eq!(&layer.pixels[idx(2, 2)..idx(2, 2) + 4], &[9, 8, 7, 255]);
+    }
+
+    #[test]
+    fn paste_clips_against_a_smaller_current_document() {
+        let mut source = Document::new(4, 4).unwrap();
+        let id = source
+            .add_layer("s", &solid(4, 4, [3, 3, 3, 255]), 4, 4)
+            .unwrap();
+        let clipboard = source.copy(id).unwrap();
+
+        let mut target = Document::new(2, 2).unwrap();
+        let pasted = target.paste(&clipboard, "Pasted");
+
+        let layer = &target.layers()[0];
+        assert_eq!(layer.id, pasted);
+        assert_eq!(layer.pixels, solid(2, 2, [3, 3, 3, 255]));
+    }
+
+    #[test]
+    fn paste_survives_a_document_with_no_room_for_it_at_all() {
+        let mut source = Document::new(3, 3).unwrap();
+        let id = source
+            .add_layer("s", &solid(3, 3, [8, 8, 8, 255]), 3, 3)
+            .unwrap();
+        source.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        let clipboard = source.copy(id).unwrap(); // origin (2,2)-(3,3): entirely outside a 1x1 target
+
+        let mut target = Document::new(1, 1).unwrap();
+        target.paste(&clipboard, "Pasted");
+
+        assert_eq!(target.layers()[0].pixels, vec![0u8; 4]);
     }
 
     #[test]

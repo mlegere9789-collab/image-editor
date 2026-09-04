@@ -1758,6 +1758,98 @@ each other.
 **300 Rust tests total** (295 → 300, 293 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 18 — Edit > Copy / Cut / Paste (and Paste Special > Paste in Place)
+
+Every prior increment either read a layer's pixels in place or rewrote
+them in place; this one is the first to move pixels *between* layers
+and hold them somewhere outside the document entirely between the two
+halves of the gesture. A new opaque `document::Clipboard` type — a
+sub-rectangle's worth of RGBA8 pixels plus the document coordinates it
+was captured from — is threaded through three new
+`Document` methods and stashed on `AppState` in `lib.rs`
+(`clipboard: Mutex<Option<Clipboard>>`), deliberately *not* on
+`Document` itself: a real clipboard survives undo, redo, and even
+switching to a different document, none of which anything `Document`
+tracks does, so it needed to live one level up, alongside (but
+independent from) the undo/redo history.
+
+`Document::copy(id)` captures layer `id`'s pixels within the active
+selection's bounding box — or the whole canvas, with no selection —
+into a `Clipboard`. It doesn't just crop to that box: a shared
+`extract` helper walks every pixel in the box and tests it against the
+selection's own shape (via the existing `Selection::contains`), so an
+ellipse, a rounded rectangle, a bordered ring, or an inverted selection
+all copy out with the pixels outside their actual shape (but inside
+the bounding box) coming back fully transparent — exactly as pasting
+that clipboard onto an empty layer would look. `Document::cut(id)` is
+`copy` followed by clearing (to `[0, 0, 0, 0]`) exactly the same
+selection-masked pixels from the source layer, and reports that region
+as the dirty rect for recompositing. Copying is allowed from a locked
+layer (nothing is written, so there's nothing to protect against,
+matching Photoshop's own behaviour); cutting still checks the lock, the
+same as every other command that rewrites a layer's pixels, and leaves
+both the document and whatever was already on the clipboard untouched
+if it fails.
+
+`Document::paste(clipboard, name)` adds the clipboard's contents as a
+new top layer, positioned at the exact document coordinates it was
+copied from. This app has no scrollable viewport to paste into the
+middle of — the canvas is always shown at its own document
+coordinates — so a plain Paste landing back at the original position
+*is* Paste Special > Paste in Place, and both menu items are backed by
+the same one command; Paste Into and Paste Outside are not (they'd
+need clipping the paste to a *second* selection, not just placing it),
+and stay unchecked in `docs/PHOTOSHOP_PARITY.md`. Because the
+clipboard outlives the document it was copied from, pasting is clipped
+per-pixel against whatever document is open *now*, which can have
+different dimensions than the one at copy time — after a 90° rotation
+(Phase 17), say, or after opening a different image. `paste` cannot
+fail: a paste that lands partly or fully outside the current canvas
+just produces a new layer with that much less visible on it, the same
+as pasting into a too-small canvas in real Photoshop.
+
+The three new Tauri commands are `copy`, `cut`, and `paste`. `cut` and
+`paste` are checkpointed like any other discrete edit; `copy` doesn't
+touch the document at all, but still returns a full `Snapshot` (an
+unchanged one) rather than `()`, purely so the frontend can drive it
+through the same `runCommand` path as every other command instead of a
+one-off. The frontend adds a **Copy** / **Cut** / **Paste** button
+group to the main toolbar (Copy and Cut gated on a selected layer,
+Paste on a local `canPaste` flag that flips true the first time either
+Copy or Cut succeeds and never flips back — mirroring the backend
+clipboard's own "outlives everything" lifetime) plus the usual
+Ctrl/Cmd+C / X / V keyboard shortcuts alongside the existing
+Ctrl/Cmd+Z / Shift+Z / D / A / Shift+I bindings.
+
+**Verified two ways.** New `document.rs` tests cover: copying the
+whole layer with no selection; copying only a rectangular selection's
+bounding box; copying through a non-rectangular (ellipse) selection,
+hand-verified pixel-by-pixel against the ellipse's own inside/outside
+math for all 16 pixels of a 4×4 canvas; copying from a locked layer
+succeeding; cutting clearing exactly the selected pixels and reporting
+that rect dirty, with the untouched pixels around it spot-checked;
+cutting a locked layer failing and leaving it byte-for-byte unchanged;
+pasting landing a copied region at its original coordinates on a
+brand-new top layer; pasting clipping correctly into a *smaller*
+current document (exercising both the row-break and column-skip
+clipping paths in one test); and pasting a clipboard whose origin is
+now entirely outside the current canvas producing an all-transparent
+layer without panicking. Live under Xvfb: opened the bundled
+colourful gradient sample, dragged a rectangular selection over its
+top-left 2×2 tile block, clicked **Copy**, then **Paste** — a new
+"Pasted Layer" appeared in the layer list sitting exactly over the
+original colours (invisible on canvas since the content is identical,
+as expected). Deleted that layer, clicked **Cut** on the same
+selection, and watched that same 2×2 block turn solid black on the
+base layer — confirming the pixels were actually cleared, not just
+logically tracked. Clicked **Paste** again and the block's original
+blue-to-purple gradient colours reappeared exactly where they'd been
+cut from, on a fresh "Pasted Layer", confirming the full
+copy/cut/paste round trip end to end through the UI.
+
+**311 Rust tests total** (300 → 311, 304 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

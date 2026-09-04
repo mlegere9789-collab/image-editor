@@ -485,6 +485,29 @@ export default function App() {
     setShowGradientFillDialog(false);
   }, [runCommand, gradientFillStart, gradientFillEnd]);
 
+  // Whether the backend clipboard has something in it. Set once a Copy or
+  // Cut succeeds and never cleared afterward — the backend clipboard itself
+  // outlives undo/redo and even opening a different document (see
+  // `AppState::clipboard` in `lib.rs`), so this mirrors that: it only ever
+  // goes from false to true for the life of the app.
+  const [canPaste, setCanPaste] = useState(false);
+
+  const copySelection = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("copy", { id: selectedId });
+    setCanPaste(true);
+  }, [runCommand, selectedId]);
+
+  const cutSelection = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("cut", { id: selectedId });
+    setCanPaste(true);
+  }, [runCommand, selectedId]);
+
+  const pasteClipboard = useCallback(async () => {
+    await runCommand("paste", {}, "top");
+  }, [runCommand]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
@@ -507,6 +530,15 @@ export default function App() {
       } else if (key === "i" && event.shiftKey) {
         event.preventDefault();
         if (hasSelection && !busy) invertSelection();
+      } else if (key === "c") {
+        event.preventDefault();
+        if (selectedId !== null && !busy) void copySelection();
+      } else if (key === "x") {
+        event.preventDefault();
+        if (selectedId !== null && !busy) void cutSelection();
+      } else if (key === "v") {
+        event.preventDefault();
+        if (document !== null && canPaste && !busy) void pasteClipboard();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -524,6 +556,11 @@ export default function App() {
     document,
     selectAll,
     invertSelection,
+    selectedId,
+    copySelection,
+    cutSelection,
+    canPaste,
+    pasteClipboard,
   ]);
 
   useEffect(() => {
@@ -896,6 +933,33 @@ export default function App() {
             title="Redo (Ctrl/Cmd+Shift+Z)"
           >
             Redo
+          </button>
+        </div>
+
+        <div className="tools" role="group" aria-label="Clipboard">
+          <button
+            className="button button--quiet"
+            onClick={copySelection}
+            disabled={busy || selectedId === null}
+            title="Edit > Copy"
+          >
+            Copy
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={cutSelection}
+            disabled={busy || selectedId === null}
+            title="Edit > Cut"
+          >
+            Cut
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={pasteClipboard}
+            disabled={busy || !hasDocument || !canPaste}
+            title="Edit > Paste (always pastes back at its original position — see Edit > Paste Special > Paste in Place)"
+          >
+            Paste
           </button>
         </div>
 

@@ -17,7 +17,7 @@ use tauri::{Manager, State};
 
 use blend::BlendMode;
 use composite::Rect;
-use document::{Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS};
+use document::{Clipboard, Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS};
 
 /// Same order of magnitude as `png::MAX_FILE_BYTES` — a blank canvas this
 /// large would be as much of a memory problem as a PNG that big.
@@ -45,6 +45,11 @@ struct AppState {
     document: Mutex<Option<Document>>,
     composite: CompositeCache,
     history: Mutex<History>,
+    /// Edit > Copy/Cut's most recent capture, ready for Edit > Paste. Kept
+    /// here rather than on `Document` itself: a real clipboard survives
+    /// undo, redo, and even opening a different document, none of which
+    /// `Document`'s own state does.
+    clipboard: Mutex<Option<Clipboard>>,
 }
 
 /// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
@@ -559,6 +564,52 @@ fn rotate_document_90(state: State<'_, AppState>, clockwise: bool) -> Result<Sna
     })
 }
 
+/// Edit > Copy: captures layer `id`'s pixels — within the active selection,
+/// or the whole layer with none — into the clipboard, ready for [`paste`].
+/// Doesn't actually change the document; still returns a [`Snapshot`] (an
+/// unchanged one) rather than `()` so the frontend can drive this through
+/// the same `runCommand` path as every other command instead of a bespoke
+/// one just for this.
+#[tauri::command]
+fn copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    let clipboard = document.copy(id)?;
+    *state.clipboard.lock().map_err(|_| POISONED.to_string())? = Some(clipboard);
+    snapshot(&state, document, None)
+}
+
+/// Edit > Cut: [`copy`], then clears the copied pixels from layer `id`.
+#[tauri::command]
+fn cut(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    push_checkpoint(&state)?;
+    let mut guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    let (clipboard, rect) = document.cut(id)?;
+    *state.clipboard.lock().map_err(|_| POISONED.to_string())? = Some(clipboard);
+    snapshot(&state, document, rect)
+}
+
+/// Edit > Paste — also serves as Edit > Paste Special > Paste in Place,
+/// since [`document::Document::paste`] always lands the clipboard back at
+/// its original coordinates (see that function's own docs for why). Errors
+/// if nothing has been copied or cut yet, the same as Photoshop greying
+/// the menu item out.
+#[tauri::command]
+fn paste(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let clipboard = {
+        let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "Nothing has been copied or cut yet.".to_string())?
+            .clone()
+    };
+    edit_checkpointed(&state, |document| {
+        document.paste(&clipboard, "Pasted Layer");
+        Ok(None)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -952,6 +1003,9 @@ pub fn run() {
             flip_layer_vertical,
             rotate_layer_180,
             rotate_document_90,
+            copy,
+            cut,
+            paste,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
