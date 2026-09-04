@@ -197,6 +197,11 @@ export default function App() {
   const hasSelection = document?.selection != null;
   const canReselect = document?.canReselect ?? false;
 
+  const invertColors = useCallback(() => {
+    if (selectedId === null) return;
+    void runCommand("invert_colors", { id: selectedId });
+  }, [runCommand, selectedId]);
+
   const applyModifySelection = useCallback(async () => {
     if (modifyMode === null) return;
     const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
@@ -730,6 +735,14 @@ export default function App() {
             title="Gradient: drag to blend from color to end color along that line"
           >
             Gradient
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={invertColors}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Invert"
+          >
+            Invert Colors
           </button>
           <input
             type="color"

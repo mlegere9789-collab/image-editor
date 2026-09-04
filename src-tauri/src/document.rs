@@ -897,6 +897,51 @@ impl Document {
             y1: max_y + 1,
         }))
     }
+
+    /// Image > Adjustments > Invert: subtract each RGB channel from 255,
+    /// leaving alpha untouched — the same "flip every channel" transform
+    /// Photoshop's own Invert applies, with no intermediate curve. Confined
+    /// to the active selection and blocked by a locked layer, like every
+    /// other in-place pixel edit. Unlike Paint Bucket's flood-fill region,
+    /// this touches every pixel the selection includes rather than a
+    /// contiguous area, so — like Gradient — it iterates the whole canvas.
+    pub fn invert_colors(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width, self.height);
+        let selection = self.selection;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+
+        let mut touched: Option<(u32, u32, u32, u32)> = None;
+        for py in 0..height {
+            for px in 0..width {
+                if let Some(selection) = &selection {
+                    if !selection.contains(px as f32 + 0.5, py as f32 + 0.5) {
+                        continue;
+                    }
+                }
+                let base = (py as usize * width as usize + px as usize) * CHANNELS;
+                for channel in 0..3 {
+                    layer.pixels[base + channel] = 255 - layer.pixels[base + channel];
+                }
+
+                touched = Some(match touched {
+                    None => (px, py, px, py),
+                    Some((min_x, min_y, max_x, max_y)) => {
+                        (min_x.min(px), min_y.min(py), max_x.max(px), max_y.max(py))
+                    }
+                });
+            }
+        }
+
+        Ok(touched.map(|(min_x, min_y, max_x, max_y)| Rect {
+            x0: min_x,
+            y0: min_y,
+            x1: max_x + 1,
+            y1: max_y + 1,
+        }))
+    }
 }
 
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
@@ -1738,6 +1783,92 @@ mod tests {
                 [255, 255, 255, 255]
             )
             .is_err());
+    }
+
+    #[test]
+    fn invert_colors_flips_every_rgb_channel_but_leaves_alpha() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([0, 64, 255, 128]); // 0
+        pixels.extend([10, 20, 30, 255]); // 1
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        let rect = doc.invert_colors(id).unwrap().unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 191, 0, 128]);
+        assert_eq!(pixel(&doc, id, 1, 0), [245, 235, 225, 255]);
+    }
+
+    #[test]
+    fn inverting_twice_restores_the_original_colours() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([12, 200, 77, 255]);
+        pixels.extend([0, 0, 0, 0]);
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+        let original = [pixel(&doc, id, 0, 0), pixel(&doc, id, 1, 0)];
+
+        doc.invert_colors(id).unwrap();
+        doc.invert_colors(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), original[0]);
+        assert_eq!(pixel(&doc, id, 1, 0), original[1]);
+    }
+
+    #[test]
+    fn invert_colors_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [10u8, 20, 30, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        let rect = doc.invert_colors(id).unwrap().unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [245, 235, 225, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [245, 235, 225, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [10, 20, 30, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn invert_colors_flips_rgb_even_under_zero_alpha() {
+        // Invert operates on the layer's raw pixel data, not what's visibly
+        // rendered — a fully transparent pixel's RGB (all zero, same as any
+        // freshly added layer) still flips to white, even though neither
+        // colour is visible until the layer's alpha changes.
+        let (mut doc, id) = transparent_doc_wh(1, 1);
+        doc.invert_colors(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 0]);
+    }
+
+    #[test]
+    fn invert_colors_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.invert_colors(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn invert_colors_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.invert_colors(999).is_err());
     }
 
     #[test]

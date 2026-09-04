@@ -771,6 +771,44 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+## Phase 11: Invert (adjustments)
+
+The first entry from PART V of the parity checklist — Image >
+Adjustments > Invert flips every RGB channel of a layer's pixels
+(`255 - channel`), leaving alpha untouched. `Document::invert_colors`
+follows the same per-pixel-iteration shape Gradient established: no
+bounded region to flood-fill or stroke outward from, so it walks every
+pixel the canvas has, skipping whatever the active selection excludes,
+and is blocked outright by a locked layer — the same two guards every
+other in-place pixel edit already respects. Unlike Gradient's blend math,
+Invert needed no alpha compositing at all: it operates directly on the
+layer's own stored channel bytes, which is also why it still flips a
+fully transparent pixel's RGB (mathematically correct, if invisible until
+that pixel's alpha changes) rather than special-casing alpha out of the
+loop.
+
+`invert_colors` is a new `edit_checkpointed` command, taking just the
+layer id — no color, no drag, nothing else to configure, matching
+Photoshop's own menu item having no dialog. The frontend adds an
+**Invert Colors** toolbar button next to Gradient, enabled whenever a
+layer is selected (`canPaint`, the same gate Brush/Eraser use) rather
+than needing an active tool at all — clicking it fires once and is done.
+
+**Verified two ways.** New `document.rs` tests cover the core channel
+flip against hand-picked byte values (including a partially-transparent
+pixel, to confirm alpha itself is untouched), inverting twice restoring
+the original colours exactly, confinement to an active selection (pixels
+outside it provably untouched), a fully-transparent pixel's RGB flipping
+even though nothing is visibly different yet, a locked layer rejecting
+the call, and an unknown layer id erroring. Live under Xvfb: New…
+(800×600) → painted a white L-shaped stroke → **Invert Colors** — the
+stroke turned solid black, screenshotted before and after — → **Undo**
+— the white stroke came back exactly, confirming the command checkpoints
+itself correctly like every other one-shot action in this project.
+
+**158 Rust tests total** (152 → 158). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

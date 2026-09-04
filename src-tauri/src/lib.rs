@@ -605,6 +605,14 @@ fn gradient_fill(
     })
 }
 
+/// Image > Adjustments > Invert on layer `id`: flip every RGB channel,
+/// leaving alpha untouched. A whole, discrete action on its own, so it
+/// checkpoints itself, the same as [`flood_fill`] and [`gradient_fill`].
+#[tauri::command]
+fn invert_colors(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.invert_colors(id))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -701,6 +709,7 @@ pub fn run() {
             erase_stroke,
             flood_fill,
             gradient_fill,
+            invert_colors,
             select_rectangle,
             select_ellipse,
             select_all,
