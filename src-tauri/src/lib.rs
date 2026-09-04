@@ -466,6 +466,18 @@ fn add_layer(state: State<'_, AppState>, path: String) -> Result<Snapshot, Strin
     })
 }
 
+/// Layer > New Fill Layer > Solid Color: add a new top layer filled
+/// entirely with `color` (RGBA8). Always named "Color Fill 1" — there is
+/// no auto-incrementing layer-name scheme in this app yet (the first
+/// layer of a brand new document is likewise always plainly "Layer 1").
+#[tauri::command]
+fn add_solid_color_layer(state: State<'_, AppState>, color: [u8; 4]) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_solid_color_layer("Color Fill 1", color);
+        Ok(None)
+    })
+}
+
 #[tauri::command]
 fn set_layer_visible(
     state: State<'_, AppState>,
@@ -881,6 +893,7 @@ pub fn run() {
             open_document,
             new_document,
             add_layer,
+            add_solid_color_layer,
             set_layer_visible,
             set_layer_locked,
             rasterize_layer,

@@ -527,6 +527,40 @@ impl Document {
         Ok(id)
     }
 
+    /// Layer > New Fill Layer > Solid Color: adds a new top layer filled
+    /// entirely with `color` (RGBA8). A real Photoshop fill layer stays
+    /// "live" — double-clicking it later reopens a colour picker and
+    /// repaints the whole layer in place, all without needing a mask or
+    /// touching any layer below it. This app's layer model has no such
+    /// generative layer kind (every [`Layer`] is an ordinary pixel buffer —
+    /// see the `PIXEL LAYER` entry in `docs/PHOTOSHOP_PARITY.md`), so the
+    /// scope cut here is the same one [`Self::add_layer`] (Add Layer from
+    /// file) already makes: this creates an ordinary pixel layer whose
+    /// initial content happens to be a flat fill, exactly as if the whole
+    /// canvas had been painted with the Paint Bucket at 100% opacity —
+    /// editable afterward like any other layer, just not re-openable as a
+    /// live "recipe". Cannot fail: `color` and the document's own size are
+    /// always valid.
+    pub fn add_solid_color_layer(&mut self, name: impl Into<String>, color: [u8; 4]) -> LayerId {
+        let mut pixels = vec![0u8; self.buffer_len()];
+        for pixel in pixels.chunks_exact_mut(CHANNELS) {
+            pixel.copy_from_slice(&color);
+        }
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.layers.push(Layer {
+            id,
+            name: name.into(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            pixels,
+        });
+        id
+    }
+
     fn index_of(&self, id: LayerId) -> Result<usize, String> {
         self.layers
             .iter()
@@ -1680,6 +1714,34 @@ mod tests {
         let pixels = &doc.layers()[0].pixels;
         assert_eq!(&pixels[0..4], &[1, 1, 1, 255]);
         assert_eq!(&pixels[8..12], &[5, 5, 5, 255]); // start of layer row 1
+    }
+
+    #[test]
+    fn a_solid_color_layer_fills_the_whole_canvas() {
+        let mut doc = Document::new(3, 2).unwrap();
+        let id = doc.add_solid_color_layer("Color Fill 1", [10, 20, 30, 255]);
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(pixel(&doc, id, x, y), [10, 20, 30, 255]);
+            }
+        }
+    }
+
+    #[test]
+    fn a_solid_color_layer_is_named_and_stacked_on_top() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("base", &solid(1, 1, [0; 4]), 1, 1).unwrap();
+        let id = doc.add_solid_color_layer("Color Fill 1", [255, 0, 0, 255]);
+        let top = doc.layers().last().unwrap();
+        assert_eq!(top.id, id);
+        assert_eq!(top.name, "Color Fill 1");
+    }
+
+    #[test]
+    fn a_solid_color_layer_can_have_transparency() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_solid_color_layer("Color Fill 1", [0, 0, 0, 128]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 128]);
     }
 
     #[test]

@@ -209,6 +209,9 @@ export default function App() {
   const [colorBalanceMidtones, setColorBalanceMidtones] = useState<number[]>([0, 0, 0]);
   const [colorBalanceHighlights, setColorBalanceHighlights] = useState<number[]>([0, 0, 0]);
 
+  const [showSolidColorFillDialog, setShowSolidColorFillDialog] = useState(false);
+  const [solidColorFill, setSolidColorFill] = useState("#ffffff");
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -461,6 +464,12 @@ export default function App() {
     });
     setShowColorBalanceDialog(false);
   }, [runCommand, selectedId, colorBalanceShadows, colorBalanceMidtones, colorBalanceHighlights]);
+
+  const applySolidColorFill = useCallback(async () => {
+    const [r, g, b] = hexToRgb(solidColorFill);
+    await runCommand("add_solid_color_layer", { color: [r, g, b, 255] });
+    setShowSolidColorFillDialog(false);
+  }, [runCommand, solidColorFill]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -822,6 +831,14 @@ export default function App() {
         </button>
         <button className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
           Add layer…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowSolidColorFillDialog(true)}
+          disabled={busy || !hasDocument}
+          title="Layer > New Fill Layer > Solid Color"
+        >
+          Solid Color…
         </button>
         <button
           className="button button--quiet"
@@ -1945,6 +1962,43 @@ export default function App() {
               </button>
               <button className="button" onClick={applyColorBalance} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSolidColorFillDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSolidColorFillDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Solid Color Fill Layer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Solid Color Fill Layer</h2>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={solidColorFill}
+                onChange={(event) => setSolidColorFill(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSolidColorFillDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySolidColorFill} disabled={busy}>
+                Add Layer
               </button>
             </div>
           </div>

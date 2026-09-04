@@ -1559,6 +1559,50 @@ exactly as designed.
 **280 Rust tests total** (277 → 280, 273 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 14 — Layer > New Fill Layer > Solid Color
+
+Layer > New Fill Layer > Solid Color adds a new top layer filled
+entirely with a chosen colour. A real Photoshop fill layer stays
+"live" — double-clicking it later reopens a colour picker and repaints
+the whole layer in place, all without needing a mask or touching any
+layer below it. This app's layer model has no such generative layer
+kind (every layer is an ordinary pixel buffer, the same fact the
+`PIXEL LAYER` and `RASTERIZE` entries in `docs/PHOTOSHOP_PARITY.md`
+already record), so the scope cut here is the same one Add Layer (from
+a PNG file) already makes: `Document::add_solid_color_layer` creates an
+ordinary pixel layer whose initial content happens to be a flat fill,
+exactly as if the whole canvas had been painted with the Paint Bucket
+at 100% opacity — editable afterward like any other layer, just not
+re-openable as a live "recipe." The new layer is always named "Color
+Fill 1" — there is no auto-incrementing layer-name scheme in this app
+yet (the first layer of a brand new document is likewise always
+plainly "Layer 1"). The function cannot fail: a colour and the
+document's own size are always valid, so unlike `add_layer` it returns
+a bare `LayerId` rather than a `Result`.
+
+The frontend adds a **Solid Color…** toolbar button next to **Add
+layer…**, gated on a document being open (not on a layer being
+selected, since it always adds a new layer regardless of what else is
+selected). It opens a small modal with a single `<input type="color">`
+swatch and an **Add Layer** button — no dialog complexity beyond
+picking the colour, since there is nothing else to configure.
+
+**Verified two ways.** New `document.rs` tests cover: a solid colour
+layer filling every pixel of the canvas with the exact requested RGBA
+value, the new layer being named correctly and pushed onto the top of
+the stack, and the fill colour's alpha channel being honoured (a
+semi-transparent fill layer). Live under Xvfb: created an 800×600
+document (starting with one ordinary transparent "Layer 1"), opened
+**Solid Color…**, left the colour picker at its default white, and
+clicked **Add Layer** — a new "Color Fill 1" layer appeared at the top
+of the layer panel and the canvas immediately went from the
+transparent checkerboard to solid opaque white across its full extent,
+confirming the command reaches the backend, creates a real layer, and
+composites correctly.
+
+**283 Rust tests total** (280 → 283, 276 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
