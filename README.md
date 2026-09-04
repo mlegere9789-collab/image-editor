@@ -771,7 +771,7 @@ confirming the shrink was symmetric rather than anchored to one corner.
 **152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
-## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure (adjustments)
+## Phase 11 — Invert / Threshold / Posterize / Brightness-Contrast / Hue-Saturation / Black & White / Vibrance / Photo Filter / Exposure / Gradient Map (adjustments)
 
 The first entry from PART V of the parity checklist — Image >
 Adjustments > Invert flips every RGB channel of a layer's pixels
@@ -1135,6 +1135,48 @@ corner clipping to pure white, exactly the expected offset-lift curve,
 screenshotted before and after.
 
 **223 Rust tests total** (213 → 223). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
+**Gradient Map.** Image > Adjustments > Gradient Map replaces each
+pixel's colour with a point along the line from a shadow colour to a
+highlight colour, picked by that pixel's own ITU-R BT.601 luma — the
+same weighting `threshold` and `black_and_white` already use — so a
+shadow-luma pixel lands exactly on the shadow colour, a highlight-luma
+pixel exactly on the highlight colour, and everything between blends
+smoothly. Photoshop's own dialog accepts an arbitrary multi-stop
+gradient preset; this always maps to a straight two-colour line, the
+same two-stop scope `gradient_fill` already uses for its own gradients —
+a deliberate scope cut, not an oversight. Alpha untouched.
+
+`Document::gradient_map` is the ninth caller of `adjust_layer_pixels`,
+composing three pieces this project already had lying around: the luma
+computation `threshold`/`black_and_white` established, and the `lerp`/
+`to_unit`/`to_byte` blend helpers `gradient_fill`/`photo_filter` already
+use — landing this late in the batch made it almost entirely a
+composition of existing math rather than new math. New `edit_checkpointed`
+command taking the layer id, `shadow_color`, and `highlight_color` (both
+`[u8; 3]`). The frontend adds a **Gradient Map…** toolbar button opening
+a modal with two colour pickers, defaulting to black and white — the
+same default Photoshop's own dialog opens with, and a Black & White-style
+result until the swatches are changed.
+
+**Verified two ways.** New `document.rs` tests cover a black pixel
+mapping exactly to the shadow colour and a white pixel exactly to the
+highlight colour (the two boundary cases), the luma weighting itself
+against the same hand-verified 76/150 values Threshold's and Black &
+White's own tests use (proving it's genuinely luma-driven, not a flat
+per-channel average), alpha staying untouched, confinement to an active
+selection, a locked layer, and an unknown layer id. Live under Xvfb:
+loaded the same colourful sample-image gradient layer via a temporary
+probe button (removed before committing, `grep -n "TEMP\|PROBE"`
+returning nothing) → **Gradient Map…** → applied at the default
+black-to-white swatches — the multicoloured grid mapped cleanly to a
+black-to-white gradient matching each cell's original luma, visually
+identical to what Black & White alone would have produced with those two
+colours, confirming the two-colour line degenerates correctly to a plain
+greyscale map at its default extremes, screenshotted before and after.
+
+**230 Rust tests total** (223 → 230). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
 ## Prerequisites

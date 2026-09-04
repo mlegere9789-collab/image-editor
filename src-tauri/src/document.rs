@@ -1160,6 +1160,37 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Image > Adjustments > Gradient Map: replaces each pixel's colour
+    /// with a point along the line from `shadow_color` to
+    /// `highlight_color`, picked by that pixel's own ITU-R BT.601 luma
+    /// (`0.299R + 0.587G + 0.114B`, the same weighting `threshold` and
+    /// `black_and_white` already use) — a shadow-luma pixel lands on
+    /// `shadow_color`, a highlight-luma pixel on `highlight_color`, and
+    /// everything between blends smoothly. Photoshop's own dialog accepts
+    /// an arbitrary multi-stop gradient preset; this always maps to a
+    /// straight two-colour line between the shadow and highlight colours,
+    /// the same two-stop-gradient scope [`Self::gradient_fill`] already
+    /// uses for its own gradients — a deliberate scope cut, not an
+    /// oversight. Alpha untouched.
+    pub fn gradient_map(
+        &mut self,
+        id: LayerId,
+        shadow_color: [u8; 3],
+        highlight_color: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * to_unit(r) + 0.587 * to_unit(g) + 0.114 * to_unit(b);
+            let map = |channel: usize| {
+                to_byte(lerp(
+                    to_unit(shadow_color[channel]),
+                    to_unit(highlight_color[channel]),
+                    luma,
+                ))
+            };
+            [map(0), map(1), map(2), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -2772,6 +2803,77 @@ mod tests {
     fn exposure_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.exposure(999, 50, 10, 100).is_err());
+    }
+
+    #[test]
+    fn gradient_map_sends_black_to_the_shadow_colour_exactly() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.gradient_map(id, [10, 20, 30], [200, 210, 220]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn gradient_map_sends_white_to_the_highlight_colour_exactly() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 255, 255, 255], 1, 1).unwrap();
+        doc.gradient_map(id, [10, 20, 30], [200, 210, 220]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 210, 220, 255]);
+    }
+
+    #[test]
+    fn gradient_map_uses_bt601_luma_not_a_flat_average() {
+        // Against a black-to-white gradient, the mapped grey exactly
+        // equals each colour's own luma - the same 76/150 values
+        // threshold's and black_and_white's own weighting tests use.
+        let mut doc = Document::new(2, 1).unwrap();
+        let mut pixels = Vec::new();
+        pixels.extend([255, 0, 0, 255]); // red: luma 76
+        pixels.extend([0, 255, 0, 255]); // green: luma 150
+        let id = doc.add_layer("row", &pixels, 2, 1).unwrap();
+
+        doc.gradient_map(id, [0, 0, 0], [255, 255, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [76, 76, 76, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn gradient_map_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 77], 1, 1).unwrap();
+        doc.gradient_map(id, [0, 0, 255], [255, 255, 0]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn gradient_map_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [255u8, 255, 255, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+
+        doc.gradient_map(id, [0, 0, 0], [200, 210, 220]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 210, 220, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 210, 220, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn gradient_map_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc
+            .gradient_map(id, [0, 0, 0], [255, 255, 255])
+            .unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn gradient_map_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.gradient_map(999, [0, 0, 0], [255, 255, 255]).is_err());
     }
 
     #[test]

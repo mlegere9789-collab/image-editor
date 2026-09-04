@@ -701,6 +701,20 @@ fn exposure(
     })
 }
 
+/// Image > Adjustments > Gradient Map on layer `id`: maps luma to a point
+/// between `shadow_color` and `highlight_color`.
+#[tauri::command]
+fn gradient_map(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shadow_color: [u8; 3],
+    highlight_color: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.gradient_map(id, shadow_color, highlight_color)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -806,6 +820,7 @@ pub fn run() {
             vibrance,
             photo_filter,
             exposure,
+            gradient_map,
             select_rectangle,
             select_ellipse,
             select_all,

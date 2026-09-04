@@ -124,6 +124,10 @@ export default function App() {
   const [exposureOffset, setExposureOffset] = useState(0);
   const [exposureGamma, setExposureGamma] = useState(100);
 
+  const [showGradientMapDialog, setShowGradientMapDialog] = useState(false);
+  const [gradientMapShadow, setGradientMapShadow] = useState("#000000");
+  const [gradientMapHighlight, setGradientMapHighlight] = useState("#ffffff");
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -297,6 +301,18 @@ export default function App() {
     });
     setShowExposureDialog(false);
   }, [runCommand, selectedId, exposureStops, exposureOffset, exposureGamma]);
+
+  const applyGradientMap = useCallback(async () => {
+    if (selectedId === null) return;
+    const shadow = hexToRgb(gradientMapShadow);
+    const highlight = hexToRgb(gradientMapHighlight);
+    await runCommand("gradient_map", {
+      id: selectedId,
+      shadowColor: shadow,
+      highlightColor: highlight,
+    });
+    setShowGradientMapDialog(false);
+  }, [runCommand, selectedId, gradientMapShadow, gradientMapHighlight]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -897,6 +913,14 @@ export default function App() {
           >
             Exposure…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGradientMapDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Gradient Map"
+          >
+            Gradient Map…
+          </button>
           <input
             type="color"
             className="tools__color"
@@ -1399,6 +1423,52 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyExposure} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGradientMapDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGradientMapDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Gradient Map"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Gradient Map</h2>
+            <label className="control control--row">
+              <span className="control__label">Shadows</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={gradientMapShadow}
+                onChange={(event) => setGradientMapShadow(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Highlights</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={gradientMapHighlight}
+                onChange={(event) => setGradientMapHighlight(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGradientMapDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGradientMap} disabled={busy}>
                 Apply
               </button>
             </div>
