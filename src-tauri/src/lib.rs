@@ -628,6 +628,12 @@ fn fill_selection(
     edit_checkpointed(&state, |document| document.fill_selection(id, color))
 }
 
+/// Filter > Blur > Box Blur on layer `id`.
+#[tauri::command]
+fn box_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.box_blur(id, radius))
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -1026,6 +1032,7 @@ pub fn run() {
             paste,
             delete_selection,
             fill_selection,
+            box_blur,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

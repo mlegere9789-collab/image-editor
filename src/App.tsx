@@ -219,6 +219,9 @@ export default function App() {
   const [showFillDialog, setShowFillDialog] = useState(false);
   const [fillColor, setFillColor] = useState("#ffffff");
 
+  const [showBoxBlurDialog, setShowBoxBlurDialog] = useState(false);
+  const [boxBlurRadius, setBoxBlurRadius] = useState(4);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -522,6 +525,12 @@ export default function App() {
     await runCommand("fill_selection", { id: selectedId, color: [r, g, b, 255] });
     setShowFillDialog(false);
   }, [runCommand, selectedId, fillColor]);
+
+  const applyBoxBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("box_blur", { id: selectedId, radius: boxBlurRadius });
+    setShowBoxBlurDialog(false);
+  }, [runCommand, selectedId, boxBlurRadius]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1269,6 +1278,14 @@ export default function App() {
             title="Image > Adjustments > Color Balance"
           >
             Color Balance…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowBoxBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Box Blur"
+          >
+            Box Blur…
           </button>
           <input
             type="color"
@@ -2211,6 +2228,47 @@ export default function App() {
               </button>
               <button className="button" onClick={applyFill} disabled={busy}>
                 Fill
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBoxBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBoxBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Box Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Box Blur</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{boxBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={40}
+                value={boxBlurRadius}
+                onChange={(event) => setBoxBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBoxBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyBoxBlur} disabled={busy}>
+                Apply
               </button>
             </div>
           </div>

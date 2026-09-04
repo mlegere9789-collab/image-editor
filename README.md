@@ -1926,6 +1926,76 @@ updating some tracked state.
 **320 Rust tests total** (311 → 320, 313 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 20 — Filter > Blur > Box Blur
+
+The first filter in this app that reads from more than one source pixel
+to produce a single output pixel — every prior adjustment (Levels,
+Curves, Threshold, Photo Filter, ...) is a pure per-pixel function, but
+a blur is inherently a neighbourhood operation, so this phase is the
+project's first real convolution. A box blur (a flat mean over a
+square window) is the simplest one there is — much simpler than a true
+Gaussian blur's bell-curve-weighted average — which made it the
+well-scoped starting point for this whole family of filters rather
+than Gaussian Blur itself.
+
+`Document::box_blur(id, radius)` walks every pixel in the active
+selection (or the whole layer, with none) and replaces it with the
+flat average of every channel — R, G, B, and A independently — across
+a `(2*radius+1)`-square window centred on it. Sampling past a layer's
+edge repeats the edge pixel (clamp-to-edge) rather than wrapping
+around or padding with transparency, which has a second useful effect
+beyond avoiding a black/transparent fringe at the border: every
+window, everywhere, is exactly `(2*radius+1)^2` samples, so the
+integer-division rounding in the average is uniform across the whole
+layer instead of shifting depending on how close a pixel is to an
+edge. Every sample is read from a snapshot of the layer's pixels taken
+before the pass starts, so pixels already blurred earlier in the same
+pass never leak into pixels blurred later — a genuine "old pixels in,
+new pixels out" convolution rather than an accidental IIR filter.
+
+The averaging is deliberately not alpha-aware: Photoshop's own blur
+filters treat colour as premultiplied by alpha internally, so a fully
+opaque pixel blurring toward a fully transparent neighbour doesn't
+pick up a dark fringe from that neighbour's arbitrary, invisible RGB
+values. This implementation averages the four channels completely
+independently and un-premultiplied — the same "no extra colour science
+beyond what's already stored in the file" scope cut the Levels, Curves,
+and Color Balance adjustments already make elsewhere in this project.
+A blur near a hard transparency edge can therefore show a faint fringe
+that real Photoshop wouldn't, a known, documented limitation rather
+than a bug.
+
+The frontend adds a **Box Blur…** button to the adjustments toolbar
+group (next to Color Balance), opening a dialog with a single Radius
+slider (1–40px, defaulting to 4) — the same layout as the existing
+Threshold dialog's single-slider pattern.
+
+**Verified two ways.** New `document.rs` tests build a small 3×3 test
+layer whose red channel climbs left-to-right, top-to-bottom (10, 20,
+30 / 40, 50, 60 / 70, 80, 90) specifically so every pixel's blurred
+value can be hand-derived from its position alone: the centre pixel's
+full 3×3 window averages back to its own original value (450⁄9 = 50,
+exactly, since the grid is symmetric around the centre); the top-left
+corner's edge-clamped window comes out to 210⁄9 = 23 (asserting the
+*truncating*, not rounding, integer division); the bottom-right
+corner comes out to 690⁄9 = 76; and the uniformly-255 alpha channel
+survives the average exactly, confirming it really is blurred through
+the same code path as the colour channels rather than being special-
+cased. A second test confines a selection to a single pixel and
+reuses the same hand-derived corner value as a built-in
+cross-check, confirming every pixel outside the selection is left
+completely untouched. Locked-layer, unknown-layer, and zero-radius
+error cases round out the set. Live under Xvfb: opened the bundled
+colourful gradient sample (a grid of flat-coloured tiles separated by
+sharp white grid lines) and applied **Box Blur…** at the default 4px
+radius — every grid line across the whole canvas visibly softened
+into a blurred gradient in a single click, confirming the filter
+applies across the entire layer, not just near where the cursor
+happened to be.
+
+**325 Rust tests total** (320 → 325, 318 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

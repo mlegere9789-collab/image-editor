@@ -950,6 +950,68 @@ impl Document {
         id
     }
 
+    /// Filter > Blur > Box Blur: averages every channel of each pixel in
+    /// the active selection (or the whole layer, with none) with its
+    /// neighbours in a `(2*radius+1)`-square window, clamped to the
+    /// layer's own edges rather than wrapping or padding with transparency
+    /// — sampling past an edge just repeats the edge pixel, which also
+    /// keeps every window exactly `(2*radius+1)^2` samples regardless of
+    /// where the pixel sits, so integer-division rounding is uniform
+    /// everywhere rather than shifting near a border. A box blur (a flat
+    /// mean) is the simplest blur there is; unlike Photoshop's own blur
+    /// filters, which are alpha-aware to avoid dark fringing where an
+    /// opaque pixel blurs into a fully transparent neighbour, this
+    /// averages R, G, B, and A independently and un-premultiplied — the
+    /// same "no extra colour science beyond what's already in the file"
+    /// scope cut the Levels/Curves/Color Balance adjustments already make.
+    /// Every sample is read from a snapshot of the layer taken before any
+    /// pixel is written, so a wide radius never blurs already-blurred
+    /// pixels into their neighbours mid-pass. Errors on a zero radius (a
+    /// 1x1 "blur" is a no-op, not worth a menu item) or a locked/unknown
+    /// layer.
+    pub fn box_blur(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Blur radius must be at least 1 pixel.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let mut sums = [0u32; CHANNELS];
+                let mut count = 0u32;
+                for dy in -r..=r {
+                    let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+                    for dx in -r..=r {
+                        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+                        let base = (sy * doc_width + sx) * CHANNELS;
+                        for (c, sum) in sums.iter_mut().enumerate() {
+                            *sum += source[base + c] as u32;
+                        }
+                        count += 1;
+                    }
+                }
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (sum, pixel) in sums.iter().zip(&mut layer.pixels[dst..dst + CHANNELS]) {
+                    *pixel = (sum / count) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
     /// that overshoots by a rounding step is not an error.
     pub fn set_opacity(&mut self, id: LayerId, opacity: f32) -> Result<(), String> {
@@ -2713,6 +2775,89 @@ mod tests {
     fn fill_selection_errors_on_an_unknown_layer() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.fill_selection(999, [1, 2, 3, 255]).is_err());
+    }
+
+    /// A 3x3 layer whose red channel climbs left-to-right, top-to-bottom
+    /// (10, 20, 30 / 40, 50, 60 / 70, 80, 90), green and blue both zero,
+    /// alpha fully opaque — used by the box-blur tests below so every
+    /// pixel's 3x3 neighbourhood average can be hand-derived from its
+    /// position alone.
+    fn ramped_3x3() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 3).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            10, 0, 0, 255,  20, 0, 0, 255,  30, 0, 0, 255,
+            40, 0, 0, 255,  50, 0, 0, 255,  60, 0, 0, 255,
+            70, 0, 0, 255,  80, 0, 0, 255,  90, 0, 0, 255,
+        ];
+        let id = doc.add_layer("base", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn box_blur_averages_a_neighbourhood_with_edge_clamping() {
+        let (mut doc, id) = ramped_3x3();
+
+        doc.box_blur(id, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Centre pixel's window is the whole 3x3 grid: (10+..+90)/9 = 50,
+        // its own original value, since the grid is symmetric around it.
+        assert_eq!(pixels[idx(1, 1)], 50);
+        // Top-left corner repeats the edge row/column for the missing
+        // neighbours: (10+10+20+10+10+20+40+40+50)/9 = 210/9 = 23 (integer
+        // division truncates, not rounds).
+        assert_eq!(pixels[idx(0, 0)], 23);
+        // Bottom-right corner, by the same edge-clamped math:
+        // (50+60+60+80+90+90+80+90+90)/9 = 690/9 = 76.
+        assert_eq!(pixels[idx(2, 2)], 76);
+        // Alpha was uniformly 255 everywhere, so it survives the average
+        // exactly (255*9/9 = 255) even though it's blurred like any other
+        // channel.
+        assert_eq!(pixels[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn box_blur_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap(); // just the top-left pixel
+
+        doc.box_blur(id, 1).unwrap();
+
+        let pixels = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Same corner value hand-derived in the unconfined test above.
+        assert_eq!(pixels[idx(0, 0)], 23);
+        // Everywhere outside the selection is untouched, including the
+        // centre pixel, whose own blurred value (50) happens to equal its
+        // original one — a weaker check on its own, so the corner (2, 2)
+        // and an edge pixel are asserted unchanged too.
+        assert_eq!(pixels[idx(1, 1)], 50);
+        assert_eq!(pixels[idx(2, 2)], 90);
+        assert_eq!(pixels[idx(1, 0)], 20);
+    }
+
+    #[test]
+    fn box_blur_with_zero_radius_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        let err = doc.box_blur(id, 0).unwrap_err();
+        assert!(err.contains("at least 1"), "{err}");
+    }
+
+    #[test]
+    fn box_blur_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.box_blur(id, 1).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn box_blur_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 2).unwrap();
+        assert!(doc.box_blur(999, 1).is_err());
     }
 
     #[test]
