@@ -393,6 +393,24 @@ fn invert_selection(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Select > Modify > Expand: grow the selection outward by `amount` pixels.
+#[tauri::command]
+fn expand_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.expand_selection(amount)?;
+        Ok(None)
+    })
+}
+
+/// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
+#[tauri::command]
+fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.contract_selection(amount)?;
+        Ok(None)
+    })
+}
+
 /// Select > Reselect: restore the selection `deselect` most recently cleared.
 #[tauri::command]
 fn reselect(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -687,6 +705,8 @@ pub fn run() {
             select_ellipse,
             select_all,
             invert_selection,
+            expand_selection,
+            contract_selection,
             reselect,
             deselect,
             export_png,

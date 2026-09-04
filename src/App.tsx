@@ -91,6 +91,11 @@ export default function App() {
   const [newWidth, setNewWidth] = useState(800);
   const [newHeight, setNewHeight] = useState(600);
 
+  // Select > Modify > Expand/Contract share one dialog: `null` means closed,
+  // otherwise which of the two backend commands Apply should send.
+  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | null>(null);
+  const [modifyAmount, setModifyAmount] = useState(4);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -191,6 +196,13 @@ export default function App() {
   );
   const hasSelection = document?.selection != null;
   const canReselect = document?.canReselect ?? false;
+
+  const applyModifySelection = useCallback(async () => {
+    if (modifyMode === null) return;
+    const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
+    await runCommand(command, { amount: modifyAmount });
+    setModifyMode(null);
+  }, [runCommand, modifyMode, modifyAmount]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -643,6 +655,22 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setModifyMode("expand")}
+            disabled={busy || !hasSelection}
+            title="Select > Modify > Expand"
+          >
+            Expand…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setModifyMode("contract")}
+            disabled={busy || !hasSelection}
+            title="Select > Modify > Contract"
+          >
+            Contract…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={deselect}
             disabled={busy || !hasSelection}
             title="Deselect (Ctrl/Cmd+D)"
@@ -789,6 +817,49 @@ export default function App() {
                 disabled={busy || newWidth < 1 || newHeight < 1}
               >
                 Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modifyMode !== null && (
+        <div
+          className="modal-overlay"
+          onClick={() => setModifyMode(null)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label={modifyMode === "expand" ? "Expand selection" : "Contract selection"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              {modifyMode === "expand" ? "Expand selection" : "Contract selection"}
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                {modifyMode === "expand" ? "Expand By (px)" : "Contract By (px)"}
+              </span>
+              <input
+                type="number"
+                min={1}
+                max={4000}
+                value={modifyAmount}
+                onChange={(event) => setModifyAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setModifyMode(null)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyModifySelection}
+                disabled={busy || modifyAmount < 1}
+              >
+                Apply
               </button>
             </div>
           </div>

@@ -449,7 +449,7 @@ Deselect (outline disappears, Reselect changes from disabled to enabled)
 → Reselect (outline reappears, Deselect/Invert re-enable) — all four
 single clicks, screenshotted at each step.
 
-## Phase 10 — Lock / Merge Visible / Flatten Image / Merge Down / Eyedropper / Paint Bucket / Gradient / Single Row & Column Marquee
+## Phase 10 — Lock / Merge Visible / Flatten Image / Merge Down / Eyedropper / Paint Bucket / Gradient / Single Row & Column Marquee / Expand & Contract Selection
 
 `Layer` gains a `locked: bool` (Photoshop's "Lock image pixels" — the one
 lock sub-mode that actually protects against the edits this app can make).
@@ -721,6 +721,55 @@ the click position.
 
 **142 Rust tests total** (unchanged — frontend-only increment). `cargo fmt`,
 `clippy`, `cargo test`, and `npm run build` all clean.
+
+**Expand Selection / Contract Selection.** Select > Modify > Expand and
+Contract grow or shrink the selected region by a pixel amount on every
+side. Both share one new private helper, `resize_selection_bounds(delta)`
+on `Document`, that grows the shape's bounding box by `delta` pixels per
+side (negative shrinks it) and clamps each edge to the canvas —
+`expand_selection(amount)` and `contract_selection(amount)` are just
+`resize_selection_bounds(amount as i64)` and `resize_selection_bounds
+(-(amount as i64))`. Errors if nothing is selected, if `amount` is zero
+(Photoshop's own dialog requires a positive pixel count), or if
+contracting that far would collapse the selection to zero width or
+height — leaving the selection untouched rather than silently clearing
+it. The existing `Selection { shape, bounds, inverted }` representation
+(no mask) turned out to be exactly the right fit for this one: neither
+command needed any new state.
+
+The one subtlety worth calling out: for an *inverted* selection —
+everywhere except the shape — growing the *selected* area means shrinking
+the excluded shape, the opposite of what growing a normal selection's
+bounds does. `resize_selection_bounds` flips `delta`'s sign against the
+shape's own bounds whenever `selection.inverted` is set, so Expand and
+Contract read correctly to the user regardless of whether Select > Inverse
+was used beforehand, without needing a mask to express "grow everywhere
+except a shrinking hole."
+
+The frontend adds **Expand…** and **Contract…** buttons next to Invert in
+the Selection tool group, both disabled without an active selection. They
+share one small modal (the same `modal-overlay`/`modal` pattern the New
+Document dialog established) with a single pixel-amount number input,
+defaulting to 4; clicking Apply sends `expand_selection` or
+`contract_selection` with that amount and closes the dialog.
+
+**Verified two ways.** New `document.rs` tests cover both commands
+erroring with nothing selected, both erroring at a zero amount, expand
+growing bounds on every side, expand clamping at the canvas edge,
+contract shrinking bounds on every side, contracting past the selection's
+own size erroring and leaving the original bounds untouched, and — the
+inverted case specifically — expanding an inverted selection shrinking
+the excluded shape's bounds and contracting one growing it, each checked
+against hand-computed exact bounds. Live under Xvfb: New… (800×600) →
+Rect Select → dragged out a selection → **Expand…** → Apply at the
+default 4px — the marching-ants outline grew outward by a few pixels on
+every side, screenshotted before and after for a direct visual diff.
+Drew a fresh, larger rectangle → **Contract…** → set 30px → Apply — the
+outline shrank to a visibly smaller box centred on the same spot,
+confirming the shrink was symmetric rather than anchored to one corner.
+
+**152 Rust tests total** (142 → 152). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
 
 ## Prerequisites
 

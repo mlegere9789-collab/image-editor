@@ -274,6 +274,60 @@ impl Document {
         Ok(())
     }
 
+    /// Select > Modify > Expand: grow the selected region outward by
+    /// `amount` pixels on every side, clamped to the canvas edge. An error
+    /// if nothing is selected, or `amount` is zero (Photoshop's own dialog
+    /// requires a positive number of pixels).
+    pub fn expand_selection(&mut self, amount: u32) -> Result<(), String> {
+        if amount == 0 {
+            return Err("Expand By must be greater than zero pixels.".to_string());
+        }
+        self.resize_selection_bounds(amount as i64)
+    }
+
+    /// Select > Modify > Contract: shrink the selected region inward by
+    /// `amount` pixels on every side. An error if nothing is selected,
+    /// `amount` is zero, or contracting that far would leave no pixels
+    /// selected at all.
+    pub fn contract_selection(&mut self, amount: u32) -> Result<(), String> {
+        if amount == 0 {
+            return Err("Contract By must be greater than zero pixels.".to_string());
+        }
+        self.resize_selection_bounds(-(amount as i64))
+    }
+
+    /// Shared bounds arithmetic for [`Self::expand_selection`] and
+    /// [`Self::contract_selection`]: grows the shape's bounding box by
+    /// `delta` pixels per side (negative shrinks it). For an *inverted*
+    /// selection — everywhere except the shape — growing the *selected*
+    /// area means shrinking the excluded shape, so `delta`'s sign flips
+    /// relative to the shape's own bounds in that case; this is what makes
+    /// Expand/Contract behave correctly after Select > Inverse without any
+    /// mask-based representation.
+    fn resize_selection_bounds(&mut self, delta: i64) -> Result<(), String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        let shape_delta = if selection.inverted { -delta } else { delta };
+        let b = selection.bounds;
+        let x0 = (b.x0 as i64 - shape_delta).clamp(0, width);
+        let y0 = (b.y0 as i64 - shape_delta).clamp(0, height);
+        let x1 = (b.x1 as i64 + shape_delta).clamp(0, width);
+        let y1 = (b.y1 as i64 + shape_delta).clamp(0, height);
+        if x0 >= x1 || y0 >= y1 {
+            return Err("That would leave nothing selected.".to_string());
+        }
+        selection.bounds = Rect {
+            x0: x0 as u32,
+            y0: y0 as u32,
+            x1: x1 as u32,
+            y1: y1 as u32,
+        };
+        Ok(())
+    }
+
     /// Clear the selection — every stroke goes back to being unrestricted.
     /// Remembers what was cleared, for `reselect` to restore.
     pub fn deselect(&mut self) {
@@ -1797,6 +1851,130 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pixel(&doc, id, 0, 4), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn expanding_with_nothing_selected_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.expand_selection(2).is_err());
+    }
+
+    #[test]
+    fn contracting_with_nothing_selected_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc.contract_selection(2).is_err());
+    }
+
+    #[test]
+    fn expanding_by_zero_pixels_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        assert!(doc.expand_selection(0).is_err());
+    }
+
+    #[test]
+    fn contracting_by_zero_pixels_is_an_error() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        assert!(doc.contract_selection(0).is_err());
+    }
+
+    #[test]
+    fn expand_grows_the_bounds_on_every_side() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 10.0, 10.0).unwrap();
+        doc.expand_selection(2).unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 3,
+                y0: 3,
+                x1: 12,
+                y1: 12
+            }
+        );
+    }
+
+    #[test]
+    fn expand_clamps_to_the_canvas_edge() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(1.0, 1.0, 19.0, 19.0).unwrap();
+        doc.expand_selection(5).unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 20,
+                y1: 20
+            }
+        );
+    }
+
+    #[test]
+    fn contract_shrinks_the_bounds_on_every_side() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 15.0, 15.0).unwrap();
+        doc.contract_selection(3).unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 8,
+                y0: 8,
+                x1: 12,
+                y1: 12
+            }
+        );
+    }
+
+    #[test]
+    fn contracting_past_the_selection_size_is_an_error_and_leaves_it_unchanged() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 10.0, 10.0).unwrap();
+        let before = doc.selection().unwrap();
+        assert!(doc.contract_selection(10).is_err());
+        assert_eq!(doc.selection().unwrap(), before);
+    }
+
+    #[test]
+    fn expanding_an_inverted_selection_shrinks_the_excluded_shape() {
+        // Inverted: everything *except* the rectangle is selected. Growing
+        // that selected area outward means the excluded rectangle itself
+        // shrinks — the opposite direction from expanding a normal selection.
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 15.0, 15.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.expand_selection(2).unwrap();
+        let selection = doc.selection().unwrap();
+        assert!(selection.inverted);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 7,
+                y0: 7,
+                x1: 13,
+                y1: 13
+            }
+        );
+    }
+
+    #[test]
+    fn contracting_an_inverted_selection_grows_the_excluded_shape() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.select_rectangle(5.0, 5.0, 15.0, 15.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.contract_selection(2).unwrap();
+        let selection = doc.selection().unwrap();
+        assert!(selection.inverted);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 3,
+                y0: 3,
+                x1: 17,
+                y1: 17
+            }
+        );
     }
 
     #[test]
