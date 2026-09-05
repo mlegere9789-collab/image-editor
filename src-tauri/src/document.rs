@@ -371,10 +371,8 @@ fn voronoi_site_averages(
         .zip(&counts)
         .map(|(sum, &count)| {
             let mut average = [0u8; CHANNELS];
-            if count > 0 {
-                for (slot, &s) in average.iter_mut().zip(sum) {
-                    *slot = (s / count) as u8;
-                }
+            for (slot, &s) in average.iter_mut().zip(sum) {
+                *slot = s.checked_div(count).unwrap_or(0) as u8;
             }
             average
         })
