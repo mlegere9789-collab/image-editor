@@ -1074,6 +1074,19 @@ fn colored_pencil(
     })
 }
 
+/// Filter Gallery > Artistic > Cutout on layer `id`.
+#[tauri::command]
+fn cutout(
+    state: State<'_, AppState>,
+    id: LayerId,
+    levels: u32,
+    edge_simplicity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.cutout(id, levels, edge_simplicity)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1665,6 +1678,7 @@ pub fn run() {
             extrude,
             lighting_effects,
             colored_pencil,
+            cutout,
             crystallize,
             facet,
             pointillize,

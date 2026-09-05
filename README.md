@@ -3902,6 +3902,59 @@ complete.
 **488 Rust tests total** (483 → 488, 481 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 54 — Filter Gallery > Artistic > Cutout
+
+Simplifies the layer into broad, flat-coloured areas by composing two
+already-existing operations rather than a real segmentation into
+cut-paper shapes, which is a documented approximation, not a port.
+`Document::cutout(id, levels, edge_simplicity)` runs a [`box_blur_at`]
+pre-pass to erase fine detail — `edge_simplicity` (Photoshop's own
+0..=10 range) is used directly as its box radius, so 0 skips the blur
+entirely and 10 heavily simplifies detail before quantizing — and then
+applies the exact same quantization step `Self::posterize` already uses,
+to `levels` (Photoshop's own 2..=8 range) values per channel. Alpha is
+untouched (the blur's own alpha average is discarded in favour of the
+original, matching `posterize`'s own convention). Photoshop's separate
+Edge Fidelity slider, which tunes how closely a real cutout follows
+actual edges, is a documented scope cut with no equivalent here.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python port of the same blur-then-quantize
+formula. The primary fixture is the existing `ramped_3x3` helper (a
+pure-red 10..90 ramp): at its centre pixel, a radius-1 box blur's 3×3
+neighbourhood covers the whole grid with no edge-clamp duplication, so
+the red average is the plain mean, `450 / 9 = 50` exactly (integer
+division, no remainder); at 5 levels the quantization step is `255 / 4 =
+63.75`, and `50 / 63.75 = 0.7843` rounds to `1`, which times the step
+rounds to `64` — comfortably clear of a `.5` boundary at both rounding
+steps. A second test confirms edge simplicity `0` skips the blur
+entirely, reproducing `posterize`'s own quantization directly (corner
+value `90` also quantizes to `64` by the same arithmetic, value `10` to
+`0`). A third confirms a uniform flat layer is unchanged by the
+blurring step and then quantizes as a whole (a flat `128` at 2 levels,
+step `255`, unambiguously rounds up to `255`), and separately confines
+the ramp fixture to a one-pixel selection at the same centre pixel used
+in the first test (chosen because its output, `64`, differs from its
+input, `50`, avoiding the coincidental-no-op pitfall). A fourth confirms
+out-of-range levels/edge-simplicity and a locked/unknown layer all
+error. All four passed on the first run, matching the Python reference
+exactly. A new **Cutout…** dialog exposes Number of Levels and Edge
+Simplicity sliders, added after Colored Pencil in the same new Artistic
+filter group.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as Phase 53: this session's Xvfb instance has been
+confirmed, through a control test and a full Xvfb-and-application
+restart in Phase 52, to have stopped delivering synthetic `xdotool`
+pointer clicks to the webview entirely, and re-running that same
+diagnostic a third time was judged unlikely to produce new information.
+The dialog's wiring was reviewed by hand instead. This carries forward
+the same documented gap rather than re-litigating it, on top of
+test/build coverage that is otherwise complete.
+
+**492 Rust tests total** (488 → 492, 485 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

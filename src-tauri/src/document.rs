@@ -3724,6 +3724,58 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Cutout: simplifies the layer into
+    /// broad, flat-coloured areas by composing two existing operations —
+    /// a [`box_blur_at`] pre-pass to erase fine detail, then the same
+    /// quantization [`Self::posterize`] already uses — rather than a real
+    /// segmentation into cut-paper shapes, which is a documented
+    /// approximation, not a port. `levels` (Photoshop's own 2..=8 range)
+    /// is the number of quantized values each channel can take, exactly
+    /// as in `posterize`. `edge_simplicity` (Photoshop's own 0..=10
+    /// range) is used directly as the pre-blur's box radius — 0 skips the
+    /// blur pass entirely, 10 heavily simplifies detail before
+    /// quantizing, giving fewer and larger flat areas. Photoshop's
+    /// separate Edge Fidelity slider, which controls how closely the
+    /// cutout follows real edges, is a documented scope cut with no
+    /// equivalent here. Alpha is untouched (the blur pass's own alpha
+    /// average is discarded in favour of the original, matching
+    /// `posterize`'s convention). Confined to the selection and errors on
+    /// an out-of-range parameter or a locked/unknown layer.
+    pub fn cutout(
+        &mut self,
+        id: LayerId,
+        levels: u32,
+        edge_simplicity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=8).contains(&levels) {
+            return Err("Cutout levels must be between 2 and 8.".to_string());
+        }
+        if edge_simplicity > 10 {
+            return Err("Cutout edge simplicity must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = edge_simplicity as i64;
+        let step = 255.0 / (levels as f32 - 1.0);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let sampled = if radius > 0 {
+                box_blur_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
+            [
+                quantize(sampled[0]),
+                quantize(sampled[1]),
+                quantize(sampled[2]),
+                src[base + 3],
+            ]
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -8627,6 +8679,83 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.colored_pencil(999, 1, 15, 0).is_err());
+    }
+
+    #[test]
+    fn cutout_blurs_then_quantizes() {
+        // ramped_3x3's centre pixel, radius 1: the box blur's 3x3
+        // neighbourhood covers the whole grid with no edge-clamp
+        // duplication, so its red average is the plain mean
+        // (10+20+...+90)/9 = 450/9 = 50 exactly (integer division, no
+        // remainder). At 5 levels the quantization step is 255/4 = 63.75;
+        // 50/63.75 = 0.7843 rounds to 1, and 1*63.75 = 63.75 rounds to 64
+        // (0.75 fraction, clear of any .5 boundary). The flat green/blue
+        // channels average to 0 and quantize to 0.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.cutout(id, 5, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [64, 0, 0, 255]);
+    }
+
+    #[test]
+    fn cutout_zero_simplicity_skips_the_blur_and_only_quantizes() {
+        // Radius 0 (Photoshop's own minimum Edge Simplicity): no
+        // blurring, so this is exactly `posterize`'s own quantization
+        // applied directly to each pixel. At 5 levels, corner value 90
+        // quantizes the same way the centre's blurred 50 average did
+        // (90/63.75 = 1.4118 -> 1, 1*63.75 = 63.75 -> 64), and value 10
+        // quantizes to 0 (10/63.75 = 0.157 -> 0).
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.cutout(id, 5, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [64, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn cutout_is_a_no_op_on_a_flat_layer_and_confined_to_the_selection() {
+        // A uniform 128 stays 128 under the blur (averaging a flat field
+        // changes nothing), and at 2 levels (step 255) quantizes up to
+        // the far end: 128/255 = 0.502 rounds unambiguously to 1 (not a
+        // .5 case itself, so Rust's away-from-zero rounding needs no
+        // special care here), and 1*255 = 255 exactly.
+        let (mut doc, id) = grey_2x2();
+        doc.cutout(id, 2, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [255, 255, 255, 255]));
+
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.cutout(id, 5, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 1)..idx(1, 1) + 4], [64, 0, 0, 255]);
+        assert_eq!(after[..idx(1, 1)], before[..idx(1, 1)]); // unselected, untouched
+        assert_eq!(after[idx(1, 1) + 4..], before[idx(1, 1) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn cutout_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.cutout(id, 1, 1).is_err());
+        assert!(doc.cutout(id, 9, 1).is_err());
+        assert!(doc.cutout(id, 4, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.cutout(id, 4, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.cutout(999, 4, 1).is_err());
     }
 
     #[test]

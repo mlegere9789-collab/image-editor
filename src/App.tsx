@@ -321,6 +321,9 @@ export default function App() {
   const [coloredPencilWidth, setColoredPencilWidth] = useState(4);
   const [coloredPencilPressure, setColoredPencilPressure] = useState(8);
   const [coloredPencilPaper, setColoredPencilPaper] = useState(25);
+  const [showCutoutDialog, setShowCutoutDialog] = useState(false);
+  const [cutoutLevels, setCutoutLevels] = useState(4);
+  const [cutoutSimplicity, setCutoutSimplicity] = useState(4);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -894,6 +897,16 @@ export default function App() {
     });
     setShowColoredPencilDialog(false);
   }, [runCommand, selectedId, coloredPencilWidth, coloredPencilPressure, coloredPencilPaper]);
+
+  const applyCutout = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("cutout", {
+      id: selectedId,
+      levels: cutoutLevels,
+      edgeSimplicity: cutoutSimplicity,
+    });
+    setShowCutoutDialog(false);
+  }, [runCommand, selectedId, cutoutLevels, cutoutSimplicity]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2157,6 +2170,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Colored Pencil"
           >
             Colored Pencil…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCutoutDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Cutout"
+          >
+            Cutout…
           </button>
           <button
             className="button button--quiet"
@@ -4236,6 +4257,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyColoredPencil} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCutoutDialog && (
+        <div className="modal-overlay" onClick={() => setShowCutoutDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Cutout"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Cutout</h2>
+            <label className="control">
+              <span className="control__label">
+                Number of Levels
+                <span className="control__value">{cutoutLevels}</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={8}
+                value={cutoutLevels}
+                onChange={(event) => setCutoutLevels(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Edge Simplicity
+                <span className="control__value">{cutoutSimplicity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={cutoutSimplicity}
+                onChange={(event) => setCutoutSimplicity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowCutoutDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyCutout} disabled={busy}>
                 Apply
               </button>
             </div>

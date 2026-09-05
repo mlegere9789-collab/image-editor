@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 112.**
+**618 distinct capabilities tracked. Currently shipped: 113.**
 
 ## PART I — EVERY TOOL
 
@@ -544,7 +544,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Vanishing Point
 - [ ] Smart Filters
 - [x] Colored Pencil (Filter Gallery → Artistic; the layer's own colour along a dilated Sobel edge map, blended against a flat paper grey — Photoshop's actual directional-hatching pencil-stroke renderer is a documented approximation, not a port — see README Phase 53)
-- [ ] CutoutSimplifies an image into broad, poster-like areas of flat color, producing a cut-paper/graphic appearance.
+- [x] Cutout (Filter Gallery → Artistic; a box-blur pre-pass composed with `posterize`'s own quantization, rather than a real segmentation into cut-paper shapes — Photoshop's separate Edge Fidelity slider is a documented scope cut — see README Phase 54)
 - [ ] Dry BrushSimulates a dry-brush painting technique, reducing detail while emphasizing broad strokes.
 - [ ] Film GrainAdds photographic-looking grain while preserving the overall tonal structure.
 - [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
