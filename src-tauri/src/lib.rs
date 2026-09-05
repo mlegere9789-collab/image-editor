@@ -1100,6 +1100,23 @@ fn dry_brush(
     })
 }
 
+/// Filter Gallery > Artistic > Film Grain on layer `id`. The frontend
+/// sends a fresh `seed` on every apply so repeated applications differ,
+/// as with Add Noise.
+#[tauri::command]
+fn film_grain(
+    state: State<'_, AppState>,
+    id: LayerId,
+    grain: u32,
+    highlight_area: u32,
+    intensity: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.film_grain(id, grain, highlight_area, intensity, seed)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1693,6 +1710,7 @@ pub fn run() {
             colored_pencil,
             cutout,
             dry_brush,
+            film_grain,
             crystallize,
             facet,
             pointillize,

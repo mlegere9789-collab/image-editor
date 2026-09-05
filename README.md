@@ -4006,6 +4006,59 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **496 Rust tests total** (492 → 496, 489 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 56 — Filter Gallery > Artistic > Film Grain
+
+Monochromatic seeded noise — one [`XorShift32`] draw per pixel, added
+equally to all three channels, the same generator `Self::add_noise`
+already uses — that fades out toward brighter pixels, the way real
+photographic grain reads as more visible in shadows and midtones than in
+highlights. A documented, simplified approximation of Photoshop's own
+tonal-weighting curve, not a port of its exact shape.
+`Document::film_grain(id, grain, highlight_area, intensity, seed)`:
+`grain` and `intensity` (Photoshop's own 0..=20 and 0..=10 ranges) both
+scale the noise's raw amplitude as fractions of `255`; `highlight_area`
+(0..=20) scales how strongly each pixel's own ITU-R BT.601 luma
+suppresses it, via `weight = 1 − luma · (highlight_area / 20)`, clamped
+to `0..=1` — `0` applies grain uniformly regardless of brightness, `20`
+fades it to nothing on a pure-white pixel while leaving black pixels at
+full strength. The frontend sends a fresh `seed` on every apply, as with
+Add Noise.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python port of the same `XorShift32` generator —
+carefully re-implemented with explicit 32-bit float rounding after every
+operation (via `struct.pack`/`unpack` round-tripping), since a naive
+double-precision port would silently drift from Rust's actual `f32`
+arithmetic. On `grey_2x2` (a flat `128` everywhere), with highlight area
+`0` (weight `1` uniformly) and grain/intensity `10`/`10` (amplitude
+`127.5`), seed `1`'s first four draws — `-0.99987`, `-0.96851`,
+`+0.23281`, `-0.85676` — give final values `1`, `5`, `158`, and `19`,
+none near a `.5` boundary. A second test isolates the highlight
+weighting on a single white pixel: at highlight area `0` the first seeded
+draw applies in full (`255 → 204`); at highlight area `20` the same draw
+contributes exactly zero and the pixel stays untouched at `255` — a
+clean before/after demonstration of the suppression term. A third
+confines the flat fixture to a one-pixel selection. A fourth confirms
+out-of-range grain/highlight-area/intensity and a locked/unknown layer
+all error. All four passed on the first run, matching the Python
+reference exactly. A new **Film Grain…** dialog exposes Grain, Highlight
+Area, and Intensity sliders, added after Dry Brush in the same Artistic
+filter group.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous three: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**500 Rust tests total** (496 → 500, 493 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

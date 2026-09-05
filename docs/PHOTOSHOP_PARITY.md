@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 114.**
+**618 distinct capabilities tracked. Currently shipped: 115.**
 
 ## PART I — EVERY TOOL
 
@@ -546,7 +546,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Colored Pencil (Filter Gallery → Artistic; the layer's own colour along a dilated Sobel edge map, blended against a flat paper grey — Photoshop's actual directional-hatching pencil-stroke renderer is a documented approximation, not a port — see README Phase 53)
 - [x] Cutout (Filter Gallery → Artistic; a box-blur pre-pass composed with `posterize`'s own quantization, rather than a real segmentation into cut-paper shapes — Photoshop's separate Edge Fidelity slider is a documented scope cut — see README Phase 54)
 - [x] Dry Brush (Filter Gallery → Artistic; an edge-preserving median smoothing pass blended back toward the original by a Detail factor — Photoshop's separate canvas-grain Texture slider is a documented scope cut — see README Phase 55)
-- [ ] Film GrainAdds photographic-looking grain while preserving the overall tonal structure.
+- [x] Film Grain (Filter Gallery → Artistic; one seeded XorShift32 draw per pixel applied to all three channels, fading out toward brighter pixels by luma — a documented simplification of Photoshop's own tonal-weighting curve — see README Phase 56)
 - [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
 - [ ] Neon GlowAdds a colored glow around image details, creating a neon-like effect.
 - [ ] Paint DaubsConverts image detail into visible painted dabs.

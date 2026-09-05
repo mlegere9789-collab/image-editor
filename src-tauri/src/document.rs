@@ -3830,6 +3830,62 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Film Grain: monochromatic seeded noise
+    /// (one [`XorShift32`] draw per pixel, added equally to all three
+    /// channels, the same generator [`Self::add_noise`] already uses) that
+    /// fades out toward brighter pixels, the way real photographic grain
+    /// reads as more visible in shadows and midtones than in highlights —
+    /// a documented, simplified approximation of Photoshop's own tonal
+    /// weighting, not a port of its exact curve. `grain` (Photoshop's own
+    /// 0..=20 range) and `intensity` (0..=10) both scale the noise's raw
+    /// amplitude (as fractions of `255`); `highlight_area` (0..=20) scales
+    /// how strongly each pixel's own ITU-R BT.601 luma suppresses it, via
+    /// `weight = 1 − luma · (highlight_area / 20)`, clamped to `0..=1` —
+    /// `0` applies grain uniformly regardless of brightness, `20` fades it
+    /// to nothing on a pure-white pixel while leaving black pixels at full
+    /// strength. The frontend sends a fresh `seed` on every apply, as with
+    /// Add Noise. Confined to the selection and errors on an out-of-range
+    /// parameter or a locked/unknown layer.
+    pub fn film_grain(
+        &mut self,
+        id: LayerId,
+        grain: u32,
+        highlight_area: u32,
+        intensity: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if grain > 20 {
+            return Err("Film Grain amount must be between 0 and 20.".to_string());
+        }
+        if highlight_area > 20 {
+            return Err("Film Grain highlight area must be between 0 and 20.".to_string());
+        }
+        if intensity > 10 {
+            return Err("Film Grain intensity must be between 0 and 10.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let amount = grain as f32 / 20.0;
+        let intensity_f = intensity as f32 / 10.0;
+        let highlight_f = highlight_area as f32 / 20.0;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let draw = rng.next_unit();
+            let luma = (0.299 * src[base] as f32
+                + 0.587 * src[base + 1] as f32
+                + 0.114 * src[base + 2] as f32)
+                / 255.0;
+            let weight = (1.0 - luma * highlight_f).clamp(0.0, 1.0);
+            let delta = draw * amount * 255.0 * intensity_f * weight;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + delta).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -8886,6 +8942,82 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.dry_brush(999, 1, 0).is_err());
+    }
+
+    #[test]
+    fn film_grain_adds_one_seeded_draw_per_pixel_to_all_channels() {
+        // grey_2x2 (128 everywhere), highlight area 0 (weight 1
+        // uniformly), grain 10 (amount 0.5) and intensity 10 (factor
+        // 1.0): delta = draw * 0.5 * 255. Seed 1's first four draws,
+        // computed by an independent Python port of the same XorShift32
+        // generator, are -0.99987, -0.96851, +0.23281, and -0.85676,
+        // giving deltas of -127.484, -123.484, +29.683, and -109.237 and
+        // final values 128 + delta rounded to 1, 5, 158, and 19 — none of
+        // them near a .5 boundary.
+        let (mut doc, id) = grey_2x2();
+        doc.film_grain(id, 10, 0, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], [1, 1, 1, 255]);
+        assert_eq!(&p[4..8], [5, 5, 5, 255]);
+        assert_eq!(&p[8..12], [158, 158, 158, 255]);
+        assert_eq!(&p[12..16], [19, 19, 19, 255]);
+    }
+
+    #[test]
+    fn film_grain_highlight_area_suppresses_grain_on_bright_pixels() {
+        // A single white pixel (luma 1.0), grain 4 (amount 0.2), intensity
+        // 10. At highlight area 0 the weight is 1 regardless of
+        // brightness, so the first seeded draw (-0.99987, seed 1) applies
+        // in full: delta = -0.99987 * 0.2 * 255 = -50.994, giving
+        // 255 - 50.994 = 204.006 -> 204. At highlight area 20 the weight
+        // is 1 - luma*1.0 = 0, so the same draw contributes exactly zero
+        // and the pixel stays untouched at 255.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc
+            .add_layer("white", &solid(1, 1, [255, 255, 255, 255]), 1, 1)
+            .unwrap();
+        doc.film_grain(id, 4, 0, 10, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, [204, 204, 204, 255]);
+
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc
+            .add_layer("white", &solid(1, 1, [255, 255, 255, 255]), 1, 1)
+            .unwrap();
+        doc.film_grain(id, 4, 20, 10, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn film_grain_is_confined_to_the_selection() {
+        let (mut doc, id) = grey_2x2();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.film_grain(id, 10, 0, 10, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[0..4], [1, 1, 1, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn film_grain_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.film_grain(id, 21, 0, 10, 1).is_err());
+        assert!(doc.film_grain(id, 10, 21, 10, 1).is_err());
+        assert!(doc.film_grain(id, 10, 0, 11, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.film_grain(id, 10, 0, 10, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.film_grain(999, 10, 0, 10, 1).is_err());
     }
 
     #[test]

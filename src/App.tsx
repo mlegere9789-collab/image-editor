@@ -327,6 +327,10 @@ export default function App() {
   const [showDryBrushDialog, setShowDryBrushDialog] = useState(false);
   const [dryBrushSize, setDryBrushSize] = useState(4);
   const [dryBrushDetail, setDryBrushDetail] = useState(6);
+  const [showFilmGrainDialog, setShowFilmGrainDialog] = useState(false);
+  const [filmGrainAmount, setFilmGrainAmount] = useState(6);
+  const [filmGrainHighlightArea, setFilmGrainHighlightArea] = useState(4);
+  const [filmGrainIntensity, setFilmGrainIntensity] = useState(6);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -920,6 +924,20 @@ export default function App() {
     });
     setShowDryBrushDialog(false);
   }, [runCommand, selectedId, dryBrushSize, dryBrushDetail]);
+
+  const applyFilmGrain = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Add Noise.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("film_grain", {
+      id: selectedId,
+      grain: filmGrainAmount,
+      highlightArea: filmGrainHighlightArea,
+      intensity: filmGrainIntensity,
+      seed,
+    });
+    setShowFilmGrainDialog(false);
+  }, [runCommand, selectedId, filmGrainAmount, filmGrainHighlightArea, filmGrainIntensity]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2199,6 +2217,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Dry Brush"
           >
             Dry Brush…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFilmGrainDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Film Grain"
+          >
+            Film Grain…
           </button>
           <button
             className="button button--quiet"
@@ -4379,6 +4405,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDryBrush} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFilmGrainDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFilmGrainDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Film Grain"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Film Grain</h2>
+            <label className="control">
+              <span className="control__label">
+                Grain
+                <span className="control__value">{filmGrainAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={filmGrainAmount}
+                onChange={(event) => setFilmGrainAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Highlight Area
+                <span className="control__value">{filmGrainHighlightArea}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={filmGrainHighlightArea}
+                onChange={(event) => setFilmGrainHighlightArea(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Intensity
+                <span className="control__value">{filmGrainIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={filmGrainIntensity}
+                onChange={(event) => setFilmGrainIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFilmGrainDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyFilmGrain} disabled={busy}>
                 Apply
               </button>
             </div>
