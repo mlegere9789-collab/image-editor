@@ -966,6 +966,28 @@ fn shear(
     })
 }
 
+/// Filter > Distort > Displace on layer `id`, using `map_layer_id`'s
+/// red/green channels as the horizontal/vertical displacement map.
+#[tauri::command]
+fn displace(
+    state: State<'_, AppState>,
+    id: LayerId,
+    map_layer_id: LayerId,
+    horizontal_scale: f32,
+    vertical_scale: f32,
+    wrap_around: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.displace(
+            id,
+            map_layer_id,
+            horizontal_scale,
+            vertical_scale,
+            wrap_around,
+        )
+    })
+}
+
 /// Filter > Pixelate > Color Halftone on layer `id`.
 #[tauri::command]
 fn color_halftone(
@@ -1573,6 +1595,7 @@ pub fn run() {
             polar_coordinates,
             wave,
             shear,
+            displace,
             color_halftone,
             mezzotint,
             crystallize,

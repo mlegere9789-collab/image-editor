@@ -3656,6 +3656,61 @@ restored the original gradient.
 **472 Rust tests total** (469 → 472, 465 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 50 — Filter > Distort > Displace
+
+The last new Distort filter. Photoshop's own dialog browses to a separate
+displacement-map file and offers Stretch to Fit or Tile to reconcile that
+file's size with the target canvas; `Document::displace(id, map_layer_id,
+horizontal_scale, vertical_scale, wrap_around)` sidesteps that whole
+problem by using an already-open layer as the map instead — every layer
+here shares the document's exact canvas size, so the map is never
+resampled, and Stretch to Fit/Tile become moot rather than needing their
+own implementation. For pixel `(x, y)`, the map layer's red channel
+there gives the horizontal displacement, `(red − 128) / 128 ·
+horizontal_scale`, and its green channel the vertical, `(green − 128) /
+128 · vertical_scale` — 128 (mid-grey) means no shift in either
+direction, 0 the full shift one way and 255 the full shift the other,
+exactly Photoshop's own convention. The displaced position is rounded to
+the nearest whole pixel — this filter moves whole pixels rather than
+resampling, the same convention `shear` uses — and, also like `shear`,
+`wrap_around` picks between Photoshop's two undefined-area modes: clamping
+the source into range (**Repeat Edge Pixels**) or wrapping it with
+`rem_euclid` (**Wrap Around**). A **Displace…** dialog exposes a
+Displacement Map layer picker (populated from every other layer in the
+document), Horizontal/Vertical Scale sliders, and the same Repeat Edge
+Pixels/Wrap Around radio pair `shear` uses; it's disabled whenever fewer
+than two layers exist, since a document needs a second layer to serve as
+the map.
+
+**Verified two ways.** Four new `document.rs` tests, all built on one
+shared 3×3 map fixture: mid-grey `(128, 128)` everywhere except `(0, 0)`
+at `(127, 127)` and `(2, 2)` at `(130, 128)`. Paired with a horizontal and
+vertical scale of exactly 128.0, `(map − 128) / 128 · 128` reduces to
+clean integer pixels of displacement — worked out by hand: `(0, 0)`
+shifts by `(−1, −1)`, `(1, 1)` doesn't move, and `(2, 2)` shifts by `(+2,
+0)`. On the 3×3 `ramp_square` fixture (red = `10x + y`), the first test
+confirms Repeat Edge Pixels: `(0, 0)`'s shift clamps back to itself
+(red 0), `(1, 1)` is unchanged (red 11), and `(2, 2)`'s shift also clamps
+back to itself (red 22). A second test reuses the identical fixture under
+Wrap Around instead: `(0, 0)` now wraps to `(2, 2)` (red 22) and `(2, 2)`
+wraps to `(1, 2)` (red 12), while `(1, 1)` is unaffected either way. A
+third test confirms a one-pixel selection under Wrap Around changes only
+that pixel (Repeat Edge Pixels was deliberately not used here, since
+`(0, 0)`'s shift happens to clamp back to itself under that mode — a
+coincidental no-op rather than a real check, the same pitfall caught and
+fixed in Mezzotint's own selection test); a fourth confirms a non-finite
+scale, an unknown map layer, and a locked/unknown target layer all error.
+All four passed on the first run. Live under Xvfb: loaded the bundled
+gradient sample, added a second copy of it as a layer to serve as the
+map, and applied Displace at a 75px horizontal and vertical scale — the
+canvas's ruled grid lines visibly bent and warped following the map's own
+smooth colour gradient, most noticeably near the top-left where the
+map's colours vary fastest — and Undo restored the original, perfectly
+straight grid.
+
+**476 Rust tests total** (472 → 476, 469 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

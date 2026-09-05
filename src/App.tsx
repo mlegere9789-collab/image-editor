@@ -304,6 +304,11 @@ export default function App() {
   const [showShearDialog, setShowShearDialog] = useState(false);
   const [shearControlPoints, setShearControlPoints] = useState([0, 0, 0, 0, 0]);
   const [shearWrapAround, setShearWrapAround] = useState(false);
+  const [showDisplaceDialog, setShowDisplaceDialog] = useState(false);
+  const [displaceMapLayerId, setDisplaceMapLayerId] = useState<number | null>(null);
+  const [displaceHorizontalScale, setDisplaceHorizontalScale] = useState(10);
+  const [displaceVerticalScale, setDisplaceVerticalScale] = useState(10);
+  const [displaceWrapAround, setDisplaceWrapAround] = useState(false);
   const [showColorHalftoneDialog, setShowColorHalftoneDialog] = useState(false);
   const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showMezzotintDialog, setShowMezzotintDialog] = useState(false);
@@ -808,6 +813,32 @@ export default function App() {
     });
     setShowShearDialog(false);
   }, [runCommand, selectedId, shearControlPoints, shearWrapAround]);
+
+  const openDisplaceDialog = useCallback(() => {
+    const layers = document?.layers ?? [];
+    const other = layers.find((layer) => layer.id !== selectedId) ?? null;
+    setDisplaceMapLayerId(other?.id ?? null);
+    setShowDisplaceDialog(true);
+  }, [document, selectedId]);
+
+  const applyDisplace = useCallback(async () => {
+    if (selectedId === null || displaceMapLayerId === null) return;
+    await runCommand("displace", {
+      id: selectedId,
+      mapLayerId: displaceMapLayerId,
+      horizontalScale: displaceHorizontalScale,
+      verticalScale: displaceVerticalScale,
+      wrapAround: displaceWrapAround,
+    });
+    setShowDisplaceDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    displaceMapLayerId,
+    displaceHorizontalScale,
+    displaceVerticalScale,
+    displaceWrapAround,
+  ]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
@@ -2117,6 +2148,14 @@ export default function App() {
             title="Filter > Distort > Shear"
           >
             Shear…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openDisplaceDialog}
+            disabled={busy || !canPaint || (document?.layers.length ?? 0) < 2}
+            title="Filter > Distort > Displace"
+          >
+            Displace…
           </button>
           <button
             className="button button--quiet"
@@ -4439,6 +4478,97 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyShear} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDisplaceDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDisplaceDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Displace"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Displace</h2>
+            <label className="control control--row">
+              <span className="control__label">Displacement Map</span>
+              <select
+                value={displaceMapLayerId ?? ""}
+                onChange={(event) => setDisplaceMapLayerId(Number(event.target.value))}
+              >
+                {(document?.layers ?? [])
+                  .filter((layer) => layer.id !== selectedId)
+                  .map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Horizontal Scale
+                <span className="control__value">{displaceHorizontalScale}px</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={displaceHorizontalScale}
+                onChange={(event) => setDisplaceHorizontalScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Vertical Scale
+                <span className="control__value">{displaceVerticalScale}px</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={displaceVerticalScale}
+                onChange={(event) => setDisplaceVerticalScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Repeat Edge Pixels</span>
+              <input
+                type="radio"
+                name="displace-undefined-areas"
+                checked={!displaceWrapAround}
+                onChange={() => setDisplaceWrapAround(false)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Wrap Around</span>
+              <input
+                type="radio"
+                name="displace-undefined-areas"
+                checked={displaceWrapAround}
+                onChange={() => setDisplaceWrapAround(true)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDisplaceDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyDisplace}
+                disabled={busy || displaceMapLayerId === null}
+              >
                 Apply
               </button>
             </div>

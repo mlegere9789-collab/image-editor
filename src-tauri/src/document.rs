@@ -3310,6 +3310,57 @@ impl Document {
         })
     }
 
+    /// Filter > Distort > Displace: pulls each pixel from a position
+    /// offset by another layer's own colours — Photoshop's own dialog
+    /// browses to a separate displacement-map file, but every layer here
+    /// already shares the document's exact canvas size, so using an
+    /// already-open layer (`map_layer_id`) sidesteps Photoshop's own
+    /// Stretch-to-Fit/Tile choice entirely: the map layer is never
+    /// resampled. For pixel `(x, y)`, that layer's red channel there
+    /// gives the horizontal displacement, `(red − 128) / 128 ·
+    /// horizontal_scale`, and its green channel the vertical, `(green −
+    /// 128) / 128 · vertical_scale` — 128 (mid-grey) means no shift in
+    /// either direction, 0 the full shift one way and 255 the full shift
+    /// the other, Photoshop's own convention. The displaced position is
+    /// rounded to the nearest whole pixel — this filter moves whole
+    /// pixels rather than resampling — then, like [`Self::shear`],
+    /// `wrap_around` picks between Photoshop's two undefined-area modes:
+    /// `false` clamps the source into range (**Repeat Edge Pixels**);
+    /// `true` wraps it with `rem_euclid` instead (**Wrap Around**).
+    /// Errors on a non-finite scale, an unknown map layer, or a
+    /// locked/unknown target layer.
+    pub fn displace(
+        &mut self,
+        id: LayerId,
+        map_layer_id: LayerId,
+        horizontal_scale: f32,
+        vertical_scale: f32,
+        wrap_around: bool,
+    ) -> Result<Option<Rect>, String> {
+        if !horizontal_scale.is_finite() || !vertical_scale.is_finite() {
+            return Err("Displace scale must be a number.".to_string());
+        }
+        let map = self.layer(map_layer_id)?.pixels.clone();
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let map_base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let dx = (map[map_base] as f32 - 128.0) / 128.0 * horizontal_scale;
+            let dy = (map[map_base + 1] as f32 - 128.0) / 128.0 * vertical_scale;
+            let sx = (col as f32 + dx).round() as i64;
+            let sy = (row as f32 + dy).round() as i64;
+            let (x, y) = if wrap_around {
+                (sx.rem_euclid(width), sy.rem_euclid(height))
+            } else {
+                (sx.clamp(0, width - 1), sy.clamp(0, height - 1))
+            };
+            let base = (y as usize * doc_width + x as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Filter > Pixelate > Mezzotint: reduces each colour channel to pure
     /// black or white in coarse, randomly-thresholded blocks — a
     /// documented approximation of Photoshop's own several mezzotint
@@ -7793,6 +7844,87 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.lens_flare(999, 0.0, 0.0, 150).is_err());
+    }
+
+    /// A 3x3 displacement map whose red/green channels are mid-grey (128,
+    /// no shift) everywhere except three pixels: (0, 0) is (127, 127)
+    /// (one pixel up-left, once scaled by 128), (1, 1) stays neutral, and
+    /// (2, 2) is (130, 128) (two pixels right). Paired with a
+    /// `horizontal_scale`/`vertical_scale` of 128.0, `(map − 128) / 128 *
+    /// 128` reduces to exactly `map − 128` pixels of displacement — clean
+    /// integers, chosen so the resulting source coordinates land partly
+    /// off-canvas (testing the clamp/wrap difference) and partly on an
+    /// identity shift (testing the zero case).
+    fn displace_map_fixture() -> Vec<u8> {
+        let mut pixels = [128u8, 128, 0, 255].repeat(9);
+        pixels[0] = 127; // (0, 0): dx = -1
+        pixels[1] = 127; // (0, 0): dy = -1
+        let idx22 = (2 * 3 + 2) * 4;
+        pixels[idx22] = 130; // (2, 2): dx = +2
+        pixels
+    }
+
+    #[test]
+    fn displace_clamps_the_displaced_source_by_default() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramp_square(3);
+        let map_id = doc.add_layer("map", &displace_map_fixture(), 3, 3).unwrap();
+        doc.displace(id, map_id, 128.0, 128.0, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 0); // (-1, -1) clamps to (0, 0)
+        assert_eq!(p[idx(1, 1)], 11); // no shift
+        assert_eq!(p[idx(2, 2)], 22); // (4, 2) clamps to (2, 2)
+    }
+
+    #[test]
+    fn displace_wraps_the_displaced_source_when_asked() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramp_square(3);
+        let map_id = doc.add_layer("map", &displace_map_fixture(), 3, 3).unwrap();
+        doc.displace(id, map_id, 128.0, 128.0, true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 22); // (-1, -1) wraps to (2, 2)
+        assert_eq!(p[idx(1, 1)], 11); // no shift
+        assert_eq!(p[idx(2, 2)], 12); // (4, 2) wraps to (1, 2)
+    }
+
+    #[test]
+    fn displace_is_confined_to_the_selection() {
+        // wrap_around = true, since pixel (0, 0)'s displacement of (-1,
+        // -1) is already known (from the wrap test above) to change it —
+        // clamping the same shift lands back on (0, 0) unchanged, which
+        // would make this a coincidental no-op rather than a real check.
+        let (mut doc, id) = ramp_square(3);
+        let map_id = doc.add_layer("map", &displace_map_fixture(), 3, 3).unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.displace(id, map_id, 128.0, 128.0, true).unwrap();
+        assert_ne!(doc.layers()[0].pixels[0..4], before[0..4]);
+        assert_eq!(doc.layers()[0].pixels[4..], before[4..]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn displace_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        let map_id = doc
+            .add_layer("map", &solid(2, 2, [128, 128, 0, 255]), 2, 2)
+            .unwrap();
+        assert!(doc.displace(id, map_id, f32::NAN, 0.0, false).is_err());
+        assert!(doc.displace(id, 999, 0.0, 0.0, false).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.displace(id, map_id, 0.0, 0.0, false).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.displace(999, 999, 0.0, 0.0, false).is_err());
     }
 
     #[test]
