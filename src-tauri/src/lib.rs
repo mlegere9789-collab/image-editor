@@ -1010,6 +1010,25 @@ fn mezzotint(
     edit_checkpointed(&state, |document| document.mezzotint(id, cell_size, seed))
 }
 
+/// Filter > Stylize > Extrude on layer `id`. `random` picks Photoshop's
+/// Random depth basis over Level-based; the frontend sends a fresh `seed`
+/// on every apply so repeated Random applications differ, as with Add
+/// Noise.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn extrude(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    depth: u32,
+    random: bool,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.extrude(id, cell_size, depth, random, seed)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1598,6 +1617,7 @@ pub fn run() {
             displace,
             color_halftone,
             mezzotint,
+            extrude,
             crystallize,
             facet,
             pointillize,

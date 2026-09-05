@@ -313,6 +313,10 @@ export default function App() {
   const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showMezzotintDialog, setShowMezzotintDialog] = useState(false);
   const [mezzotintCellSize, setMezzotintCellSize] = useState(8);
+  const [showExtrudeDialog, setShowExtrudeDialog] = useState(false);
+  const [extrudeSize, setExtrudeSize] = useState(20);
+  const [extrudeDepth, setExtrudeDepth] = useState(30);
+  const [extrudeRandom, setExtrudeRandom] = useState(false);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -853,6 +857,20 @@ export default function App() {
     await runCommand("mezzotint", { id: selectedId, cellSize: mezzotintCellSize, seed });
     setShowMezzotintDialog(false);
   }, [runCommand, selectedId, mezzotintCellSize]);
+
+  const applyExtrude = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Add Noise/Mezzotint (used only in Random mode).
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("extrude", {
+      id: selectedId,
+      cellSize: extrudeSize,
+      depth: extrudeDepth,
+      random: extrudeRandom,
+      seed,
+    });
+    setShowExtrudeDialog(false);
+  }, [runCommand, selectedId, extrudeSize, extrudeDepth, extrudeRandom]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2068,6 +2086,14 @@ export default function App() {
             title="Filter > Stylize > Glowing Edges"
           >
             Glowing Edges…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowExtrudeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Extrude"
+          >
+            Extrude…
           </button>
           <button
             className="button button--quiet"
@@ -4007,6 +4033,71 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGlowingEdges} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExtrudeDialog && (
+        <div className="modal-overlay" onClick={() => setShowExtrudeDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Extrude"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Extrude</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{extrudeSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={255}
+                value={extrudeSize}
+                onChange={(event) => setExtrudeSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Depth
+                <span className="control__value">{extrudeDepth}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={255}
+                value={extrudeDepth}
+                onChange={(event) => setExtrudeDepth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Level-based</span>
+              <input
+                type="radio"
+                name="extrude-depth-basis"
+                checked={!extrudeRandom}
+                onChange={() => setExtrudeRandom(false)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Random</span>
+              <input
+                type="radio"
+                name="extrude-depth-basis"
+                checked={extrudeRandom}
+                onChange={() => setExtrudeRandom(true)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowExtrudeDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyExtrude} disabled={busy}>
                 Apply
               </button>
             </div>

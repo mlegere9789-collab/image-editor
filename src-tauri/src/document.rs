@@ -3431,6 +3431,107 @@ impl Document {
         })
     }
 
+    /// Filter > Stylize > Extrude: pops the layer into a grid of raised
+    /// square blocks, each shaded along its own diagonal from a bright
+    /// top-left corner to a dark bottom-right one — a documented,
+    /// deliberately simplified stand-in for Photoshop's real 3-D block
+    /// rendering (viewer-facing side walls, a genuine perspective pop),
+    /// chosen because a closed-form diagonal shade is hand-verifiable in a
+    /// way that projecting cube faces isn't. Photoshop's Pyramids block
+    /// type and its stretched-image front faces (as opposed to Solid
+    /// Front Faces) are further, documented scope cuts — every block here
+    /// is a flat square filled with its own average colour, the same
+    /// anchored grid [`Self::mosaic`] uses.
+    ///
+    /// `cell_size` (Photoshop's own 2..=255 range) sets the block size;
+    /// `depth` (its own 1..=255 range) sets the maximum shading swing.
+    /// Each block's own factor — how much of that swing it actually gets —
+    /// is either drawn fresh from the seeded [`XorShift32`] generator
+    /// (`random = true`, Photoshop's own Random depth) or the block's own
+    /// ITU-R BT.601 luma over 255 (`random = false`, Level-based: brighter
+    /// blocks pop harder). For a pixel at local position `(lx, ly)` inside
+    /// its `cell`-pixel block, `t = ((cell−1−lx) + (cell−1−ly)) /
+    /// (2·(cell−1)) − 0.5` runs from `+0.5` at the top-left corner to
+    /// `−0.5` at the bottom-right, and every colour channel (never alpha,
+    /// which stays the block's own average like `mosaic`) is offset by
+    /// `t · factor · depth`, clamped to `0..=255`. Errors on a cell size
+    /// outside `2..=255`, a depth outside `1..=255`, or a locked/unknown
+    /// layer.
+    pub fn extrude(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        depth: u32,
+        random: bool,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=255).contains(&cell_size) {
+            return Err("Extrude size must be between 2 and 255 pixels.".to_string());
+        }
+        if !(1..=255).contains(&depth) {
+            return Err("Extrude depth must be between 1 and 255.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let cell = cell_size as usize;
+        let cells_x = width.div_ceil(cell);
+        let cells_y = height.div_ceil(cell);
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut sums = vec![[0u64; CHANNELS]; cells_x * cells_y];
+        let mut counts = vec![0u64; cells_x * cells_y];
+        for y in 0..height {
+            for x in 0..width {
+                let ci = (y / cell) * cells_x + x / cell;
+                let base = (y * doc_width + x) * CHANNELS;
+                for c in 0..CHANNELS {
+                    sums[ci][c] += source[base + c] as u64;
+                }
+                counts[ci] += 1;
+            }
+        }
+        let averages: Vec<[u8; CHANNELS]> = sums
+            .iter()
+            .zip(&counts)
+            .map(|(sum, &count)| std::array::from_fn(|c| (sum[c] / count) as u8))
+            .collect();
+        let mut rng = XorShift32::new(seed);
+        let factors: Vec<f32> = (0..cells_x * cells_y)
+            .map(|ci| {
+                if random {
+                    rng.next_u32() as f32 / 4_294_967_296.0
+                } else {
+                    let [r, g, b, _] = averages[ci];
+                    (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0
+                }
+            })
+            .collect();
+        let max_offset = (cell - 1) as f32 * 2.0;
+        self.filter_pixels(id, |_, row, col| {
+            let (cx, cy) = (col as usize / cell, row as usize / cell);
+            let ci = cy * cells_x + cx;
+            let (lx, ly) = (col as usize % cell, row as usize % cell);
+            let t = if max_offset > 0.0 {
+                ((cell - 1 - lx) + (cell - 1 - ly)) as f32 / max_offset - 0.5
+            } else {
+                0.0
+            };
+            let shade = t * factors[ci] * depth as f32;
+            let avg = averages[ci];
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (avg[c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = avg[3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -8022,6 +8123,103 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.mezzotint(999, 1, 1).is_err());
+    }
+
+    #[test]
+    fn extrude_shades_each_block_diagonally_by_its_level_based_luma() {
+        // A single 4x4 block, solid (200, 100, 50, 255), so its average is
+        // exactly that colour. Its BT.601 luma is 0.299*200 + 0.587*100 +
+        // 0.114*50 = 124.2, giving factor 124.2/255 = 0.4870588... At
+        // depth 100, t(lx,ly) = ((3-lx)+(3-ly))/6 - 0.5 runs from +0.5 at
+        // the top-left corner to -0.5 at the bottom-right; shade = t *
+        // factor * 100 computed by hand (and cross-checked with a small
+        // Python script) gives +24.35 at (0,0), -24.35 at (3,3), +8.12 at
+        // (1,1) and -8.12 at (2,2), rounding to the expected colours
+        // below. Alpha stays the block's own average (255), untouched by
+        // the shading.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("block", &solid(4, 4, [200, 100, 50, 255]), 4, 4)
+            .unwrap();
+        doc.extrude(id, 4, 100, false, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [224, 124, 74, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [176, 76, 26, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [208, 108, 58, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [192, 92, 42, 255]);
+    }
+
+    #[test]
+    fn extrude_random_mode_draws_a_fresh_factor_per_block() {
+        // Two 4x4 blocks side by side (8x4 canvas): the left solid (10,
+        // 20, 30, 255), the right solid (200, 210, 220, 255). In random
+        // mode the two blocks' factors come from the seeded XorShift32
+        // sequence instead of their own luma; seed 123456789's first two
+        // draws, computed by an independent Python port of the same
+        // generator, give factors 0.6321277192328125 and
+        // 0.5212643640115857. At depth 255 (the maximum), the corner
+        // shades computed by hand from those factors clamp at both ends:
+        // the left block's bottom-right corner clamps to 0 and the right
+        // block's top-left corner clamps to 255, alongside two
+        // unclamped corners.
+        let idx = |x: usize, y: usize| (y * 8 + x) * 4;
+        let mut pixels = Vec::with_capacity(8 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..8u32 {
+                if x < 4 {
+                    pixels.extend_from_slice(&[10, 20, 30, 255]);
+                } else {
+                    pixels.extend_from_slice(&[200, 210, 220, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(8, 4).unwrap();
+        let id = doc.add_layer("halves", &pixels, 8, 4).unwrap();
+        doc.extrude(id, 4, 255, true, 123456789).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [91, 101, 111, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(4, 0)..idx(4, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(7, 3)..idx(7, 3) + 4], [134, 144, 154, 255]);
+    }
+
+    #[test]
+    fn extrude_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("block", &solid(4, 4, [200, 100, 50, 255]), 4, 4)
+            .unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.extrude(id, 4, 100, false, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [224, 124, 74, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn extrude_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.extrude(id, 1, 100, false, 1).is_err());
+        assert!(doc.extrude(id, 256, 100, false, 1).is_err());
+        assert!(doc.extrude(id, 4, 0, false, 1).is_err());
+        assert!(doc.extrude(id, 4, 256, false, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.extrude(id, 4, 100, false, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.extrude(999, 4, 100, false, 1).is_err());
     }
 
     #[test]

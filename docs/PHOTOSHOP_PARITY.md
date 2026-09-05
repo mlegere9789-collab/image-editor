@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 109.**
+**618 distinct capabilities tracked. Currently shipped: 110.**
 
 ## PART I — EVERY TOOL
 
@@ -584,7 +584,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
 - [x] Diffuse (seeded neighbour shuffle with Normal / Darken Only / Lighten Only, plus deterministic closest-neighbour Anisotropic — see README Phase 33)
 - [x] Emboss (relief lit from an angle: 128 + (away − toward) · amount%, nearest-neighbour sampling at the given height — see README Phase 31)
-- [ ] Extrude (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
+- [x] Extrude (Blocks type only, Solid Front Faces only: flat per-block average colour with a closed-form diagonal bevel shade, Level-based or Random depth; Pyramids and stretched front faces are a documented scope cut — see README Phase 51)
 - [x] Find Edges (inverted Sobel |Gx|+|Gy| per channel, white where flat — see README Phase 31)
 - [x] Glowing Edges (Sobel magnitude dilated by Edge Width, scaled by Edge Brightness, box-smoothed by Smoothness, on black — see README Phase 35)
 - [x] Solarize (min(v, 255 − v) per channel, the tent curve — see README Phase 31)

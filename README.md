@@ -3711,6 +3711,60 @@ straight grid.
 **476 Rust tests total** (472 → 476, 469 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 51 — Filter > Stylize > Extrude
+
+Pops the layer into a grid of raised square blocks — a documented,
+deliberately simplified stand-in for Photoshop's real 3-D block rendering
+(viewer-facing side walls, a genuine perspective pop), chosen because a
+closed-form diagonal shade is hand-verifiable in a way that projecting
+cube faces isn't. `Document::extrude(id, cell_size, depth, random, seed)`
+reuses `mosaic`'s exact anchored grid and per-cell averaging, so every
+block starts as a flat square filled with its own average colour —
+Photoshop's Pyramids block type and its stretched-image front faces
+(as opposed to Solid Front Faces) are further, documented scope cuts.
+`cell_size` (Photoshop's own 2..=255 range) sets the block size and
+`depth` (its own 1..=255 range) the maximum shading swing; each block's
+own factor — how much of that swing it actually gets — is either drawn
+fresh from the seeded `XorShift32` generator (`random = true`,
+Photoshop's own Random depth) or the block's own ITU-R BT.601 luma over
+255 (`random = false`, Level-based: brighter blocks pop harder, the same
+luma weights `threshold` and `black_and_white` already use). For a pixel
+at local position `(lx, ly)` inside its block, `t = ((cell−1−lx) +
+(cell−1−ly)) / (2·(cell−1)) − 0.5` runs from `+0.5` at the top-left
+corner to `−0.5` at the bottom-right, and every colour channel (never
+alpha, which stays the block's own average like `mosaic`) is offset by
+`t · factor · depth`, clamped to `0..=255` — a diagonal bevel from bright
+to dark that reads as a raised block without any actual 3-D geometry. An
+**Extrude…** dialog exposes Size and Depth sliders plus a Level-based /
+Random radio pair.
+
+**Verified two ways.** Four new `document.rs` tests. The first uses a
+single 4×4 block, solid `(200, 100, 50, 255)`, so its average is exactly
+that colour and its luma works out to `124.2` (factor `0.4870588...`);
+at depth 100 the diagonal formula predicts `+24.35` at the top-left
+corner, `−24.35` at the bottom-right, and `±8.12` one step in from each —
+all four hand-computed values, cross-checked with a small Python script,
+matched exactly. A second test puts two solid-coloured 4×4 blocks side
+by side in Random mode: a Python port of the same seeded `XorShift32`
+sequence independently computed the two blocks' factors
+(`0.6321277192328125` and `0.5212643640115857`), and at depth 255 the
+resulting corner shades clamp at both extremes — one corner to `0`, the
+opposite block's corner to `255` — exercising the clamp alongside the
+random draw itself. A third confirms a one-pixel selection changes only
+that pixel (to the already-known top-left-corner colour from the first
+test) with alpha untouched; a fourth confirms a cell size or depth
+outside their Photoshop ranges and a locked/unknown layer all error. All
+four passed on the first run. Live under Xvfb on the bundled gradient
+sample at the default 20px size and 30 depth (Level-based), the smooth
+gradient broke into a fine grid of individually diagonally-shaded
+blocks — each visibly brighter at its top-left corner and darker at its
+bottom-right, exactly the raised-block bevel the formula is meant to
+produce — and Undo restored the original smooth gradient and its ruled
+grid lines.
+
+**480 Rust tests total** (476 → 480, 473 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
