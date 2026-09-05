@@ -324,6 +324,9 @@ export default function App() {
   const [showCutoutDialog, setShowCutoutDialog] = useState(false);
   const [cutoutLevels, setCutoutLevels] = useState(4);
   const [cutoutSimplicity, setCutoutSimplicity] = useState(4);
+  const [showDryBrushDialog, setShowDryBrushDialog] = useState(false);
+  const [dryBrushSize, setDryBrushSize] = useState(4);
+  const [dryBrushDetail, setDryBrushDetail] = useState(6);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -907,6 +910,16 @@ export default function App() {
     });
     setShowCutoutDialog(false);
   }, [runCommand, selectedId, cutoutLevels, cutoutSimplicity]);
+
+  const applyDryBrush = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("dry_brush", {
+      id: selectedId,
+      brushSize: dryBrushSize,
+      brushDetail: dryBrushDetail,
+    });
+    setShowDryBrushDialog(false);
+  }, [runCommand, selectedId, dryBrushSize, dryBrushDetail]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2178,6 +2191,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Cutout"
           >
             Cutout…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDryBrushDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Dry Brush"
+          >
+            Dry Brush…
           </button>
           <button
             className="button button--quiet"
@@ -4304,6 +4325,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCutout} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDryBrushDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDryBrushDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Dry Brush"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Dry Brush</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Size
+                <span className="control__value">{dryBrushSize}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={dryBrushSize}
+                onChange={(event) => setDryBrushSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Brush Detail
+                <span className="control__value">{dryBrushDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={dryBrushDetail}
+                onChange={(event) => setDryBrushDetail(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDryBrushDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDryBrush} disabled={busy}>
                 Apply
               </button>
             </div>

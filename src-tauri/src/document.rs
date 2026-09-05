@@ -3776,6 +3776,60 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Dry Brush: a documented approximation
+    /// of Photoshop's real dry-brush painting simulation, built from a
+    /// [`median_at`] smoothing pass — the same edge-preserving smoothing
+    /// [`Self::median`] already uses, which erases fine texture while
+    /// keeping sharp boundaries intact, unlike a plain blur — blended
+    /// back toward the original per pixel. `brush_size` (Photoshop's own
+    /// 0..=10 range) is the median radius; 0 skips the smoothing pass
+    /// entirely. `brush_detail` (Photoshop's own 0..=10 range) is how
+    /// much of the original, unsmoothed pixel shows back through: each
+    /// channel becomes `smoothed · (1 − detail) + original · detail`,
+    /// where `detail = brush_detail / 10`, so 0 is the median result
+    /// untouched and 10 restores the original exactly. Photoshop's
+    /// separate Texture slider (a canvas-grain overlay) is a documented
+    /// scope cut with no equivalent here. Alpha is untouched. Confined to
+    /// the selection and errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn dry_brush(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        brush_detail: u32,
+    ) -> Result<Option<Rect>, String> {
+        if brush_size > 10 {
+            return Err("Dry Brush size must be between 0 and 10.".to_string());
+        }
+        if brush_detail > 10 {
+            return Err("Dry Brush detail must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = brush_size as i64;
+        let detail = brush_detail as f32 / 10.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let smoothed = if radius > 0 {
+                median_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let sm = smoothed[c] as f32;
+                out[c] = (sm * (1.0 - detail) + orig * detail)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -8756,6 +8810,82 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.cutout(999, 4, 1).is_err());
+    }
+
+    #[test]
+    fn dry_brush_blends_the_median_toward_the_original_by_detail() {
+        // ramped_3x3's corner (0,0), radius 1: the clamped 3x3 neighbourhood
+        // samples red values [10,10,10,10,20,20,40,40,50] (edge-clamping
+        // duplicates (0,0)=10 four times and (1,0)=40/(1,1)=50 once each,
+        // (0,1)=20 twice); sorted, the middle (5th of 9) is 20. That differs
+        // from the corner's own original value, 10, which is what makes this
+        // a meaningful blend test. At detail 0 (brush_detail 0) the output
+        // is the median untouched, 20; at detail 1.0 (brush_detail 10) it's
+        // the original exactly, 10 (no rounding needed, both endpoints are
+        // exact); at detail 0.4 (brush_detail 4) it's 20*0.6 + 10*0.4 = 16.0
+        // exactly, again no rounding ambiguity.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.dry_brush(id, 1, 0).unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(0, 0)..idx(0, 0) + 4],
+            [20, 0, 0, 255]
+        );
+
+        let (mut doc, id) = ramped_3x3();
+        doc.dry_brush(id, 1, 10).unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(0, 0)..idx(0, 0) + 4],
+            [10, 0, 0, 255]
+        );
+
+        let (mut doc, id) = ramped_3x3();
+        doc.dry_brush(id, 1, 4).unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(0, 0)..idx(0, 0) + 4],
+            [16, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn dry_brush_zero_size_skips_smoothing_entirely() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.dry_brush(id, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn dry_brush_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.dry_brush(id, 1, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [20, 0, 0, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn dry_brush_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.dry_brush(id, 11, 0).is_err());
+        assert!(doc.dry_brush(id, 1, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.dry_brush(id, 1, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.dry_brush(999, 1, 0).is_err());
     }
 
     #[test]

@@ -1087,6 +1087,19 @@ fn cutout(
     })
 }
 
+/// Filter Gallery > Artistic > Dry Brush on layer `id`.
+#[tauri::command]
+fn dry_brush(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    brush_detail: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.dry_brush(id, brush_size, brush_detail)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1679,6 +1692,7 @@ pub fn run() {
             lighting_effects,
             colored_pencil,
             cutout,
+            dry_brush,
             crystallize,
             facet,
             pointillize,

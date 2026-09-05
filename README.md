@@ -3955,6 +3955,57 @@ test/build coverage that is otherwise complete.
 **492 Rust tests total** (488 → 492, 485 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 55 — Filter Gallery > Artistic > Dry Brush
+
+A documented approximation of Photoshop's real dry-brush painting
+simulation, built from a [`median_at`] smoothing pass — the same
+edge-preserving smoothing `Self::median` already uses, which erases fine
+texture while keeping sharp boundaries intact, unlike a plain blur —
+blended back toward the original per pixel. `Document::dry_brush(id,
+brush_size, brush_detail)` uses `brush_size` (Photoshop's own 0..=10
+range) directly as the median radius (0 skips smoothing entirely) and
+`brush_detail` (Photoshop's own 0..=10 range) as how much of the
+original, unsmoothed pixel shows back through: each channel becomes
+`smoothed · (1 − detail) + original · detail`, where `detail =
+brush_detail / 10`, so 0 is the median result untouched and 10 restores
+the original exactly. Photoshop's separate Texture slider (a canvas-grain
+overlay) is a documented scope cut with no equivalent here. Alpha is
+untouched.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python port of the same formula. Reuses the
+existing `ramped_3x3` fixture, at its corner `(0, 0)`: a radius-1 median's
+clamped 3×3 neighbourhood samples red values `[10, 10, 10, 10, 20, 20,
+40, 40, 50]` (edge-clamping duplicates the corner's own `10` four times,
+`20` twice, `40` once, plus the diagonal neighbour `50` once); sorted,
+the middle value (5th of 9) is `20` — deliberately different from the
+corner's own original value, `10`, which is what makes this a meaningful
+blend test rather than a coincidental no-op. At detail `0` the output is
+the median untouched, `20`; at detail `1.0` it's the original exactly,
+`10` (both endpoints exact, no rounding needed); at detail `0.4` it's
+`20 × 0.6 + 10 × 0.4 = 16.0` exactly, again with no rounding ambiguity.
+All three matched the Python reference exactly on the first run. A
+second test confirms brush size `0` is a byte-for-byte no-op on the
+whole layer (smoothing skipped entirely). A third confines the same
+corner case to a one-pixel selection. A fourth checks that an
+out-of-range brush size or detail and a locked/unknown layer all error.
+A new **Dry Brush…** dialog exposes Brush Size and Brush Detail sliders,
+added after Cutout in the same Artistic filter group.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**496 Rust tests total** (492 → 496, 489 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
