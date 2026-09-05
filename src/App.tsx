@@ -38,6 +38,15 @@ const DIFFUSE_MODES: readonly (readonly [DiffuseMode, string])[] = [
   ["anisotropic", "Anisotropic"],
 ];
 
+type RippleSize = "small" | "medium" | "large";
+
+// Photoshop's Small / Medium / Large ripple sizes, as wavelengths in pixels.
+const RIPPLE_SIZES: readonly (readonly [RippleSize, string, number])[] = [
+  ["small", "Small", 8],
+  ["medium", "Medium", 16],
+  ["large", "Large", 32],
+];
+
 const TEXT_INPUT_TYPES = new Set(["text", "number", "search", "email", "url", "password"]);
 
 // Keyboard shortcuts must not steal Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+Z from a
@@ -261,6 +270,11 @@ export default function App() {
   const [glowSmoothness, setGlowSmoothness] = useState(5);
   const [showMosaicDialog, setShowMosaicDialog] = useState(false);
   const [mosaicCellSize, setMosaicCellSize] = useState(8);
+  const [showRippleDialog, setShowRippleDialog] = useState(false);
+  const [rippleAmount, setRippleAmount] = useState(100);
+  const [rippleSize, setRippleSize] = useState<RippleSize>("medium");
+  const [showTwirlDialog, setShowTwirlDialog] = useState(false);
+  const [twirlAngle, setTwirlAngle] = useState(50);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -658,6 +672,22 @@ export default function App() {
     await runCommand("mosaic", { id: selectedId, cellSize: mosaicCellSize });
     setShowMosaicDialog(false);
   }, [runCommand, selectedId, mosaicCellSize]);
+
+  const applyRipple = useCallback(async () => {
+    if (selectedId === null) return;
+    const wavelength = RIPPLE_SIZES.find(([value]) => value === rippleSize)?.[2] ?? 16;
+    // 100 % on the Small size is a one-pixel ripple; the amplitude scales
+    // with the wavelength so each size keeps Photoshop's proportions.
+    const amplitude = (rippleAmount / 100) * (wavelength / 8);
+    await runCommand("ripple", { id: selectedId, amplitude, wavelength });
+    setShowRippleDialog(false);
+  }, [runCommand, selectedId, rippleAmount, rippleSize]);
+
+  const applyTwirl = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("twirl", { id: selectedId, angle: twirlAngle });
+    setShowTwirlDialog(false);
+  }, [runCommand, selectedId, twirlAngle]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1797,6 +1827,22 @@ export default function App() {
             title="Filter > Pixelate > Fragment"
           >
             Fragment
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowRippleDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Ripple"
+          >
+            Ripple…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowTwirlDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Twirl"
+          >
+            Twirl…
           </button>
           <input
             type="color"
@@ -3610,6 +3656,86 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyMosaic} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRippleDialog && (
+        <div className="modal-overlay" onClick={() => setShowRippleDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Ripple"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Ripple</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{rippleAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={-999}
+                max={999}
+                value={rippleAmount}
+                onChange={(event) => setRippleAmount(Number(event.target.value))}
+              />
+            </label>
+            {RIPPLE_SIZES.map(([value, label]) => (
+              <label key={value} className="control control--row">
+                <span className="control__label">{label}</span>
+                <input
+                  type="radio"
+                  name="ripple-size"
+                  value={value}
+                  checked={rippleSize === value}
+                  onChange={() => setRippleSize(value)}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowRippleDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyRipple} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTwirlDialog && (
+        <div className="modal-overlay" onClick={() => setShowTwirlDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Twirl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Twirl</h2>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{twirlAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-999}
+                max={999}
+                value={twirlAngle}
+                onChange={(event) => setTwirlAngle(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowTwirlDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyTwirl} disabled={busy}>
                 Apply
               </button>
             </div>

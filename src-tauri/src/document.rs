@@ -244,6 +244,27 @@ fn average_samples(
     averaged
 }
 
+/// The pixel of `source` nearest to the continuous position `(sx, sy)`:
+/// each coordinate rounded to the nearest whole pixel (`f32::round`,
+/// halves away from zero) and clamped to the layer, so positions off the
+/// edge repeat the edge pixel — Photoshop's "Repeat Edge Pixels". The
+/// resampling primitive behind the Distort filters; nearest-neighbour
+/// rather than bilinear is the same hard-edged scope cut
+/// [`motion_blur_at`] makes.
+fn sample_nearest(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (sx, sy): (f32, f32),
+) -> [u8; CHANNELS] {
+    let x = (sx.round() as i64).clamp(0, width - 1) as usize;
+    let y = (sy.round() as i64).clamp(0, height - 1) as usize;
+    let base = (y * doc_width + x) * CHANNELS;
+    let mut out = [0u8; CHANNELS];
+    out.copy_from_slice(&source[base..base + CHANNELS]);
+    out
+}
+
 /// Like [`box_blur_at`], but the window is a straight line through
 /// `(col, row)` instead of a square: `2 * half + 1` samples at integer
 /// steps `t` from `-half` to `half`, each offset by `t * (dx, dy)` and
@@ -2388,6 +2409,69 @@ impl Document {
                         (sx, sy)
                     });
             average_samples(source, doc_width, samples)
+        })
+    }
+
+    /// Filter > Distort > Ripple: every pixel is pulled from a position
+    /// displaced sinusoidally — `amplitude · sin(2π·y / wavelength)`
+    /// horizontally and `amplitude · sin(2π·x / wavelength)` vertically,
+    /// both in pixels — so straight lines wobble like a reflection on
+    /// water. Sampling is nearest-neighbour with edge repeat via
+    /// [`sample_nearest`]. Photoshop's dialog has a percentage Amount and a
+    /// Small/Medium/Large size; the frontend maps those to an amplitude and
+    /// a wavelength of 8, 16 or 32 px, with 100 % on Small being a
+    /// one-pixel ripple. A zero amplitude is the identity; a zero
+    /// wavelength or a non-finite amplitude is an error, as is a
+    /// locked/unknown layer. Whole pixels move, alpha included.
+    pub fn ripple(
+        &mut self,
+        id: LayerId,
+        amplitude: f32,
+        wavelength: u32,
+    ) -> Result<Option<Rect>, String> {
+        if wavelength == 0 {
+            return Err("Ripple wavelength must be at least 1 pixel.".to_string());
+        }
+        if !amplitude.is_finite() {
+            return Err(format!(
+                "Ripple amplitude must be a number, got {amplitude}."
+            ));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let k = std::f32::consts::TAU / wavelength as f32;
+        self.filter_pixels(id, |source, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let sx = x + amplitude * (k * y).sin();
+            let sy = y + amplitude * (k * x).sin();
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
+    }
+
+    /// Filter > Distort > Twirl: rotates the layer about its centre by an
+    /// angle that falls off with distance — `angle · (1 − r/R)²` degrees,
+    /// where `r` is the pixel's distance from the centre and `R` half the
+    /// shorter side — so the middle spins hard and everything at or beyond
+    /// `R` stays put: the classic whirlpool. Positive angles turn the
+    /// content clockwise on screen, as on Photoshop's dial. Each pixel is
+    /// pulled from the position that rotates onto it, via nearest-neighbour
+    /// [`sample_nearest`]. Angle 0 is the identity; a non-finite angle or a
+    /// locked/unknown layer is an error. Whole pixels move, alpha included.
+    pub fn twirl(&mut self, id: LayerId, angle: f32) -> Result<Option<Rect>, String> {
+        if !angle.is_finite() {
+            return Err(format!("Twirl angle must be a number, got {angle}."));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let reach = width.min(height) as f32 / 2.0;
+        self.filter_pixels(id, |source, row, col| {
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let falloff = (1.0 - (dx * dx + dy * dy).sqrt() / reach).max(0.0);
+            let (sin, cos) = (angle * falloff * falloff).to_radians().sin_cos();
+            let sx = cx + dx * cos + dy * sin;
+            let sy = cy - dx * sin + dy * cos;
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
         })
     }
 
@@ -5760,6 +5844,129 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.mosaic(999, 2).is_err());
         assert!(empty.fragment(999).is_err());
+    }
+
+    /// A `size`×`size` layer whose red is `10·x + y`, so every sample
+    /// position has a distinct, readable value.
+    fn ramp_square(size: u8) -> (Document, LayerId) {
+        let mut doc = Document::new(size as u32, size as u32).unwrap();
+        let mut pixels = Vec::with_capacity(size as usize * size as usize * CHANNELS);
+        for y in 0..size {
+            for x in 0..size {
+                pixels.extend_from_slice(&[10 * x + y, 0, 0, 255]);
+            }
+        }
+        let id = doc
+            .add_layer("ramp", &pixels, size as u32, size as u32)
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn ripple_displaces_by_a_sine_of_the_other_axis() {
+        let (mut doc, id) = ramp_square(4);
+        doc.ripple(id, 1.0, 4).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // Wavelength 4 makes sin(2πt/4) run 0, 1, 0, -1 over t = 0..4, so
+        // with amplitude 1 each pixel reads (x + s[y], y + s[x]) on a layer
+        // whose red is 10x + y, clamped at the edges.
+        assert_eq!(p[idx(0, 0)], 0); // s[0] = 0 both ways
+        assert_eq!(p[idx(1, 1)], 22); // reads (2, 2)
+        assert_eq!(p[idx(0, 1)], 11); // reads (1, 1)
+        assert_eq!(p[idx(2, 2)], 22); // s[2] = 0: unchanged
+        assert_eq!(p[idx(3, 3)], 22); // reads (2, 2)
+        assert_eq!(p[idx(1, 3)], 3); // (0, 4) clamps to (0, 3)
+        assert_eq!(p[idx(3, 1)], 30); // (4, 0) clamps to (3, 0)
+        assert_eq!(p[idx(1, 1) + 3], 255);
+
+        // Amplitude 2 reaches two pixels: (1,1) reads (3,3), (0,1) reads (2,1).
+        let (mut doc, id) = ramp_square(4);
+        doc.ripple(id, 2.0, 4).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 33);
+        assert_eq!(p[idx(0, 1)], 21);
+    }
+
+    #[test]
+    fn ripple_with_zero_amplitude_is_the_identity_and_honours_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.ripple(id, 0.0, 4).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ramp_square(4);
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.ripple(id, 1.0, 4).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 22);
+        assert_eq!(doc.layers()[0].pixels[idx(0, 1)], 1); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn twirl_rotates_the_middle_and_leaves_the_corners_alone() {
+        let (mut doc, id) = ramp_square(5);
+        doc.twirl(id, 250.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 5 + x) * 4;
+        // R = 2.5. The four pixels one step from the centre have falloff
+        // (1 - 1/2.5)² = 0.36, so 250° becomes exactly 90°: each reads the
+        // pixel a quarter turn anticlockwise from it, which turns the
+        // content clockwise on screen.
+        assert_eq!(p[idx(3, 2)], 21); // from (2, 1)
+        assert_eq!(p[idx(2, 3)], 32); // from (3, 2)
+        assert_eq!(p[idx(1, 2)], 23); // from (2, 3)
+        assert_eq!(p[idx(2, 1)], 12); // from (1, 2)
+        assert_eq!(p[idx(2, 2)], 22); // the centre itself
+                                      // (3, 3) sits at r = √2 and turns 250 · (1 - 0.566)² ≈ 47°: the
+                                      // offset (1, 1) rotates to (1.41, -0.05), rounding to (1, 0), so it
+                                      // reads (3, 2).
+        assert_eq!(p[idx(3, 3)], 32);
+        // Two steps out the falloff is 0.04, so 10°: (2, 0) rotates to
+        // (1.97, -0.35), which still rounds to itself.
+        assert_eq!(p[idx(4, 2)], 42);
+        // The corners lie beyond R and do not move at all.
+        assert_eq!(p[idx(0, 0)], 0);
+        assert_eq!(p[idx(4, 4)], 44);
+        assert_eq!(p[idx(3, 2) + 3], 255);
+    }
+
+    #[test]
+    fn twirl_direction_follows_the_sign_and_zero_is_the_identity() {
+        let idx = |x: usize, y: usize| (y * 5 + x) * 4;
+        let (mut doc, id) = ramp_square(5);
+        doc.twirl(id, -250.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(3, 2)], 23); // now from (2, 3)
+        assert_eq!(doc.layers()[0].pixels[idx(2, 1)], 32); // from (3, 2)
+
+        let (mut doc, id) = ramp_square(5);
+        let before = doc.layers()[0].pixels.clone();
+        doc.twirl(id, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn distort_filters_propagate_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.ripple(id, 1.0, 0).is_err());
+        assert!(doc.ripple(id, f32::NAN, 4).is_err());
+        assert!(doc.twirl(id, f32::INFINITY).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.ripple(id, 1.0, 4).is_err());
+        assert!(doc.twirl(id, 50.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.ripple(999, 1.0, 4).is_err());
+        assert!(empty.twirl(999, 50.0).is_err());
     }
 
     #[test]

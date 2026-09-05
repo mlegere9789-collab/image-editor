@@ -2944,6 +2944,69 @@ restored the original after each.
 **421 Rust tests total** (417 → 421, 414 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 37 — Filter > Distort: Ripple and Twirl
+
+The first two Distort filters, and with them the resampling primitive
+the rest of that submenu will share: `sample_nearest(source, (sx, sy))`
+returns the pixel nearest a continuous position, each coordinate
+rounded to the nearest whole pixel and clamped to the layer so
+positions off the edge repeat the edge pixel — Photoshop's "Repeat Edge
+Pixels". Nearest-neighbour rather than bilinear is the same hard-edged
+scope cut Motion Blur makes. Every Distort filter is then just a
+formula for *where each output pixel pulls from*, run through the
+`filter_pixels` skeleton, so whole pixels move, alpha included.
+
+**Ripple** pulls each pixel from a sinusoidally displaced position:
+`amplitude · sin(2π·y / wavelength)` horizontally and `amplitude ·
+sin(2π·x / wavelength)` vertically, both in pixels, so straight lines
+wobble like a reflection on water. Photoshop's dialog has a percentage
+Amount and a Small / Medium / Large size; the frontend maps those to a
+wavelength of 8, 16 or 32 px and an amplitude of `amount% ×
+wavelength / 8`, so 100 % on Small is a one-pixel ripple and each size
+keeps Photoshop's proportions. A zero amplitude is the identity; a zero
+wavelength or a non-finite amplitude is rejected. **Twirl** rotates the
+layer about its centre by an angle that falls off with distance —
+`angle · (1 − r/R)²` degrees, with `r` the pixel's distance from the
+centre and `R` half the shorter side — so the middle spins hard and
+everything at or beyond `R` stays put: the classic whirlpool. Positive
+angles turn the content clockwise on screen, as on Photoshop's dial;
+each pixel pulls from the position that rotates onto it. Angle 0 is the
+identity and a non-finite angle is rejected. The frontend adds
+**Ripple…** (Amount −999..999 %, size radios) and **Twirl…** (Angle
+−999..999°) dialogs.
+
+**Verified two ways.** Five new `document.rs` tests on a new
+`ramp_square(n)` fixture whose red is `10·x + y`, so every sample
+position has a distinct, readable value; every expectation was worked
+by hand and cross-checked with a scripted evaluation of the same
+formulas. Ripple at wavelength 4 makes `sin(2πt/4)` run 0, 1, 0, −1
+over t = 0..4, so with amplitude 1 on a 4×4 layer each pixel reads
+`(x + s[y], y + s[x])`: (1, 1) reads (2, 2) → 22, (0, 1) reads (1, 1) →
+11, (3, 3) reads (2, 2) → 22, (2, 2) is untouched because `s[2] = 0`,
+and the edge cases clamp — (1, 3) reads (0, 4) → (0, 3) → 3, (3, 1)
+reads (4, 0) → (3, 0) → 30; amplitude 2 reaches two pixels (33 and 21);
+amplitude 0 returns the layer byte-for-byte; with one pixel selected
+only it moves and the dirty rect is that pixel. Twirl on a 5×5 layer
+has `R = 2.5`, so the four pixels one step from the centre have falloff
+`(1 − 1/2.5)² = 0.36` and 250° becomes exactly 90°: each reads the
+pixel a quarter-turn anticlockwise from it — (3, 2) → 21, (2, 3) → 32,
+(1, 2) → 23, (2, 1) → 12 — turning the content clockwise; the centre
+keeps 22; (3, 3) at r = √2 turns ≈ 47°, its offset (1, 1) landing on
+(1.41, −0.05) → (1, 0), so it reads 32; two steps out the falloff is
+0.04 → 10° and (2, 0) rounds back to itself (42); the corners lie
+beyond `R` and keep 0 and 44. Angle −250 sends (3, 2) to 23 and (2, 1)
+to 32 instead, and angle 0 is the identity. Zero wavelength, NaN
+amplitude, infinite angle, locked layers and unknown ids all error. All
+passing on first run. Live under Xvfb on the bundled gradient sample:
+Ripple at 302 %, Large turned every straight grid line — and the
+layer's own border — into a clean sine wave of 32-px wavelength and
+about 12-px amplitude; after an undo, Twirl at 422° spiralled the grid
+into a whirlpool around the centre while the edges beyond `R` kept
+their straight lines. Undo restored the original after each.
+
+**426 Rust tests total** (421 → 426, 419 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

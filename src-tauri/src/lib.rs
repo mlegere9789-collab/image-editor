@@ -861,6 +861,26 @@ fn fragment(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String>
     edit_checkpointed(&state, |document| document.fragment(id))
 }
 
+/// Filter > Distort > Ripple on layer `id`: `amplitude` in pixels,
+/// `wavelength` in pixels.
+#[tauri::command]
+fn ripple(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amplitude: f32,
+    wavelength: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.ripple(id, amplitude, wavelength)
+    })
+}
+
+/// Filter > Distort > Twirl on layer `id`: `angle` in degrees at the centre.
+#[tauri::command]
+fn twirl(state: State<'_, AppState>, id: LayerId, angle: f32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.twirl(id, angle))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1333,6 +1353,8 @@ pub fn run() {
             glowing_edges,
             mosaic,
             fragment,
+            ripple,
+            twirl,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

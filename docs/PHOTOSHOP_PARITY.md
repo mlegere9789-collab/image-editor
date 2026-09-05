@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 91.**
+**618 distinct capabilities tracked. Currently shipped: 93.**
 
 ## PART I — EVERY TOOL
 
@@ -518,10 +518,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)
 - [ ] Pinch (Filter > Distort; added with the Distort audit)
 - [ ] Polar Coordinates (Filter > Distort; added with the Distort audit)
-- [ ] Ripple (Filter > Distort; added with the Distort audit)
+- [x] Ripple (sinusoidal displacement, amplitude × sin(2π·y/λ) horizontally and the transpose vertically, nearest-neighbour, Small/Medium/Large = 8/16/32 px — see README Phase 37)
 - [ ] Shear (Filter > Distort; added with the Distort audit)
 - [ ] Spherize (Filter > Distort; added with the Distort audit)
-- [ ] Twirl (Filter > Distort; added with the Distort audit)
+- [x] Twirl (rotation about the centre by angle · (1 − r/R)², nearest-neighbour — see README Phase 37)
 - [ ] Wave (Filter > Distort; added with the Distort audit)
 - [ ] ZigZag (Filter > Distort; added with the Distort audit)
 - [ ] Clouds (Filter > Render; the Render submenu was missing from the original audit, added while shipping Mosaic)
