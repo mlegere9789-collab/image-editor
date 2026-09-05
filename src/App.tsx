@@ -293,6 +293,14 @@ export default function App() {
   const [zigZagStyle, setZigZagStyle] = useState<ZigZagStyle>("pondRipples");
   const [showPolarDialog, setShowPolarDialog] = useState(false);
   const [polarToPolar, setPolarToPolar] = useState(true);
+  const [showWaveDialog, setShowWaveDialog] = useState(false);
+  const [waveGenerators, setWaveGenerators] = useState(5);
+  const [waveWavelengthMin, setWaveWavelengthMin] = useState(10);
+  const [waveWavelengthMax, setWaveWavelengthMax] = useState(40);
+  const [waveAmplitudeMin, setWaveAmplitudeMin] = useState(5);
+  const [waveAmplitudeMax, setWaveAmplitudeMax] = useState(20);
+  const [waveHorizontalScale, setWaveHorizontalScale] = useState(100);
+  const [waveVerticalScale, setWaveVerticalScale] = useState(100);
   const [showColorHalftoneDialog, setShowColorHalftoneDialog] = useState(false);
   const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
@@ -742,6 +750,34 @@ export default function App() {
     await runCommand("polar_coordinates", { id: selectedId, toPolar: polarToPolar });
     setShowPolarDialog(false);
   }, [runCommand, selectedId, polarToPolar]);
+
+  const applyWave = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Add Noise/Crystallize.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("wave", {
+      id: selectedId,
+      generators: waveGenerators,
+      wavelengthMin: waveWavelengthMin,
+      wavelengthMax: waveWavelengthMax,
+      amplitudeMin: waveAmplitudeMin,
+      amplitudeMax: waveAmplitudeMax,
+      horizontalScale: waveHorizontalScale,
+      verticalScale: waveVerticalScale,
+      seed,
+    });
+    setShowWaveDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    waveGenerators,
+    waveWavelengthMin,
+    waveWavelengthMax,
+    waveAmplitudeMin,
+    waveAmplitudeMax,
+    waveHorizontalScale,
+    waveVerticalScale,
+  ]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
@@ -1957,6 +1993,14 @@ export default function App() {
             title="Filter > Distort > Polar Coordinates"
           >
             Polar Coordinates…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowWaveDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Wave"
+          >
+            Wave…
           </button>
           <button
             className="button button--quiet"
@@ -4040,6 +4084,134 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPolarCoordinates} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWaveDialog && (
+        <div className="modal-overlay" onClick={() => setShowWaveDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Wave"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Wave</h2>
+            <label className="control">
+              <span className="control__label">
+                Number of Generators
+                <span className="control__value">{waveGenerators}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={waveGenerators}
+                onChange={(event) => setWaveGenerators(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Wavelength Min
+                <span className="control__value">{waveWavelengthMin}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                value={waveWavelengthMin}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setWaveWavelengthMin(next);
+                  if (next > waveWavelengthMax) setWaveWavelengthMax(next);
+                }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Wavelength Max
+                <span className="control__value">{waveWavelengthMax}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                value={waveWavelengthMax}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setWaveWavelengthMax(next);
+                  if (next < waveWavelengthMin) setWaveWavelengthMin(next);
+                }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Amplitude Min
+                <span className="control__value">{waveAmplitudeMin}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waveAmplitudeMin}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setWaveAmplitudeMin(next);
+                  if (next > waveAmplitudeMax) setWaveAmplitudeMax(next);
+                }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Amplitude Max
+                <span className="control__value">{waveAmplitudeMax}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waveAmplitudeMax}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setWaveAmplitudeMax(next);
+                  if (next < waveAmplitudeMin) setWaveAmplitudeMin(next);
+                }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Horizontal Scale
+                <span className="control__value">{waveHorizontalScale}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waveHorizontalScale}
+                onChange={(event) => setWaveHorizontalScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Vertical Scale
+                <span className="control__value">{waveVerticalScale}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waveVerticalScale}
+                onChange={(event) => setWaveVerticalScale(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowWaveDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyWave} disabled={busy}>
                 Apply
               </button>
             </div>

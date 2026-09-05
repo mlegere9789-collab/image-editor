@@ -2747,6 +2747,79 @@ impl Document {
         })
     }
 
+    /// Filter > Distort > Wave: like [`Self::ripple`], but the sine wave
+    /// doing the displacing is the *sum* of several independently
+    /// randomised generators instead of one fixed sine — Photoshop's own
+    /// effect, whose dialog exposes exactly that: a generator count and a
+    /// min/max range each generator's own randomly drawn wavelength and
+    /// amplitude falls within. For each of `generators` waves, three draws
+    /// from the seeded [`XorShift32`] generator pick a wavelength in
+    /// `wavelength_min..=wavelength_max`, an amplitude in
+    /// `amplitude_min..=amplitude_max`, and a phase offset in pixels
+    /// (`0..wavelength`) — the same style of seeded draw Diffuse and the
+    /// other randomised filters here use. Every pixel's horizontal
+    /// displacement is `horizontal_scale / 100` times the sum, over every
+    /// generator, of `amplitude · sin(2π · (y + phase) / wavelength)`; its
+    /// vertical displacement is the same sum over `x` instead of `y`,
+    /// scaled by `vertical_scale / 100` — the same axis-swap `ripple` uses.
+    /// Sampling is nearest-neighbour with edge repeat via
+    /// [`sample_nearest`], the scope cut `ripple` and [`Self::twirl`]
+    /// already make; Photoshop's Triangle and Square wave types and its
+    /// Wrap Around undefined-area mode are further, documented scope cuts
+    /// — only Sine and Repeat Edge Pixels are implemented. Errors on zero
+    /// generators, an empty wavelength or amplitude range (a maximum below
+    /// its minimum), a zero minimum wavelength, or a locked/unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wave(
+        &mut self,
+        id: LayerId,
+        generators: u32,
+        wavelength_min: u32,
+        wavelength_max: u32,
+        amplitude_min: u32,
+        amplitude_max: u32,
+        horizontal_scale: f32,
+        vertical_scale: f32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if generators == 0 {
+            return Err("Wave needs at least one generator.".to_string());
+        }
+        if wavelength_min == 0 {
+            return Err("Wave wavelength must be at least 1 pixel.".to_string());
+        }
+        if wavelength_max < wavelength_min {
+            return Err("Wave wavelength maximum must be at least its minimum.".to_string());
+        }
+        if amplitude_max < amplitude_min {
+            return Err("Wave amplitude maximum must be at least its minimum.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let mut rng = XorShift32::new(seed);
+        let wavelength_span = wavelength_max - wavelength_min + 1;
+        let amplitude_span = amplitude_max - amplitude_min + 1;
+        let mut waves = Vec::with_capacity(generators as usize);
+        for _ in 0..generators {
+            let wavelength = wavelength_min + rng.next_u32() % wavelength_span;
+            let amplitude = amplitude_min + rng.next_u32() % amplitude_span;
+            let phase = rng.next_u32() % wavelength;
+            waves.push((wavelength as f32, amplitude as f32, phase as f32));
+        }
+        self.filter_pixels(id, |source, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let (mut dx, mut dy) = (0.0f32, 0.0f32);
+            for &(wavelength, amplitude, phase) in &waves {
+                let k = std::f32::consts::TAU / wavelength;
+                dx += amplitude * (k * (y + phase)).sin();
+                dy += amplitude * (k * (x + phase)).sin();
+            }
+            let sx = x + horizontal_scale / 100.0 * dx;
+            let sy = y + vertical_scale / 100.0 * dy;
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
+    }
+
     /// Filter > Pixelate > Color Halftone: reduces the layer to a grid of
     /// solid-colour circular dots, echoing a colour newspaper print. Each
     /// colour channel gets its own square screen of `2 · max_radius`-pixel
@@ -6609,6 +6682,93 @@ mod tests {
             .zig_zag(999, 10.0, 5, ZigZagStyle::PondRipples)
             .is_err());
         assert!(empty.polar_coordinates(999, false).is_err());
+    }
+
+    #[test]
+    fn wave_with_one_generator_is_a_phase_shifted_ripple() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // One generator, wavelength fixed to 4 (min = max) and amplitude
+        // fixed to 1 (min = max), so only the phase draw matters: seed 1's
+        // three draws are 270369, 67634689, 2647435461, and with a span of
+        // 1 the first two are consumed but contribute nothing; the third,
+        // 2647435461 % 4 = 1, is the phase. k = 2π/4 = π/2, so
+        // dx(y) = sin(π/2·(y+1)) is 1, 0, -1, 0 for y = 0..3, and dy(x) is
+        // the same function of x. (0, 0): dx(0)=1, dy(0)=1 -> samples
+        // (1, 1) = 11. (1, 0): dx(0)=1, dy(1)=0 -> (2, 0) = 20. (2, 0):
+        // dx(0)=1, dy(2)=-1 -> (3, -1) clamps to (3, 0) = 30. (3, 0):
+        // dx(0)=1, dy(3)=0 -> (4, 0) clamps to (3, 0) = 30. (1, 1): both
+        // shifts 0 -> (1, 1) = 11. (2, 2): dx(2)=-1, dy(2)=-1 -> (1, 1) =
+        // 11. (3, 3): both shifts 0 -> (3, 3) = 33. Cross-checked with a
+        // small Python script evaluating the same formula.
+        let (mut doc, id) = ramp_square(4);
+        doc.wave(id, 1, 4, 4, 1, 1, 100.0, 100.0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 11);
+        assert_eq!(p[idx(1, 0)], 20);
+        assert_eq!(p[idx(2, 0)], 30);
+        assert_eq!(p[idx(3, 0)], 30);
+        assert_eq!(p[idx(1, 1)], 11);
+        assert_eq!(p[idx(2, 2)], 11);
+        assert_eq!(p[idx(3, 3)], 33);
+        assert_eq!(p[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn wave_sums_every_generator() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        // Two generators, wavelength 2..=6, amplitude 1..=3, seed 1: the
+        // six draws it consumes give generator 0 wavelength 6, amplitude 2,
+        // phase 3, and generator 1 wavelength 2, amplitude 3, phase 0 (a
+        // Python script implementing the same draw-and-map logic pins
+        // these and the resulting grid). (0, 0) sums to dx = -2, dy = -2,
+        // sampling (-2, -2) clamped to (0, 0) = 0. (5, 5) sums to dx = 5,
+        // dy = 5 (clamped to the far corner either way) = 55.
+        let (mut doc, id) = ramp_square(6);
+        doc.wave(id, 2, 2, 6, 1, 3, 100.0, 100.0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 0);
+        assert_eq!(p[idx(1, 0)], 10);
+        assert_eq!(p[idx(4, 1)], 23);
+        assert_eq!(p[idx(0, 4)], 24);
+        assert_eq!(p[idx(5, 5)], 55);
+    }
+
+    #[test]
+    fn wave_scale_zero_is_the_identity_and_honours_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.wave(id, 1, 4, 4, 1, 1, 0.0, 0.0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ramp_square(4);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.wave(id, 1, 4, 4, 1, 1, 100.0, 100.0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 11);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 10); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn wave_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.wave(id, 0, 1, 1, 1, 1, 100.0, 100.0, 1).is_err());
+        assert!(doc.wave(id, 1, 0, 1, 1, 1, 100.0, 100.0, 1).is_err());
+        assert!(doc.wave(id, 1, 4, 2, 1, 1, 100.0, 100.0, 1).is_err());
+        assert!(doc.wave(id, 1, 1, 4, 3, 1, 100.0, 100.0, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.wave(id, 1, 1, 4, 1, 1, 100.0, 100.0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.wave(999, 1, 1, 4, 1, 1, 100.0, 100.0, 1).is_err());
     }
 
     #[test]

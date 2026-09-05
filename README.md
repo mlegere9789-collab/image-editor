@@ -3302,6 +3302,62 @@ the original crisp gradient and grid lines.
 **445 Rust tests total** (441 → 445, 438 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 43 — Filter > Distort > Wave
+
+The last new Distort filter, and the one that turns Ripple's single fixed
+sine into Photoshop's actual dialog: a count of independently randomised
+generators, each with its own wavelength and amplitude drawn from a
+range. `Document::wave(id, generators, wavelength_min, wavelength_max,
+amplitude_min, amplitude_max, horizontal_scale, vertical_scale, seed)`
+draws three values per generator from the seeded `XorShift32` generator
+— a wavelength in `wavelength_min..=wavelength_max`, an amplitude in
+`amplitude_min..=amplitude_max`, and a phase offset in `0..wavelength` —
+the same style of seeded draw every randomised filter here uses. Every
+pixel's horizontal displacement is `horizontal_scale / 100` times the
+*sum*, over every generator, of `amplitude · sin(2π · (y + phase) /
+wavelength)`; its vertical displacement is the same sum over `x` instead
+of `y`, scaled by `vertical_scale / 100` — the same axis-swap Ripple
+uses, now with several waves layered together instead of one. Sampling
+is nearest-neighbour with edge repeat via `sample_nearest`, the scope
+cut Ripple and Twirl already make; Photoshop's Triangle and Square wave
+types and its Wrap Around undefined-area mode are further, documented
+scope cuts — only Sine and Repeat Edge Pixels are implemented. A
+**Wave…** dialog exposes all seven of Photoshop's own numeric controls:
+Number of Generators, Wavelength Min/Max, Amplitude Min/Max, and
+Horizontal/Vertical Scale, with the min/max sliders keeping each other
+consistent (dragging one past the other drags it along too, since a
+maximum below its minimum is rejected).
+
+**Verified two ways.** Four new `document.rs` tests. With one generator
+and both wavelength and amplitude fixed to a single value (min = max —
+so only the phase draw does anything), the effect collapses to exactly
+Ripple's own formula with a phase shift: seed 1's third draw gives phase
+1, and on the 4×4 `ramp_square` fixture (red = `10x + y`) the resulting
+per-pixel displacement was worked out entirely by hand — `(0, 0)` reads
+`(1, 1) = 11`, `(1, 0)` reads `(2, 0) = 20`, `(2, 0)` and `(3, 0)` both
+clamp to `(3, 0) = 30`, `(1, 1)` and `(3, 3)` land on themselves, and
+`(2, 2)` reads `(1, 1) = 11` — then cross-checked with a small Python
+script evaluating the same formula. A second test uses two generators
+(wavelength 2–6, amplitude 1–3) on the 6×6 fixture; the six draws it
+consumes were fed through a Python reference implementing the same
+draw-and-map logic to confirm five spot-checked pixels, proving the
+displacements really do sum rather than the last generator simply
+overwriting the others. A third test confirms both scales at 0 is the
+identity and that a one-pixel selection moves only that pixel with a
+1×1 dirty rect. The fourth checks that zero generators, a zero minimum
+wavelength, a wavelength or amplitude maximum below its minimum, a
+locked layer and an unknown id all error without touching pixels. All
+four passed on the first run. Live under Xvfb on the bundled gradient
+sample at the defaults (5 generators, wavelength 10–40, amplitude
+5–20), the crisp grid lines dissolved into a jagged, chaotic-looking
+distortion — visibly busier than Ripple's single clean sine, exactly
+what summing five independently randomised waves should look like — and
+the layer's own border showed the same jaggedness. Undo restored the
+original crisp gradient and grid lines.
+
+**449 Rust tests total** (445 → 449, 442 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

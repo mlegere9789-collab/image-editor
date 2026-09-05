@@ -919,6 +919,37 @@ fn polar_coordinates(
     edit_checkpointed(&state, |document| document.polar_coordinates(id, to_polar))
 }
 
+/// Filter > Distort > Wave on layer `id`. The frontend sends a fresh `seed`
+/// on every apply so repeated applications differ, as with Add Noise.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn wave(
+    state: State<'_, AppState>,
+    id: LayerId,
+    generators: u32,
+    wavelength_min: u32,
+    wavelength_max: u32,
+    amplitude_min: u32,
+    amplitude_max: u32,
+    horizontal_scale: f32,
+    vertical_scale: f32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.wave(
+            id,
+            generators,
+            wavelength_min,
+            wavelength_max,
+            amplitude_min,
+            amplitude_max,
+            horizontal_scale,
+            vertical_scale,
+            seed,
+        )
+    })
+}
+
 /// Filter > Pixelate > Color Halftone on layer `id`.
 #[tauri::command]
 fn color_halftone(
@@ -1435,6 +1466,7 @@ pub fn run() {
             spherize,
             zig_zag,
             polar_coordinates,
+            wave,
             color_halftone,
             crystallize,
             pointillize,
