@@ -2187,6 +2187,58 @@ impl Document {
         })
     }
 
+    /// Filter > Blur > Surface Blur: blurs flat areas while leaving edges
+    /// sharp. Each colour channel becomes a weighted mean of the
+    /// `(2·radius+1)`-square, edge-clamped window, where a neighbour's
+    /// weight is `threshold − |neighbour − centre|` when that is positive
+    /// and zero otherwise — so samples within `threshold` of the pixel's
+    /// own value count in proportion to how close they are, and anything
+    /// further away (the far side of an edge) is ignored entirely. The
+    /// pixel itself always carries weight `threshold`, so the weights never
+    /// sum to zero. The mean is rounded to the nearest whole value.
+    /// Photoshop's Surface Blur is the same idea with the same two controls
+    /// (Radius 1..=100, Threshold 2..=255); a threshold of 1 here admits
+    /// only exact matches and so changes nothing. Alpha is untouched.
+    /// Errors on a zero radius or threshold or a locked/unknown layer.
+    pub fn surface_blur(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        threshold: u8,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Surface blur radius must be at least 1 pixel.".to_string());
+        }
+        if threshold == 0 {
+            return Err("Surface blur threshold must be at least 1.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let r = radius as i64;
+        let threshold = threshold as i64;
+        self.filter_pixels(id, |source, row, col| {
+            let centre = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out[3] = source[centre + 3];
+            for (c, slot) in out.iter_mut().enumerate().take(3) {
+                let own = source[centre + c] as i64;
+                let (mut weighted, mut weights) = (0i64, 0i64);
+                for dy in -r..=r {
+                    let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+                    for dx in -r..=r {
+                        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+                        let v = source[(sy * doc_width + sx) * CHANNELS + c] as i64;
+                        let w = (threshold - (v - own).abs()).max(0);
+                        weighted += w * v;
+                        weights += w;
+                    }
+                }
+                *slot = ((weighted + weights / 2) / weights) as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -5314,6 +5366,76 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.diffuse(999, DiffuseMode::Anisotropic, 1).is_err());
+    }
+
+    #[test]
+    fn surface_blur_averages_only_within_the_threshold() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.surface_blur(id, 1, 25).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Centre 50: only 40, 50 and 60 lie within 25 (weights 15, 25, 15),
+        // so (15*40 + 25*50 + 15*60) / 55 = 50. Top-left corner 10, whose
+        // clamped window holds four 10s (weight 25 each), two 20s (weight
+        // 15) and a 40 and a 50 that fall outside: 1600 / 130 = 12.3 -> 12,
+        // far less pull than the box blur's 23 — which is the point. The 20
+        // beside it: (2*15*10 + 2*25*20 + 2*15*30 + 5*40) / 115 = 20.9 -> 21.
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(0, 0)], 12);
+        assert_eq!(p[idx(1, 0)], 21);
+        assert_eq!(p[idx(1, 1) + 1], 0); // the flat green channel stays flat
+        assert_eq!(p[idx(1, 1) + 3], 255); // alpha untouched
+    }
+
+    #[test]
+    fn surface_blur_threshold_extremes_are_a_full_weighted_mean_and_the_identity() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Threshold 255 admits every sample, weighted 255 - |difference|;
+        // the ramp is symmetric around its centre, so the centre stays 50.
+        let (mut doc, id) = ramped_3x3();
+        doc.surface_blur(id, 1, 255).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 50);
+
+        // Threshold 1 admits only exact matches, so nothing moves.
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.surface_blur(id, 1, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn surface_blur_leaves_a_flat_layer_alone_and_is_confined_to_the_selection() {
+        let (mut doc, id) = grey_2x2();
+        doc.surface_blur(id, 2, 40).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [128, 128, 128, 255]));
+
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.surface_blur(id, 1, 25).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 12);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 20);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn surface_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.surface_blur(id, 0, 25).is_err());
+        assert!(doc.surface_blur(id, 1, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.surface_blur(id, 1, 25).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.surface_blur(999, 1, 25).is_err());
     }
 
     #[test]

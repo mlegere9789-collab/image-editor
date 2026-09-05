@@ -252,6 +252,9 @@ export default function App() {
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
   const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
   const [gaussianBlurRadius, setGaussianBlurRadius] = useState(2);
+  const [showSurfaceBlurDialog, setShowSurfaceBlurDialog] = useState(false);
+  const [surfaceBlurRadius, setSurfaceBlurRadius] = useState(5);
+  const [surfaceBlurThreshold, setSurfaceBlurThreshold] = useState(15);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -622,6 +625,16 @@ export default function App() {
     await runCommand("gaussian_blur", { id: selectedId, radius: gaussianBlurRadius });
     setShowGaussianBlurDialog(false);
   }, [runCommand, selectedId, gaussianBlurRadius]);
+
+  const applySurfaceBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("surface_blur", {
+      id: selectedId,
+      radius: surfaceBlurRadius,
+      threshold: surfaceBlurThreshold,
+    });
+    setShowSurfaceBlurDialog(false);
+  }, [runCommand, selectedId, surfaceBlurRadius, surfaceBlurThreshold]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1531,6 +1544,14 @@ export default function App() {
             title="Filter > Blur > Gaussian Blur"
           >
             Gaussian Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSurfaceBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Surface Blur"
+          >
+            Surface Blur…
           </button>
           <button
             className="button button--quiet"
@@ -3387,6 +3408,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDiffuse} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSurfaceBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSurfaceBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Surface Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Surface Blur</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{surfaceBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={surfaceBlurRadius}
+                onChange={(event) => setSurfaceBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Threshold
+                <span className="control__value">{surfaceBlurThreshold} levels</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={255}
+                value={surfaceBlurThreshold}
+                onChange={(event) => setSurfaceBlurThreshold(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSurfaceBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySurfaceBlur} disabled={busy}>
                 Apply
               </button>
             </div>

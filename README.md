@@ -2797,6 +2797,53 @@ rule. Undo restored the original after each.
 **409 Rust tests total** (404 → 409, 402 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 34 — Filter > Blur > Surface Blur
+
+The edge-preserving blur: it smooths flat and gently varying areas
+while leaving real edges untouched, which is what makes it the usual
+tool for skin and noise. `Document::surface_blur(id, radius,
+threshold)` makes each colour channel a weighted mean of the
+`(2·radius+1)`-square, edge-clamped window in which a neighbour's
+weight is `threshold − |neighbour − centre|` when that is positive and
+zero otherwise. Samples within `threshold` of the pixel's own value
+count in proportion to how close they are; anything further away — the
+far side of an edge — is ignored entirely, so an edge never bleeds
+into the pixels beside it. The pixel itself always carries weight
+`threshold`, so the weights never sum to zero, and the mean is rounded
+to the nearest whole value with integer arithmetic. Photoshop's Surface
+Blur has the same two controls (Radius 1–100, Threshold 2–255); here
+the dialog offers Radius 1–16 and Threshold 1–255, and a threshold of 1
+admits only exact matches, so it changes nothing. Alpha is untouched,
+the selection is honoured, and a zero radius or threshold is rejected.
+The frontend adds a **Surface Blur…** button after Gaussian Blur with
+the two sliders.
+
+**Verified two ways.** Four new `document.rs` tests on the 3×3 red ramp
+(10..90 by tens) at radius 1, every weight written out by hand. At
+threshold 25 the centre 50 admits only 40, 50 and 60 (weights 15, 25,
+15), so `(15·40 + 25·50 + 15·60) / 55 = 50`; the top-left corner 10,
+whose clamped window holds four 10s (weight 25 each), two 20s (weight
+15) and a 40 and a 50 that fall outside, gives `1600 / 130 = 12.3 →
+12` — far less pull than the box blur's 23 on the same window, which is
+the whole point of the filter; the 20 beside it gives `(2·15·10 +
+2·25·20 + 2·15·30 + 5·40) / 115 = 20.9 → 21`. The flat green channel
+stays 0 and alpha stays 255. At threshold 255 every sample is admitted
+with weight `255 − |difference|` and the centre, symmetric in its
+window, still comes out 50 (`104750 / 2095`); at threshold 1 the layer
+is returned byte-for-byte unchanged. A flat grey layer is unchanged at
+radius 2, threshold 40; with only the top-left pixel selected it alone
+becomes 12 while its neighbour keeps 20 and the dirty rect is that
+pixel; zero radius, zero threshold, a locked layer and an unknown id
+all error without touching pixels. All passing on first run. Live
+under Xvfb on the bundled gradient sample at the default radius 5,
+threshold 15: the smooth gradient was smoothed and the one-pixel white
+grid lines stayed perfectly crisp with no halo — a 4× zoom on the same
+grid intersection that Gaussian Blur had turned into wide soft bands
+showed sharp single-pixel edges. Undo restored the original.
+
+**413 Rust tests total** (409 → 413, 406 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

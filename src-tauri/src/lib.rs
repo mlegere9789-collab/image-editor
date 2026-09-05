@@ -835,6 +835,19 @@ fn gaussian_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result
     edit_checkpointed(&state, |document| document.gaussian_blur(id, radius))
 }
 
+/// Filter > Blur > Surface Blur on layer `id`.
+#[tauri::command]
+fn surface_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    threshold: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.surface_blur(id, radius, threshold)
+    })
+}
+
 /// Filter > Stylize > Diffuse on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as in Photoshop.
 #[tauri::command]
@@ -1290,6 +1303,7 @@ pub fn run() {
             trace_contour,
             gaussian_blur,
             diffuse,
+            surface_blur,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
