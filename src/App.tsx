@@ -259,6 +259,8 @@ export default function App() {
   const [glowEdgeWidth, setGlowEdgeWidth] = useState(2);
   const [glowEdgeBrightness, setGlowEdgeBrightness] = useState(6);
   const [glowSmoothness, setGlowSmoothness] = useState(5);
+  const [showMosaicDialog, setShowMosaicDialog] = useState(false);
+  const [mosaicCellSize, setMosaicCellSize] = useState(8);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -650,6 +652,12 @@ export default function App() {
     });
     setShowGlowingEdgesDialog(false);
   }, [runCommand, selectedId, glowEdgeWidth, glowEdgeBrightness, glowSmoothness]);
+
+  const applyMosaic = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("mosaic", { id: selectedId, cellSize: mosaicCellSize });
+    setShowMosaicDialog(false);
+  }, [runCommand, selectedId, mosaicCellSize]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1773,6 +1781,22 @@ export default function App() {
             title="Filter > Stylize > Glowing Edges"
           >
             Glowing Edges…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMosaicDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Pixelate > Mosaic"
+          >
+            Mosaic…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("fragment", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Filter > Pixelate > Fragment"
+          >
+            Fragment
           </button>
           <input
             type="color"
@@ -3552,6 +3576,40 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGlowingEdges} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMosaicDialog && (
+        <div className="modal-overlay" onClick={() => setShowMosaicDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Mosaic"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Mosaic</h2>
+            <label className="control">
+              <span className="control__label">
+                Cell Size
+                <span className="control__value">{mosaicCellSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={64}
+                value={mosaicCellSize}
+                onChange={(event) => setMosaicCellSize(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowMosaicDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyMosaic} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -849,6 +849,18 @@ fn glowing_edges(
     })
 }
 
+/// Filter > Pixelate > Mosaic on layer `id`.
+#[tauri::command]
+fn mosaic(state: State<'_, AppState>, id: LayerId, cell_size: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.mosaic(id, cell_size))
+}
+
+/// Filter > Pixelate > Fragment on layer `id`.
+#[tauri::command]
+fn fragment(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.fragment(id))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1319,6 +1331,8 @@ pub fn run() {
             diffuse,
             surface_blur,
             glowing_edges,
+            mosaic,
+            fragment,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

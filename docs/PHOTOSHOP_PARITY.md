@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**597 distinct capabilities tracked. Currently shipped: 89.**
+**618 distinct capabilities tracked. Currently shipped: 91.**
 
 ## PART I — EVERY TOOL
 
@@ -508,6 +508,27 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Minimum (per-channel neighbourhood minimum, i.e. morphological erode — see README Phase 29)
 - [x] Offset (wrap-around shift by any horizontal/vertical amount; the Repeat Edge / Transparent fill modes are a documented scope cut — see README Phase 29)
 - [x] Custom (5×5 signed convolution kernel with Scale and Offset, integer arithmetic; loading/saving .acf kernels is a documented scope cut — see README Phase 30)
+- [ ] Color Halftone (Filter > Pixelate; the Pixelate submenu was missing from the original audit, added while shipping Mosaic)
+- [ ] Crystallize (Filter > Pixelate; added with the Pixelate audit)
+- [ ] Facet (Filter > Pixelate; added with the Pixelate audit)
+- [x] Fragment (four copies offset four pixels diagonally and averaged — see README Phase 36)
+- [ ] Mezzotint (Filter > Pixelate; added with the Pixelate audit)
+- [x] Mosaic (each cell replaced by its mean colour, partial edge cells averaged over the pixels present — see README Phase 36)
+- [ ] Pointillize (Filter > Pixelate; added with the Pixelate audit)
+- [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)
+- [ ] Pinch (Filter > Distort; added with the Distort audit)
+- [ ] Polar Coordinates (Filter > Distort; added with the Distort audit)
+- [ ] Ripple (Filter > Distort; added with the Distort audit)
+- [ ] Shear (Filter > Distort; added with the Distort audit)
+- [ ] Spherize (Filter > Distort; added with the Distort audit)
+- [ ] Twirl (Filter > Distort; added with the Distort audit)
+- [ ] Wave (Filter > Distort; added with the Distort audit)
+- [ ] ZigZag (Filter > Distort; added with the Distort audit)
+- [ ] Clouds (Filter > Render; the Render submenu was missing from the original audit, added while shipping Mosaic)
+- [ ] Difference Clouds (Filter > Render; added with the Render audit)
+- [ ] Fibers (Filter > Render; added with the Render audit)
+- [ ] Lens Flare (Filter > Render; added with the Render audit)
+- [ ] Lighting Effects (Filter > Render; added with the Render audit)
 - [ ] Liquify
 - [ ] Forward Warp Tool
 - [ ] Pucker Tool

@@ -2318,6 +2318,79 @@ impl Document {
         })
     }
 
+    /// Filter > Pixelate > Mosaic: the layer is cut into a grid of
+    /// `cell_size`-pixel squares anchored at the top-left corner and every
+    /// pixel takes the mean colour of its square, giving the blocky
+    /// "pixelated" look. Cells that run off the right or bottom edge
+    /// average only the pixels they actually contain. Each cell's mean is
+    /// computed once from a snapshot of the whole layer — unselected pixels
+    /// in a cell still contribute, as in Photoshop — and then only the
+    /// selected pixels are written. All four channels average
+    /// independently with truncating integer division, like
+    /// [`Self::box_blur`]. A cell size of 1 is the identity; 0 is an error,
+    /// as is a locked or unknown layer.
+    pub fn mosaic(&mut self, id: LayerId, cell_size: u32) -> Result<Option<Rect>, String> {
+        if cell_size == 0 {
+            return Err("Mosaic cell size must be at least 1 pixel.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = cell_size as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let cells_x = width.div_ceil(cell);
+        let cells_y = height.div_ceil(cell);
+        let mut means = vec![[0u8; CHANNELS]; cells_x * cells_y];
+        for cy in 0..cells_y {
+            for cx in 0..cells_x {
+                let (x0, y0) = (cx * cell, cy * cell);
+                let (x1, y1) = ((x0 + cell).min(width), (y0 + cell).min(height));
+                let mut sums = [0u64; CHANNELS];
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let base = (y * width + x) * CHANNELS;
+                        for (sum, &v) in sums.iter_mut().zip(&source[base..base + CHANNELS]) {
+                            *sum += v as u64;
+                        }
+                    }
+                }
+                let count = ((x1 - x0) * (y1 - y0)) as u64;
+                for (slot, sum) in means[cy * cells_x + cx].iter_mut().zip(&sums) {
+                    *slot = (sum / count) as u8;
+                }
+            }
+        }
+        self.filter_pixels(id, |_, row, col| {
+            means[(row as usize / cell) * cells_x + col as usize / cell]
+        })
+    }
+
+    /// Filter > Pixelate > Fragment: four copies of the layer, offset four
+    /// pixels diagonally (up-left, up-right, down-left, down-right) and
+    /// averaged, giving the "out of register" doubled look. No parameters,
+    /// as in Photoshop. Samples past the edge clamp onto it, and all four
+    /// channels average un-premultiplied through [`average_samples`], like
+    /// [`Self::box_blur`]. Errors on a locked or unknown layer.
+    pub fn fragment(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let samples =
+                [(-4, -4), (4, -4), (-4, 4), (4, 4)]
+                    .into_iter()
+                    .map(|(dx, dy): (i64, i64)| {
+                        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+                        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+                        (sx, sy)
+                    });
+            average_samples(source, doc_width, samples)
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -5599,6 +5672,94 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.glowing_edges(999, 1, 6, 1).is_err());
+    }
+
+    #[test]
+    fn mosaic_averages_each_cell_including_partial_edge_cells() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Cell size 2 on the 3x3 ramp: the top-left 2x2 {10,20,40,50} -> 30,
+        // the one-column strip beside it {30,60} -> 45, the one-row strip
+        // below {70,80} -> 75, and the lone corner 90 stays 90.
+        let (mut doc, id) = ramped_3x3();
+        doc.mosaic(id, 2).unwrap();
+        assert_eq!(reds_3x3(&doc), [30, 30, 45, 30, 30, 45, 75, 75, 90]);
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0) + 1], 0);
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0) + 3], 255);
+
+        // Cell size 3 is one cell holding the whole layer: 450 / 9 = 50.
+        let (mut doc, id) = ramped_3x3();
+        doc.mosaic(id, 3).unwrap();
+        assert!(reds_3x3(&doc).iter().all(|&v| v == 50));
+    }
+
+    #[test]
+    fn mosaic_cell_one_is_the_identity_and_the_selection_confines_the_write() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.mosaic(id, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        // Only the top-left pixel is selected, but its cell's mean still
+        // includes the unselected 20, 40 and 50.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.mosaic(id, 2).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 30);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 20);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn fragment_averages_four_copies_offset_four_pixels_diagonally() {
+        // A 9x9 layer whose red is 10*x + y, so every diagonal sample has a
+        // distinct, predictable value.
+        let mut doc = Document::new(9, 9).unwrap();
+        let mut pixels = Vec::with_capacity(9 * 9 * CHANNELS);
+        for y in 0..9u8 {
+            for x in 0..9u8 {
+                pixels.extend_from_slice(&[10 * x + y, 0, 0, 255]);
+            }
+        }
+        let id = doc.add_layer("ramp", &pixels, 9, 9).unwrap();
+        doc.fragment(id).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        // Centre (4,4) reads the four corners 0, 80, 8, 88 -> 176 / 4 = 44,
+        // its own value, since the ramp is linear. (1,1) reads (0,0)=0,
+        // (5,0)=50, (0,5)=5, (5,5)=55 -> 110 / 4 = 27. (8,8) reads (4,4)=44
+        // and three clamped samples 84, 48, 88 -> 264 / 4 = 66. (0,0) reads
+        // 0, 40, 4, 44 -> 22.
+        assert_eq!(p[idx(4, 4)], 44);
+        assert_eq!(p[idx(1, 1)], 27);
+        assert_eq!(p[idx(8, 8)], 66);
+        assert_eq!(p[idx(0, 0)], 22);
+        assert_eq!(p[idx(4, 4) + 3], 255);
+
+        let (mut doc, id) = grey_2x2();
+        doc.fragment(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [128, 128, 128, 255]));
+    }
+
+    #[test]
+    fn pixelate_filters_propagate_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.mosaic(id, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.mosaic(id, 2).is_err());
+        assert!(doc.fragment(id).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.mosaic(999, 2).is_err());
+        assert!(empty.fragment(999).is_err());
     }
 
     #[test]

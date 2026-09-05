@@ -2890,6 +2890,60 @@ an edge. Undo restored the original.
 **417 Rust tests total** (413 → 417, 410 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 36 — Filter > Pixelate: Mosaic and Fragment
+
+Auditing the filter menus for this phase showed the parity list had
+never tracked three whole Photoshop submenus — Pixelate (Color
+Halftone, Crystallize, Facet, Fragment, Mezzotint, Mosaic, Pointillize),
+Distort (Displace, Pinch, Polar Coordinates, Ripple, Shear, Spherize,
+Twirl, Wave, ZigZag) and Render (Clouds, Difference Clouds, Fibers, Lens
+Flare, Lighting Effects). All twenty-one are now tracked, taking the
+catalogue from 597 to 618, and the two exact-arithmetic Pixelate
+filters ship here.
+
+**Mosaic** cuts the layer into a grid of `cell_size`-pixel squares
+anchored at the top-left corner and gives every pixel the mean colour
+of its square. `Document::mosaic(id, cell_size)` computes each cell's
+mean once from a snapshot of the whole layer — unselected pixels in a
+cell still contribute, as in Photoshop — and then writes only the
+selected pixels through the `filter_pixels` skeleton, so the cost is
+one pass over the layer regardless of cell size. Cells that run off the
+right or bottom edge average only the pixels they actually contain. All
+four channels average independently with truncating integer division,
+like Box Blur. A cell size of 1 is the identity and 0 is rejected.
+**Fragment** takes no parameters, as in Photoshop: four copies of the
+layer offset four pixels diagonally — up-left, up-right, down-left,
+down-right — are averaged, through the same `average_samples` Box Blur
+and Motion Blur use, with samples past the edge clamped. The frontend
+adds a **Mosaic…** dialog (Cell Size 2–64) and a one-click **Fragment**
+button.
+
+**Verified two ways.** Four new `document.rs` tests. Mosaic at cell size
+2 on the 3×3 red ramp (10..90 by tens) gives the top-left 2×2 {10, 20,
+40, 50} → 30, the one-column strip beside it {30, 60} → 45, the one-row
+strip below {70, 80} → 75 and the lone corner 90 → 90 — reds 30, 30,
+45 / 30, 30, 45 / 75, 75, 90 — with green still 0 and alpha 255; cell
+size 3 is one cell over the whole layer, 450 / 9 = 50 everywhere; cell
+size 1 returns the layer byte-for-byte; with only the top-left pixel
+selected it becomes 30 (its cell's mean still counts the unselected 20,
+40 and 50) while its neighbour keeps 20 and the dirty rect is that one
+pixel. Fragment is checked on a 9×9 layer whose red is `10·x + y`, so
+every diagonal sample has a distinct value: the centre (4, 4) reads the
+four corners 0, 80, 8, 88 → 176 / 4 = 44, its own value, because the
+ramp is linear; (1, 1) reads 0, 50, 5, 55 → 27; (8, 8) reads 44 and
+three clamped samples 84, 48, 88 → 66; (0, 0) reads 0, 40, 4, 44 → 22;
+alpha stays 255 and a flat grey layer is unchanged. Zero cell size,
+locked layers and unknown ids error for both. All passing on first run.
+Live under Xvfb on the bundled gradient sample: Mosaic at 20 px
+collapsed the gradient into flat 20-pixel blocks and averaged the thin
+white grid lines into slightly lighter cells; after an undo, Fragment
+turned every grid line into a pair of half-intensity lines eight pixels
+apart — the ±4 diagonal copies — the "out of register" look. Undo
+restored the original after each.
+
+**421 Rust tests total** (417 → 421, 414 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
