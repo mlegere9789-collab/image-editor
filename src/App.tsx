@@ -20,6 +20,26 @@ const PROJECT_FILTER = [{ name: "Image Editor Project", extensions: ["iep"] }];
 
 /** One row per output channel (R, G, B); each row is
  * [rCoeff, gCoeff, bCoeff, constant]. This is the no-op matrix. */
+const IDENTITY_KERNEL = Array.from({ length: 25 }, (_, i) => (i === 12 ? "1" : "0"));
+
+// The Custom kernel fields are held as strings: a controlled numeric value
+// would snap the invalid intermediate "-" back to 0 and eat the sign.
+function toInteger(text: string): number {
+  const n = Math.trunc(Number(text));
+  return Number.isFinite(n) ? n : 0;
+}
+
+const TEXT_INPUT_TYPES = new Set(["text", "number", "search", "email", "url", "password"]);
+
+// Keyboard shortcuts must not steal Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+Z from a
+// field the user is typing in; sliders and colour pickers keep them.
+function isTypingTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLTextAreaElement ||
+    (target instanceof HTMLInputElement && TEXT_INPUT_TYPES.has(target.type))
+  );
+}
+
 const IDENTITY_CHANNEL_MIXER = [
   [100, 0, 0, 0],
   [0, 100, 0, 0],
@@ -250,6 +270,10 @@ export default function App() {
   const [showHighPassDialog, setShowHighPassDialog] = useState(false);
   const [highPassRadius, setHighPassRadius] = useState(3);
   const [showOffsetDialog, setShowOffsetDialog] = useState(false);
+  const [showCustomDialog, setShowCustomDialog] = useState(false);
+  const [customKernel, setCustomKernel] = useState<string[]>(IDENTITY_KERNEL);
+  const [customScale, setCustomScale] = useState("1");
+  const [customOffset, setCustomOffset] = useState("0");
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
 
@@ -649,9 +673,21 @@ export default function App() {
     setShowOffsetDialog(false);
   }, [runCommand, selectedId, offsetX, offsetY]);
 
+  const applyCustom = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("custom", {
+      id: selectedId,
+      kernel: customKernel.map(toInteger),
+      scale: toInteger(customScale),
+      offset: toInteger(customOffset),
+    });
+    setShowCustomDialog(false);
+  }, [runCommand, selectedId, customKernel, customScale, customOffset]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) return;
+      if (isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
@@ -1586,6 +1622,14 @@ export default function App() {
             title="Filter > Other > Offset (wrap around)"
           >
             Offset…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCustomDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Other > Custom (5×5 convolution kernel)"
+          >
+            Custom…
           </button>
           <input
             type="color"
@@ -2989,6 +3033,78 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyOffset} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCustomDialog && (
+        <div className="modal-overlay" onClick={() => setShowCustomDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Custom"
+            style={{ width: 380 }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Other &gt; Custom</h2>
+            <div className="kernel-grid">
+              {customKernel.map((value, index) => (
+                <input
+                  key={index}
+                  type="number"
+                  min={-999}
+                  max={999}
+                  value={value}
+                  aria-label={`Kernel row ${Math.floor(index / 5) + 1} column ${(index % 5) + 1}`}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setCustomKernel((kernel) => kernel.map((v, i) => (i === index ? next : v)));
+                  }}
+                />
+              ))}
+            </div>
+            <label className="control">
+              <span className="control__label">Scale</span>
+              <input
+                type="number"
+                min={1}
+                max={9999}
+                value={customScale}
+                onChange={(event) => setCustomScale(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">Offset</span>
+              <input
+                type="number"
+                min={-9999}
+                max={9999}
+                value={customOffset}
+                onChange={(event) => setCustomOffset(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setCustomKernel(IDENTITY_KERNEL);
+                  setCustomScale("1");
+                  setCustomOffset("0");
+                }}
+              >
+                Reset
+              </button>
+              <button className="button button--quiet" onClick={() => setShowCustomDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyCustom}
+                disabled={busy || toInteger(customScale) === 0}
+              >
                 Apply
               </button>
             </div>

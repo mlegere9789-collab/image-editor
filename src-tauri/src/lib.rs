@@ -776,6 +776,20 @@ fn offset(state: State<'_, AppState>, id: LayerId, dx: i32, dy: i32) -> Result<S
     edit_checkpointed(&state, |document| document.offset(id, dx, dy))
 }
 
+/// Filter > Other > Custom on layer `id`: a 5×5 kernel with Scale and Offset.
+#[tauri::command]
+fn custom(
+    state: State<'_, AppState>,
+    id: LayerId,
+    kernel: [i32; 25],
+    scale: i32,
+    offset: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.custom(id, kernel, scale, offset)
+    })
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1212,6 +1226,7 @@ pub fn run() {
             minimum,
             high_pass,
             offset,
+            custom,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

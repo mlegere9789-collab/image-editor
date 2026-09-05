@@ -334,6 +334,47 @@ fn extreme_at(
     out
 }
 
+/// Photoshop's Filter > Other > Custom convolution at one pixel: each
+/// colour channel becomes `(Σ kernel[i] · sample[i]) / scale + offset`,
+/// clamped to 0..=255. The 25 kernel entries are laid out row by row over
+/// the 5×5 neighbourhood centred on `(col, row)` — `kernel[12]` is the
+/// pixel itself, `kernel[0]` the sample two up and two left — and samples
+/// beyond the layer edge clamp to the nearest edge pixel like every other
+/// window filter here. The division is integer division truncating toward
+/// zero, the arithmetic a person can redo on paper, and alpha is carried
+/// over unchanged because Custom is a colour filter. `scale` must be
+/// non-zero; the caller checks.
+fn convolve_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (u32, u32),
+    kernel: &[i32; 25],
+    scale: i32,
+    offset: i32,
+) -> [u8; CHANNELS] {
+    let mut sums = [0i64; 3];
+    for (i, &weight) in kernel.iter().enumerate() {
+        if weight == 0 {
+            continue;
+        }
+        let (kx, ky) = ((i % 5) as i64 - 2, (i / 5) as i64 - 2);
+        let sx = (col as i64 + kx).clamp(0, width - 1) as usize;
+        let sy = (row as i64 + ky).clamp(0, height - 1) as usize;
+        let base = (sy * doc_width + sx) * CHANNELS;
+        for (c, sum) in sums.iter_mut().enumerate() {
+            *sum += weight as i64 * source[base + c] as i64;
+        }
+    }
+    let centre = (row as usize * doc_width + col as usize) * CHANNELS;
+    let mut out = [0u8; CHANNELS];
+    for (slot, sum) in out.iter_mut().zip(&sums) {
+        *slot = (sum / scale as i64 + offset as i64).clamp(0, 255) as u8;
+    }
+    out[3] = source[centre + 3];
+    out
+}
+
 /// A tiny, dependency-free pseudo-random generator (Marsaglia's
 /// xorshift32) for [`Document::add_noise`]. Chosen over pulling in the
 /// `rand` crate for one reason that matters more than statistical
@@ -1713,6 +1754,63 @@ impl Document {
             x1: self.width,
             y1: self.height,
         }))
+    }
+
+    /// Filter > Other > Custom: a user-supplied 5×5 convolution kernel
+    /// with Photoshop's Scale (the divisor) and Offset (added after
+    /// dividing), applied per colour channel by [`convolve_at`]. `kernel`
+    /// is the 25 coefficients row by row with `kernel[12]` the centre;
+    /// Photoshop accepts −999..=999 for each coefficient, 1..=9999 for
+    /// Scale and −9999..=9999 for Offset, and the frontend's inputs use
+    /// the same ranges. Every one of the classic kernels is a setting of
+    /// this one dialog — the identity (a lone 1 in the middle), a box
+    /// blur (nine 1s over a Scale of 9), the textbook sharpen (5 in the
+    /// middle, −1 above, below, left and right), an emboss (−1 and +1 on
+    /// a diagonal with an Offset of 128) — which is why it is the natural
+    /// stepping stone to the Stylize filters. Loading and saving kernels
+    /// to Photoshop's `.acf` files is a deliberate scope cut. Alpha is
+    /// untouched. Honours the selection and the layer lock; errors on a
+    /// zero Scale, which would divide by zero.
+    pub fn custom(
+        &mut self,
+        id: LayerId,
+        kernel: [i32; 25],
+        scale: i32,
+        offset: i32,
+    ) -> Result<Option<Rect>, String> {
+        if scale == 0 {
+            return Err("Scale must not be zero.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let picked = convolve_at(
+                    &source,
+                    doc_width,
+                    (width, height),
+                    (row, col),
+                    &kernel,
+                    scale,
+                    offset,
+                );
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&picked);
+            }
+        }
+        Ok(Some(bounds))
     }
 
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
@@ -4395,6 +4493,151 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.maximum(999, 1).is_err());
         assert!(empty.offset(999, 1, 0).is_err());
+    }
+
+    fn kernel(entries: &[(usize, i32)]) -> [i32; 25] {
+        let mut k = [0i32; 25];
+        for &(i, weight) in entries {
+            k[i] = weight;
+        }
+        k
+    }
+
+    #[test]
+    fn custom_identity_kernel_leaves_the_layer_alone() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let dirty = doc.custom(id, kernel(&[(12, 1)]), 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn custom_offset_shifts_every_colour_channel_and_clamps() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(12, 1)]), 1, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(1, 1)], p[idx(2, 2)]], [15, 55, 95]);
+        assert_eq!(p[idx(0, 0) + 1], 5); // the flat green channel lifts too
+        assert_eq!(p[idx(0, 0) + 3], 255); // alpha is not a colour channel
+
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(12, 1)]), 1, -20).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(1, 0)], p[idx(2, 0)]], [0, 0, 10]);
+    }
+
+    #[test]
+    fn custom_box_kernel_reproduces_the_box_blur() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let ones: Vec<(usize, i32)> = [6, 7, 8, 11, 12, 13, 16, 17, 18]
+            .iter()
+            .map(|&i| (i, 1))
+            .collect();
+        doc.custom(id, kernel(&ones), 9, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // The same windows the box-blur test lists: 450/9, 210/9, 690/9.
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(0, 0)], 23);
+        assert_eq!(p[idx(2, 2)], 76);
+    }
+
+    #[test]
+    fn custom_sharpen_kernel_amplifies_the_centre_against_its_neighbours() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(
+            id,
+            kernel(&[(12, 5), (7, -1), (11, -1), (13, -1), (17, -1)]),
+            1,
+            0,
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Centre: 5*50 - (20+40+60+80) = 50. Top-left, with the up and
+        // left samples clamped onto itself: 5*10 - (10+10+20+40) = -30 -> 0.
+        // Bottom-right, right and down clamped: 5*90 - (60+80+90+90) = 130.
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(0, 0)], 0);
+        assert_eq!(p[idx(2, 2)], 130);
+        assert_eq!(p[idx(2, 2) + 1], 0);
+        assert_eq!(p[idx(2, 2) + 3], 255);
+    }
+
+    #[test]
+    fn custom_scale_divides_toward_zero_and_negative_weights_invert() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(12, 1)]), 4, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(1, 1)], p[idx(2, 2)]], [2, 12, 22]);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(12, -1)]), 1, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(1, 1)], p[idx(2, 2)]], [90, 50, 10]);
+        assert_eq!(p[idx(1, 1) + 1], 100);
+    }
+
+    #[test]
+    fn custom_kernel_reaches_two_pixels_out_with_edge_clamping() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // kernel[24] is the (+2, +2) corner: the top-left pixel reads the
+        // bottom-right one, and anything nearer the edge clamps onto it.
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(24, 1)]), 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 90);
+        assert_eq!(p[idx(1, 1)], 90);
+
+        // kernel[14] is (+2, 0): the left column reads the right column.
+        let (mut doc, id) = ramped_3x3();
+        doc.custom(id, kernel(&[(14, 1)]), 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(0, 1)], p[idx(0, 2)]], [30, 60, 90]);
+        assert_eq!(p[idx(1, 1)], 60); // (3, 1) clamps to (2, 1)
+    }
+
+    #[test]
+    fn custom_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.custom(id, kernel(&[(12, 1)]), 1, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 150);
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(2, 2)], 90);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn custom_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.custom(id, kernel(&[(12, 1)]), 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.custom(id, kernel(&[(12, 1)]), 1, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.custom(999, kernel(&[(12, 1)]), 1, 0).is_err());
     }
 
     #[test]

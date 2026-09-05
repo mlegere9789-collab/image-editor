@@ -486,7 +486,8 @@ body {
   text-align: center;
 }
 
-.channel-mixer input[type="number"] {
+.channel-mixer input[type="number"],
+.kernel-grid input[type="number"] {
   width: 56px;
   padding: 4px 6px;
   border: 1px solid var(--border);
@@ -494,4 +495,11 @@ body {
   background: var(--bg);
   color: var(--text);
   font: inherit;
+}
+
+.kernel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 56px);
+  gap: 6px;
+  justify-content: center;
 }

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 80.**
+**593 distinct capabilities tracked. Currently shipped: 81.**
 
 ## PART I — EVERY TOOL
 
@@ -507,7 +507,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Maximum (per-channel neighbourhood maximum, i.e. morphological dilate — see README Phase 29)
 - [x] Minimum (per-channel neighbourhood minimum, i.e. morphological erode — see README Phase 29)
 - [x] Offset (wrap-around shift by any horizontal/vertical amount; the Repeat Edge / Transparent fill modes are a documented scope cut — see README Phase 29)
-- [ ] Custom
+- [x] Custom (5×5 signed convolution kernel with Scale and Offset, integer arithmetic; loading/saving .acf kernels is a documented scope cut — see README Phase 30)
 - [ ] Liquify
 - [ ] Forward Warp Tool
 - [ ] Pucker Tool

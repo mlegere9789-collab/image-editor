@@ -2544,6 +2544,76 @@ the left edge. Undo restored the original after each.
 **385 Rust tests total** (378 → 385, 378 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 30 — Filter > Other > Custom
+
+The last item in Photoshop's Other submenu is the one that generalises
+half the others: a user-supplied 5×5 convolution kernel. Each colour
+channel of each pixel becomes `(Σ kernel[i] · sample[i]) / scale +
+offset`, clamped to 0..=255, where the 25 coefficients are laid out row
+by row over the neighbourhood centred on the pixel (`kernel[12]` is the
+pixel itself, `kernel[0]` the sample two up and two left) and samples
+past the layer edge clamp to the nearest edge pixel like every other
+window filter here. `Document::custom(id, kernel, scale, offset)` does
+that through a `convolve_at` helper that skips zero-weight cells,
+accumulates in `i64`, and divides with integer division truncating
+toward zero — the arithmetic a person can redo on paper. Alpha is
+carried over unchanged, since Custom is a colour filter, and it honours
+the selection and the layer lock. Photoshop's ranges are kept: −999..999
+per coefficient, 1..9999 for Scale, −9999..9999 for Offset; a Scale of 0
+is rejected rather than dividing by it. Every classic kernel is a
+setting of this one dialog — the identity (a lone 1), a box blur (nine
+1s over 9), the textbook sharpen (5 in the middle, −1 on each side), an
+emboss (−1 and +1 on a diagonal with an Offset of 128) — which makes it
+the stepping stone to the Stylize filters. Loading and saving kernels to
+Photoshop's `.acf` files is a deliberate scope cut. The frontend adds a
+**Custom…** button opening a 5×5 grid of number fields plus Scale and
+Offset, with a Reset back to the identity.
+
+Two small frontend bugs surfaced while typing a kernel in and are fixed
+here because Custom is the most typing-heavy dialog in the app. First,
+the global shortcut handler now ignores key presses whose target is a
+text-like input (`text`, `number`, `search`, `email`, `url`, `password`)
+or a textarea — before, Ctrl+A inside any number field ran **Select
+All** on the canvas instead of selecting the field's text, and Ctrl+C /
+Ctrl+V / Ctrl+Z were likewise hijacked; sliders and the colour picker
+keep their shortcuts. Second, the kernel, Scale and Offset fields are
+held as strings and parsed on Apply: a controlled numeric `value` snaps
+the invalid intermediate `"-"` back to `0` the instant it is typed, so
+a negative coefficient could never be entered — and a kernel without
+negatives can't sharpen, emboss or find an edge.
+
+**Verified two ways.** Eight new `document.rs` tests on the 3×3 red-ramp
+fixture (10, 20, 30 / 40, 50, 60 / 70, 80, 90), every neighbourhood
+small enough to write out. The identity kernel returns the layer
+untouched with the full-canvas dirty rect. Identity plus Offset 5 lifts
+every colour channel by 5 (10 → 15, 50 → 55, 90 → 95; the flat green
+channel 0 → 5) while alpha stays 255, and Offset −20 clamps the top row
+to 0, 0, 10. Nine 1s in the middle of the grid over Scale 9 reproduce
+the box-blur test's own answers — 450/9 = 50 at the centre, 210/9 = 23
+at the clamped corner, 690/9 = 76 opposite. The textbook sharpen gives
+5·50 − (20+40+60+80) = 50 at the centre, 5·10 − (10+10+20+40) = −30 → 0
+at the corner whose up and left samples clamp onto itself, and 5·90 −
+(60+80+90+90) = 130 at the far corner. Scale 4 divides toward zero
+(10 → 2, 50 → 12, 90 → 22); a −1 centre with Offset 100 inverts (10 →
+90, 50 → 50, 90 → 10, green → 100). The far corner cell `kernel[24]`
+proves the 5×5 reach — the top-left pixel reads the bottom-right's 90,
+and pixels nearer the edge clamp onto it — while `kernel[14]` (+2, 0)
+copies the right column onto the left (30, 60, 90). With only the
+centre pixel selected, identity plus Offset 100 changes it to 150,
+leaves the corners at 10 and 90, and reports the 1×1 dirty rect. Zero
+Scale, a locked layer and an unknown id all error without touching a
+pixel. All passing on first run. Live under Xvfb on the bundled
+gradient sample: typing an emboss into the real grid — −1 at row 2
+column 2, 0 in the centre, +1 at row 4 column 4, Offset 128 — turned
+every smooth tile flat mid-grey and every white grid line into a
+light/dark relief pair, exactly the classic emboss; Undo restored the
+original. The first attempt at that typing is what exposed the two
+shortcut and negative-sign bugs above; after the fixes, Ctrl+A stayed
+inside the field and `-1` was accepted as typed.
+
+**393 Rust tests total** (385 → 393, 386 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
