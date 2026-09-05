@@ -311,6 +311,12 @@ export default function App() {
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
   const [pointillizeCellSize, setPointillizeCellSize] = useState(16);
   const [pointillizeBackground, setPointillizeBackground] = useState("#ffffff");
+  const [showCloudsDialog, setShowCloudsDialog] = useState(false);
+  const [cloudsForeground, setCloudsForeground] = useState("#ffffff");
+  const [cloudsBackground, setCloudsBackground] = useState("#000000");
+  const [showDifferenceCloudsDialog, setShowDifferenceCloudsDialog] = useState(false);
+  const [differenceCloudsForeground, setDifferenceCloudsForeground] = useState("#ffffff");
+  const [differenceCloudsBackground, setDifferenceCloudsBackground] = useState("#000000");
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -819,6 +825,35 @@ export default function App() {
     });
     setShowPointillizeDialog(false);
   }, [runCommand, selectedId, pointillizeCellSize, pointillizeBackground]);
+
+  const applyClouds = useCallback(async () => {
+    if (selectedId === null) return;
+    const [fr, fg, fb] = hexToRgb(cloudsForeground);
+    const [br, bg, bb] = hexToRgb(cloudsBackground);
+    // A fresh seed per apply, as with Add Noise/Crystallize/Pointillize.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("clouds", {
+      id: selectedId,
+      foreground: [fr, fg, fb, 255],
+      background: [br, bg, bb, 255],
+      seed,
+    });
+    setShowCloudsDialog(false);
+  }, [runCommand, selectedId, cloudsForeground, cloudsBackground]);
+
+  const applyDifferenceClouds = useCallback(async () => {
+    if (selectedId === null) return;
+    const [fr, fg, fb] = hexToRgb(differenceCloudsForeground);
+    const [br, bg, bb] = hexToRgb(differenceCloudsBackground);
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("difference_clouds", {
+      id: selectedId,
+      foreground: [fr, fg, fb, 255],
+      background: [br, bg, bb, 255],
+      seed,
+    });
+    setShowDifferenceCloudsDialog(false);
+  }, [runCommand, selectedId, differenceCloudsForeground, differenceCloudsBackground]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -2046,6 +2081,22 @@ export default function App() {
             title="Filter > Pixelate > Pointillize"
           >
             Pointillize…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCloudsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Render > Clouds"
+          >
+            Clouds…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDifferenceCloudsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Render > Difference Clouds"
+          >
+            Difference Clouds…
           </button>
           <input
             type="color"
@@ -4427,6 +4478,87 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPointillize} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCloudsDialog && (
+        <div className="modal-overlay" onClick={() => setShowCloudsDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Clouds"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Render &gt; Clouds</h2>
+            <label className="control control--row">
+              <span className="control__label">Foreground</span>
+              <input
+                type="color"
+                value={cloudsForeground}
+                onChange={(event) => setCloudsForeground(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Background</span>
+              <input
+                type="color"
+                value={cloudsBackground}
+                onChange={(event) => setCloudsBackground(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowCloudsDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyClouds} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDifferenceCloudsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDifferenceCloudsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Difference Clouds"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Render &gt; Difference Clouds</h2>
+            <label className="control control--row">
+              <span className="control__label">Foreground</span>
+              <input
+                type="color"
+                value={differenceCloudsForeground}
+                onChange={(event) => setDifferenceCloudsForeground(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Background</span>
+              <input
+                type="color"
+                value={differenceCloudsBackground}
+                onChange={(event) => setDifferenceCloudsBackground(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDifferenceCloudsDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDifferenceClouds} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -1004,6 +1004,39 @@ fn pointillize(
     })
 }
 
+/// Filter > Render > Clouds on layer `id`. `foreground`/`background` are the
+/// two RGBA colours the noise field lerps between. The frontend sends a
+/// fresh `seed` on every apply so repeated applications differ, as with Add
+/// Noise.
+#[tauri::command]
+fn clouds(
+    state: State<'_, AppState>,
+    id: LayerId,
+    foreground: [u8; CHANNELS],
+    background: [u8; CHANNELS],
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.clouds(id, foreground, background, seed)
+    })
+}
+
+/// Filter > Render > Difference Clouds on layer `id`. Same parameters as
+/// [`clouds`], but blended with the layer's existing colour via the
+/// Difference formula instead of replacing it.
+#[tauri::command]
+fn difference_clouds(
+    state: State<'_, AppState>,
+    id: LayerId,
+    foreground: [u8; CHANNELS],
+    background: [u8; CHANNELS],
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.difference_clouds(id, foreground, background, seed)
+    })
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1487,6 +1520,8 @@ pub fn run() {
             color_halftone,
             crystallize,
             pointillize,
+            clouds,
+            difference_clouds,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -3036,6 +3036,122 @@ impl Document {
         })
     }
 
+    /// Shared by [`Document::clouds`] and [`Document::difference_clouds`]:
+    /// a `width * height` field of fractal value noise in `[0, 1]`, indexed
+    /// `y * width + x`. Four octaves are summed, the coarsest a grid of
+    /// pseudo-random corner values spaced `base_cell =
+    /// (width.max(height) / 4).max(1)` pixels apart (each subsequent octave
+    /// half that spacing, floored at 1 pixel), bilinearly interpolated
+    /// between the four corners surrounding each pixel; each octave's
+    /// weight halves in turn (1, 1/2, 1/4, 1/8), and the weighted sum is
+    /// divided by the total weight so the field stays within `[0, 1]`. Each
+    /// octave's corner grid is drawn from `seed`'s [`XorShift32`] sequence
+    /// in turn, coarsest first, the same style of seeded draw every
+    /// randomised filter here uses. This is a value-noise approximation of
+    /// Photoshop's own (undocumented, proprietary) cloud renderer — a
+    /// documented simplification, not a port.
+    fn clouds_field(width: usize, height: usize, seed: u32) -> Vec<f32> {
+        const OCTAVES: u32 = 4;
+        let base_cell = (width.max(height) as u32 / 4).max(1);
+        let mut rng = XorShift32::new(seed);
+        let mut field = vec![0f32; width * height];
+        let mut total_weight = 0f32;
+        let mut weight = 1f32;
+        for octave in 0..OCTAVES {
+            let cell = (base_cell >> octave).max(1) as usize;
+            let cols = width.div_ceil(cell) + 1;
+            let rows = height.div_ceil(cell) + 1;
+            let corners: Vec<f32> = (0..cols * rows)
+                .map(|_| rng.next_u32() as f32 / 4_294_967_296.0)
+                .collect();
+            for y in 0..height {
+                let gy = y as f32 / cell as f32;
+                let iy = gy.floor() as usize;
+                let fy = gy - iy as f32;
+                for x in 0..width {
+                    let gx = x as f32 / cell as f32;
+                    let ix = gx.floor() as usize;
+                    let fx = gx - ix as f32;
+                    let v00 = corners[iy * cols + ix];
+                    let v10 = corners[iy * cols + ix + 1];
+                    let v01 = corners[(iy + 1) * cols + ix];
+                    let v11 = corners[(iy + 1) * cols + ix + 1];
+                    let top = v00 + (v10 - v00) * fx;
+                    let bottom = v01 + (v11 - v01) * fx;
+                    field[y * width + x] += weight * (top + (bottom - top) * fy);
+                }
+            }
+            total_weight += weight;
+            weight *= 0.5;
+        }
+        for v in field.iter_mut() {
+            *v /= total_weight;
+        }
+        field
+    }
+
+    /// Filter > Render > Clouds: fills the layer with fractal value noise
+    /// (via [`Self::clouds_field`]) linearly interpolated, channel by
+    /// channel including alpha, between `background` (noise 0) and
+    /// `foreground` (noise 1) — Photoshop's own Clouds has no dialog at
+    /// all, generating from whatever the current foreground/background
+    /// colours are, so those are this filter's only real parameters beyond
+    /// the seed. Unlike every other filter here, the existing pixels are
+    /// replaced outright rather than transformed: Render filters generate
+    /// new content. Errors only on a locked/unknown layer.
+    pub fn clouds(
+        &mut self,
+        id: LayerId,
+        foreground: [u8; CHANNELS],
+        background: [u8; CHANNELS],
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let field = Self::clouds_field(width, height, seed);
+        self.filter_pixels(id, |_source, row, col| {
+            let t = field[row as usize * doc_width + col as usize];
+            let mut out = [0u8; CHANNELS];
+            for c in 0..CHANNELS {
+                let (bg, fg) = (background[c] as f32, foreground[c] as f32);
+                out[c] = (bg + (fg - bg) * t).round() as u8;
+            }
+            out
+        })
+    }
+
+    /// Filter > Render > Difference Clouds: the same fractal cloud
+    /// generator as [`Self::clouds`], but combined with the layer's
+    /// existing colour via the Difference blend formula, `|existing −
+    /// cloud|`, instead of replacing it outright — repeated applications
+    /// fold the clouds back on themselves, Photoshop's own description of
+    /// the effect. Alpha is left untouched, since Difference is a colour
+    /// blend; only the three colour channels are combined. Errors only on
+    /// a locked/unknown layer.
+    pub fn difference_clouds(
+        &mut self,
+        id: LayerId,
+        foreground: [u8; CHANNELS],
+        background: [u8; CHANNELS],
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let field = Self::clouds_field(width, height, seed);
+        self.filter_pixels(id, |source, row, col| {
+            let t = field[row as usize * doc_width + col as usize];
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let (bg, fg) = (background[c] as f32, foreground[c] as f32);
+                let cloud = (bg + (fg - bg) * t).round() as i16;
+                out[c] = (source[base + c] as i16 - cloud).unsigned_abs() as u8;
+            }
+            out[3] = source[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -7165,6 +7281,119 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.pointillize(999, 1, [0, 0, 0, 255], 1).is_err());
+    }
+
+    #[test]
+    fn clouds_lerps_between_background_and_foreground_by_the_noise_field() {
+        // 16x16 (base_cell = 16/4 = 4, octave cells 4/2/1/1), seed 1. The
+        // field itself was computed by a Python port of clouds_field's
+        // exact arithmetic (same XorShift32 sequence, same bilinear/weight
+        // maths): field[0,0] = 0.29261351729122304, field[7,7] =
+        // 0.44604673015419394. Lerping background=[10,20,30,255] to
+        // foreground=[200,150,50,255] by those two values and rounding
+        // gives [66, 58, 36, 255] and [95, 78, 39, 255] respectively.
+        let idx = |x: usize, y: usize| (y * 16 + x) * 4;
+        let mut doc = Document::new(16, 16).unwrap();
+        let id = doc
+            .add_layer("blank", &solid(16, 16, [0, 0, 0, 0]), 16, 16)
+            .unwrap();
+        doc.clouds(id, [200, 150, 50, 255], [10, 20, 30, 255], 1)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [66, 58, 36, 255]);
+        assert_eq!(&p[idx(7, 7)..idx(7, 7) + 4], [95, 78, 39, 255]);
+    }
+
+    #[test]
+    fn clouds_is_confined_to_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc
+            .clouds(id, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .unwrap();
+        assert_ne!(doc.layers()[0].pixels[0..4], before[0..4]);
+        assert_eq!(doc.layers()[0].pixels[4..], before[4..]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn clouds_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .clouds(id, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .clouds(999, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+    }
+
+    #[test]
+    fn difference_clouds_combines_the_cloud_with_the_existing_colour_via_the_difference_formula() {
+        // Same 16x16/seed 1 field and foreground/background as the
+        // clouds() test above, but starting from a solid [100, 100, 100,
+        // 255] layer instead of blank. Cloud RGB at (0,0) is [66, 58, 36]
+        // and at (7,7) is [95, 78, 39] (worked out the same way); the
+        // Difference formula |existing - cloud| gives [34, 42, 64] and [5,
+        // 22, 61] respectively, with alpha left at the existing 255 since
+        // Difference only blends colour.
+        let idx = |x: usize, y: usize| (y * 16 + x) * 4;
+        let mut doc = Document::new(16, 16).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(16, 16, [100, 100, 100, 255]), 16, 16)
+            .unwrap();
+        doc.difference_clouds(id, [200, 150, 50, 255], [10, 20, 30, 255], 1)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [34, 42, 64, 255]);
+        assert_eq!(&p[idx(7, 7)..idx(7, 7) + 4], [5, 22, 61, 255]);
+    }
+
+    #[test]
+    fn difference_clouds_is_confined_to_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc
+            .difference_clouds(id, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .unwrap();
+        assert_ne!(doc.layers()[0].pixels[0..3], before[0..3]); // selected, changed
+        assert_eq!(doc.layers()[0].pixels[3], before[3]); // alpha untouched
+        assert_eq!(doc.layers()[0].pixels[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn difference_clouds_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .difference_clouds(id, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .difference_clouds(999, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
     }
 
     #[test]

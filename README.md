@@ -3410,6 +3410,73 @@ original, unsheared grid.
 **454 Rust tests total** (449 → 454, 447 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 45 — Filter > Render > Clouds and Difference Clouds
+
+The first Render filters, and the first filters in this project that
+*generate* content rather than transform what's already there. Both share
+`clouds_field(width, height, seed)`, a fractal value-noise field in `[0,
+1]` — a documented, hand-checkable approximation of Photoshop's own
+undocumented, proprietary cloud renderer, not a port of it. Four octaves
+are summed, each half the previous octave's cell spacing and half its
+weight, starting from `base_cell = (width.max(height) / 4).max(1)`
+pixels; each octave draws a grid of pseudo-random corner values from the
+seeded `XorShift32` generator — coarsest octave first, the same style of
+seeded draw every randomised filter here uses — and every pixel's value
+for that octave is bilinearly interpolated between the four grid corners
+around it. The weighted sum (weights 1, 1/2, 1/4, 1/8) is divided by the
+total weight, keeping the field within `[0, 1]`.
+
+`Document::clouds(id, foreground, background, seed)` replaces every
+selected pixel outright — Render filters generate new content rather than
+transforming existing pixels, the one place in this project where the
+source pixel is ignored entirely — with `background` lerped to
+`foreground` by the noise field, channel by channel including alpha.
+Photoshop's own Clouds dialog has no controls at all; it paints with
+whatever the current foreground/background colours are, so those (plus
+the seed, standing in for Photoshop's own unseeded randomness) are this
+filter's only real parameters. `Document::difference_clouds` reuses the
+exact same noise field and foreground/background lerp to get a "cloud
+colour", but instead of replacing the pixel it combines that colour with
+the layer's *existing* one via the Difference blend formula, `|existing −
+cloud|`, on the three colour channels only — alpha is left untouched,
+since Difference is a colour blend. Repeated applications of Difference
+Clouds fold the pattern back on itself, which is Photoshop's own
+description of the effect. A **Clouds…** and a **Difference Clouds…**
+dialog each expose a Foreground and a Background colour picker.
+
+**Verified two ways.** Six new `document.rs` tests, split evenly between
+the two filters. `clouds`'s first test uses a 16×16 canvas (`base_cell =
+16 / 4 = 4`, so the four octaves' cell spacings are 4, 2, 1, 1 — the last
+two land exactly on pixel corners, meaning no interpolation, while the
+first two exercise it for real) and seed 1: a Python port of
+`clouds_field`'s exact arithmetic — same `XorShift32` sequence, same
+bilinear and weighting maths — computed the noise field independently,
+giving `0.29261351729122304` at `(0, 0)` and `0.44604673015419394` at
+`(7, 7)`; lerping `background = [10, 20, 30, 255]` to `foreground = [200,
+150, 50, 255]` by those two values and rounding predicts `[66, 58, 36,
+255]` and `[95, 78, 39, 255]`, which is exactly what the Rust
+implementation produced. A second test confirms a one-pixel selection
+changes only that pixel (checked by inequality against the original,
+since the noise value itself isn't the point of that test) with a 1×1
+dirty rect; a third confirms a locked layer and an unknown id both error.
+`difference_clouds` reuses the same computed field and foreground/
+background values against a solid `[100, 100, 100, 255]` layer: the same
+Python script's cloud colours, `[66, 58, 36]` and `[95, 78, 39]`, put
+through `|100 − cloud|` predict `[34, 42, 64]` and `[5, 22, 61]` with
+alpha left at 255 — again exactly what the Rust implementation produced —
+plus matching selection-confinement and error-propagation tests. All six
+passed on the first run. Live under Xvfb on the bundled gradient sample:
+**Clouds** with the default white foreground and black background
+replaced the crisp colour grid with a soft, genuinely cloud-like
+grey-on-white fractal pattern; Undo restored the gradient. **Difference
+Clouds** on the same sample produced the classic "psychedelic" look —
+saturated, complementary-looking colour swirls where the cloud pattern
+and the gradient's own colours cancelled and clashed — and Undo again
+restored the original gradient.
+
+**460 Rust tests total** (454 → 460, 453 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
