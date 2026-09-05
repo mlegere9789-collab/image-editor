@@ -1117,6 +1117,20 @@ fn film_grain(
     })
 }
 
+/// Filter Gallery > Artistic > Neon Glow on layer `id`.
+#[tauri::command]
+fn neon_glow(
+    state: State<'_, AppState>,
+    id: LayerId,
+    glow_size: u32,
+    glow_brightness: u32,
+    color: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.neon_glow(id, glow_size, glow_brightness, color)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1711,6 +1725,7 @@ pub fn run() {
             cutout,
             dry_brush,
             film_grain,
+            neon_glow,
             crystallize,
             facet,
             pointillize,

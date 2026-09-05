@@ -3886,6 +3886,96 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Neon Glow: a documented, hand-verifiable
+    /// approximation of Photoshop's real Neon Glow, which reworks the
+    /// whole image's tones around a glow colour — instead, each pixel is
+    /// pulled toward `color` in proportion to its own edge strength,
+    /// leaving flat areas exactly as they were and letting only the
+    /// glow's own colour bloom around detail. The layer's own ITU-R
+    /// BT.601 luma feeds the same [`sobel_at`] edge detector
+    /// [`Self::find_edges`] uses, widened by the same [`extreme_at`]
+    /// neighbourhood-maximum [`Self::colored_pencil`]'s own `pencil_width`
+    /// already uses, at radius `glow_size` (a documented simplification of
+    /// Photoshop's own `-24..=24` range, which also supports an inward
+    /// variant this project doesn't model, down to this project's
+    /// `0..=24`). `glow_brightness` (Photoshop's own `0..=50` range)
+    /// scales how far each pixel travels toward `color`: `strength =
+    /// (widened_edge / 255) · (glow_brightness / 50)`, clamped to
+    /// `0..=1`, and every colour channel becomes `orig + (color − orig) ·
+    /// strength`, rounded and clamped. Alpha is untouched. Confined to
+    /// the selection and errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn neon_glow(
+        &mut self,
+        id: LayerId,
+        glow_size: u32,
+        glow_brightness: u32,
+        color: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        if glow_size > 24 {
+            return Err("Neon Glow size must be between 0 and 24.".to_string());
+        }
+        if glow_brightness > 50 {
+            return Err("Neon Glow brightness must be between 0 and 50.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        if glow_size > 0 {
+            let radius = glow_size as i64;
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened =
+                        extreme_at(&edges, doc_width, (width, height), (row, col), radius, true);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let brightness_f = glow_brightness as f32 / 50.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge_strength = mag_buf[base] as f32 / 255.0;
+            let strength = (edge_strength * brightness_f).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let target = color[c] as f32;
+                out[c] = (orig + (target - orig) * strength)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9018,6 +9108,112 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.film_grain(999, 10, 0, 10, 1).is_err());
+    }
+
+    fn neon_glow_cliff_fixture() -> (Document, LayerId) {
+        // Same shape as colored_pencil_cliff_fixture: 4x4, vertically
+        // uniform, columns 0-1 solid (200,200,200,255), columns 2-3 solid
+        // (50,50,50,255). Sobel magnitude comes out to [0, 255, 255, 0]
+        // across every row: 255 (clamped) at the two boundary columns, 0
+        // at the two outer columns whose clamped neighbourhoods are
+        // entirely flat.
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn neon_glow_pulls_edges_toward_the_glow_colour() {
+        // Size 0 (no dilation), brightness 50 (strength factor 1.0),
+        // green glow: at the two 255-magnitude boundary columns strength
+        // is exactly 1.0, so both fully become the glow colour regardless
+        // of their own original shade; the two flat columns (magnitude 0,
+        // strength 0) are left exactly as they were.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = neon_glow_cliff_fixture();
+        doc.neon_glow(id, 0, 50, [0, 255, 0]).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 255, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 255, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn neon_glow_brightness_scales_a_partial_blend() {
+        // Size 0, brightness 20 (strength factor 0.4) at the same
+        // full-magnitude boundary columns: every channel arithmetic here
+        // lands on an exact integer with no rounding at all. Column 1
+        // (original 200): green is 200 + (255-200)*0.4 = 200+22 = 222;
+        // red/blue are 200 + (0-200)*0.4 = 200-80 = 120. Column 2
+        // (original 50): green is 50 + (255-50)*0.4 = 50+82 = 132;
+        // red/blue are 50 + (0-50)*0.4 = 50-20 = 30.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = neon_glow_cliff_fixture();
+        doc.neon_glow(id, 0, 20, [0, 255, 0]).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [120, 222, 120, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [30, 132, 30, 255]);
+    }
+
+    #[test]
+    fn neon_glow_size_dilates_the_edge_map() {
+        // Size 1 (radius 1) spreads both 255-magnitude boundary columns
+        // across every column of this 4-wide fixture, the same reasoning
+        // as colored_pencil_width_dilates_the_edge_map, so at full
+        // brightness every pixel becomes the glow colour regardless of
+        // its own original shade.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = neon_glow_cliff_fixture();
+        doc.neon_glow(id, 1, 50, [0, 255, 0]).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 255, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn neon_glow_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = neon_glow_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.neon_glow(id, 0, 50, [0, 255, 0]).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [0, 255, 0, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn neon_glow_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.neon_glow(id, 25, 50, [0, 255, 0]).is_err());
+        assert!(doc.neon_glow(id, 0, 51, [0, 255, 0]).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.neon_glow(id, 0, 50, [0, 255, 0]).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.neon_glow(999, 0, 50, [0, 255, 0]).is_err());
     }
 
     #[test]

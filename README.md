@@ -4059,6 +4059,60 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **500 Rust tests total** (496 → 500, 493 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 57 — Filter Gallery > Artistic > Neon Glow
+
+A documented, hand-verifiable approximation of Photoshop's real Neon
+Glow, which reworks the whole image's tones around a glow colour —
+instead, each pixel is pulled toward a chosen colour in proportion to
+its own edge strength, leaving flat areas exactly as they were and
+letting only the glow's own colour bloom around detail.
+`Document::neon_glow(id, glow_size, glow_brightness, color)` reuses the
+same [`sobel_at`] edge detector `find_edges` already uses over the
+layer's own luma, widened by the same [`extreme_at`]
+neighbourhood-maximum `colored_pencil`'s own `pencil_width` already
+uses, at radius `glow_size` (a documented simplification of Photoshop's
+own `-24..=24` range — which also supports an inward variant this
+project doesn't model — down to `0..=24`). `glow_brightness`
+(Photoshop's own `0..=50` range) scales how far each pixel travels
+toward `color`: `strength = (widened_edge / 255) · (glow_brightness /
+50)`, clamped to `0..=1`, and every colour channel becomes `orig +
+(color − orig) · strength`, rounded and clamped. Alpha is untouched. A
+new **Neon Glow…** dialog exposes Glow Size and Glow Brightness sliders
+plus a colour picker.
+
+**Verified two ways.** Five new `document.rs` tests, cross-checked
+against an independent Python port of the same formula, reusing the same
+bright/dark split 4×4 fixture `colored_pencil`'s own tests already
+established (columns 0-1 solid `(200, 200, 200, 255)`, columns 2-3 solid
+`(50, 50, 50, 255)`, giving a clean Sobel magnitude map of `[0, 255,
+255, 0]` across every row). At size `0` and full brightness (`50`), a
+green glow colour fully replaces both edge columns regardless of their
+own shade, while the two flat columns are left untouched. At a partial
+brightness (`20`, strength factor `0.4`), every resulting channel value
+lands on an exact integer with no rounding at all — e.g. column 1's
+green channel is `200 + (255 − 200) × 0.4 = 222`. At size `1` (a
+radius-1 dilation), the same reasoning as `colored_pencil`'s own
+width-dilation test spreads both boundary columns across all four
+columns, so every pixel becomes the glow colour at full brightness. A
+fourth test confines the fixture to a one-pixel selection; a fifth
+confirms an out-of-range glow size or brightness and a locked/unknown
+layer all error. All five passed on the first run, matching the Python
+reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous four: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**505 Rust tests total** (500 → 505, 498 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

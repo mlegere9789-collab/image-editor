@@ -331,6 +331,10 @@ export default function App() {
   const [filmGrainAmount, setFilmGrainAmount] = useState(6);
   const [filmGrainHighlightArea, setFilmGrainHighlightArea] = useState(4);
   const [filmGrainIntensity, setFilmGrainIntensity] = useState(6);
+  const [showNeonGlowDialog, setShowNeonGlowDialog] = useState(false);
+  const [neonGlowSize, setNeonGlowSize] = useState(5);
+  const [neonGlowBrightness, setNeonGlowBrightness] = useState(25);
+  const [neonGlowColor, setNeonGlowColor] = useState("#00ffff");
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -938,6 +942,18 @@ export default function App() {
     });
     setShowFilmGrainDialog(false);
   }, [runCommand, selectedId, filmGrainAmount, filmGrainHighlightArea, filmGrainIntensity]);
+
+  const applyNeonGlow = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(neonGlowColor);
+    await runCommand("neon_glow", {
+      id: selectedId,
+      glowSize: neonGlowSize,
+      glowBrightness: neonGlowBrightness,
+      color: [r, g, b],
+    });
+    setShowNeonGlowDialog(false);
+  }, [runCommand, selectedId, neonGlowSize, neonGlowBrightness, neonGlowColor]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2225,6 +2241,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Film Grain"
           >
             Film Grain…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowNeonGlowDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Neon Glow"
+          >
+            Neon Glow…
           </button>
           <button
             className="button button--quiet"
@@ -4472,6 +4496,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFilmGrain} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNeonGlowDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowNeonGlowDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Neon Glow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Neon Glow</h2>
+            <label className="control">
+              <span className="control__label">
+                Glow Size
+                <span className="control__value">{neonGlowSize}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={24}
+                value={neonGlowSize}
+                onChange={(event) => setNeonGlowSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Glow Brightness
+                <span className="control__value">{neonGlowBrightness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={neonGlowBrightness}
+                onChange={(event) => setNeonGlowBrightness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Glow Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={neonGlowColor}
+                onChange={(event) => setNeonGlowColor(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowNeonGlowDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyNeonGlow} disabled={busy}>
                 Apply
               </button>
             </div>
