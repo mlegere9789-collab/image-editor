@@ -2702,6 +2702,113 @@ impl Document {
         })
     }
 
+    /// Filter > Pixelate > Crystallize: breaks the layer into irregular
+    /// polygonal "crystal" cells — a Voronoi diagram — and fills each with
+    /// its own average colour. `cell_size` sets up a grid of that many
+    /// pixels a side, the same anchored, edge-clamped grid [`Self::mosaic`]
+    /// uses; in each grid cell, two draws from the seeded [`XorShift32`]
+    /// generator place one random "site" somewhere inside that cell
+    /// (`draw % cell_width`, `draw % cell_height`), giving one jittered
+    /// site per cell rather than Photoshop's denser, unstructured
+    /// scattering — a documented simplification that still produces
+    /// organic-looking cells while keeping the site count, and therefore
+    /// the nearest-site search, bounded and simple. Every pixel in the
+    /// layer (selected or not, so an edit still averages in its unselected
+    /// neighbours, as in `mosaic`) is assigned to the closest of the up to
+    /// nine sites in its own grid cell and the eight around it — sites are
+    /// never more than one cell apart, so the true nearest site is always
+    /// among those nine — and every channel, alpha included, is averaged
+    /// over each site's assigned pixels before only the selected pixels
+    /// are written with their site's average. Errors on a zero cell size
+    /// or a locked/unknown layer.
+    pub fn crystallize(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if cell_size == 0 {
+            return Err("Crystallize cell size must be at least 1 pixel.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = cell_size as i64;
+        let cells_x = width.div_ceil(cell_size as usize);
+        let cells_y = height.div_ceil(cell_size as usize);
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+
+        let mut rng = XorShift32::new(seed);
+        let mut sites = Vec::with_capacity(cells_x * cells_y);
+        for cy in 0..cells_y {
+            for cx in 0..cells_x {
+                let (ox, oy) = (cx as i64 * cell, cy as i64 * cell);
+                let cell_w = (((ox + cell).min(width as i64)) - ox).max(1);
+                let cell_h = (((oy + cell).min(height as i64)) - oy).max(1);
+                let sx = ox + rng.next_u32() as i64 % cell_w;
+                let sy = oy + rng.next_u32() as i64 % cell_h;
+                sites.push((sx, sy));
+            }
+        }
+
+        let nearest_site = |x: i64, y: i64| -> usize {
+            let (hcx, hcy) = (x / cell, y / cell);
+            let mut best: Option<(i64, usize)> = None;
+            for ncy in (hcy - 1)..=(hcy + 1) {
+                if ncy < 0 || ncy as usize >= cells_y {
+                    continue;
+                }
+                for ncx in (hcx - 1)..=(hcx + 1) {
+                    if ncx < 0 || ncx as usize >= cells_x {
+                        continue;
+                    }
+                    let idx = ncy as usize * cells_x + ncx as usize;
+                    let (sx, sy) = sites[idx];
+                    let d = (sx - x) * (sx - x) + (sy - y) * (sy - y);
+                    if best.map_or(true, |(best_d, _)| d < best_d) {
+                        best = Some((d, idx));
+                    }
+                }
+            }
+            best.expect("every pixel has at least its own cell's site as a candidate")
+                .1
+        };
+
+        let mut sums = vec![[0u64; CHANNELS]; sites.len()];
+        let mut counts = vec![0u64; sites.len()];
+        for y in 0..height {
+            for x in 0..width {
+                let idx = nearest_site(x as i64, y as i64);
+                let base = (y * width + x) * CHANNELS;
+                for (sum, &v) in sums[idx].iter_mut().zip(&source[base..base + CHANNELS]) {
+                    *sum += v as u64;
+                }
+                counts[idx] += 1;
+            }
+        }
+        let averages: Vec<[u8; CHANNELS]> = sums
+            .iter()
+            .zip(&counts)
+            .map(|(sum, &count)| {
+                let mut average = [0u8; CHANNELS];
+                if count > 0 {
+                    for (slot, &s) in average.iter_mut().zip(sum) {
+                        *slot = (s / count) as u8;
+                    }
+                }
+                average
+            })
+            .collect();
+
+        self.filter_pixels(id, |_, row, col| {
+            averages[nearest_site(col as i64, row as i64)]
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -6507,6 +6614,80 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.color_halftone(999, 2).is_err());
+    }
+
+    #[test]
+    fn crystallize_partitions_by_jittered_sites_and_averages_each_region() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        // A 6x6 ramp_square (red = 10x + y) with cell_size 3 and seed 1 gives
+        // a 2x2 grid of cells. Seed 1's first eight xorshift32 draws — the
+        // same sequence the Diffuse tests already pin — map through
+        // `draw % 3` (each cell is exactly 3x3) to four jittered sites at
+        // (0, 1), (3, 2), (2, 4) and (4, 3) (cell (0,0), (1,0), (0,1), (1,1)
+        // in turn), worked out and cross-checked with a small Python script
+        // implementing the same nearest-of-nine-neighbours search this
+        // method does. Averaging every one of the 36 pixels over its
+        // nearest site gives four region colours: 7, 35, 19 and 49.
+        let (mut doc, id) = ramp_square(6);
+        doc.crystallize(id, 3, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let red = |x: usize, y: usize| p[idx(x, y)];
+        assert_eq!(red(0, 0), 7);
+        assert_eq!(red(2, 0), 7);
+        assert_eq!(red(3, 0), 35);
+        assert_eq!(red(5, 2), 49);
+        assert_eq!(red(0, 5), 19);
+        assert_eq!(red(5, 5), 49);
+        assert_eq!(p[idx(0, 0) + 1], 0); // the flat green channel stays flat
+        assert_eq!(p[idx(0, 0) + 3], 255); // alpha, averaged too, is unchanged here
+    }
+
+    #[test]
+    fn crystallize_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        // Same fixture and seed as above: pass 1 (building the site
+        // averages) always sees the whole layer, so the touched pixel gets
+        // the same average (7) it would without a selection; only it is
+        // written.
+        let (mut doc, id) = ramp_square(6);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.crystallize(id, 3, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 7);
+        assert_eq!(p[idx(1, 0)], 10); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn crystallize_is_deterministic_per_seed_and_differs_across_seeds() {
+        let (mut a, ida) = ramp_square(6);
+        let (mut b, idb) = ramp_square(6);
+        a.crystallize(ida, 3, 7).unwrap();
+        b.crystallize(idb, 3, 7).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+
+        let (mut c, idc) = ramp_square(6);
+        c.crystallize(idc, 3, 99).unwrap();
+        assert_ne!(a.layers()[0].pixels, c.layers()[0].pixels);
+    }
+
+    #[test]
+    fn crystallize_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.crystallize(id, 0, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.crystallize(id, 1, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.crystallize(999, 1, 1).is_err());
     }
 
     #[test]

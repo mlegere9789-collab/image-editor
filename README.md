@@ -3183,6 +3183,68 @@ original crisp gradient and grid lines.
 **437 Rust tests total** (433 → 437, 430 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 41 — Filter > Pixelate > Crystallize
+
+The other unshipped filter from the earlier Pixelate audit: instead of
+Color Halftone's regular dot grid, Crystallize breaks the layer into
+irregular polygonal "crystal" cells — a Voronoi diagram — and fills each
+with its own average colour. `Document::crystallize(id, cell_size,
+seed)` reuses `Mosaic`'s anchored, edge-clamped grid of `cell_size`-pixel
+squares, but instead of colouring each grid square directly, it places
+one randomly jittered "site" inside each square (two draws from the
+seeded `XorShift32` generator Add Noise, Diffuse and Glowing Edges
+already use, mapped to an offset inside that square's own — possibly
+clamped — width and height) and then assigns every pixel in the layer to
+whichever of the up to nine sites in its own grid square and the eight
+squares around it is nearest; since sites are never more than one grid
+square apart, the true nearest site is always among those nine, so the
+search stays small and bounded. That's a documented simplification of
+Photoshop's denser, unstructured point scattering — one jittered site
+per grid square rather than a true Poisson-disc distribution — chosen
+because it still produces organic-looking cells while keeping the
+algorithm's cost and its test values tractable. Every pixel (selected or
+not, so an edit still averages in its unselected neighbours, exactly
+`mosaic`'s convention) is assigned to its nearest site in a first pass
+that accumulates every channel — alpha included — into a running sum per
+site; a second pass computes each site's average and, through the
+`filter_pixels` skeleton, writes only the selected pixels with their
+site's average. The frontend sends a fresh seed on every apply, as with
+Add Noise and Diffuse, through a **Crystallize…** dialog with a Cell Size
+slider (3–64 px, Photoshop's own dialog runs 3–300).
+
+**Verified two ways.** Four new `document.rs` tests, all built on the
+existing `ramp_square(6)` fixture (red = `10x + y`) with `cell_size = 3`
+(an exact 2×2 grid of 3×3 squares) and `seed = 1` — the same seed-1
+xorshift32 sequence the Diffuse tests already pin. Mapping its first
+eight draws through `draw % 3` (each square is exactly 3 px wide) places
+the four sites at (0, 1), (3, 2), (2, 4) and (4, 3), one per square in
+scan order; a small Python script implementing the same nine-neighbour
+search and per-site averaging this method does was run first to get
+ground truth, then cross-checked pixel by pixel before being written
+into the test. Averaging all 36 pixels over their nearest site gives
+four region colours — 7, 35, 19 and 49 — and the test spot-checks one
+pixel from each region (for instance `(0, 0)` and `(2, 0)` both land in
+the 7-region despite being two squares apart, while `(3, 0)` two pixels
+away is already in the 35-region), plus confirms the flat green channel
+and full alpha survive untouched. A second test confines the same
+computation to a one-pixel selection: since the whole-canvas pass that
+builds the site averages never looks at the selection, the touched
+pixel gets the identical value (7) it would without one, while its
+unselected neighbour keeps its original ramp value and the dirty rect is
+the one pixel. A third test confirms the same seed reproduces byte-
+identical output while a different seed changes it. The fourth checks
+that a zero cell size, a locked layer and an unknown id all error
+without touching pixels. All four passed on the first run against the
+scripted ground truth. Live under Xvfb on the bundled gradient sample at
+cell size 16, the smooth gradient broke into a mosaic of irregular flat-
+coloured polygons that still visibly followed the underlying colour
+flow — blue in the corner, magenta along the top edge, green along the
+left, cream in the bright corner — exactly the crystallize look. Undo
+restored the original crisp gradient and grid lines.
+
+**441 Rust tests total** (437 → 441, 434 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

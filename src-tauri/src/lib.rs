@@ -929,6 +929,18 @@ fn color_halftone(
     edit_checkpointed(&state, |document| document.color_halftone(id, max_radius))
 }
 
+/// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
+/// `seed` on every apply so repeated applications differ, as with Add Noise.
+#[tauri::command]
+fn crystallize(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.crystallize(id, cell_size, seed))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1408,6 +1420,7 @@ pub fn run() {
             zig_zag,
             polar_coordinates,
             color_halftone,
+            crystallize,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
