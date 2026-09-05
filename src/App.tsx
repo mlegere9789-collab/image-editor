@@ -317,6 +317,10 @@ export default function App() {
   const [extrudeSize, setExtrudeSize] = useState(20);
   const [extrudeDepth, setExtrudeDepth] = useState(30);
   const [extrudeRandom, setExtrudeRandom] = useState(false);
+  const [showColoredPencilDialog, setShowColoredPencilDialog] = useState(false);
+  const [coloredPencilWidth, setColoredPencilWidth] = useState(4);
+  const [coloredPencilPressure, setColoredPencilPressure] = useState(8);
+  const [coloredPencilPaper, setColoredPencilPaper] = useState(25);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -879,6 +883,17 @@ export default function App() {
     });
     setShowExtrudeDialog(false);
   }, [runCommand, selectedId, extrudeSize, extrudeDepth, extrudeRandom]);
+
+  const applyColoredPencil = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("colored_pencil", {
+      id: selectedId,
+      pencilWidth: coloredPencilWidth,
+      strokePressure: coloredPencilPressure,
+      paperBrightness: coloredPencilPaper,
+    });
+    setShowColoredPencilDialog(false);
+  }, [runCommand, selectedId, coloredPencilWidth, coloredPencilPressure, coloredPencilPaper]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2134,6 +2149,14 @@ export default function App() {
             title="Filter > Stylize > Extrude"
           >
             Extrude…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowColoredPencilDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Colored Pencil"
+          >
+            Colored Pencil…
           </button>
           <button
             className="button button--quiet"
@@ -4146,6 +4169,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyExtrude} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColoredPencilDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColoredPencilDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Colored Pencil"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Colored Pencil</h2>
+            <label className="control">
+              <span className="control__label">
+                Pencil Width
+                <span className="control__value">{coloredPencilWidth}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={24}
+                value={coloredPencilWidth}
+                onChange={(event) => setColoredPencilWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Pressure
+                <span className="control__value">{coloredPencilPressure}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={coloredPencilPressure}
+                onChange={(event) => setColoredPencilPressure(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Paper Brightness
+                <span className="control__value">{coloredPencilPaper}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={coloredPencilPaper}
+                onChange={(event) => setColoredPencilPaper(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColoredPencilDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColoredPencil} disabled={busy}>
                 Apply
               </button>
             </div>

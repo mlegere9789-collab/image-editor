@@ -3630,6 +3630,100 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Colored Pencil: emphasises edges with
+    /// the layer's own colour and lets a flat "paper" grey show through
+    /// everywhere else, a documented approximation of Photoshop's actual
+    /// pencil-stroke renderer (which draws directional hatching along
+    /// edges rather than a uniform blend). The layer's own ITU-R BT.601
+    /// luma feeds the same [`sobel_at`] edge detector [`Self::find_edges`]
+    /// uses; `pencil_width` (Photoshop's own 1..=24 range) widens that
+    /// edge map with the [`extreme_at`] neighbourhood-maximum [`Self::
+    /// glowing_edges`]'s own `edge_width` already uses, at radius
+    /// `pencil_width − 1`, so a wider pencil claims a wider halo around
+    /// each edge. `stroke_pressure` (0..=15) is a flat multiplier on the
+    /// (0..=1-normalised) edge strength — 0 shows only paper, 15 shows the
+    /// full edge map — and `paper_brightness` (0..=50) sets the flat grey
+    /// (`paper_brightness / 50 · 255`) that fills in everywhere the
+    /// blended edge strength doesn't reach 1. Each of the three colour
+    /// channels becomes `orig · blend + paper · (1 − blend)`, rounded and
+    /// clamped; alpha is untouched. Confined to the selection and errors
+    /// on an out-of-range parameter or a locked/unknown layer.
+    pub fn colored_pencil(
+        &mut self,
+        id: LayerId,
+        pencil_width: u32,
+        stroke_pressure: u32,
+        paper_brightness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=24).contains(&pencil_width) {
+            return Err("Colored Pencil width must be between 1 and 24 pixels.".to_string());
+        }
+        if stroke_pressure > 15 {
+            return Err("Colored Pencil stroke pressure must be between 0 and 15.".to_string());
+        }
+        if paper_brightness > 50 {
+            return Err("Colored Pencil paper brightness must be between 0 and 50.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        if pencil_width > 1 {
+            let radius = pencil_width as i64 - 1;
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened =
+                        extreme_at(&edges, doc_width, (width, height), (row, col), radius, true);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let pressure_factor = stroke_pressure as f32 / 15.0;
+        let paper_gray = (paper_brightness as f32 / 50.0 * 255.0)
+            .round()
+            .clamp(0.0, 255.0);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge_strength = mag_buf[base] as f32 / 255.0;
+            let blend = (edge_strength * pressure_factor).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                out[c] = (orig * blend + paper_gray * (1.0 - blend))
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -8420,6 +8514,119 @@ mod tests {
         assert!(empty
             .lighting_effects(999, 0.0, 0.0, 10.0, 100, 20, 100, [255, 255, 255])
             .is_err());
+    }
+
+    fn colored_pencil_cliff_fixture() -> (Document, LayerId) {
+        // 4x4, vertically uniform: columns 0-1 solid (200,200,200,255),
+        // columns 2-3 solid (50,50,50,255). R=G=B everywhere, so the luma
+        // buffer equals the input exactly (0.299+0.587+0.114 = 1.0), and
+        // being vertically uniform means edge clamping at the top/bottom
+        // rows changes nothing, so every row is identical. Sobel magnitude
+        // at the two boundary columns (1 and 2): Gx = 4*50 - 4*200 = -600,
+        // |Gx|+|Gy=0| = 600, clamped to 255 by sobel_at itself. The two
+        // columns one step further out (0 and 3) see all-clamped/
+        // identical neighbours in every direction, so Gx = Gy = 0.
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn colored_pencil_blends_original_and_paper_by_edge_strength() {
+        // Width 1 (no dilation), full pressure (15 -> factor 1.0), black
+        // paper (brightness 0): the raw magnitude map [0, 255, 255, 0]
+        // becomes the blend directly, so the two edge columns pass their
+        // original colour through unchanged and the two flat columns
+        // become pure paper (black).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = colored_pencil_cliff_fixture();
+        doc.colored_pencil(id, 1, 15, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 1)..idx(2, 1) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 1)..idx(3, 1) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn colored_pencil_width_dilates_the_edge_map() {
+        // Width 2 (radius 1) spreads both 255-magnitude boundary columns
+        // across every column of this 4-wide fixture (each column's 3x3
+        // neighbourhood reaches at least one of the two boundary columns),
+        // so at full pressure and any paper colour every pixel passes its
+        // original colour through unchanged.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = colored_pencil_cliff_fixture();
+        doc.colored_pencil(id, 2, 15, 30).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn colored_pencil_partial_pressure_blends_toward_grey_paper() {
+        // Width 1, pressure 5 (factor 1/3), paper brightness 30 (grey
+        // 30/50*255 = 153.0 exactly). The two boundary columns (edge
+        // strength 1.0) blend a third of the way from paper to their own
+        // colour: 200*(1/3) + 153*(2/3) = 168.667 -> 169, and 50*(1/3) +
+        // 153*(2/3) = 118.667 -> 119, both comfortably clear of a .5
+        // rounding boundary. The two flat columns (edge strength 0) are
+        // pure paper regardless of pressure.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = colored_pencil_cliff_fixture();
+        doc.colored_pencil(id, 1, 5, 30).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [153, 153, 153, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [169, 169, 169, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [119, 119, 119, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [153, 153, 153, 255]);
+    }
+
+    #[test]
+    fn colored_pencil_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = colored_pencil_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.colored_pencil(id, 1, 15, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn colored_pencil_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.colored_pencil(id, 0, 15, 0).is_err());
+        assert!(doc.colored_pencil(id, 25, 15, 0).is_err());
+        assert!(doc.colored_pencil(id, 1, 16, 0).is_err());
+        assert!(doc.colored_pencil(id, 1, 15, 51).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.colored_pencil(id, 1, 15, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.colored_pencil(999, 1, 15, 0).is_err());
     }
 
     #[test]

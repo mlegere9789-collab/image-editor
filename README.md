@@ -3841,6 +3841,67 @@ otherwise complete.
 **483 Rust tests total** (480 → 483, 476 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 53 — Filter Gallery > Artistic > Colored Pencil
+
+Emphasises edges with the layer's own colour and lets a flat "paper" grey
+show through everywhere else — a documented approximation of Photoshop's
+actual renderer, which draws directional cross-hatched pencil strokes
+rather than a uniform per-pixel blend. `Document::colored_pencil(id,
+pencil_width, stroke_pressure, paper_brightness)` builds an ITU-R BT.601
+luma buffer from the layer, runs it through the same [`sobel_at`] edge
+detector `find_edges` already uses, and widens that edge map with the
+same [`extreme_at`] neighbourhood-maximum `glowing_edges`'s own
+`edge_width` already uses, at radius `pencil_width − 1` (Photoshop's own
+1..=24 range) — a wider pencil claims a wider halo around each edge.
+`stroke_pressure` (0..=15) is a flat multiplier on the 0..=1-normalised
+edge strength, and `paper_brightness` (0..=50) sets the flat grey
+(`paper_brightness / 50 · 255`) that shows through wherever the blended
+edge strength falls short of 1. Every colour channel becomes `orig ·
+blend + paper · (1 − blend)`, rounded and clamped; alpha is untouched. A
+**Colored Pencil…** dialog exposes Pencil Width, Stroke Pressure, and
+Paper Brightness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, cross-checked
+against an independent Python port of the same formula. The fixture is a
+4×4 canvas, vertically uniform, split into a bright half
+(`(200, 200, 200, 255)` for `x < 2`) and a dark half (`(50, 50, 50, 255)`
+for `x ≥ 2`) — with R = G = B everywhere, the luma buffer equals the
+input exactly, and Sobel's hand-computable magnitude comes out clean:
+`255` (clamped) at the two boundary columns, `0` at the two outer
+columns, since the outer columns' neighbourhoods are entirely flat once
+edge-clamping is accounted for. At pencil width 1 (no dilation), full
+pressure, and black paper, the two edge columns pass their own colour
+straight through and the two flat columns become pure paper (black); at
+width 2, the dilation radius reaches every column from at least one
+boundary, so every pixel passes its own colour through unchanged
+regardless of paper colour; at partial pressure (`5/15`) and paper
+brightness `30` (an exact grey of `153`, no rounding needed), the two
+edge columns blend a third of the way from paper to their own colour —
+`200 × 1/3 + 153 × 2/3 = 168.667 → 169` and `50 × 1/3 + 153 × 2/3 =
+118.667 → 119` — both comfortably clear of a `.5` rounding boundary. All
+three matched the Python reference exactly on the first run. A fourth
+test confines the fixture to a one-pixel selection at a flat column
+(picked specifically because its pencil-width-1 output, `0`, differs
+from its `200` input, avoiding the coincidental-no-op pitfall a
+same-shaped selection test would otherwise risk); a fifth confirms an
+out-of-range pencil width/stroke pressure/paper brightness and a
+locked/unknown layer all error. Live interactive verification under
+Xvfb was not attempted this phase: this session's Xvfb instance was
+already confirmed, during the previous phase, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely (verified via
+a control test against an unrelated, pre-existing toolbar button, and
+confirmed to persist across a full Xvfb-and-application restart), so a
+repeat attempt was judged unlikely to yield new information and the
+dialog's wiring was instead reviewed by hand (state, the command call,
+and the `runCommand("colored_pencil", …)` parameter names matching the
+Tauri command's own camelCase-converted argument names exactly). This
+carries forward the same documented gap from Phase 52 rather than
+re-litigating it, on top of test/build coverage that is otherwise
+complete.
+
+**488 Rust tests total** (483 → 488, 481 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

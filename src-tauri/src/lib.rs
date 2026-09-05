@@ -1060,6 +1060,20 @@ fn lighting_effects(
     })
 }
 
+/// Filter Gallery > Artistic > Colored Pencil on layer `id`.
+#[tauri::command]
+fn colored_pencil(
+    state: State<'_, AppState>,
+    id: LayerId,
+    pencil_width: u32,
+    stroke_pressure: u32,
+    paper_brightness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.colored_pencil(id, pencil_width, stroke_pressure, paper_brightness)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1650,6 +1664,7 @@ pub fn run() {
             mezzotint,
             extrude,
             lighting_effects,
+            colored_pencil,
             crystallize,
             facet,
             pointillize,
