@@ -324,6 +324,10 @@ export default function App() {
   const [fibersStrength, setFibersStrength] = useState(4);
   const [fibersForeground, setFibersForeground] = useState("#ffffff");
   const [fibersBackground, setFibersBackground] = useState("#000000");
+  const [showLensFlareDialog, setShowLensFlareDialog] = useState(false);
+  const [lensFlareCenterX, setLensFlareCenterX] = useState(0);
+  const [lensFlareCenterY, setLensFlareCenterY] = useState(0);
+  const [lensFlareBrightness, setLensFlareBrightness] = useState(100);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -893,6 +897,23 @@ export default function App() {
     });
     setShowFibersDialog(false);
   }, [runCommand, selectedId, fibersVariance, fibersStrength, fibersForeground, fibersBackground]);
+
+  const openLensFlareDialog = useCallback(() => {
+    setLensFlareCenterX(Math.round((document?.width ?? 2) / 2));
+    setLensFlareCenterY(Math.round((document?.height ?? 2) / 2));
+    setShowLensFlareDialog(true);
+  }, [document]);
+
+  const applyLensFlare = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("lens_flare", {
+      id: selectedId,
+      centerX: lensFlareCenterX,
+      centerY: lensFlareCenterY,
+      brightness: lensFlareBrightness,
+    });
+    setShowLensFlareDialog(false);
+  }, [runCommand, selectedId, lensFlareCenterX, lensFlareCenterY, lensFlareBrightness]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -2160,6 +2181,14 @@ export default function App() {
             title="Filter > Render > Fibers"
           >
             Fibers…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openLensFlareDialog}
+            disabled={busy || !canPaint}
+            title="Filter > Render > Lens Flare"
+          >
+            Lens Flare…
           </button>
           <input
             type="color"
@@ -4726,6 +4755,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFibers} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLensFlareDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLensFlareDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Lens Flare"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Render &gt; Lens Flare</h2>
+            <label className="control">
+              <span className="control__label">
+                Center X
+                <span className="control__value">{lensFlareCenterX}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.width ?? 1}
+                value={lensFlareCenterX}
+                onChange={(event) => setLensFlareCenterX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Center Y
+                <span className="control__value">{lensFlareCenterY}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={lensFlareCenterY}
+                onChange={(event) => setLensFlareCenterY(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Brightness
+                <span className="control__value">{lensFlareBrightness}%</span>
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={300}
+                value={lensFlareBrightness}
+                onChange={(event) => setLensFlareBrightness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLensFlareDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyLensFlare} disabled={busy}>
                 Apply
               </button>
             </div>

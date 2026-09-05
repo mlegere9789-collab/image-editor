@@ -1077,6 +1077,22 @@ fn fibers(
     })
 }
 
+/// Filter > Render > Lens Flare on layer `id`. `center_x`/`center_y` are
+/// document pixel coordinates; `brightness` is Photoshop's own 10..=300 %
+/// range.
+#[tauri::command]
+fn lens_flare(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    brightness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lens_flare(id, center_x, center_y, brightness)
+    })
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1565,6 +1581,7 @@ pub fn run() {
             clouds,
             difference_clouds,
             fibers,
+            lens_flare,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -3607,6 +3607,55 @@ restored the original gradient.
 **469 Rust tests total** (466 → 469, 462 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 49 — Filter > Render > Lens Flare
+
+The fourth Render filter, and the first that composites onto the layer's
+existing colour rather than replacing it outright, generating new
+content but blending it in the way an actual light source would.
+`Document::lens_flare(id, center_x, center_y, brightness)` screens two
+elements onto the layer: the main flare itself, and a smaller, dimmer
+secondary reflection mirrored through the canvas centre — the two
+elements a viewer's eye is drawn to first in a real flare. This is a
+documented, deliberately reduced approximation of Photoshop's own four
+lens types, which add several more hexagonal or ring-shaped secondary
+flares along that same line; those are a scope cut, since a closed-form
+radial falloff is what makes this filter hand-verifiable at all, and
+hexagons or rings wouldn't be. The radius, `0.15 · min(width, height)`,
+isn't user-adjustable, matching Photoshop's own dialog, which has no
+size control either — only Brightness (10..=300 %, its own exact range)
+and the flare's centre point. The main flare's intensity at distance `d`
+is a soft core, `(1 − d/radius)²` out to `radius`, plus a wider, dimmer
+halo, `0.3 · (1 − d/(4·radius))²` out to `4·radius`; the secondary flare
+— `0.35 · radius` in size, positioned at the point on the far side of the
+canvas centre from the main flare — is a bare core at 0.4× strength.
+Both intensities sum, scale by `brightness / 100`, and clamp to `[0, 1]`;
+that fraction screens each of the three colour channels toward white,
+`existing + t · (255 − existing)`, leaving alpha untouched. A **Lens
+Flare…** dialog exposes Center X/Y sliders (bounded to the canvas, and
+seeded to its centre when the dialog opens) plus the Brightness slider.
+
+**Verified two ways.** Three new `document.rs` tests. A Python port of
+the exact core/halo/secondary falloff formulas independently computed a
+5×5 canvas — solid `(50, 50, 50, 255)`, flare at `(1, 1)`, brightness
+150 % — pixel by pixel: the flare's own centre saturates to pure white
+since `d = 0` maxes the core out before scaling; the secondary
+reflection, mirrored through the canvas centre `(2, 2)` onto `(3, 3)`,
+comes out at `(173, 173, 173)` (`0.4` core `× 1.5` brightness `= 0.6`
+screened against 50); the far corner `(4, 0)` is untouched, far enough
+from both flares to clear even the wide halo's `4 · radius` cutoff — all
+three matched the Rust implementation exactly. A second test confirms a
+one-pixel selection changes only that pixel with alpha untouched and a
+1×1 dirty rect; a third confirms a brightness outside `10..=300` and a
+locked/unknown layer all error. All three passed on the first run. Live
+under Xvfb on the bundled gradient sample, positioning the flare toward
+the upper-left at 236 % brightness produced a bright core with a soft
+surrounding glow plus a distinctly visible secondary dot on the mirrored
+side of the canvas — an immediately recognisable lens flare — and Undo
+restored the original gradient.
+
+**472 Rust tests total** (469 → 472, 465 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

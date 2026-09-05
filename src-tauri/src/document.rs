@@ -3241,6 +3241,75 @@ impl Document {
         })
     }
 
+    /// Filter > Render > Lens Flare: screens a bright light source onto
+    /// the layer, centred at `(center_x, center_y)`, plus a smaller,
+    /// dimmer secondary reflection mirrored through the canvas centre —
+    /// the two elements of a real lens flare a viewer's eye is drawn to
+    /// first. This is a documented, deliberately reduced approximation of
+    /// Photoshop's own four lens types, which add several more hexagonal
+    /// or ring-shaped secondary flares along that same line; those are a
+    /// scope cut, since a closed-form radial falloff is what makes this
+    /// filter hand-verifiable at all, and hexagons/rings wouldn't be.
+    /// `radius = 0.15 · min(width, height)` (not user-adjustable, matching
+    /// Photoshop's own dialog, which has no size control either). The main
+    /// flare's intensity at distance `d` is a soft core, `(1 − d/radius)²`
+    /// out to `radius`, plus a wider, dimmer halo, `0.3 · (1 −
+    /// d/(4·radius))²` out to `4·radius`; the secondary flare — at the
+    /// point `radius · 0.35` in size, on the far side of the canvas centre
+    /// from the main flare — is just a bare core at 0.4× strength. Both
+    /// intensities sum, scale by `brightness / 100` (Photoshop's own
+    /// 10..=300 % range), and clamp to `[0, 1]`; that fraction screens
+    /// each of the three colour channels toward white, `existing + t ·
+    /// (255 − existing)`, leaving alpha untouched. Errors on a brightness
+    /// outside `10..=300` or a locked/unknown layer.
+    pub fn lens_flare(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        brightness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(10..=300).contains(&brightness) {
+            return Err("Lens Flare brightness must be between 10 and 300.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let radius = width.min(height) as f32 * 0.15;
+        let (dcx, dcy) = ((width as f32 - 1.0) / 2.0, (height as f32 - 1.0) / 2.0);
+        let (sx, sy) = (2.0 * dcx - center_x, 2.0 * dcy - center_y);
+        let secondary_radius = radius * 0.35;
+        let scale = brightness as f32 / 100.0;
+        self.filter_pixels(id, |source, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let d = ((x - center_x).powi(2) + (y - center_y).powi(2)).sqrt();
+            let core = if d < radius {
+                (1.0 - d / radius).powi(2)
+            } else {
+                0.0
+            };
+            let halo = if d < 4.0 * radius {
+                0.3 * (1.0 - d / (4.0 * radius)).powi(2)
+            } else {
+                0.0
+            };
+            let d2 = ((x - sx).powi(2) + (y - sy).powi(2)).sqrt();
+            let secondary = if d2 < secondary_radius {
+                0.4 * (1.0 - d2 / secondary_radius).powi(2)
+            } else {
+                0.0
+            };
+            let t = ((core + halo + secondary) * scale).clamp(0.0, 1.0);
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let existing = source[base + c] as f32;
+                out[c] = (existing + t * (255.0 - existing)).round() as u8;
+            }
+            out[3] = source[base + 3];
+            out
+        })
+    }
+
     /// Filter > Pixelate > Mezzotint: reduces each colour channel to pure
     /// black or white in coarse, randomly-thresholded blocks — a
     /// documented approximation of Photoshop's own several mezzotint
@@ -7666,6 +7735,64 @@ mod tests {
         assert!(empty
             .fibers(999, 50, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
             .is_err());
+    }
+
+    #[test]
+    fn lens_flare_screens_a_core_halo_and_secondary_reflection_onto_the_layer() {
+        // 5x5 canvas, solid (50, 50, 50, 255), flare centred at (1, 1),
+        // brightness 150%. radius = 0.15 * 5 = 0.75; the canvas centre is
+        // (2, 2), so the secondary reflection sits at (3, 3), mirrored
+        // through it. A Python port of the exact core/halo/secondary
+        // falloff formulas independently computed the whole 5x5 grid: the
+        // flare's own centre (1, 1) saturates to pure white (255, 255,
+        // 255) since d=0 puts core at its maximum 1.0 before scaling by
+        // 1.5x brightness (clamped); the secondary centre (3, 3) comes out
+        // at (173, 173, 173) (0.4 core * 1.5 brightness = 0.6, screened:
+        // 50 + 0.6*(255-50) = 173); the far corner (4, 0) is untouched at
+        // (50, 50, 50), far enough from both flares that d exceeds even
+        // the wide halo's 4*radius cutoff.
+        let idx = |x: usize, y: usize| (y * 5 + x) * 4;
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(5, 5, [50, 50, 50, 255]), 5, 5)
+            .unwrap();
+        doc.lens_flare(id, 1.0, 1.0, 150).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [173, 173, 173, 255]);
+        assert_eq!(&p[idx(4, 0)..idx(4, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn lens_flare_is_confined_to_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.lens_flare(id, 0.0, 0.0, 300).unwrap();
+        assert_ne!(doc.layers()[0].pixels[0..3], before[0..3]);
+        assert_eq!(doc.layers()[0].pixels[3], before[3]); // alpha untouched
+        assert_eq!(doc.layers()[0].pixels[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn lens_flare_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.lens_flare(id, 0.0, 0.0, 9).is_err());
+        assert!(doc.lens_flare(id, 0.0, 0.0, 301).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.lens_flare(id, 0.0, 0.0, 150).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.lens_flare(999, 0.0, 0.0, 150).is_err());
     }
 
     #[test]
