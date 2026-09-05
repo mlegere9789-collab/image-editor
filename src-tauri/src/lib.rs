@@ -976,6 +976,18 @@ fn color_halftone(
     edit_checkpointed(&state, |document| document.color_halftone(id, max_radius))
 }
 
+/// Filter > Pixelate > Mezzotint on layer `id`. The frontend sends a fresh
+/// `seed` on every apply so repeated applications differ, as with Add Noise.
+#[tauri::command]
+fn mezzotint(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.mezzotint(id, cell_size, seed))
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1546,6 +1558,7 @@ pub fn run() {
             wave,
             shear,
             color_halftone,
+            mezzotint,
             crystallize,
             facet,
             pointillize,

@@ -3562,6 +3562,51 @@ this filter — and Undo restored the original colour gradient.
 **466 Rust tests total** (462 → 466, 459 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 48 — Filter > Pixelate > Mezzotint
+
+Photoshop's own Mezzotint offers several pattern types — dots, lines and
+strokes at various sizes — through its own undocumented algorithm.
+`Document::mezzotint(id, cell_size, seed)` collapses these to one:
+square cells of random dots, on the grounds that replicating the others'
+exact undocumented shapes wouldn't be any more hand-verifiable than this
+one, and dots are the type that best matches the coarse, blocky
+"engraving" look the filter is named for. `cell_size` sets up the same
+anchored grid `mosaic` and `color_halftone` already use; each cell
+averages its red, green and blue channels independently (alpha is left
+untouched, the same convention `color_halftone` uses) and draws its own
+random threshold per channel from the seeded `XorShift32` generator — a
+channel becomes solid 255 for every pixel in that cell if the cell's
+average for that channel exceeds the draw, solid 0 otherwise, so a whole
+cell's channel flips together rather than any mid-tone surviving. Since
+each of the three channels thresholds independently, a single cell's
+output is always one of eight colours (black, the three primaries, the
+three secondaries, white) — the same eight-colour palette `color_halftone`
+produces, for the same reason.
+
+**Verified two ways.** Three new `document.rs` tests. The first uses a
+4×4 canvas split into four solid-coloured 2×2 quadrants — (100, 50, 200),
+(10, 240, 30), (255, 0, 0) and (128, 128, 128) — so each cell's average is
+exactly its quadrant's colour; a Python port of the same seeded
+per-cell-per-channel draw (seed 3) gives thresholds `(99, 3, 71)`, `(73,
+203, 243)`, `(67, 4, 15)` and `(79, 1, 10)` for the four cells in turn.
+Comparing each average against its own threshold by hand — e.g. quadrant
+one's 100 > 99, 50 > 3 and 200 > 71 are all true — predicts white, pure
+green, pure red and white for the four quadrants respectively, confirmed
+pixel-for-pixel against the actual output, including that every pixel
+within a cell shares its cell's single outcome. A second test reuses that
+exact fixture and seed to confirm a one-pixel selection changes only that
+pixel (to the already-known white) with a 1×1 dirty rect, alpha
+untouched; a third confirms a zero cell size, a locked layer and an
+unknown id all error. All three passed on the first run. Live under Xvfb
+on the bundled gradient sample at the default 8px cell size, the smooth
+gradient collapsed into a coarse, high-contrast field of solid red,
+green, blue, cyan, magenta, yellow, black and white blocks — visually a
+dead match for Photoshop's own random-dot Mezzotint look — and Undo
+restored the original gradient.
+
+**469 Rust tests total** (466 → 469, 462 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

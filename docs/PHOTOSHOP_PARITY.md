@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 106.**
+**618 distinct capabilities tracked. Currently shipped: 107.**
 
 ## PART I — EVERY TOOL
 
@@ -512,7 +512,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Crystallize (jittered-grid Voronoi cells, one site per grid square, each region averaged — see README Phase 41)
 - [x] Facet (a documented delegation to Crystallize at a small fixed cell size, matching Photoshop's own parameterless dialog — see README Phase 46)
 - [x] Fragment (four copies offset four pixels diagonally and averaged — see README Phase 36)
-- [ ] Mezzotint (Filter > Pixelate; added with the Pixelate audit)
+- [x] Mezzotint (random per-cell, per-channel threshold against the cell's own average, collapsing Photoshop's several undocumented pattern types to one hand-verifiable dot pattern — see README Phase 48)
 - [x] Mosaic (each cell replaced by its mean colour, partial edge cells averaged over the pixels present — see README Phase 36)
 - [x] Pointillize (the same jittered Voronoi sites as Crystallize, stamped as radius-cell_size/2 dots on a background colour — see README Phase 42)
 - [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)

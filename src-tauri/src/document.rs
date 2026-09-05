@@ -3241,6 +3241,76 @@ impl Document {
         })
     }
 
+    /// Filter > Pixelate > Mezzotint: reduces each colour channel to pure
+    /// black or white in coarse, randomly-thresholded blocks — a
+    /// documented approximation of Photoshop's own several mezzotint
+    /// patterns (dots, lines, strokes at various sizes), collapsed here to
+    /// one: square cells of random dots, since replicating the others'
+    /// exact undocumented shapes wouldn't be any more hand-verifiable than
+    /// this one. `cell_size` sets up the same anchored grid
+    /// [`Self::mosaic`] and [`Self::color_halftone`] use; each cell
+    /// averages its red, green and blue channels independently (alpha is
+    /// untouched, as in `color_halftone`) and draws its own random
+    /// threshold per channel from the seeded [`XorShift32`] generator — a
+    /// channel becomes 255 for every pixel in the cell if that channel's
+    /// average exceeds the draw, 0 otherwise, so a whole cell's channel
+    /// flips to solid black or solid white together rather than any
+    /// mid-tone surviving. Errors on a zero cell size or a locked/unknown
+    /// layer.
+    pub fn mezzotint(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if cell_size == 0 {
+            return Err("Mezzotint cell size must be at least 1 pixel.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let cell = cell_size as usize;
+        let cells_x = width.div_ceil(cell);
+        let cells_y = height.div_ceil(cell);
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut sums = vec![[0u64; 3]; cells_x * cells_y];
+        let mut counts = vec![0u64; cells_x * cells_y];
+        for y in 0..height {
+            for x in 0..width {
+                let ci = (y / cell) * cells_x + x / cell;
+                let base = (y * doc_width + x) * CHANNELS;
+                for c in 0..3 {
+                    sums[ci][c] += source[base + c] as u64;
+                }
+                counts[ci] += 1;
+            }
+        }
+        let mut rng = XorShift32::new(seed);
+        let thresholds: Vec<[u8; 3]> = (0..cells_x * cells_y)
+            .map(|_| std::array::from_fn(|_| (rng.next_u32() % 256) as u8))
+            .collect();
+        self.filter_pixels(id, |source, row, col| {
+            let ci = (row as usize / cell) * cells_x + col as usize / cell;
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let avg = sums[ci][c] / counts[ci];
+                out[c] = if avg > thresholds[ci][c] as u64 {
+                    255
+                } else {
+                    0
+                };
+            }
+            out[3] = source[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -7596,6 +7666,103 @@ mod tests {
         assert!(empty
             .fibers(999, 50, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
             .is_err());
+    }
+
+    #[test]
+    fn mezzotint_thresholds_each_cells_channel_average_against_its_own_random_draw() {
+        // 4x4, cell size 2 (four 2x2 cells), each cell a solid colour so
+        // its average is exactly that colour: (0,0) = (100, 50, 200),
+        // (1,0) = (10, 240, 30), (0,1) = (255, 0, 0), (1,1) = (128, 128,
+        // 128). A Python port of the same XorShift32-seeded draw-per-cell
+        // logic (seed 3) gives thresholds (R, G, B) of (99, 3, 71), (73,
+        // 203, 243), (67, 4, 15) and (79, 1, 10) for the four cells in
+        // that same order — comparing each cell's average against its own
+        // threshold by hand: (0,0) 100>99, 50>3, 200>71 are all true ->
+        // white; (1,0) 10>73 false, 240>203 true, 30>243 false -> pure
+        // green; (0,1) 255>67 true, 0>4 false, 0>15 false -> pure red;
+        // (1,1) 128 exceeds all three (79, 1, 10) -> white.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        let quadrant = |cx: usize, cy: usize| -> [u8; 3] {
+            match (cx, cy) {
+                (0, 0) => [100, 50, 200],
+                (1, 0) => [10, 240, 30],
+                (0, 1) => [255, 0, 0],
+                _ => [128, 128, 128],
+            }
+        };
+        for y in 0..4 {
+            for x in 0..4 {
+                let [r, g, b] = quadrant(x / 2, y / 2);
+                let base = idx(x, y);
+                pixels[base..base + 4].copy_from_slice(&[r, g, b, 255]);
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("quadrants", &pixels, 4, 4).unwrap();
+        doc.mezzotint(id, 2, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 255, 0, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 255, 255, 255]);
+        // Every pixel in a cell shares its cell's outcome.
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 1)..idx(3, 1) + 4], [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn mezzotint_is_confined_to_the_selection() {
+        // Reuses the exact quadrant fixture and seed from the test above,
+        // where cell (0, 0)'s average (100, 50, 200) is already known to
+        // cross its threshold (99, 3, 71) to solid white — a real,
+        // verified change rather than a coincidental no-op.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut pixels = vec![0u8; 4 * 4 * 4];
+        let quadrant = |cx: usize, cy: usize| -> [u8; 3] {
+            match (cx, cy) {
+                (0, 0) => [100, 50, 200],
+                (1, 0) => [10, 240, 30],
+                (0, 1) => [255, 0, 0],
+                _ => [128, 128, 128],
+            }
+        };
+        for y in 0..4 {
+            for x in 0..4 {
+                let [r, g, b] = quadrant(x / 2, y / 2);
+                let base = idx(x, y);
+                pixels[base..base + 4].copy_from_slice(&[r, g, b, 255]);
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("quadrants", &pixels, 4, 4).unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.mezzotint(id, 2, 3).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(after[3], before[3]); // alpha untouched
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn mezzotint_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.mezzotint(id, 0, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.mezzotint(id, 1, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.mezzotint(999, 1, 1).is_err());
     }
 
     #[test]
