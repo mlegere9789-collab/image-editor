@@ -790,6 +790,43 @@ fn custom(
     })
 }
 
+/// Filter > Stylize > Find Edges on layer `id`.
+#[tauri::command]
+fn find_edges(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.find_edges(id))
+}
+
+/// Filter > Stylize > Solarize on layer `id`.
+#[tauri::command]
+fn solarize(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.solarize(id))
+}
+
+/// Filter > Stylize > Emboss on layer `id`.
+#[tauri::command]
+fn emboss(
+    state: State<'_, AppState>,
+    id: LayerId,
+    angle: f32,
+    height: u32,
+    amount: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.emboss(id, angle, height, amount)
+    })
+}
+
+/// Filter > Stylize > Trace Contour on layer `id`.
+#[tauri::command]
+fn trace_contour(
+    state: State<'_, AppState>,
+    id: LayerId,
+    level: u8,
+    upper: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.trace_contour(id, level, upper))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1227,6 +1264,10 @@ pub fn run() {
             high_pass,
             offset,
             custom,
+            find_edges,
+            solarize,
+            emboss,
+            trace_contour,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 81.**
+**597 distinct capabilities tracked. Currently shipped: 85.**
 
 ## PART I — EVERY TOOL
 
@@ -561,10 +561,14 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] StampReduces imagery to a simplified stamped graphic.
 - [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
 - [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
+- [ ] Diffuse (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
+- [x] Emboss (relief lit from an angle: 128 + (away − toward) · amount%, nearest-neighbour sampling at the given height — see README Phase 31)
+- [ ] Extrude (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
+- [x] Find Edges (inverted Sobel |Gx|+|Gy| per channel, white where flat — see README Phase 31)
 - [ ] Glowing EdgesDetects strong edges and surrounds them with a luminous/neon-like effect.
-- [ ] SolarizeCombines positive and negative tonal characteristics to create the classic solarization effect.
+- [x] Solarize (min(v, 255 − v) per channel, the tent curve — see README Phase 31)
 - [ ] TilesBreaks an image into displaced tile-like sections.
-- [ ] Trace ContourIdentifies major brightness transitions and draws contour-like lines along them.
+- [x] Trace Contour (per-channel contour where the channel crosses the level, Lower/Upper edge — see README Phase 31)
 - [ ] WindCreates horizontal streaks resembling wind blowing across the image.
 - [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
 - [ ] GrainAdds simulated grain texture to an image.

@@ -274,6 +274,13 @@ export default function App() {
   const [customKernel, setCustomKernel] = useState<string[]>(IDENTITY_KERNEL);
   const [customScale, setCustomScale] = useState("1");
   const [customOffset, setCustomOffset] = useState("0");
+  const [showEmbossDialog, setShowEmbossDialog] = useState(false);
+  const [embossAngle, setEmbossAngle] = useState(135);
+  const [embossHeight, setEmbossHeight] = useState(3);
+  const [embossAmount, setEmbossAmount] = useState(100);
+  const [showTraceContourDialog, setShowTraceContourDialog] = useState(false);
+  const [traceLevel, setTraceLevel] = useState(128);
+  const [traceUpper, setTraceUpper] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
 
@@ -683,6 +690,23 @@ export default function App() {
     });
     setShowCustomDialog(false);
   }, [runCommand, selectedId, customKernel, customScale, customOffset]);
+
+  const applyEmboss = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("emboss", {
+      id: selectedId,
+      angle: embossAngle,
+      height: embossHeight,
+      amount: embossAmount,
+    });
+    setShowEmbossDialog(false);
+  }, [runCommand, selectedId, embossAngle, embossHeight, embossAmount]);
+
+  const applyTraceContour = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("trace_contour", { id: selectedId, level: traceLevel, upper: traceUpper });
+    setShowTraceContourDialog(false);
+  }, [runCommand, selectedId, traceLevel, traceUpper]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1630,6 +1654,38 @@ export default function App() {
             title="Filter > Other > Custom (5×5 convolution kernel)"
           >
             Custom…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("find_edges", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Find Edges"
+          >
+            Find Edges
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("solarize", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Solarize"
+          >
+            Solarize
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowEmbossDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Emboss"
+          >
+            Emboss…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowTraceContourDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Trace Contour"
+          >
+            Trace Contour…
           </button>
           <input
             type="color"
@@ -3105,6 +3161,115 @@ export default function App() {
                 onClick={applyCustom}
                 disabled={busy || toInteger(customScale) === 0}
               >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showEmbossDialog && (
+        <div className="modal-overlay" onClick={() => setShowEmbossDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Emboss"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Emboss</h2>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{embossAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={embossAngle}
+                onChange={(event) => setEmbossAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Height
+                <span className="control__value">{embossHeight}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={embossHeight}
+                onChange={(event) => setEmbossHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{embossAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={500}
+                value={embossAmount}
+                onChange={(event) => setEmbossAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowEmbossDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyEmboss} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTraceContourDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTraceContourDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Trace Contour"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Trace Contour</h2>
+            <label className="control">
+              <span className="control__label">
+                Level
+                <span className="control__value">{traceLevel}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={traceLevel}
+                onChange={(event) => setTraceLevel(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Upper edge</span>
+              <input
+                type="checkbox"
+                checked={traceUpper}
+                onChange={(event) => setTraceUpper(event.target.checked)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTraceContourDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTraceContour} disabled={busy}>
                 Apply
               </button>
             </div>

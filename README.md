@@ -2614,6 +2614,84 @@ inside the field and `-1` was accepted as typed.
 **393 Rust tests total** (385 → 393, 386 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 31 — Filter > Stylize: Find Edges, Solarize, Emboss, Trace Contour
+
+Four of Photoshop's Stylize filters, each a few lines once the window
+machinery from the last phases exists. They share a new private
+`filter_pixels(id, pick)` skeleton — snapshot the layer, run `pick` on
+every selected pixel against that untouched snapshot, return the dirty
+rect, error on a locked or unknown layer — so a filter never reads its
+own output and none of the four repeats the selection loop.
+
+**Find Edges** inverts a Sobel edge magnitude: a new `sobel_at` helper
+weights the 3×3 neighbourhood by `[−1 0 1; −2 0 2; −1 0 1]` for `Gx`
+and its transpose for `Gy`, and each colour channel becomes
+`255 − min(255, |Gx| + |Gy|)`. Flat areas come out white, edges dark in
+whichever channel changed. The L1 sum keeps the arithmetic in integers a
+person can check; there are no parameters, as in Photoshop. **Solarize**
+is the tent curve `min(v, 255 − v)` per channel — the lower half of the
+range is untouched and the upper half folded back down, so the whole
+result lands in 0..=127, which is why the classic recipe follows it with
+Auto Levels. **Emboss** takes Photoshop's angle, height and amount:
+with `angle` in degrees (0° from the right, anticlockwise like the
+Motion Blur dial, so the default 135° lights from the upper left), each
+channel becomes `128 + (away − toward) · amount / 100`, where `toward`
+is the sample `height` pixels from the pixel in the light's direction
+and `away` the sample the same distance the other way, both edge-clamped
+and nearest-neighbour like Motion Blur. A surface whose bright side
+faces the light reads light and its far side dark, the raised look;
+flat areas come out mid-grey. **Trace Contour** takes Photoshop's level
+and Lower/Upper edge: for each channel, a pixel is marked when it sits
+on the chosen side of `level` (below for Lower, at-or-above for Upper)
+and one of its four neighbours sits on the other; marked channels go to
+0 and the rest to 255, so a contour in one channel draws in that
+channel's complement on white and a contour in all three draws black.
+Neighbours past the edge clamp onto the pixel itself, so the border is
+never a crossing. All four leave alpha alone and honour the selection.
+The frontend adds one-click **Find Edges** and **Solarize** buttons and
+**Emboss…** (angle, height, amount sliders) and **Trace Contour…**
+(level slider, Upper edge checkbox) dialogs.
+
+Auditing this batch also showed the parity list had never tracked
+Emboss, Find Edges, Diffuse or Extrude — the four classic Stylize
+entries — so they are added (Diffuse and Extrude unchecked), taking the
+catalogue from 593 to 597.
+
+**Verified two ways.** Seven new `document.rs` tests. Solarize on greys
+10, 128, 200, 255 gives 10, 127, 55, 0 with alpha untouched. Find Edges
+on the 3×3 red ramp (10..90 by tens): the centre's `Gx = (30 + 120 +
+90) − (10 + 80 + 70) = 80` and `Gy = (70 + 160 + 90) − (10 + 40 + 30) =
+240` sum past 255 and invert to 0, while the top-left corner with every
+missing sample clamped gives `Gx = 40`, `Gy = 120`, 160 → 95; the flat
+green channel is 255 everywhere, and a solid grey layer comes out pure
+white. Emboss at angle 0, height 1, amount 100 gives the centre
+`128 + 40 − 60 = 108` and both clamped corners 118; angle 180 mirrors
+it to 148; angle 90 (light from above) gives `128 + 80 − 20 = 188`;
+amount 200 and 50 scale the same −20 relief to 88 and 118; height 2
+reaches the clamped edges (108 at the centre and at the left edge).
+Trace Contour at level 50, Lower, marks exactly the 20, 30 and 40 —
+each touches a 50 or 60 — and not the 10, whose neighbours are 20 and
+40, giving reds 255, 0, 0, 0, 255, 255, 255, 255, 255; Upper at the same
+level marks the other side of the contour, the 50, 60 and 70; level 0
+Lower and level 255 Upper draw nothing. Emboss confined to the centre
+pixel changes only it and reports the 1×1 dirty rect, and zero height,
+zero amount, a NaN angle, locked layers and unknown ids all error. All
+passing on first run. Live under Xvfb on the bundled gradient sample:
+**Find Edges** turned the smooth tiles white with dark grid lines that
+went red and green near the saturated edges where only one channel
+changes; **Solarize** turned the white grid lines black and folded the
+ramps so they peak mid-image; **Emboss** at 135°/3 px/100% flattened
+the tiles to mid-grey with a light upper-left / dark lower-right relief
+on every line; **Trace Contour** at level 128, Lower, left the canvas
+white with blue contours in the dark-blue region (red and green both
+marked), magenta at the top right (only green), cyan at the bottom left
+(only red), nothing in the cream corner where every channel is already
+above 128, plus the horizontal contour where green crosses the level.
+Undo restored the original after each.
+
+**400 Rust tests total** (393 → 400, 393 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

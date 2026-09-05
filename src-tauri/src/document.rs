@@ -375,6 +375,36 @@ fn convolve_at(
     out
 }
 
+/// The Sobel edge magnitude of `source` at `(col, row)`, per colour
+/// channel: `|Gx| + |Gy|` clamped to 255, where `Gx` weights the 3×3
+/// neighbourhood by `[-1 0 1; -2 0 2; -1 0 1]` and `Gy` by its transpose,
+/// with samples past the layer edge clamped like every other window
+/// filter here. Those are the two kernels every image-processing text
+/// prints, and the L1 sum of their absolute responses keeps the result in
+/// integers a person can check; a flat region scores exactly 0. Alpha is
+/// carried over unchanged. Shared by Find Edges, which inverts it.
+fn sobel_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (u32, u32),
+) -> [u8; CHANNELS] {
+    let sample = |dx: i64, dy: i64| {
+        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        (sy * doc_width + sx) * CHANNELS
+    };
+    let mut out = [0u8; CHANNELS];
+    for (c, slot) in out.iter_mut().enumerate().take(3) {
+        let v = |dx: i64, dy: i64| source[sample(dx, dy) + c] as i32;
+        let gx = (v(1, -1) + 2 * v(1, 0) + v(1, 1)) - (v(-1, -1) + 2 * v(-1, 0) + v(-1, 1));
+        let gy = (v(-1, 1) + 2 * v(0, 1) + v(1, 1)) - (v(-1, -1) + 2 * v(0, -1) + v(1, -1));
+        *slot = (gx.abs() + gy.abs()).min(255) as u8;
+    }
+    out[3] = source[sample(0, 0) + 3];
+    out
+}
+
 /// A tiny, dependency-free pseudo-random generator (Marsaglia's
 /// xorshift32) for [`Document::add_noise`]. Chosen over pulling in the
 /// `rand` crate for one reason that matters more than statistical
@@ -1811,6 +1841,169 @@ impl Document {
             }
         }
         Ok(Some(bounds))
+    }
+
+    /// The shared skeleton of the per-pixel filters: snapshot the layer,
+    /// then let `pick(source, row, col)` compute each selected pixel's new
+    /// value from that untouched snapshot, so a filter never reads its own
+    /// output. Confined to the selection, returns the dirty rect, and
+    /// errors on a locked or unknown layer.
+    fn filter_pixels(
+        &mut self,
+        id: LayerId,
+        mut pick: impl FnMut(&[u8], u32, u32) -> [u8; CHANNELS],
+    ) -> Result<Option<Rect>, String> {
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let picked = pick(&source, row, col);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&picked);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Stylize > Find Edges: each colour channel becomes
+    /// `255 − sobel`, the inverted [`sobel_at`] edge magnitude, so flat
+    /// areas come out white and edges dark in the colour of whichever
+    /// channel changed — the familiar "pencil sketch on white" look. No
+    /// parameters, as in Photoshop. Alpha is untouched.
+    pub fn find_edges(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let mut out = sobel_at(source, doc_width, (width, height), (row, col));
+            for slot in out.iter_mut().take(3) {
+                *slot = 255 - *slot;
+            }
+            out
+        })
+    }
+
+    /// Filter > Stylize > Solarize: each colour channel becomes
+    /// `min(v, 255 − v)` — the lower half of the range is left alone and
+    /// the upper half is folded back down, the tent-shaped curve that
+    /// mimics a print re-exposed to light mid-development. The whole
+    /// result therefore sits in 0..=127, which is why the classic recipe
+    /// follows Solarize with Auto Levels. Alpha is untouched.
+    pub fn solarize(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            for slot in out.iter_mut().take(3) {
+                *slot = (*slot).min(255 - *slot);
+            }
+            out
+        })
+    }
+
+    /// Filter > Stylize > Emboss: a relief map lit from `angle` degrees
+    /// (0° is from the right, increasing anticlockwise like the Motion
+    /// Blur dial, so Photoshop's default 135° lights from the upper left).
+    /// Each colour channel becomes `128 + (away − toward) · amount / 100`,
+    /// where `toward` is the sample `height` pixels from the pixel in the
+    /// light's direction and `away` the sample the same distance the other
+    /// way, both clamped to the layer. An edge whose bright side faces the
+    /// light therefore reads light and its far side dark, the way a raised
+    /// surface looks; flat areas come out mid-grey. `height` is in pixels
+    /// (Photoshop 1..=100), `amount` in percent (Photoshop 1..=500).
+    /// Sampling is nearest-neighbour, the same scope cut Motion Blur
+    /// makes. Alpha is untouched. Errors on a zero height or amount or a
+    /// non-finite angle.
+    pub fn emboss(
+        &mut self,
+        id: LayerId,
+        angle: f32,
+        height: u32,
+        amount: u32,
+    ) -> Result<Option<Rect>, String> {
+        if height == 0 {
+            return Err("Emboss height must be at least 1 pixel.".to_string());
+        }
+        if amount == 0 {
+            return Err("Emboss amount must be at least 1%.".to_string());
+        }
+        if !angle.is_finite() {
+            return Err(format!("Emboss angle must be a number, got {angle}."));
+        }
+        let (width, layer_height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = (height as f32 * cos).round() as i64;
+        let dy = -((height as f32 * sin).round() as i64);
+        let amount = amount as i32;
+        self.filter_pixels(id, |source, row, col| {
+            let at = |sx: i64, sy: i64| {
+                let x = sx.clamp(0, width - 1) as usize;
+                let y = sy.clamp(0, layer_height - 1) as usize;
+                (y * doc_width + x) * CHANNELS
+            };
+            let toward = at(col as i64 + dx, row as i64 + dy);
+            let away = at(col as i64 - dx, row as i64 - dy);
+            let centre = at(col as i64, row as i64);
+            let mut out = [0u8; CHANNELS];
+            for (c, slot) in out.iter_mut().enumerate().take(3) {
+                let relief = source[away + c] as i32 - source[toward + c] as i32;
+                *slot = (128 + relief * amount / 100).clamp(0, 255) as u8;
+            }
+            out[3] = source[centre + 3];
+            out
+        })
+    }
+
+    /// Filter > Stylize > Trace Contour: for each colour channel, draws
+    /// the contour line where the channel crosses `level`. With `upper`
+    /// false (Photoshop's "Lower" edge) the pixels *below* the level that
+    /// touch — left, right, above or below — a pixel at or above it are
+    /// marked; with `upper` true it is the pixels at or above the level
+    /// touching one below. Marked channels become 0 and everything else
+    /// 255, so a contour in one channel is a line in that channel's
+    /// complementary colour on white, and a contour in all three is black.
+    /// Neighbours past the layer edge clamp onto the pixel itself, so the
+    /// border never counts as a crossing. Alpha is untouched.
+    pub fn trace_contour(
+        &mut self,
+        id: LayerId,
+        level: u8,
+        upper: bool,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let at = |sx: i64, sy: i64| {
+                let x = sx.clamp(0, width - 1) as usize;
+                let y = sy.clamp(0, height - 1) as usize;
+                (y * doc_width + x) * CHANNELS
+            };
+            let (x, y) = (col as i64, row as i64);
+            let centre = at(x, y);
+            let neighbours = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
+            let mut out = [255u8; CHANNELS];
+            for (c, slot) in out.iter_mut().enumerate().take(3) {
+                let above = |base: usize| source[base + c] >= level;
+                let here = above(centre);
+                if here == upper && neighbours.iter().any(|&n| above(n) != here) {
+                    *slot = 0;
+                }
+            }
+            out[3] = source[centre + 3];
+            out
+        })
     }
 
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
@@ -4638,6 +4831,153 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.custom(999, kernel(&[(12, 1)]), 1, 0).is_err());
+    }
+
+    #[test]
+    fn solarize_folds_the_upper_half_of_the_range_back_down() {
+        let (mut doc, id) = greys_2x2([10, 128, 200, 255]);
+        doc.solarize(id).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // min(v, 255 - v): 10 stays, 128 -> 127, 200 -> 55, 255 -> 0.
+        assert_eq!([p[0], p[4], p[8], p[12]], [10, 127, 55, 0]);
+        assert_eq!([p[1], p[2]], [10, 10]); // every colour channel alike
+        assert_eq!(p[3], 255); // alpha untouched
+    }
+
+    #[test]
+    fn find_edges_is_white_where_flat_and_dark_where_the_gradient_is_steep() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.find_edges(id).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Centre: Gx = (30+120+90) - (10+80+70) = 80, Gy = (70+160+90) -
+        // (10+40+30) = 240, |Gx|+|Gy| = 320 -> 255 -> inverted to 0.
+        // Top-left corner with every missing sample clamped: Gx =
+        // (20+40+50) - (10+20+40) = 40, Gy = (40+80+50) - (10+20+20) = 120,
+        // 160 -> 95.
+        assert_eq!(p[idx(1, 1)], 0);
+        assert_eq!(p[idx(0, 0)], 95);
+        assert_eq!(p[idx(0, 0) + 1], 255); // the flat green channel has no edges
+        assert_eq!(p[idx(0, 0) + 3], 255);
+
+        let (mut doc, id) = grey_2x2();
+        doc.find_edges(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn emboss_lights_the_side_facing_the_angle() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Angle 0: the light comes from the right, so each pixel becomes
+        // 128 + (left neighbour - right neighbour). Centre: 128 + 40 - 60.
+        // The corners clamp their missing neighbour onto themselves.
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 0.0, 1, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 108);
+        assert_eq!(p[idx(0, 0)], 118);
+        assert_eq!(p[idx(2, 2)], 118);
+        assert_eq!(p[idx(1, 1) + 1], 128); // flat green: no relief
+        assert_eq!(p[idx(1, 1) + 3], 255);
+
+        // Angle 180 is the mirror image of angle 0.
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 180.0, 1, 100).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 148);
+
+        // Angle 90: light from above, so 128 + (below - above) = 128 + 80 - 20.
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 90.0, 1, 100).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 188);
+    }
+
+    #[test]
+    fn emboss_amount_scales_the_relief_and_height_reaches_further() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 0.0, 1, 200).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 88);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 0.0, 1, 50).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 118);
+
+        // Height 2 from the middle column reaches both (clamped) edges.
+        let (mut doc, id) = ramped_3x3();
+        doc.emboss(id, 0.0, 2, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 108);
+        assert_eq!(p[idx(0, 1)], 108); // left edge: 40 (clamped) - 60
+    }
+
+    #[test]
+    fn trace_contour_outlines_where_a_channel_crosses_the_level() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Lower edge at level 50 marks the pixels below 50 that touch one
+        // at or above it: 20 (above the 50), 30 (above the 60) and 40 (left
+        // of the 50). The 10 in the corner only touches 20 and 40.
+        let (mut doc, id) = ramped_3x3();
+        doc.trace_contour(id, 50, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let reds: Vec<u8> = (0..9).map(|i| p[i * 4]).collect();
+        assert_eq!(reds, [255, 0, 0, 0, 255, 255, 255, 255, 255]);
+        assert_eq!(p[idx(1, 0) + 1], 255); // the flat green channel never crosses
+        assert_eq!(p[idx(1, 0) + 3], 255);
+
+        // Upper edge marks the other side of the same contour: 50, 60, 70.
+        let (mut doc, id) = ramped_3x3();
+        doc.trace_contour(id, 50, true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let reds: Vec<u8> = (0..9).map(|i| p[i * 4]).collect();
+        assert_eq!(reds, [255, 255, 255, 255, 0, 0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn trace_contour_at_the_extremes_draws_nothing() {
+        let (mut doc, id) = ramped_3x3();
+        doc.trace_contour(id, 0, false).unwrap(); // nothing is below 0
+        assert!(doc.layers()[0]
+            .pixels
+            .chunks(4)
+            .all(|px| px[0] == 255 && px[3] == 255));
+
+        let (mut doc, id) = ramped_3x3();
+        doc.trace_contour(id, 255, true).unwrap(); // nothing reaches 255
+        assert!(doc.layers()[0].pixels.chunks(4).all(|px| px[0] == 255));
+    }
+
+    #[test]
+    fn stylize_filters_honour_the_selection_and_propagate_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.emboss(id, 0.0, 1, 100).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 108);
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 10);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.emboss(id, 0.0, 0, 100).is_err());
+        assert!(doc.emboss(id, 0.0, 1, 0).is_err());
+        assert!(doc.emboss(id, f32::NAN, 1, 100).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.find_edges(id).is_err());
+        assert!(doc.solarize(id).is_err());
+        assert!(doc.emboss(id, 0.0, 1, 100).is_err());
+        assert!(doc.trace_contour(id, 128, false).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.find_edges(999).is_err());
+        assert!(empty.solarize(999).is_err());
+        assert!(empty.trace_contour(999, 128, true).is_err());
     }
 
     #[test]
