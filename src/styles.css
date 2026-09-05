@@ -34,6 +34,13 @@ body {
   display: grid;
   grid-template-rows: auto 1fr auto;
   height: 100%;
+  min-height: 0;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  min-height: 0;
 }
 
 .app--dropping .stage {
@@ -43,11 +50,49 @@ body {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.tools__color {
+  width: 30px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tools__color:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tools__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tools__slider input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
 }
 
 .toolbar__title {
@@ -94,11 +139,96 @@ body {
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
+.canvas-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+  /* A pointer drag across the canvas is a tool gesture, never a native
+     "select this image" gesture — without this, WebKitGTK renders its own
+     full-image selection highlight over any click-drag. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .canvas {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  touch-action: none;
+  -webkit-user-drag: none;
+}
+
+.canvas--brush {
+  cursor: crosshair;
+}
+
+.canvas--eraser {
+  cursor: cell;
+}
+
+.canvas--selectRect,
+.canvas--selectEllipse {
+  cursor: crosshair;
+}
+
+.canvas--selectRow {
+  cursor: row-resize;
+}
+
+.canvas--selectColumn {
+  cursor: col-resize;
+}
+
+.canvas--eyedropper {
+  cursor: copy;
+}
+
+.canvas--paintBucket {
+  cursor: cell;
+}
+
+.canvas--gradient {
+  cursor: crosshair;
+}
+
+/* A selection's marching-ants outline: four repeating-gradient "edges"
+   (border-style: dashed itself has no animatable offset), animated in the
+   direction that reads as ants marching clockwise. mix-blend-mode: difference
+   keeps it visible against either theme or any image colour underneath,
+   rather than picking one fixed outline colour that could vanish into a
+   similarly-coloured canvas. */
+.selection-outline {
+  position: absolute;
+  pointer-events: none;
+  mix-blend-mode: difference;
+  background-image:
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+  background-size: 8px 1.5px, 8px 1.5px, 1.5px 8px, 1.5px 8px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  animation: marching-ants 0.5s linear infinite;
+}
+
+.selection-outline--ellipse {
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+@keyframes marching-ants {
+  to {
+    background-position:
+      8px 0,
+      -8px 100%,
+      0 -8px,
+      100% 8px;
+  }
 }
 
 .notice {
@@ -145,4 +275,231 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+}
+
+/* --- Layers panel --- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+}
+
+.panel__heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.panel__empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.layer:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.layer--selected {
+  border-color: var(--accent);
+  background: rgb(76 141 255 / 14%);
+}
+
+.layer__eye,
+.layer__lock {
+  flex: none;
+  cursor: pointer;
+}
+
+.layer__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer__meta {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.control--row {
+  flex-direction: row;
+  gap: 6px;
+}
+
+.control--row .button {
+  flex: 1;
+}
+
+.control__label {
+  display: flex;
+  justify-content: space-between;
+}
+
+.control__value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.control select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.button--quiet {
+  background: transparent;
+  color: var(--text);
+}
+
+.button--quiet:hover:not(:disabled) {
+  background: rgb(255 255 255 / 7%);
+  filter: none;
+}
+
+.button--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button--active:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.button--danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: rgb(255 107 107 / 14%);
+  filter: none;
+}
+
+.control input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+  z-index: 10;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 280px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+}
+
+.modal__heading {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.channel-mixer {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.channel-mixer th,
+.channel-mixer td {
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.channel-mixer input[type="number"],
+.kernel-grid input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.kernel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 56px);
+  gap: 6px;
+  justify-content: center;
 }

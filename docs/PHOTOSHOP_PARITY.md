@@ -1,0 +1,647 @@
+# Photoshop Parity Checklist
+
+Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
+
+**618 distinct capabilities tracked. Currently shipped: 101.**
+
+## PART I — EVERY TOOL
+
+- [ ] MOVE TOOL
+- [ ] ARTBOARD TOOL
+- [x] RECTANGULAR MARQUEE TOOL
+- [x] ELLIPTICAL MARQUEE TOOL
+- [x] SINGLE ROW MARQUEE TOOL
+- [x] SINGLE COLUMN MARQUEE TOOL
+- [ ] LASSO TOOL
+- [ ] POLYGONAL LASSO TOOL
+- [ ] MAGNETIC LASSO TOOL
+- [ ] OBJECT SELECTION TOOL
+- [ ] QUICK SELECTION TOOL
+- [ ] MAGIC WAND TOOL
+- [ ] SELECTION BRUSH TOOL
+- [ ] REMOVE TOOL
+- [ ] HEALING BRUSH TOOL
+- [ ] SPOT HEALING BRUSH TOOL
+- [ ] PATCH TOOL
+- [ ] CONTENT-AWARE MOVE TOOL
+- [ ] RED EYE TOOL
+- [ ] CLONE STAMP TOOL
+- [ ] PATTERN STAMP TOOL
+- [x] ERASER TOOL
+- [ ] BACKGROUND ERASER TOOL
+- [ ] MAGIC ERASER TOOL
+- [x] GRADIENT TOOL
+- [x] PAINT BUCKET TOOL
+- [x] BRUSH TOOL
+- [x] PENCIL TOOL
+- [ ] COLOR REPLACEMENT TOOL
+- [ ] MIXER BRUSH TOOL
+- [ ] HISTORY BRUSH TOOL
+- [ ] ART HISTORY BRUSH TOOL
+- [ ] DODGE TOOL
+- [ ] BURN TOOL
+- [ ] SPONGE TOOL
+- [ ] BLUR TOOL
+- [ ] SHARPEN TOOL
+- [ ] SMUDGE TOOL
+- [ ] PEN TOOL
+- [ ] FREEFORM PEN TOOL
+- [ ] CURVATURE PEN TOOL
+- [ ] ADD ANCHOR POINT TOOL
+- [ ] DELETE ANCHOR POINT TOOL
+- [ ] CONVERT POINT TOOL
+- [ ] HORIZONTAL TYPE TOOL
+- [ ] VERTICAL TYPE TOOL
+- [ ] PATH SELECTION TOOL
+- [ ] DIRECT SELECTION TOOL
+- [ ] RECTANGLE TOOL
+- [ ] ELLIPSE TOOL
+- [ ] TRIANGLE TOOL
+- [ ] POLYGON TOOL
+- [ ] STAR TOOL
+- [ ] LINE TOOL
+- [ ] CUSTOM SHAPE TOOL
+- [ ] FRAME TOOL
+- [x] EYEDROPPER TOOL
+- [ ] COLOR SAMPLER TOOL
+- [ ] RULER TOOL
+- [ ] NOTE TOOL
+- [ ] COUNT TOOL
+
+## PART II — EVERY MAJOR SELECTION SYSTEM
+
+- [x] SELECT ALL
+- [x] DESELECT
+- [x] RESELECT
+- [x] INVERSE
+- [ ] COLOR RANGE
+- [ ] FOCUS AREA
+- [ ] SKY SELECTION
+- [ ] SUBJECT SELECTION
+- [ ] SELECT PEOPLE
+- [x] MODIFY > BORDER
+- [x] MODIFY > SMOOTH
+- [x] MODIFY > EXPAND
+- [x] MODIFY > CONTRACT
+- [ ] MODIFY > FEATHER
+- [ ] GROW
+- [ ] SIMILAR
+- [ ] SELECT AND MASK
+
+## PART III — EVERY MAJOR LAYER SYSTEM
+
+- [x] PIXEL LAYER (already true since Phase 1 — every `Layer` in this app *is* a document-sized RGBA8 pixel buffer; there is no other layer type yet to distinguish it from)
+- [ ] GROUP
+- [ ] TEXT LAYER
+- [ ] SHAPE LAYER
+- [ ] ADJUSTMENT LAYER
+- [ ] FILL LAYER
+- [ ] SMART OBJECT
+- [ ] LAYER MASK
+- [ ] VECTOR MASK
+- [ ] CLIPPING MASK
+- [ ] LINK LAYERS
+- [x] LOCK
+- [x] MERGE LAYERS
+- [x] MERGE VISIBLE
+- [x] FLATTEN IMAGE
+- [x] RASTERIZE (a genuine no-op command — every `Layer` in this app is already a pixel buffer, so there is nothing to convert *from*; validates the layer id and otherwise touches nothing, matching Photoshop's own behaviour of disabling Rasterize once a layer is already pixels)
+- [x] DUPLICATE LAYER (Ctrl/Cmd+J — missing from the original ~500-item audit this checklist was extracted from; added here as its own tracked line, bumping the total from 590 to 591, rather than shipping it uncounted — see README Phase 21)
+- [x] NEW LAYER VIA COPY (Ctrl/Cmd+J with a selection — copies the selected pixels onto a new layer without touching the clipboard; also missing from the original audit, added as its own tracked line (591 → 592) — see README Phase 24)
+- [x] NEW LAYER VIA CUT (Ctrl/Cmd+Shift+J with a selection — the same, but the source pixels are removed; also missing from the original audit, added as its own tracked line (592 → 593) — see README Phase 24)
+- [ ] CONVERT TO SMART OBJECT
+- [ ] CREATE SMART OBJECT FROM LAYERS
+
+## PART IV — LAYER STYLES
+
+- [ ] BEVEL & EMBOSS
+- [ ] CONTOUR
+- [ ] TEXTURE
+- [ ] STROKE
+- [ ] INNER SHADOW
+- [ ] INNER GLOW
+- [ ] SATIN
+- [ ] COLOR OVERLAY
+- [ ] GRADIENT OVERLAY
+- [ ] PATTERN OVERLAY
+- [ ] OUTER GLOW
+- [ ] DROP SHADOW
+
+## PART V — ADJUSTMENTS
+
+- [x] BRIGHTNESS/CONTRAST
+- [x] LEVELS
+- [x] CURVES
+- [x] EXPOSURE
+- [x] VIBRANCE
+- [x] HUE/SATURATION
+- [x] COLOR BALANCE
+- [x] BLACK & WHITE
+- [x] PHOTO FILTER
+- [x] CHANNEL MIXER
+- [ ] COLOR LOOKUP
+- [x] INVERT
+- [x] POSTERIZE
+- [x] THRESHOLD
+- [x] GRADIENT MAP
+- [ ] SELECTIVE COLOR
+
+## PART VI — FILL LAYERS
+
+- [x] SOLID COLOR
+- [x] GRADIENT
+- [ ] PATTERN
+
+## PART XXX — NON-OBVIOUS THINGS PHOTOSHOP CAN DO
+
+- [ ] Turn a photograph into linework
+- [ ] Turn a photograph into a site-analysis diagram
+- [ ] Turn CAD/PDF drawings into presentation graphics
+- [ ] Make a photograph look hand-rendered
+- [ ] Create an architectural collage
+- [ ] Change seasons
+- [ ] Change time of day
+- [ ] Change weather
+- [ ] Change materials
+- [ ] Remove an entire crowd
+
+## PART XXXVII — THE 39th SYSTEM: “WHAT SHOULD I USE?”
+
+- [ ] Content-Aware Fill
+- [ ] Generative Fill
+- [ ] Generative Expand
+- [ ] Generate Background
+- [ ] Generate Similar
+- [ ] Harmonize
+- [ ] Generative Upscale
+- [ ] Generate Image
+- [ ] Reference Images
+- [ ] Prompt to Edit
+- [ ] AI Model Picker
+- [ ] Generative Layers
+- [ ] Firefly Boards Integration
+- [ ] AI Assisted Editor
+- [ ] AI On-Device Model
+- [ ] Contextual Task Bar
+- [ ] Discover Panel
+- [ ] Quick Actions
+- [ ] Rich Tooltips
+- [ ] Custom Toolbar
+- [ ] Tool Presets
+- [ ] Preset Manager
+- [ ] Adjustment Presets
+- [ ] Gradient Presets
+- [ ] Pattern Presets
+- [ ] Custom Shapes
+- [ ] Define Pattern
+- [ ] Define Brush Preset
+- [ ] Paint Symmetry
+- [ ] Layer Comps
+- [ ] Smart Guides
+- [ ] Guide Layout
+- [ ] New Guide
+- [ ] Lock Workspace
+- [ ] Custom Menus
+- [ ] Keyboard Shortcuts customization
+- [ ] Workspaces
+- [ ] Panel Docking
+- [ ] Panel Groups
+- [ ] Collapsed Icon Panels
+- [ ] Floating Panels
+- [ ] Panel Stacking
+- [ ] Photoshop Cloud Documents
+- [ ] Search Your Cloud Files
+- [ ] Invite to Edit
+- [ ] Share for Review
+- [ ] Content Credentials
+- [ ] Creative Cloud Libraries
+- [ ] Adobe Fonts integration
+- [ ] Free Transform
+- [ ] Scale
+- [ ] Rotate
+- [ ] Skew
+- [ ] Distort
+- [ ] Perspective
+- [ ] Warp
+- [x] Rotate 180°
+- [x] Rotate 90° Clockwise (a document-level operation, not per-layer — resizes the whole document and every layer in it together, so the "every layer stays document-sized" invariant holds throughout; see Phase 17 in README.md)
+- [x] Rotate 90° Counter Clockwise (same implementation as Rotate 90° Clockwise, opposite direction)
+- [x] Flip Horizontal
+- [x] Flip Vertical
+- [ ] Transform Again
+- [ ] Free Transform + Warp Mode
+- [ ] Reference Point Locator
+- [ ] Relative Positioning
+- [ ] X Position
+- [ ] Y Position
+- [ ] Maintain Aspect Ratio
+- [ ] Content-Aware Scale
+- [ ] Content-Aware Scale — Amount
+- [ ] Content-Aware Scale — Protect
+- [ ] Content-Aware Scale — Protect Skin Tones
+- [ ] Content-Aware Scale — Reference Point Location
+- [ ] Content-Aware Scale — Reference Point Position
+- [ ] Content-Aware Scale — Scaling Percentage
+- [ ] Content-Aware Scale — Commit Transform
+- [ ] Content-Aware Scale — Cancel Transform
+- [ ] Perspective Warp
+- [ ] Perspective Warp — Layout Mode
+- [ ] Perspective Warp — Warp Mode
+- [ ] Perspective Warp — Plane Quads
+- [ ] Perspective Warp — Connected Planes
+- [ ] Perspective Warp — Unconnected Planes
+- [ ] Perspective Warp — Straighten Edge
+- [ ] Perspective Warp — Auto Level
+- [ ] Perspective Warp — Auto Straighten Vertical Lines
+- [ ] Perspective Warp — Auto Warp to Horizontal and Vertical
+- [ ] Perspective Warp — Commit Perspective Warp
+- [ ] Perspective Warp — Cancel
+- [ ] Puppet Warp
+- [ ] Puppet Warp — Mesh
+- [ ] Puppet Warp — Mode: Distort
+- [ ] Puppet Warp — Density
+- [ ] Puppet Warp — Expansion
+- [ ] Puppet Warp — Show Mesh
+- [ ] Puppet Warp — Pins
+- [ ] Puppet Warp — Pin Depth
+- [ ] Puppet Warp — Remove All Pins
+- [ ] Cylindrical Transform Warp
+- [ ] New Selection
+- [ ] Add to Selection
+- [ ] Subtract from Selection
+- [ ] Intersect with Selection
+- [ ] Anti-aliasing
+- [ ] Feather — Selection Tool Option
+- [ ] Select and Mask — Refine Edge
+- [ ] Select and Mask — Edge Detection
+- [ ] Select and Mask — Radius
+- [ ] Select and Mask — Smart Radius
+- [ ] Select and Mask — Smooth
+- [ ] Select and Mask — Feather
+- [ ] Select and Mask — Contrast
+- [ ] Select and Mask — Shift Edge
+- [ ] Select and Mask — Decontaminate Colors
+- [ ] Select and Mask — Output Settings
+- [ ] Select and Mask — Output To
+- [x] Select > Modify > Expand
+- [x] Select > Modify > Contract
+- [ ] Color Range — Sampled Colors
+- [ ] Color Range — Fuzziness
+- [ ] Color Range — Localized Color Clusters
+- [ ] Color Range — Range
+- [ ] Color Range — Selection Preview
+- [ ] Color Range — Invert
+- [ ] Color Range — Skin Tones
+- [ ] Select Subject
+- [ ] Select Subject — Device Processing
+- [ ] Select Subject — Cloud Processing
+- [ ] Remove Background
+- [ ] Select People — Individual Person Selection
+- [ ] Select People — Person Components
+- [ ] Select People — Hair Selection
+- [ ] Refine Hair
+- [ ] Mask All Objects
+- [ ] Object Selection — Rectangle Mode
+- [ ] Object Selection — Lasso Mode
+- [ ] Object Selection — Add
+- [ ] Object Selection — Subtract
+- [ ] Object Selection — Object Finder
+- [ ] Object Selection — Object Finder Refresh
+- [ ] Object Selection — Hard Edge
+- [ ] Quick Selection — Brush Size
+- [ ] Quick Selection — Hardness
+- [ ] Selection Brush Tool — Opacity
+- [ ] Selection Brush Tool — Add Mode
+- [ ] Selection Brush Tool — Subtract Mode
+- [ ] Selection Brush Tool — Brush Selection
+- [ ] Selection Brush Tool — Circle Selection
+- [ ] Move Selection
+- [ ] Transform Selection
+- [x] Copy
+- [ ] Copy Merged
+- [x] Cut
+- [x] Paste
+- [x] Paste Special > Paste in Place (identical to plain Paste in this app — see README Phase 18)
+- [ ] Paste Special > Paste Into
+- [ ] Paste Special > Paste Outside
+- [x] Delete (also covers Edit > Clear — same command in this app, see README Phase 19)
+- [x] Fill (flat colour only, no pattern/history/content-aware source — see README Phase 19)
+- [ ] Content-Aware Fill from Selection
+- [ ] Delete and Fill Selection
+- [ ] Move Tool — Hover Layer Bounds
+- [ ] Layer Auto-Select
+- [ ] Layer Auto-Select — Layer
+- [ ] Layer Auto-Select — Group
+- [ ] Show Transform Controls
+- [x] Select > Modify > Border (duplicate of MODIFY > BORDER in PART II, already shipped there — checked here for consistency)
+- [x] Select > Modify > Smooth (duplicate of MODIFY > SMOOTH in PART II, already shipped there — checked here for consistency)
+- [ ] Select > Grow
+- [ ] Select > Similar
+- [ ] Save Selection
+- [ ] Calculations
+- [ ] Calculations — Source 1
+- [ ] Calculations — Source 1 Layer
+- [ ] Calculations — Source 1 Channel
+- [ ] Calculations — Source 1 Invert
+- [ ] Calculations — Source 2
+- [ ] Calculations — Source 2 Layer
+- [ ] Calculations — Source 2 Channel
+- [ ] Calculations — Source 2 Invert
+- [ ] Calculations — Blending
+- [ ] Add Blending Mode
+- [ ] Subtract Blending Mode
+- [ ] Calculations — Opacity
+- [ ] Calculations — Mask
+- [ ] Calculations — Mask Image
+- [ ] Calculations — Mask Layer
+- [ ] Calculations — Mask Channel
+- [ ] Calculations — Mask Invert
+- [ ] Calculations — Result: New Document
+- [ ] Calculations — Result: New Channel
+- [ ] Calculations — Result: Selection
+- [ ] Apply Image
+- [ ] Apply Image — Source
+- [ ] Apply Image — Source Layer
+- [ ] Apply Image — Merged
+- [ ] Apply Image — Source Channel
+- [ ] Apply Image — Invert
+- [ ] Apply Image — Blending
+- [ ] Apply Image — Opacity
+- [ ] Apply Image — Preserve Transparency
+- [ ] Apply Image — Mask
+- [ ] Apply Image — Mask Image
+- [ ] Apply Image — Mask Layer
+- [ ] Apply Image — Mask Channel
+- [ ] Apply Image — Transparency Mask
+- [ ] Apply Image — Mask Invert
+- [ ] Apply Image — Preview
+- [ ] Spot Channel
+- [ ] New Spot Channel
+- [ ] Spot Channel Color
+- [ ] Color Libraries
+- [ ] Spot Channel Solidity
+- [ ] Convert Alpha Channel to Spot Channel
+- [ ] Merge Spot Channel
+- [ ] Spot Channel Overprinting Order
+- [ ] Alpha Channel Reordering
+- [ ] Alpha Channel Renaming
+- [ ] Channel Thumbnail Options
+- [ ] Channel Selection for Editing
+- [ ] Composite Channel
+- [ ] RGB Color Mode
+- [ ] CMYK Color Mode
+- [ ] Grayscale Mode
+- [ ] Bitmap Mode
+- [ ] Indexed Color Mode
+- [ ] Duotone Mode
+- [ ] Multichannel Mode
+- [ ] Lab Color Mode
+- [ ] 8 Bits/Channel
+- [ ] 16 Bits/Channel
+- [ ] 32 Bits/Channel
+- [ ] HDR Support
+- [ ] HDR Histogram
+- [ ] OpenColorIO
+- [ ] Enable OpenColorIO Features
+- [ ] OpenColorIO Settings
+- [ ] OpenColorIO Configuration
+- [ ] OpenColorIO Working Space
+- [ ] OpenColorIO Panel
+- [ ] ACES Color Management
+- [ ] OCIO Input Color Space Assignment
+- [ ] ICC Color Profiles
+- [ ] Monitor Profile
+- [ ] Input Device Profile
+- [ ] Output Device Profile
+- [ ] Document Profile
+- [ ] Assign Profile
+- [ ] Don't Color Manage This Document
+- [ ] Working RGB
+- [ ] Convert to Profile
+- [ ] Conversion Engine
+- [ ] Rendering Intent
+- [ ] Black Point Compensation
+- [ ] Use Dither
+- [ ] Color Settings
+- [ ] Working Spaces
+- [ ] Color Management Policies
+- [ ] Preserve Embedded Profiles
+- [ ] Convert to Working Space
+- [ ] Profile Mismatch Warnings
+- [ ] Ask When Opening
+- [ ] Ask When Pasting
+- [ ] Missing Profile Warning
+- [ ] Embed Color Profile
+- [ ] Proof Setup
+- [ ] Proof Colors
+- [ ] Gamut Warning
+- [ ] Color Blindness Proofing
+- [ ] Simulate Paper Color
+- [ ] Simulate Black Ink
+- [ ] Color & Vibrance
+- [ ] Solid Color Fill
+- [ ] Gradient Fill
+- [ ] Pattern Fill
+- [ ] Input Levels — Black Point
+- [ ] Input Levels — Midtone/Gamma
+- [ ] Input Levels — White Point
+- [ ] Output Levels — Black
+- [ ] Output Levels — White
+- [ ] Levels Channel Selection
+- [ ] Levels Black Point Eyedropper
+- [ ] Levels Gray Point Eyedropper
+- [ ] Levels White Point Eyedropper
+- [ ] Levels Auto
+- [ ] Levels Auto Options
+- [ ] Curves Point Mode
+- [ ] Curves Pencil/Draw Mode
+- [ ] Curves On-Image Adjustment Tool
+- [ ] Curves Black Point
+- [ ] Curves Gray Point
+- [ ] Curves White Point
+- [ ] Curves Show Clipping
+- [ ] Curves Show Channel Overlays
+- [ ] Curves Histogram
+- [ ] Curves Baseline
+- [ ] Curves Intersection Line
+- [ ] Curves Auto
+- [ ] Auto Tone
+- [ ] Auto Contrast
+- [ ] Auto Color
+- [x] Equalize (per-channel histogram equalisation via a CDF lookup table — see README Phase 28)
+- [x] Equalize Selected Area Only (histogram from the selection, only the selection remapped — see README Phase 28)
+- [x] Equalize Entire Image Based On Selected Area (histogram from the selection, whole layer remapped — see README Phase 28)
+- [ ] Match Color
+- [ ] Replace Color
+- [x] Blur Filter (one-click preset: box blur at radius 1 — see README Phase 25)
+- [x] Blur More (one-click preset: box blur at radius 3 — see README Phase 25)
+- [x] Gaussian Blur (separable binomial kernel with σ = radius, cut at ±3σ, edge-clamped — see README Phase 32)
+- [x] Box Blur (flat mean, clamp-to-edge sampling — see README Phase 20)
+- [x] Motion Blur (nearest-neighbour directional sampling built on the same box-blur sampling machinery, angle + distance dialog — see README Phase 23)
+- [ ] Radial Blur
+- [ ] Shape Blur
+- [x] Surface Blur (edge-preserving weighted mean: weight = threshold − |neighbour − centre| clamped at 0, radius/threshold dialog — see README Phase 34)
+- [ ] Lens Blur
+- [ ] Blur Gallery
+- [ ] Field Blur
+- [ ] Iris Blur
+- [ ] Tilt-Shift
+- [ ] Path Blur
+- [ ] Spin Blur
+- [x] Sharpen (one-click preset: unsharp mask at radius 1, 50%, no threshold — see README Phase 25)
+- [x] Sharpen Edges (one-click preset: unsharp mask at radius 1, 100%, threshold 20 — see README Phase 25)
+- [x] Sharpen More (one-click preset: unsharp mask at radius 1, 100%, no threshold — see README Phase 25)
+- [ ] Smart Sharpen
+- [x] Unsharp Mask (built on the existing box_blur convolution as its low-pass filter, with an Amount/Radius/Threshold dialog — see README Phase 22)
+- [ ] Protect Detail
+- [ ] Sample All Layers — Sharpen
+- [x] Add Noise (seeded xorshift32 noise with Amount / Distribution / Monochromatic controls — see README Phase 27)
+- [x] Uniform Noise (Add Noise's Uniform distribution — see README Phase 27)
+- [x] Gaussian Noise (Add Noise's Gaussian distribution, an Irwin–Hall mean-of-three approximation — see README Phase 27)
+- [x] Monochromatic Noise (Add Noise's Monochromatic option, one offset shared by R/G/B — see README Phase 27)
+- [x] Despeckle (one-click 3x3 median — see README Phase 26)
+- [x] Dust & Scratches (median with Photoshop's Threshold gate — see README Phase 26)
+- [x] Median (per-channel neighbourhood median, radius dialog — see README Phase 26)
+- [ ] Reduce Noise
+- [x] High Pass (original − box-blurred + 128 per channel, reusing the box-blur sampler — see README Phase 29)
+- [x] Maximum (per-channel neighbourhood maximum, i.e. morphological dilate — see README Phase 29)
+- [x] Minimum (per-channel neighbourhood minimum, i.e. morphological erode — see README Phase 29)
+- [x] Offset (wrap-around shift by any horizontal/vertical amount; the Repeat Edge / Transparent fill modes are a documented scope cut — see README Phase 29)
+- [x] Custom (5×5 signed convolution kernel with Scale and Offset, integer arithmetic; loading/saving .acf kernels is a documented scope cut — see README Phase 30)
+- [x] Color Halftone (three offset per-channel dot screens, area ≈ cell average via an exact integer inequality, no rotation — see README Phase 40)
+- [x] Crystallize (jittered-grid Voronoi cells, one site per grid square, each region averaged — see README Phase 41)
+- [ ] Facet (Filter > Pixelate; added with the Pixelate audit)
+- [x] Fragment (four copies offset four pixels diagonally and averaged — see README Phase 36)
+- [ ] Mezzotint (Filter > Pixelate; added with the Pixelate audit)
+- [x] Mosaic (each cell replaced by its mean colour, partial edge cells averaged over the pixels present — see README Phase 36)
+- [x] Pointillize (the same jittered Voronoi sites as Crystallize, stamped as radius-cell_size/2 dots on a background colour — see README Phase 42)
+- [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)
+- [x] Pinch (radial lens map ρ → ρ·(1 + 0.75·a·(1 − ρ)) inside the inscribed ellipse, nearest-neighbour — see README Phase 38)
+- [x] Polar Coordinates (Rectangular to Polar and Polar to Rectangular, angle clockwise from twelve o'clock, rim = inscribed ellipse — see README Phase 39)
+- [x] Ripple (sinusoidal displacement, amplitude × sin(2π·y/λ) horizontally and the transpose vertically, nearest-neighbour, Small/Medium/Large = 8/16/32 px — see README Phase 37)
+- [ ] Shear (Filter > Distort; added with the Distort audit)
+- [x] Spherize (radial lens map ρ → ρ·(1 − 0.75·a·(1 − ρ)), the mirror of Pinch; Horizontal/Vertical Only modes are a documented scope cut — see README Phase 38)
+- [x] Twirl (rotation about the centre by angle · (1 − r/R)², nearest-neighbour — see README Phase 37)
+- [x] Wave (sum of independently randomised sine generators, each with a seeded wavelength/amplitude/phase within a range; Triangle/Square types and Wrap Around are documented scope cuts — see README Phase 43)
+- [x] ZigZag (radial sine displacement A·sin(π·ridges·ρ) with Around Center / Out From Center / Pond Ripples styles, nearest-neighbour — see README Phase 39)
+- [ ] Clouds (Filter > Render; the Render submenu was missing from the original audit, added while shipping Mosaic)
+- [ ] Difference Clouds (Filter > Render; added with the Render audit)
+- [ ] Fibers (Filter > Render; added with the Render audit)
+- [ ] Lens Flare (Filter > Render; added with the Render audit)
+- [ ] Lighting Effects (Filter > Render; added with the Render audit)
+- [ ] Liquify
+- [ ] Forward Warp Tool
+- [ ] Pucker Tool
+- [ ] Bloat Tool
+- [ ] Twirl Tool
+- [ ] Reconstruct Tool
+- [ ] Freeze Mask Tool
+- [ ] Thaw Mask Tool
+- [ ] Liquify Mesh
+- [ ] Face-Aware Liquify
+- [ ] Lens Correction
+- [ ] Adaptive Wide Angle
+- [ ] Vanishing Point
+- [ ] Smart Filters
+- [ ] Colored PencilFilter Gallery → Artistic. Simulates an image drawn with colored pencil, emphasizing edges and paper-like areas.
+- [ ] CutoutSimplifies an image into broad, poster-like areas of flat color, producing a cut-paper/graphic appearance.
+- [ ] Dry BrushSimulates a dry-brush painting technique, reducing detail while emphasizing broad strokes.
+- [ ] Film GrainAdds photographic-looking grain while preserving the overall tonal structure.
+- [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
+- [ ] Neon GlowAdds a colored glow around image details, creating a neon-like effect.
+- [ ] Paint DaubsConverts image detail into visible painted dabs.
+- [ ] Palette KnifeSimplifies imagery into broad strokes resembling paint applied with a palette knife.
+- [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
+- [ ] Poster EdgesCombines simplified color areas with strong edge definition to create a posterized graphic effect.
+- [ ] Rough PastelsSimulates pastel artwork on a textured surface.
+- [ ] Smudge StickSoftens and smears image detail to imitate a smudged drawing or painting.
+- [ ] SpongeCreates a mottled, sponge-painted appearance.
+- [ ] UnderpaintingCreates an effect resembling an image painted over an underlying textured surface.
+- [ ] WatercolorSimulates watercolor painting by simplifying detail and creating brush/pigment-like areas.
+- [ ] Accented EdgesEmphasizes edges with brush-like strokes, producing a hand-rendered appearance.
+- [ ] Angled StrokesCreates directional brush strokes that follow an angular orientation.
+- [ ] CrosshatchCreates intersecting strokes resembling crosshatching in drawing.
+- [ ] Dark StrokesEmphasizes darker portions of the image with directional strokes.
+- [ ] Ink OutlinesCreates an ink-drawing effect by emphasizing image edges.
+- [ ] SpatterSimulates sprayed or splattered paint.
+- [ ] Sprayed StrokesCreates a sprayed-brush appearance using directional strokes.
+- [ ] Sumi-eSimulates Japanese ink-wash painting, emphasizing broad tonal brushwork.
+- [ ] Diffuse GlowCreates a glowing, photographic diffusion effect by spreading highlights and reducing sharpness.
+- [ ] GlassMakes the image appear as though viewed through textured or distorted glass.
+- [ ] Ocean RippleCreates wave-like distortions resembling an image viewed through rippling water.
+- [ ] Bas ReliefCreates a raised-relief appearance, emphasizing tonal transitions as though carved or embossed.
+- [ ] Chalk & CharcoalConverts imagery into a chalk-and-charcoal drawing appearance.
+- [ ] ChromeCreates a polished metallic/chrome-like tonal effect.
+- [ ] Conté CrayonSimulates drawing with Conté crayon on textured paper.
+- [ ] Graphic PenConverts image detail into pen-like strokes.
+- [ ] Halftone PatternCreates a printed halftone appearance using dots, circles, lines, or other patterning.
+- [ ] Note PaperCreates an image resembling artwork printed or embossed on paper.
+- [ ] PhotocopySimulates the appearance of a photocopied image with simplified tonal information.
+- [ ] PlasterCreates a raised plaster-like surface effect.
+- [ ] ReticulationSimulates photographic reticulation/grain-like surface structure.
+- [ ] StampReduces imagery to a simplified stamped graphic.
+- [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
+- [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
+- [x] Diffuse (seeded neighbour shuffle with Normal / Darken Only / Lighten Only, plus deterministic closest-neighbour Anisotropic — see README Phase 33)
+- [x] Emboss (relief lit from an angle: 128 + (away − toward) · amount%, nearest-neighbour sampling at the given height — see README Phase 31)
+- [ ] Extrude (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
+- [x] Find Edges (inverted Sobel |Gx|+|Gy| per channel, white where flat — see README Phase 31)
+- [x] Glowing Edges (Sobel magnitude dilated by Edge Width, scaled by Edge Brightness, box-smoothed by Smoothness, on black — see README Phase 35)
+- [x] Solarize (min(v, 255 − v) per channel, the tent curve — see README Phase 31)
+- [ ] TilesBreaks an image into displaced tile-like sections.
+- [x] Trace Contour (per-channel contour where the channel crosses the level, Lower/Upper edge — see README Phase 31)
+- [ ] WindCreates horizontal streaks resembling wind blowing across the image.
+- [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
+- [ ] GrainAdds simulated grain texture to an image.
+- [ ] Mosaic TilesCreates a tile-based surface appearance with grout-like separation.
+- [ ] PatchworkBreaks the image into square regions based on local colors and tonal relief.
+- [ ] Stained GlassReconstructs the image as adjacent colored cells resembling stained glass.
+- [ ] TexturizerApplies a texture to the image, including built-in texture types or a loaded texture file.
+- [ ] Neural Filters
+- [ ] Featured Neural Filters
+- [ ] Beta Neural Filters
+- [ ] Wait List Neural Filters
+- [ ] Smart Portrait
+- [ ] Skin Smoothing
+- [ ] Super Zoom
+- [ ] JPEG Artifacts Removal
+- [ ] Colorize
+- [ ] Style Transfer
+- [ ] Makeup Transfer
+- [ ] Photo Restoration
+- [ ] Landscape Mixer
+- [ ] Depth Blur
+- [ ] Color Transfer
+- [ ] Current Layer — Neural Filter Output
+- [ ] New Layer — Neural Filter Output
+- [ ] New Layer Masked — Neural Filter Output
+- [ ] Smart Filter — Neural Filter Output
+- [ ] New Document — Neural Filter Output
+- [ ] Camera Raw Filter
+- [ ] Camera Raw Histogram
+- [ ] RGB Levels
+- [ ] Shadow Clipping
+- [ ] Temperature
+- [ ] Tint
+- [ ] Highlights
+- [ ] Shadows
+- [ ] Clarity
+- [ ] Saturation — Camera Raw
+- [ ] Parametric Curve
+- [ ] Point Curve
+- [ ] Targeted Adjustment Tool
+- [ ] Color Mixer
+- [ ] Point Color
+- [ ] Color Grading
+- [ ] Optics
+- [ ] Defringe
+- [ ] Geometry
+- [ ] Constrain Crop
+- [ ] Masking
+- [ ] Subject Mask
+- [ ] Radial Gradient
+- [ ] Color Range Mask
+- [ ] Remove Tool — Camera Raw
+- [ ] Heal — Camera Raw
+- [ ] Clone — Camera Raw
+- [ ] Generative Remove — Camera Raw
