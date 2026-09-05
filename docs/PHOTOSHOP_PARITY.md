@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 99.**
+**618 distinct capabilities tracked. Currently shipped: 100.**
 
 ## PART I — EVERY TOOL
 
@@ -514,7 +514,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Fragment (four copies offset four pixels diagonally and averaged — see README Phase 36)
 - [ ] Mezzotint (Filter > Pixelate; added with the Pixelate audit)
 - [x] Mosaic (each cell replaced by its mean colour, partial edge cells averaged over the pixels present — see README Phase 36)
-- [ ] Pointillize (Filter > Pixelate; added with the Pixelate audit)
+- [x] Pointillize (the same jittered Voronoi sites as Crystallize, stamped as radius-cell_size/2 dots on a background colour — see README Phase 42)
 - [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)
 - [x] Pinch (radial lens map ρ → ρ·(1 + 0.75·a·(1 − ρ)) inside the inscribed ellipse, nearest-neighbour — see README Phase 38)
 - [x] Polar Coordinates (Rectangular to Polar and Polar to Rectangular, angle clockwise from twelve o'clock, rim = inscribed ellipse — see README Phase 39)

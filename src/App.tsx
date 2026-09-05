@@ -297,6 +297,9 @@ export default function App() {
   const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
+  const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
+  const [pointillizeCellSize, setPointillizeCellSize] = useState(16);
+  const [pointillizeBackground, setPointillizeBackground] = useState("#ffffff");
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -753,6 +756,20 @@ export default function App() {
     await runCommand("crystallize", { id: selectedId, cellSize: crystallizeCellSize, seed });
     setShowCrystallizeDialog(false);
   }, [runCommand, selectedId, crystallizeCellSize]);
+
+  const applyPointillize = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(pointillizeBackground);
+    // A fresh seed per apply, as with Add Noise/Crystallize.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("pointillize", {
+      id: selectedId,
+      cellSize: pointillizeCellSize,
+      background: [r, g, b, 255],
+      seed,
+    });
+    setShowPointillizeDialog(false);
+  }, [runCommand, selectedId, pointillizeCellSize, pointillizeBackground]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1956,6 +1973,14 @@ export default function App() {
             title="Filter > Pixelate > Crystallize"
           >
             Crystallize…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPointillizeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Pixelate > Pointillize"
+          >
+            Pointillize…
           </button>
           <input
             type="color"
@@ -4097,6 +4122,55 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCrystallize} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPointillizeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPointillizeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Pointillize"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Pointillize</h2>
+            <label className="control">
+              <span className="control__label">
+                Cell Size
+                <span className="control__value">{pointillizeCellSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={64}
+                value={pointillizeCellSize}
+                onChange={(event) => setPointillizeCellSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Background</span>
+              <input
+                type="color"
+                value={pointillizeBackground}
+                onChange={(event) => setPointillizeBackground(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPointillizeDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPointillize} disabled={busy}>
                 Apply
               </button>
             </div>

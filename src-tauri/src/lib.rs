@@ -941,6 +941,22 @@ fn crystallize(
     edit_checkpointed(&state, |document| document.crystallize(id, cell_size, seed))
 }
 
+/// Filter > Pixelate > Pointillize on layer `id`. `background` is an RGBA
+/// colour for the gaps between dots. The frontend sends a fresh `seed` on
+/// every apply so repeated applications differ, as with Add Noise.
+#[tauri::command]
+fn pointillize(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    background: [u8; CHANNELS],
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.pointillize(id, cell_size, background, seed)
+    })
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1421,6 +1437,7 @@ pub fn run() {
             polar_coordinates,
             color_halftone,
             crystallize,
+            pointillize,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -3245,6 +3245,63 @@ restored the original crisp gradient and grid lines.
 **441 Rust tests total** (437 → 441, 434 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 42 — Filter > Pixelate > Pointillize
+
+The last Pixelate filter, and one that reuses almost everything
+Crystallize just built. Photoshop's Pointillize scatters solid dots
+across the canvas over a plain background — the classic pointillist
+look — and this implementation gets there by scattering the exact same
+jittered Voronoi sites Crystallize uses, then stamping a solid,
+`cell_size / 2`-pixel-radius circle at each one instead of filling its
+whole region. Crystallize's site generation, nearest-site search and
+per-site averaging were pulled out into three shared free functions —
+`jittered_sites`, `nearest_site` and `voronoi_site_averages` — so
+`Document::pointillize(id, cell_size, background, seed)` is now a thin
+wrapper: it builds the same sites and averages Crystallize would, then
+for each selected pixel checks whether it's within its *nearest* site's
+radius (so neighbouring dots can never overlap, even when their sites
+land closer together than `cell_size` apart, since a pixel only belongs
+to a dot when that dot's site is also its nearest one); inside, the
+pixel gets that site's average colour, exactly as Crystallize computes
+it; outside, the caller-supplied `background` RGBA colour. Photoshop
+paints the gaps with the current background-colour swatch; since this
+project has no persistent background-colour setting, the colour is
+passed in directly from the dialog instead. A **Pointillize…** dialog
+adds a Cell Size slider (3–64, matching Crystallize's) and a colour
+picker for the background, defaulting to white; the frontend sends a
+fresh seed on every apply, as Crystallize and Add Noise already do.
+
+**Verified two ways.** Refactoring Crystallize into shared helpers first
+was itself verified for free: all four of its existing tests were rerun
+immediately after the refactor and passed with byte-identical output,
+confirming the extraction changed nothing about its behaviour. Four new
+`document.rs` tests then cover Pointillize itself, built on the same
+`ramp_square(6)`, `cell_size = 3`, `seed = 1` fixture as the Crystallize
+tests — the same four sites at (0, 1), (3, 2), (2, 4) and (4, 3) and the
+same four region averages (7, 35, 19, 49) — but now with `radius =
+cell_size / 2 = 1`, so only the site itself and its up to four
+orthogonal neighbours fall inside each dot. Site (0, 1)'s whole plus
+shape is on-canvas — (0, 0), (0, 1), (0, 2) and (1, 1) all come out 7 —
+while the diagonal neighbour (1, 0), one step further from the site,
+falls in a gap and comes out the white background; three more spot
+checks confirm the other three sites' dots land exactly where the same
+Python reference script used for Crystallize says they should. A
+selection test confirms the whole-canvas averaging pass still runs
+regardless of the selection (the one touched pixel gets the identical
+7 an unrestricted run would give) while an untouched neighbour is left
+at its original ramp value rather than being painted with the gap
+colour. A third test confirms same-seed determinism and cross-seed
+difference, and the fourth checks the usual zero-cell-size,
+locked-layer and unknown-id errors. All four passed on the first run.
+Live under Xvfb on the bundled gradient sample at cell size 16 with a
+white background, the smooth gradient turned into a scatter of small
+solid-coloured dots over white, following the same colour flow
+Crystallize's polygons did — recognizably pointillist. Undo restored
+the original crisp gradient and grid lines.
+
+**445 Rust tests total** (441 → 445, 438 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

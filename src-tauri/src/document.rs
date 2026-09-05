@@ -277,6 +277,110 @@ fn sample_nearest(
     out
 }
 
+/// Shared by [`Document::crystallize`] and [`Document::pointillize`]: scatters
+/// one seeded, jittered "site" per `cell_size`-pixel grid square — the same
+/// anchored, edge-clamped grid [`Document::mosaic`] uses — by drawing two
+/// values from the seeded [`XorShift32`] generator per square and mapping
+/// them onto an offset inside that square's own (possibly edge-clamped)
+/// width and height. Returns the sites, indexed `cy * cells_x + cx`, and the
+/// grid's own `(cells_x, cells_y)` dimensions.
+fn jittered_sites(
+    width: usize,
+    height: usize,
+    cell_size: u32,
+    seed: u32,
+) -> (Vec<(i64, i64)>, (usize, usize)) {
+    let cell = cell_size as i64;
+    let cells_x = width.div_ceil(cell_size as usize);
+    let cells_y = height.div_ceil(cell_size as usize);
+    let mut rng = XorShift32::new(seed);
+    let mut sites = Vec::with_capacity(cells_x * cells_y);
+    for cy in 0..cells_y {
+        for cx in 0..cells_x {
+            let (ox, oy) = (cx as i64 * cell, cy as i64 * cell);
+            let cell_w = (((ox + cell).min(width as i64)) - ox).max(1);
+            let cell_h = (((oy + cell).min(height as i64)) - oy).max(1);
+            let sx = ox + rng.next_u32() as i64 % cell_w;
+            let sy = oy + rng.next_u32() as i64 % cell_h;
+            sites.push((sx, sy));
+        }
+    }
+    (sites, (cells_x, cells_y))
+}
+
+/// Shared by [`Document::crystallize`] and [`Document::pointillize`]: the
+/// index, among the up to nine `sites` in `(x, y)`'s own grid square (of
+/// side `cell`) and the eight around it, of the one closest to `(x, y)` —
+/// sites are never more than one grid square apart, so the true nearest
+/// site is always among those nine — along with the squared distance to it.
+fn nearest_site(
+    sites: &[(i64, i64)],
+    cell: i64,
+    (cells_x, cells_y): (usize, usize),
+    (x, y): (i64, i64),
+) -> (usize, i64) {
+    let (hcx, hcy) = (x / cell, y / cell);
+    let mut best: Option<(i64, usize)> = None;
+    for ncy in (hcy - 1)..=(hcy + 1) {
+        if ncy < 0 || ncy as usize >= cells_y {
+            continue;
+        }
+        for ncx in (hcx - 1)..=(hcx + 1) {
+            if ncx < 0 || ncx as usize >= cells_x {
+                continue;
+            }
+            let idx = ncy as usize * cells_x + ncx as usize;
+            let (sx, sy) = sites[idx];
+            let d = (sx - x) * (sx - x) + (sy - y) * (sy - y);
+            if best.map_or(true, |(best_d, _)| d < best_d) {
+                best = Some((d, idx));
+            }
+        }
+    }
+    let (d, idx) = best.expect("every pixel has at least its own cell's site as a candidate");
+    (idx, d)
+}
+
+/// Shared by [`Document::crystallize`] and [`Document::pointillize`]: every
+/// pixel of `source` (a document-sized RGBA8 buffer `doc_width` pixels
+/// wide) is assigned to its [`nearest_site`] and every channel, alpha
+/// included, is averaged over each site's assigned pixels — the whole
+/// layer takes part regardless of any selection, so an edit still averages
+/// in its unselected neighbours, exactly [`Document::mosaic`]'s convention.
+fn voronoi_site_averages(
+    source: &[u8],
+    doc_width: usize,
+    sites: &[(i64, i64)],
+    cell: i64,
+    grid: (usize, usize),
+) -> Vec<[u8; CHANNELS]> {
+    let height = source.len() / CHANNELS / doc_width;
+    let mut sums = vec![[0u64; CHANNELS]; sites.len()];
+    let mut counts = vec![0u64; sites.len()];
+    for y in 0..height {
+        for x in 0..doc_width {
+            let (idx, _) = nearest_site(sites, cell, grid, (x as i64, y as i64));
+            let base = (y * doc_width + x) * CHANNELS;
+            for (sum, &v) in sums[idx].iter_mut().zip(&source[base..base + CHANNELS]) {
+                *sum += v as u64;
+            }
+            counts[idx] += 1;
+        }
+    }
+    sums.iter()
+        .zip(&counts)
+        .map(|(sum, &count)| {
+            let mut average = [0u8; CHANNELS];
+            if count > 0 {
+                for (slot, &s) in average.iter_mut().zip(sum) {
+                    *slot = (s / count) as u8;
+                }
+            }
+            average
+        })
+        .collect()
+}
+
 /// Like [`box_blur_at`], but the window is a straight line through
 /// `(col, row)` instead of a square: `2 * half + 1` samples at integer
 /// steps `t` from `-half` to `half`, each offset by `t * (dx, dy)` and
@@ -2732,8 +2836,6 @@ impl Document {
         }
         let (width, height) = (self.width as usize, self.height as usize);
         let cell = cell_size as i64;
-        let cells_x = width.div_ceil(cell_size as usize);
-        let cells_y = height.div_ceil(cell_size as usize);
         let source = {
             let layer = self.layer_mut(id)?;
             if layer.locked {
@@ -2742,70 +2844,58 @@ impl Document {
             layer.pixels.clone()
         };
 
-        let mut rng = XorShift32::new(seed);
-        let mut sites = Vec::with_capacity(cells_x * cells_y);
-        for cy in 0..cells_y {
-            for cx in 0..cells_x {
-                let (ox, oy) = (cx as i64 * cell, cy as i64 * cell);
-                let cell_w = (((ox + cell).min(width as i64)) - ox).max(1);
-                let cell_h = (((oy + cell).min(height as i64)) - oy).max(1);
-                let sx = ox + rng.next_u32() as i64 % cell_w;
-                let sy = oy + rng.next_u32() as i64 % cell_h;
-                sites.push((sx, sy));
-            }
-        }
-
-        let nearest_site = |x: i64, y: i64| -> usize {
-            let (hcx, hcy) = (x / cell, y / cell);
-            let mut best: Option<(i64, usize)> = None;
-            for ncy in (hcy - 1)..=(hcy + 1) {
-                if ncy < 0 || ncy as usize >= cells_y {
-                    continue;
-                }
-                for ncx in (hcx - 1)..=(hcx + 1) {
-                    if ncx < 0 || ncx as usize >= cells_x {
-                        continue;
-                    }
-                    let idx = ncy as usize * cells_x + ncx as usize;
-                    let (sx, sy) = sites[idx];
-                    let d = (sx - x) * (sx - x) + (sy - y) * (sy - y);
-                    if best.map_or(true, |(best_d, _)| d < best_d) {
-                        best = Some((d, idx));
-                    }
-                }
-            }
-            best.expect("every pixel has at least its own cell's site as a candidate")
-                .1
-        };
-
-        let mut sums = vec![[0u64; CHANNELS]; sites.len()];
-        let mut counts = vec![0u64; sites.len()];
-        for y in 0..height {
-            for x in 0..width {
-                let idx = nearest_site(x as i64, y as i64);
-                let base = (y * width + x) * CHANNELS;
-                for (sum, &v) in sums[idx].iter_mut().zip(&source[base..base + CHANNELS]) {
-                    *sum += v as u64;
-                }
-                counts[idx] += 1;
-            }
-        }
-        let averages: Vec<[u8; CHANNELS]> = sums
-            .iter()
-            .zip(&counts)
-            .map(|(sum, &count)| {
-                let mut average = [0u8; CHANNELS];
-                if count > 0 {
-                    for (slot, &s) in average.iter_mut().zip(sum) {
-                        *slot = (s / count) as u8;
-                    }
-                }
-                average
-            })
-            .collect();
+        let (sites, grid) = jittered_sites(width, height, cell_size, seed);
+        let averages = voronoi_site_averages(&source, width, &sites, cell, grid);
 
         self.filter_pixels(id, |_, row, col| {
-            averages[nearest_site(col as i64, row as i64)]
+            let (idx, _) = nearest_site(&sites, cell, grid, (col as i64, row as i64));
+            averages[idx]
+        })
+    }
+
+    /// Filter > Pixelate > Pointillize: the same jittered-site scatter as
+    /// [`Self::crystallize`], but instead of tiling the whole layer with
+    /// Voronoi cells, it stamps a solid, `cell_size / 2`-pixel-radius dot at
+    /// each site — coloured with that site's average, exactly as
+    /// `crystallize` computes it — on top of `background`, which fills
+    /// everything no dot reaches. A pixel belongs to a dot when it's within
+    /// that radius of the *nearest* site, so dots never overlap even though
+    /// neighbouring sites can sit closer together than `cell_size` apart.
+    /// Photoshop paints the gaps in the current background colour; here the
+    /// caller supplies it directly as an RGBA colour rather than this
+    /// project maintaining a persistent background-colour setting. Errors
+    /// on a zero cell size or a locked/unknown layer.
+    pub fn pointillize(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        background: [u8; CHANNELS],
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if cell_size == 0 {
+            return Err("Pointillize cell size must be at least 1 pixel.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = cell_size as i64;
+        let radius = cell / 2;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+
+        let (sites, grid) = jittered_sites(width, height, cell_size, seed);
+        let averages = voronoi_site_averages(&source, width, &sites, cell, grid);
+
+        self.filter_pixels(id, |_, row, col| {
+            let (idx, distance_sq) = nearest_site(&sites, cell, grid, (col as i64, row as i64));
+            if distance_sq <= radius * radius {
+                averages[idx]
+            } else {
+                background
+            }
         })
     }
 
@@ -6688,6 +6778,78 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.crystallize(999, 1, 1).is_err());
+    }
+
+    #[test]
+    fn pointillize_stamps_dots_at_the_same_sites_crystallize_would_average() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        // Same ramp_square(6), cell_size 3, seed 1 as the crystallize tests
+        // — the same four sites at (0, 1), (3, 2), (2, 4), (4, 3) and the
+        // same four region averages (7, 35, 19, 49) — but radius is now
+        // cell / 2 = 1, so a pixel only takes its nearest site's colour
+        // when within 1 pixel of it (a plus shape: the site itself plus its
+        // four orthogonal neighbours); everything else is `background`.
+        // Site (0, 1)'s plus shape is entirely on-canvas: (0,0), (0,1),
+        // (0,2) and (1,1) (its fourth neighbour, (-1, 1), doesn't exist).
+        // Worked out with the same script used for the crystallize tests.
+        let (mut doc, id) = ramp_square(6);
+        let background = [255, 255, 255, 255];
+        doc.pointillize(id, 3, background, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let px = |x: usize, y: usize| &p[idx(x, y)..idx(x, y) + 4];
+        assert_eq!(px(0, 0), [7, 0, 0, 255]);
+        assert_eq!(px(0, 1), [7, 0, 0, 255]);
+        assert_eq!(px(0, 2), [7, 0, 0, 255]);
+        assert_eq!(px(1, 1), [7, 0, 0, 255]);
+        assert_eq!(px(1, 0), background); // one step diagonal from the site: a gap
+        assert_eq!(px(3, 1), [35, 0, 0, 255]); // site (3, 2)'s own plus shape
+        assert_eq!(px(5, 0), background);
+        assert_eq!(px(2, 5), [19, 0, 0, 255]); // site (2, 4)'s plus shape
+        assert_eq!(px(4, 3), [49, 0, 0, 255]); // site (4, 3) itself
+    }
+
+    #[test]
+    fn pointillize_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = ramp_square(6);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.pointillize(id, 3, [255, 255, 255, 255], 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 7); // the one selected pixel takes its site's colour
+        assert_eq!(p[idx(1, 0)], 10); // unselected, untouched (not even painted the gap colour)
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn pointillize_is_deterministic_per_seed_and_differs_across_seeds() {
+        let (mut a, ida) = ramp_square(6);
+        let (mut b, idb) = ramp_square(6);
+        a.pointillize(ida, 3, [255, 255, 255, 255], 7).unwrap();
+        b.pointillize(idb, 3, [255, 255, 255, 255], 7).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+
+        let (mut c, idc) = ramp_square(6);
+        c.pointillize(idc, 3, [255, 255, 255, 255], 99).unwrap();
+        assert_ne!(a.layers()[0].pixels, c.layers()[0].pixels);
+    }
+
+    #[test]
+    fn pointillize_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.pointillize(id, 0, [0, 0, 0, 255], 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.pointillize(id, 1, [0, 0, 0, 255], 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.pointillize(999, 1, [0, 0, 0, 255], 1).is_err());
     }
 
     #[test]
