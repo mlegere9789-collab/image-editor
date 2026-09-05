@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 93.**
+**618 distinct capabilities tracked. Currently shipped: 95.**
 
 ## PART I — EVERY TOOL
 
@@ -516,11 +516,11 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Mosaic (each cell replaced by its mean colour, partial edge cells averaged over the pixels present — see README Phase 36)
 - [ ] Pointillize (Filter > Pixelate; added with the Pixelate audit)
 - [ ] Displace (Filter > Distort; the Distort submenu was missing from the original audit, added while shipping Mosaic)
-- [ ] Pinch (Filter > Distort; added with the Distort audit)
+- [x] Pinch (radial lens map ρ → ρ·(1 + 0.75·a·(1 − ρ)) inside the inscribed ellipse, nearest-neighbour — see README Phase 38)
 - [ ] Polar Coordinates (Filter > Distort; added with the Distort audit)
 - [x] Ripple (sinusoidal displacement, amplitude × sin(2π·y/λ) horizontally and the transpose vertically, nearest-neighbour, Small/Medium/Large = 8/16/32 px — see README Phase 37)
 - [ ] Shear (Filter > Distort; added with the Distort audit)
-- [ ] Spherize (Filter > Distort; added with the Distort audit)
+- [x] Spherize (radial lens map ρ → ρ·(1 − 0.75·a·(1 − ρ)), the mirror of Pinch; Horizontal/Vertical Only modes are a documented scope cut — see README Phase 38)
 - [x] Twirl (rotation about the centre by angle · (1 − r/R)², nearest-neighbour — see README Phase 37)
 - [ ] Wave (Filter > Distort; added with the Distort audit)
 - [ ] ZigZag (Filter > Distort; added with the Distort audit)

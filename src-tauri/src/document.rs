@@ -2475,6 +2475,67 @@ impl Document {
         })
     }
 
+    /// Shared by Pinch and Spherize: pulls every pixel inside the ellipse
+    /// inscribed in the layer from a position at the same angle but at
+    /// normalised radius `ρ · (1 − strength · (1 − ρ))` instead of `ρ` — `ρ`
+    /// being the distance from the centre in units of the half-width
+    /// horizontally and the half-height vertically, so the effect fills the
+    /// inscribed ellipse as Photoshop's does. A positive `strength` pulls
+    /// from nearer the centre and so magnifies it (a bulge); negative pulls
+    /// from further out and shrinks it (a pinch); 0 is the identity; the
+    /// rim (`ρ = 1`) always maps to itself, so the edge of the effect is
+    /// seamless. `|strength|` is capped at 0.75 by the callers, which keeps
+    /// the mapping strictly increasing (its slope at the centre is
+    /// `1 − strength`, never zero), so the middle is magnified at most 4×
+    /// rather than collapsing to a single pixel. Pixels at or beyond the
+    /// ellipse are untouched. Nearest-neighbour via [`sample_nearest`].
+    fn radial_remap(&mut self, id: LayerId, strength: f32) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (hx, hy) = (width as f32 / 2.0, height as f32 / 2.0);
+        self.filter_pixels(id, |source, row, col| {
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let rho = ((dx / hx).powi(2) + (dy / hy).powi(2)).sqrt();
+            let (sx, sy) = if rho > 0.0 && rho <= 1.0 {
+                let factor = 1.0 - strength * (1.0 - rho);
+                (cx + dx * factor, cy + dy * factor)
+            } else {
+                (col as f32, row as f32)
+            };
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
+    }
+
+    /// Filter > Distort > Pinch: squeezes the middle of the layer toward its
+    /// centre (positive amounts) or bulges it outward (negative), Photoshop's
+    /// −100..=100 %. Implemented as [`Self::radial_remap`] with strength
+    /// `−0.75 · amount / 100`, so +100 % pulls each pixel from `ρ · (1.75 −
+    /// 0.75ρ)` — 1.75× further out at the centre — and 0 is the identity:
+    /// exactly the mirror of [`Self::spherize`]. Errors on a non-finite
+    /// amount or a locked/unknown layer.
+    pub fn pinch(&mut self, id: LayerId, amount: f32) -> Result<Option<Rect>, String> {
+        if !amount.is_finite() {
+            return Err(format!("Pinch amount must be a number, got {amount}."));
+        }
+        self.radial_remap(id, -0.75 * amount / 100.0)
+    }
+
+    /// Filter > Distort > Spherize: wraps the middle of the layer onto a
+    /// sphere — bulging outward for positive amounts, caving in for negative,
+    /// Photoshop's −100..=100 %. [`Self::radial_remap`] with strength
+    /// `0.75 · amount / 100`, so +100 % pulls each pixel from `ρ · (0.25 +
+    /// 0.75ρ)` — magnifying the centre 4× like a lens — and 0 is the
+    /// identity. Photoshop's Horizontal Only and Vertical Only modes are a
+    /// deliberate scope cut. Errors on a non-finite amount or a
+    /// locked/unknown layer.
+    pub fn spherize(&mut self, id: LayerId, amount: f32) -> Result<Option<Rect>, String> {
+        if !amount.is_finite() {
+            return Err(format!("Spherize amount must be a number, got {amount}."));
+        }
+        self.radial_remap(id, 0.75 * amount / 100.0)
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -5967,6 +6028,88 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.ripple(999, 1.0, 4).is_err());
         assert!(empty.twirl(999, 50.0).is_err());
+    }
+
+    #[test]
+    fn spherize_magnifies_the_centre_and_pinch_squeezes_it() {
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        // 9x9: the centre is (4, 4) and the inscribed ellipse has half-axes
+        // 4.5, so the pixels along the middle row sit at ρ = 2/9, 4/9, 6/9,
+        // 8/9. Spherize +100 % scales each offset by 0.25 + 0.75ρ: (5, 4)
+        // reads 4 + 5/12 = 4.42 → (4, 4) = 44, (6, 4) reads 4 + 2·7/12 =
+        // 5.17 → 54, (7, 4) reads 4 + 3·0.75 = 6.25 → 64, (8, 4) reads
+        // 4 + 4·11/12 = 7.67 → 84 — the middle is stretched outward. The
+        // centre and the corners (ρ > 1) do not move.
+        let (mut doc, id) = ramp_square(9);
+        doc.spherize(id, 100.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(5, 4)], 44);
+        assert_eq!(p[idx(6, 4)], 54);
+        assert_eq!(p[idx(7, 4)], 64);
+        assert_eq!(p[idx(8, 4)], 84);
+        assert_eq!(p[idx(4, 4)], 44);
+        assert_eq!(p[idx(0, 0)], 0);
+        assert_eq!(p[idx(5, 4) + 3], 255);
+
+        // Pinch +100 % scales by 1.75 − 0.75ρ instead: (5, 4) reads 4 + 19/12
+        // = 5.58 → 64, (6, 4) reads 4 + 2·17/12 = 6.83 → 74, (7, 4) reads
+        // 4 + 3·1.25 = 7.75 → 84 and (8, 4) reads 4 + 4·13/12 = 8.33,
+        // clamped to the edge → 84.
+        let (mut doc, id) = ramp_square(9);
+        doc.pinch(id, 100.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(5, 4)], 64);
+        assert_eq!(p[idx(6, 4)], 74);
+        assert_eq!(p[idx(7, 4)], 84);
+        assert_eq!(p[idx(8, 4)], 84);
+        assert_eq!(p[idx(4, 4)], 44);
+        assert_eq!(p[idx(0, 0)], 0);
+    }
+
+    #[test]
+    fn pinch_and_spherize_are_mirror_images_and_zero_is_the_identity() {
+        let (mut a, ida) = ramp_square(9);
+        let (mut b, idb) = ramp_square(9);
+        a.pinch(ida, 60.0).unwrap();
+        b.spherize(idb, -60.0).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+
+        let (mut doc, id) = ramp_square(9);
+        let before = doc.layers()[0].pixels.clone();
+        doc.pinch(id, 0.0).unwrap();
+        doc.spherize(id, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        // Confined to the selection: only (5, 4) changes.
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        let (mut doc, id) = ramp_square(9);
+        doc.select_rectangle(5.0, 4.0, 6.0, 5.0).unwrap();
+        let dirty = doc.spherize(id, 100.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(5, 4)], 44);
+        assert_eq!(doc.layers()[0].pixels[idx(6, 4)], 64);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 5,
+                y0: 4,
+                x1: 6,
+                y1: 5
+            })
+        );
+    }
+
+    #[test]
+    fn pinch_and_spherize_propagate_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.pinch(id, f32::NAN).is_err());
+        assert!(doc.spherize(id, f32::INFINITY).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.pinch(id, 50.0).is_err());
+        assert!(doc.spherize(id, 50.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.pinch(999, 50.0).is_err());
+        assert!(empty.spherize(999, 50.0).is_err());
     }
 
     #[test]

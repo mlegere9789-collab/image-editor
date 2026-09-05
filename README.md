@@ -3007,6 +3007,60 @@ their straight lines. Undo restored the original after each.
 **426 Rust tests total** (421 → 426, 419 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 38 — Filter > Distort: Pinch and Spherize
+
+Two more Distort filters that are one mechanism. Both pull every pixel
+inside the ellipse inscribed in the layer from a position at the same
+angle but a different distance from the centre: a private
+`radial_remap(id, strength)` measures each pixel's normalised radius
+`ρ` — its distance from the centre in units of the half-width
+horizontally and the half-height vertically, so the effect fills the
+inscribed ellipse as Photoshop's does — and samples from `ρ · (1 −
+strength · (1 − ρ))` instead, through the nearest-neighbour
+`sample_nearest` from Phase 37. A positive strength pulls from nearer
+the centre and so magnifies it (a bulge); negative pulls from further
+out and shrinks it (a pinch); 0 is the identity; the rim `ρ = 1` always
+maps to itself, so the edge of the effect is seamless, and pixels
+beyond the ellipse are untouched. **Spherize** is `strength = 0.75 ·
+amount / 100` and **Pinch** is its exact mirror, `−0.75 · amount /
+100`, both over Photoshop's −100..=100 %. The 0.75 cap is deliberate:
+it keeps the mapping strictly increasing (its slope at the centre is
+`1 − strength`, never zero), so at +100 % Spherize magnifies the middle
+4× like a lens rather than collapsing it. The first draft used
+`ρ^exponent` instead, and the live run showed why that is wrong — with
+`ρ²` the magnification at the centre is unbounded and the central grid
+intersection of the sample blew up into a white blob, which
+Photoshop's lens never does — so the formula was replaced, the hand
+values re-derived and the live pass repeated before anything was
+committed. Photoshop's Horizontal Only and Vertical Only Spherize modes
+are a documented scope cut. The frontend adds **Pinch…** and
+**Spherize…** dialogs, each an Amount slider from −100 to 100.
+
+**Verified two ways.** Three new `document.rs` tests on the 9×9
+`ramp_square` fixture (red `10·x + y`), where the centre is (4, 4), the
+half-axes are 4.5 and the pixels along the middle row sit at `ρ = 2/9,
+4/9, 6/9, 8/9`. Spherize +100 % scales each offset by `0.25 + 0.75ρ`:
+(5, 4) reads `4 + 5/12 = 4.42` → (4, 4) = 44, (6, 4) reads `4 + 2 ·
+7/12 = 5.17` → 54, (7, 4) reads `4 + 3 · 0.75 = 6.25` → 64 and (8, 4)
+reads `4 + 4 · 11/12 = 7.67` → 84 — the middle stretched outward —
+while the centre and the corners (ρ > 1) keep 44 and 0 and alpha stays
+255. Pinch +100 % scales by `1.75 − 0.75ρ` instead: (5, 4) reads `4 +
+19/12 = 5.58` → 64, (6, 4) reads 6.83 → 74, (7, 4) reads 7.75 → 84 and
+(8, 4) reads 8.33, clamped to the edge → 84. Every position was worked
+by hand as a fraction and cross-checked with a scripted evaluation of
+the same formula. Pinch at 60 % is byte-identical to Spherize at −60 %;
+both at 0 return the layer unchanged; with only (5, 4) selected it
+alone changes and the dirty rect is that pixel; NaN and infinite
+amounts, locked layers and unknown ids all error. All passing on first
+run. Live under Xvfb on the bundled gradient sample: Pinch at 100 %
+drew the grid inward toward the centre, lines converging like a
+squeezed cloth; after an undo, Spherize at 100 % bowed the grid
+outward with the centre magnified like a lens and no collapse at the
+middle. Undo restored the original after each.
+
+**429 Rust tests total** (426 → 429, 422 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

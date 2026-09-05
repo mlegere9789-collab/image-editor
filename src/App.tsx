@@ -275,6 +275,10 @@ export default function App() {
   const [rippleSize, setRippleSize] = useState<RippleSize>("medium");
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
+  const [showPinchDialog, setShowPinchDialog] = useState(false);
+  const [pinchAmount, setPinchAmount] = useState(50);
+  const [showSpherizeDialog, setShowSpherizeDialog] = useState(false);
+  const [spherizeAmount, setSpherizeAmount] = useState(50);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -688,6 +692,18 @@ export default function App() {
     await runCommand("twirl", { id: selectedId, angle: twirlAngle });
     setShowTwirlDialog(false);
   }, [runCommand, selectedId, twirlAngle]);
+
+  const applyPinch = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("pinch", { id: selectedId, amount: pinchAmount });
+    setShowPinchDialog(false);
+  }, [runCommand, selectedId, pinchAmount]);
+
+  const applySpherize = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("spherize", { id: selectedId, amount: spherizeAmount });
+    setShowSpherizeDialog(false);
+  }, [runCommand, selectedId, spherizeAmount]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1843,6 +1859,22 @@ export default function App() {
             title="Filter > Distort > Twirl"
           >
             Twirl…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPinchDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Pinch"
+          >
+            Pinch…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSpherizeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Spherize"
+          >
+            Spherize…
           </button>
           <input
             type="color"
@@ -3736,6 +3768,74 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTwirl} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPinchDialog && (
+        <div className="modal-overlay" onClick={() => setShowPinchDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Pinch"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Pinch</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{pinchAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={pinchAmount}
+                onChange={(event) => setPinchAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPinchDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPinch} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSpherizeDialog && (
+        <div className="modal-overlay" onClick={() => setShowSpherizeDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Spherize"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Spherize</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{spherizeAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={spherizeAmount}
+                onChange={(event) => setSpherizeAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSpherizeDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySpherize} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -881,6 +881,18 @@ fn twirl(state: State<'_, AppState>, id: LayerId, angle: f32) -> Result<Snapshot
     edit_checkpointed(&state, |document| document.twirl(id, angle))
 }
 
+/// Filter > Distort > Pinch on layer `id`: `amount` in percent, −100..=100.
+#[tauri::command]
+fn pinch(state: State<'_, AppState>, id: LayerId, amount: f32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.pinch(id, amount))
+}
+
+/// Filter > Distort > Spherize on layer `id`: `amount` in percent, −100..=100.
+#[tauri::command]
+fn spherize(state: State<'_, AppState>, id: LayerId, amount: f32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.spherize(id, amount))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1355,6 +1367,8 @@ pub fn run() {
             fragment,
             ripple,
             twirl,
+            pinch,
+            spherize,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
