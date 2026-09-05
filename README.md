@@ -2692,6 +2692,58 @@ Undo restored the original after each.
 **400 Rust tests total** (393 → 400, 393 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 32 — Filter > Blur > Gaussian Blur
+
+The workhorse of Photoshop's Blur menu. `Document::gaussian_blur(id,
+radius)` treats `radius` as the standard deviation in pixels and
+weights each sample by a bell curve rather than the flat mean Box Blur
+uses. The kernel comes from a new `binomial_weights(sigma)` helper: the
+normalised binomial that the textbooks use as the discrete Gaussian —
+Pascal's triangle row `2n` with `n = 2·sigma²`, whose variance is
+exactly `n/2 = sigma²` — cut off at `3·sigma` taps a side (the tails
+beyond hold well under 0.3 % of the weight) and renormalised. It is
+built outward from the centre by the ratio `C(2n, n+k+1) / C(2n, n+k)
+= (n − k) / (n + k + 1)`, so nothing overflows however large the radius
+and tails that underflow to zero simply drop out; `sigma = 1` gives
+exactly `[1 4 6 4 1] / 16`. The blur is separable and runs as two
+passes: every row of the *whole* layer is blurred horizontally into a
+scratch buffer — the whole layer, not just the selection, because the
+second pass reads rows above and below the selected pixels — and then
+each selected pixel is blurred vertically from that buffer through the
+`filter_pixels` skeleton. Each pass rounds to the nearest whole value
+and clamps its samples to the layer's edges like Box Blur, and R, G, B
+and A are blurred independently and un-premultiplied, the same scope
+cut Box Blur makes. Photoshop allows radii from 0.1 to 250 px; this
+takes whole pixels and the dialog offers 1–25. The frontend adds a
+**Gaussian Blur…** button beside Box Blur with a radius slider.
+
+**Verified two ways.** Four new `document.rs` tests. The weights for
+radius 1 are `1/16, 4/16, 6/16, 4/16, 1/16` to within 1e-12; radius 2
+is Pascal's row 16 cut to ±6 and renormalised, so its centre and
+next-to-centre weights are `12870 / 65502` and `11440 / 65502` (65536
+minus the two dropped 1s and 16s) and the thirteen sum to 1; radius 25
+stays finite. On the 3×3 red ramp (10..90 by tens) radius 1 is the
+`[1 4 6 4 1] / 16` kernel applied twice with edge clamping, worked
+entirely by hand: the horizontal pass gives 14, 20, 26 / 44, 50, 56 /
+74, 80, 86 (the top-left is `(10 + 40 + 60 + 80 + 30) / 16 = 13.75`,
+rounded), and the vertical pass over those columns gives the final
+25, 31, 37 / 44, 50, 56 / 63, 69, 75 (top-left `(14 + 56 + 84 + 176 +
+74) / 16 = 25.25`; the centre stays 50 because the ramp is symmetric
+around it) — and, being a gentler kernel than the box, the corner
+lands at 25 where Box Blur's flat mean gave 23. A flat grey layer is
+returned unchanged at radius 3; with only the top-left pixel selected
+it alone becomes 25 (blurred with its unselected neighbours) while its
+neighbour keeps 20 and the dirty rect is that one pixel; zero radius,
+locked layers and unknown ids error without touching pixels. All
+passing on first run. Live under Xvfb on the bundled gradient sample,
+radius 6 turned the crisp one-pixel grid lines into wide, soft,
+bell-shaped bands with no hard edges — the signature that separates a
+Gaussian from a box blur — while the already-smooth gradient was
+visibly unchanged. Undo restored the original.
+
+**404 Rust tests total** (400 → 404, 397 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

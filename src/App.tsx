@@ -241,6 +241,8 @@ export default function App() {
 
   const [showBoxBlurDialog, setShowBoxBlurDialog] = useState(false);
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
+  const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
+  const [gaussianBlurRadius, setGaussianBlurRadius] = useState(2);
 
   const [showUnsharpMaskDialog, setShowUnsharpMaskDialog] = useState(false);
   const [unsharpMaskRadius, setUnsharpMaskRadius] = useState(2);
@@ -603,6 +605,12 @@ export default function App() {
     await runCommand("box_blur", { id: selectedId, radius: boxBlurRadius });
     setShowBoxBlurDialog(false);
   }, [runCommand, selectedId, boxBlurRadius]);
+
+  const applyGaussianBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("gaussian_blur", { id: selectedId, radius: gaussianBlurRadius });
+    setShowGaussianBlurDialog(false);
+  }, [runCommand, selectedId, gaussianBlurRadius]);
 
   const applyUnsharpMask = useCallback(async () => {
     if (selectedId === null) return;
@@ -1496,6 +1504,14 @@ export default function App() {
             title="Filter > Blur > Box Blur"
           >
             Box Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGaussianBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Gaussian Blur"
+          >
+            Gaussian Blur…
           </button>
           <button
             className="button button--quiet"
@@ -3270,6 +3286,47 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTraceContour} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGaussianBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGaussianBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Gaussian Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Gaussian Blur</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{gaussianBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={25}
+                value={gaussianBlurRadius}
+                onChange={(event) => setGaussianBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGaussianBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGaussianBlur} disabled={busy}>
                 Apply
               </button>
             </div>

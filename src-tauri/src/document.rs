@@ -405,6 +405,35 @@ fn sobel_at(
     out
 }
 
+/// The normalised binomial kernel that stands in for a Gaussian of
+/// standard deviation `sigma` pixels: Pascal's triangle row `2n` with
+/// `n = 2·sigma²`, whose variance is exactly `n/2 = sigma²`, cut off at
+/// `3·sigma` taps each side (the tails beyond hold well under 0.3 % of the
+/// weight) and renormalised — the discrete Gaussian of the textbooks.
+/// Returned as the `2·half + 1` weights with the centre in the middle.
+/// Built outward from the centre by the ratio
+/// `C(2n, n+k+1) / C(2n, n+k) = (n − k) / (n + k + 1)`, so nothing
+/// overflows however large `n` grows; tails that underflow to zero simply
+/// drop out. `sigma = 1` gives exactly `[1 4 6 4 1] / 16`.
+fn binomial_weights(sigma: u32) -> Vec<f64> {
+    let n = 2 * (sigma as i64) * (sigma as i64);
+    let half = (3 * sigma as i64).min(n);
+    let mut side = Vec::with_capacity(half as usize + 1);
+    let mut w = 1.0f64;
+    side.push(w);
+    for k in 0..half {
+        w *= (n - k) as f64 / (n + k + 1) as f64;
+        side.push(w);
+    }
+    let total = side[0] + 2.0 * side[1..].iter().sum::<f64>();
+    side[1..]
+        .iter()
+        .rev()
+        .chain(side.iter())
+        .map(|w| w / total)
+        .collect()
+}
+
 /// A tiny, dependency-free pseudo-random generator (Marsaglia's
 /// xorshift32) for [`Document::add_noise`]. Chosen over pulling in the
 /// `rand` crate for one reason that matters more than statistical
@@ -2002,6 +2031,70 @@ impl Document {
                 }
             }
             out[3] = source[centre + 3];
+            out
+        })
+    }
+
+    /// Filter > Blur > Gaussian Blur: the bell-curve-weighted blur that is
+    /// the workhorse of Photoshop's Blur menu, with `radius` playing the
+    /// role of the standard deviation in pixels. The kernel is
+    /// [`binomial_weights`]`(radius)` — the normalised binomial that
+    /// approximates a Gaussian of that σ, cut at ±3σ — applied separably:
+    /// first every row of the whole layer is blurred horizontally into a
+    /// scratch buffer (the whole layer, not just the selection, because the
+    /// second pass reads rows above and below the selected pixels), then
+    /// each selected pixel is blurred vertically from that buffer. Each
+    /// pass rounds to the nearest whole value and clamps its samples to the
+    /// layer's edges like [`Self::box_blur`]. R, G, B and A are blurred
+    /// independently and un-premultiplied, the same scope cut `box_blur`
+    /// makes. Photoshop allows radii from 0.1 to 250 px; this takes whole
+    /// pixels, 1 and up. Errors on a zero radius or a locked/unknown layer.
+    pub fn gaussian_blur(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Gaussian blur radius must be at least 1 pixel.".to_string());
+        }
+        let weights = binomial_weights(radius);
+        let half = (weights.len() / 2) as i64;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let round = |sum: &f64| sum.round().clamp(0.0, 255.0) as u8;
+        let mut horizontal = source.clone();
+        for y in 0..height {
+            for x in 0..width {
+                let mut acc = [0.0f64; CHANNELS];
+                for (k, w) in weights.iter().enumerate() {
+                    let sx = (x + k as i64 - half).clamp(0, width - 1) as usize;
+                    let base = (y as usize * doc_width + sx) * CHANNELS;
+                    for (sum, &v) in acc.iter_mut().zip(&source[base..base + CHANNELS]) {
+                        *sum += w * v as f64;
+                    }
+                }
+                let dst = (y as usize * doc_width + x as usize) * CHANNELS;
+                for (out, sum) in horizontal[dst..dst + CHANNELS].iter_mut().zip(&acc) {
+                    *out = round(sum);
+                }
+            }
+        }
+        self.filter_pixels(id, |_, row, col| {
+            let mut acc = [0.0f64; CHANNELS];
+            for (k, w) in weights.iter().enumerate() {
+                let sy = (row as i64 + k as i64 - half).clamp(0, height - 1) as usize;
+                let base = (sy * doc_width + col as usize) * CHANNELS;
+                for (sum, &v) in acc.iter_mut().zip(&horizontal[base..base + CHANNELS]) {
+                    *sum += w * v as f64;
+                }
+            }
+            let mut out = [0u8; CHANNELS];
+            for (slot, sum) in out.iter_mut().zip(&acc) {
+                *slot = round(sum);
+            }
             out
         })
     }
@@ -4978,6 +5071,76 @@ mod tests {
         assert!(empty.find_edges(999).is_err());
         assert!(empty.solarize(999).is_err());
         assert!(empty.trace_contour(999, 128, true).is_err());
+    }
+
+    #[test]
+    fn gaussian_weights_are_normalised_binomials() {
+        let w = binomial_weights(1);
+        assert_eq!(w.len(), 5);
+        for (got, want) in w.iter().zip([1.0, 4.0, 6.0, 4.0, 1.0].map(|v| v / 16.0)) {
+            assert!((got - want).abs() < 1e-12, "{got} vs {want}");
+        }
+
+        // Radius 2 is Pascal's row 16 cut to ±6 and renormalised: the two
+        // biggest weights are C(16,8) and C(16,7) over the sum of the 13
+        // kept coefficients, 65536 - 2*(1 + 16) = 65502.
+        let w = binomial_weights(2);
+        assert_eq!(w.len(), 13);
+        assert!((w[6] - 12870.0 / 65502.0).abs() < 1e-12);
+        assert!((w[5] - 11440.0 / 65502.0).abs() < 1e-12);
+        assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-12);
+        assert!(binomial_weights(25).iter().all(|w| w.is_finite()));
+    }
+
+    #[test]
+    fn gaussian_blur_radius_one_is_the_1_4_6_4_1_kernel_applied_twice() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.gaussian_blur(id, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let reds: Vec<u8> = (0..9).map(|i| p[i * 4]).collect();
+        // Horizontal pass, edge-clamped and rounded: 14 20 26 / 44 50 56 /
+        // 74 80 86 (e.g. top-left (10+40+60+80+30)/16 = 13.75); then the
+        // same kernel down each column (top-left (14+56+84+176+74)/16 =
+        // 25.25).
+        assert_eq!(reds, [25, 31, 37, 44, 50, 56, 63, 69, 75]);
+        assert_eq!(p[idx(1, 1) + 1], 0);
+        assert_eq!(p[idx(1, 1) + 3], 255);
+    }
+
+    #[test]
+    fn gaussian_blur_leaves_a_flat_layer_alone_and_is_confined_to_the_selection() {
+        let (mut doc, id) = grey_2x2();
+        doc.gaussian_blur(id, 3).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [128, 128, 128, 255]));
+
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.gaussian_blur(id, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 25); // blurred with its unselected neighbours
+        assert_eq!(p[idx(1, 0)], 20); // untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn gaussian_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.gaussian_blur(id, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.gaussian_blur(id, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.gaussian_blur(999, 1).is_err());
     }
 
     #[test]

@@ -827,6 +827,12 @@ fn trace_contour(
     edit_checkpointed(&state, |document| document.trace_contour(id, level, upper))
 }
 
+/// Filter > Blur > Gaussian Blur on layer `id`.
+#[tauri::command]
+fn gaussian_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.gaussian_blur(id, radius))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1268,6 +1274,7 @@ pub fn run() {
             solarize,
             emboss,
             trace_contour,
+            gaussian_blur,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
