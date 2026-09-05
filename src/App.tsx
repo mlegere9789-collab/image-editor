@@ -337,6 +337,14 @@ export default function App() {
   const [lensFlareCenterX, setLensFlareCenterX] = useState(0);
   const [lensFlareCenterY, setLensFlareCenterY] = useState(0);
   const [lensFlareBrightness, setLensFlareBrightness] = useState(100);
+  const [showLightingEffectsDialog, setShowLightingEffectsDialog] = useState(false);
+  const [lightingLightX, setLightingLightX] = useState(0);
+  const [lightingLightY, setLightingLightY] = useState(0);
+  const [lightingLightHeight, setLightingLightHeight] = useState(30);
+  const [lightingIntensity, setLightingIntensity] = useState(100);
+  const [lightingAmbience, setLightingAmbience] = useState(20);
+  const [lightingBumpHeight, setLightingBumpHeight] = useState(50);
+  const [lightingColor, setLightingColor] = useState("#ffffff");
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -963,6 +971,38 @@ export default function App() {
     });
     setShowLensFlareDialog(false);
   }, [runCommand, selectedId, lensFlareCenterX, lensFlareCenterY, lensFlareBrightness]);
+
+  const openLightingEffectsDialog = useCallback(() => {
+    setLightingLightX(Math.round((document?.width ?? 2) / 2));
+    setLightingLightY(Math.round((document?.height ?? 2) / 2));
+    setShowLightingEffectsDialog(true);
+  }, [document]);
+
+  const applyLightingEffects = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(lightingColor);
+    await runCommand("lighting_effects", {
+      id: selectedId,
+      lightX: lightingLightX,
+      lightY: lightingLightY,
+      lightHeight: lightingLightHeight,
+      intensity: lightingIntensity,
+      ambience: lightingAmbience,
+      bumpHeight: lightingBumpHeight,
+      color: [r, g, b],
+    });
+    setShowLightingEffectsDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    lightingLightX,
+    lightingLightY,
+    lightingLightHeight,
+    lightingIntensity,
+    lightingAmbience,
+    lightingBumpHeight,
+    lightingColor,
+  ]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -2254,6 +2294,14 @@ export default function App() {
             title="Filter > Render > Lens Flare"
           >
             Lens Flare…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openLightingEffectsDialog}
+            disabled={busy || !canPaint}
+            title="Filter > Render > Lighting Effects"
+          >
+            Lighting Effects…
           </button>
           <input
             type="color"
@@ -5043,6 +5091,121 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyLensFlare} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLightingEffectsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLightingEffectsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Lighting Effects"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Render &gt; Lighting Effects</h2>
+            <label className="control">
+              <span className="control__label">
+                Light X
+                <span className="control__value">{lightingLightX}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.width ?? 1}
+                value={lightingLightX}
+                onChange={(event) => setLightingLightX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Light Y
+                <span className="control__value">{lightingLightY}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={lightingLightY}
+                onChange={(event) => setLightingLightY(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Height
+                <span className="control__value">{lightingLightHeight}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                value={lightingLightHeight}
+                onChange={(event) => setLightingLightHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Intensity
+                <span className="control__value">{lightingIntensity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lightingIntensity}
+                onChange={(event) => setLightingIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Ambience
+                <span className="control__value">{lightingAmbience}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lightingAmbience}
+                onChange={(event) => setLightingAmbience(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Bump Height
+                <span className="control__value">{lightingBumpHeight}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lightingBumpHeight}
+                onChange={(event) => setLightingBumpHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Color</span>
+              <input
+                type="color"
+                className="tools__color"
+                value={lightingColor}
+                onChange={(event) => setLightingColor(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLightingEffectsDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyLightingEffects} disabled={busy}>
                 Apply
               </button>
             </div>

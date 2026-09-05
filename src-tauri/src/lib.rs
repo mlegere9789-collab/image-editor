@@ -1029,6 +1029,37 @@ fn extrude(
     })
 }
 
+/// Filter > Render > Lighting Effects on layer `id`. `light_x`/`light_y`
+/// are canvas-pixel coordinates of a single Point light; `light_height` is
+/// its height above the surface. `intensity`/`ambience`/`bump_height` are
+/// percentages (0-100). `color` tints the light.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn lighting_effects(
+    state: State<'_, AppState>,
+    id: LayerId,
+    light_x: f32,
+    light_y: f32,
+    light_height: f32,
+    intensity: u32,
+    ambience: u32,
+    bump_height: u32,
+    color: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lighting_effects(
+            id,
+            light_x,
+            light_y,
+            light_height,
+            intensity,
+            ambience,
+            bump_height,
+            color,
+        )
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1618,6 +1649,7 @@ pub fn run() {
             color_halftone,
             mezzotint,
             extrude,
+            lighting_effects,
             crystallize,
             facet,
             pointillize,

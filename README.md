@@ -3765,6 +3765,82 @@ grid lines.
 **480 Rust tests total** (476 → 480, 473 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 52 — Filter > Render > Lighting Effects
+
+A single Point light re-lights the layer using its own ITU-R BT.601 luma
+as a bump-mapped height field, shaded with a Blinn-Phong diffuse and
+specular model — a documented, deliberately scoped-down stand-in for
+Photoshop's real Lighting Effects, which supports up to three lights of
+three different types (Point, Spot, Infinite), a texture-channel picker,
+and Gloss/Metallic material sliders. `Document::lighting_effects(id,
+light_x, light_y, light_height, intensity, ambience, bump_height,
+color)` models exactly one Point light (Spot and Infinite are a
+documented scope cut, as is the multi-light limit), always reads the
+layer's own colour as its height field (no texture-channel picker), and
+fixes the material to a non-metallic plastic via two constants,
+`SPEC_STRENGTH = 0.3` and `SHININESS = 16` (standing in for the
+Gloss/Metallic sliders Photoshop exposes). For every pixel `(x, y)`, a
+central-difference gradient of the neighbouring luma — clamped at the
+layer's edges rather than wrapping, `dzdx = (h(x+1,y) − h(x−1,y)) / 2 ·
+scale` and the same for `dzdy`, where `scale = bump_height / 100` —
+feeds a surface normal `n = normalize(−dzdx, −dzdy, 1)`. The direction to
+the light, `l = normalize(light_x − x, light_y − y, light_height)`, gives
+a diffuse term `max(0, n·l)`, and the classic Blinn-Phong half-vector
+`h = normalize(l + (0, 0, 1))` (the fixed straight-on viewer this
+project's flat 2-D canvas implies) gives a specular term `max(0, n·h)
+^ SHININESS`. Each output channel is `orig · (ambience + intensity ·
+diffuse) · tint + 255 · SPEC_STRENGTH · spec · tint`, rounded and clamped
+to `0..=255`, where `tint = color[c] / 255` lets `color` tint both the
+diffuse light and its highlight; alpha is untouched. `intensity`,
+`ambience`, and `bump_height` are all 0-100 percentages, matching
+Photoshop's own slider ranges for this simplified model. A **Lighting
+Effects…** dialog exposes Light X/Y and Height sliders (X/Y default to
+the canvas centre on open, the same pre-seeding `openLensFlareDialog`
+already established), Intensity/Ambience/Bump Height sliders, and a
+colour picker for the light's tint.
+
+**Verified two ways.** Three new `document.rs` tests, all cross-checked
+against an independent Python port of the same formula before being
+written into Rust. The fixture is a 5×5 canvas split at `x = 2` — solid
+`(200, 200, 200, 255)` for `x < 2`, solid `(50, 50, 50, 255)` for `x ≥
+2` — lit by a light at `(1, 1, 30)` with intensity 100, ambience 20, bump
+height 100, and a white tint. `(0, 0)` sits on the bright side closest to
+the light, where the pre-clamp value is `315.94`, so it saturates to
+`255`; `(4, 4)` is far on the dark side, pre-clamp `133.04 → 133`; `(2,
+2)` sits exactly on the luma cliff, where the lateral gradient is so
+steep (`dzdx = (50 − 200) / 2 = −75`) that the tilted normal makes both
+the diffuse and specular terms clamp to zero against this light's
+direction, leaving exactly the ambience floor, `50 × 0.20 = 10.0`, with
+no fractional part to round at all; `(1, 3)` is bright side but far from
+the light, pre-clamp `42.66 → 43`. Every one of these was deliberately
+chosen clear of an exact `.5` boundary — an earlier fixture attempt (a
+flat surface with the light directly overhead) kept landing on exact
+half-integers, where Python's banker's rounding and Rust's
+away-from-zero `f32::round()` disagree, and had to be discarded in
+favour of this one. All three passed on the first run, matching the
+Python reference exactly. A second test confines the same fixture to a
+one-pixel selection at `(0, 0)` and confirms only that pixel changes (to
+the already-verified `255`), with the rest of the canvas untouched. A
+third confirms out-of-range intensity/ambience/bump-height, a
+non-positive or non-finite light height, and a locked/unknown layer all
+error. Live interactive verification under Xvfb was attempted but
+blocked by an environment issue unrelated to this filter's code: this
+session's Xvfb instance stopped delivering synthetic `xdotool` pointer
+clicks to the webview entirely partway through this phase (confirmed via
+a control test against an unrelated, pre-existing, always-enabled
+toolbar button, and confirmed to persist across a full Xvfb-and-app
+restart), so no click in the UI — on this filter's own dialog or on
+anything else — could be exercised this time. The dialog's wiring
+(state, the pre-seeded X/Y callback, the command call, and the
+`runCommand("lighting_effects", …)` parameter names matching the Tauri
+command's own camelCase-converted argument names exactly) was reviewed
+by hand instead. This is a gap in this phase's verification, documented
+rather than silently skipped, on top of test/build coverage that is
+otherwise complete.
+
+**483 Rust tests total** (480 → 483, 476 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

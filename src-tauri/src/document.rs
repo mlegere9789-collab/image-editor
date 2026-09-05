@@ -622,6 +622,23 @@ impl XorShift32 {
     }
 }
 
+/// A 3-vector scaled to unit length, for [`Document::lighting_effects`]'s
+/// surface-normal and light-direction math. The zero vector (a degenerate
+/// input no caller here actually produces) maps to itself rather than
+/// dividing by zero.
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let mag = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if mag == 0.0 {
+        v
+    } else {
+        [v[0] / mag, v[1] / mag, v[2] / mag]
+    }
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
 impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
@@ -3528,6 +3545,87 @@ impl Document {
                 out[c] = (avg[c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
             }
             out[3] = avg[3];
+            out
+        })
+    }
+
+    /// Filter > Render > Lighting Effects: a single point light re-lights
+    /// the layer using its own luma as a bump-mapped height field (a
+    /// central-difference gradient of the luma feeds a Blinn-Phong
+    /// diffuse+specular model). Scope cuts, documented rather than silently
+    /// dropped: only Photoshop's Point light type is modeled (no Spot or
+    /// Infinite), there is one light rather than Photoshop's up to three,
+    /// and the material is fixed non-metallic plastic (`SPEC_STRENGTH`/
+    /// `SHININESS` below stand in for Photoshop's Gloss/Metallic sliders,
+    /// and there is no texture-channel picker — the layer's own colour is
+    /// always the height field). `light_x`/`light_y`/`light_height` are in
+    /// the layer's own pixel/height units; `intensity` and `ambience` are
+    /// percentages (0-100) where `intensity` scales the diffuse term and
+    /// `ambience` is a flat floor kept even where the diffuse term is zero;
+    /// `bump_height` (0-100) scales how strongly the luma gradient
+    /// perturbs the surface normal, with 0 leaving the surface perfectly
+    /// flat. `color` tints both the diffuse light and its specular
+    /// highlight. Height sampling clamps at the layer's edges (a hard
+    /// border) rather than wrapping. Confined to the selection and errors
+    /// on a locked/unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lighting_effects(
+        &mut self,
+        id: LayerId,
+        light_x: f32,
+        light_y: f32,
+        light_height: f32,
+        intensity: u32,
+        ambience: u32,
+        bump_height: u32,
+        color: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        if !(0..=100).contains(&intensity) {
+            return Err("Lighting Effects intensity must be between 0 and 100.".to_string());
+        }
+        if !(0..=100).contains(&ambience) {
+            return Err("Lighting Effects ambience must be between 0 and 100.".to_string());
+        }
+        if !(0..=100).contains(&bump_height) {
+            return Err("Lighting Effects bump height must be between 0 and 100.".to_string());
+        }
+        if !(light_height > 0.0 && light_height.is_finite()) {
+            return Err("Lighting Effects light height must be a positive number.".to_string());
+        }
+        const SPEC_STRENGTH: f32 = 0.3;
+        const SHININESS: i32 = 16;
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let scale = bump_height as f32 / 100.0;
+        let intensity_f = intensity as f32 / 100.0;
+        let ambience_f = ambience as f32 / 100.0;
+        let luma_at = move |source: &[u8], x: i64, y: i64| -> f32 {
+            let cx = x.clamp(0, width as i64 - 1) as usize;
+            let cy = y.clamp(0, height as i64 - 1) as usize;
+            let base = (cy * doc_width + cx) * CHANNELS;
+            0.299 * source[base] as f32
+                + 0.587 * source[base + 1] as f32
+                + 0.114 * source[base + 2] as f32
+        };
+        self.filter_pixels(id, |source, row, col| {
+            let (x, y) = (col as i64, row as i64);
+            let dzdx = (luma_at(source, x + 1, y) - luma_at(source, x - 1, y)) / 2.0 * scale;
+            let dzdy = (luma_at(source, x, y + 1) - luma_at(source, x, y - 1)) / 2.0 * scale;
+            let normal = normalize3([-dzdx, -dzdy, 1.0]);
+            let light_vec = normalize3([light_x - col as f32, light_y - row as f32, light_height]);
+            let diffuse = dot3(normal, light_vec).max(0.0);
+            let half_vec = normalize3([light_vec[0], light_vec[1], light_vec[2] + 1.0]);
+            let spec = dot3(normal, half_vec).max(0.0).powi(SHININESS);
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = source[base + c] as f32;
+                let tint = color[c] as f32 / 255.0;
+                let mut val = orig * (ambience_f + intensity_f * diffuse) * tint;
+                val += 255.0 * SPEC_STRENGTH * spec * tint;
+                out[c] = val.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = source[base + 3];
             out
         })
     }
@@ -8220,6 +8318,108 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.extrude(999, 4, 100, false, 1).is_err());
+    }
+
+    #[test]
+    fn lighting_effects_shades_with_diffuse_and_specular_from_a_luma_bump_map() {
+        // 5x5, split at x=2: bright (200,200,200,255) for x<2, dark
+        // (50,50,50,255) for x>=2. Point light at (1,1,30), intensity
+        // 100, ambience 20, bump height 100, white tint. Values
+        // cross-checked with an independent Python port of the same
+        // Blinn-Phong formula: (0,0) sits on the bright side near the
+        // light, with the pre-clamp value 315.94, so it saturates to
+        // 255; (4,4) is far on the dark side, pre-clamp 133.04 -> 133;
+        // (2,2) sits exactly on the luma cliff, where the huge lateral
+        // gradient tilts the surface normal enough that both the diffuse
+        // and specular terms clamp to zero against this light's
+        // direction, leaving exactly the ambience floor, 50 * 0.20 =
+        // 10.0 -> 10, with no fractional part at all; (1,3) is bright
+        // side but far from the light, pre-clamp 42.66 -> 43. None of
+        // these land on a .5 boundary, so Rust's away-from-zero rounding
+        // and Python's banker's rounding agree on every one.
+        let idx = |x: usize, y: usize| (y * 5 + x) * 4;
+        let mut pixels = Vec::with_capacity(5 * 5 * 4);
+        for _y in 0..5u32 {
+            for x in 0..5u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 5, 5).unwrap();
+        doc.lighting_effects(id, 1.0, 1.0, 30.0, 100, 20, 100, [255, 255, 255])
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(4, 4)..idx(4, 4) + 4], [133, 133, 133, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 3)..idx(1, 3) + 4], [43, 43, 43, 255]);
+    }
+
+    #[test]
+    fn lighting_effects_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 5 + x) * 4;
+        let mut pixels = Vec::with_capacity(5 * 5 * 4);
+        for _y in 0..5u32 {
+            for x in 0..5u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 5, 5).unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc
+            .lighting_effects(id, 1.0, 1.0, 30.0, 100, 20, 100, [255, 255, 255])
+            .unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn lighting_effects_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, 10.0, 101, 20, 100, [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, 10.0, 100, 101, 100, [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, 10.0, 100, 20, 101, [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, 0.0, 100, 20, 100, [255, 255, 255])
+            .is_err());
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, f32::NAN, 100, 20, 100, [255, 255, 255])
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .lighting_effects(id, 0.0, 0.0, 10.0, 100, 20, 100, [255, 255, 255])
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .lighting_effects(999, 0.0, 0.0, 10.0, 100, 20, 100, [255, 255, 255])
+            .is_err());
     }
 
     #[test]
