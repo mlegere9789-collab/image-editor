@@ -95,6 +95,18 @@ pub enum DiffuseMode {
     Anisotropic,
 }
 
+/// Which way Filter > Distort > ZigZag displaces each pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ZigZagStyle {
+    /// Rotate about the centre by an angle proportional to the displacement.
+    AroundCenter,
+    /// Move along the radius, toward or away from the centre.
+    OutFromCenter,
+    /// Shift diagonally by the displacement in both axes.
+    PondRipples,
+}
+
 /// The shape of the region a [`Selection`] covers within its bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2534,6 +2546,101 @@ impl Document {
             return Err(format!("Spherize amount must be a number, got {amount}."));
         }
         self.radial_remap(id, 0.75 * amount / 100.0)
+    }
+
+    /// Filter > Distort > ZigZag: concentric ripples spreading from the
+    /// centre, like a stone dropped in a pond. Each pixel's normalised radius
+    /// `ρ = r / R` — `R` being the distance from the centre to the nearest
+    /// edge — is turned into a displacement `d = A · sin(π · ridges · ρ)`
+    /// pixels, with amplitude `A = amount / 100 · R / ridges`, so `ridges`
+    /// counts the half-waves between the centre and the rim and the ripples
+    /// keep the same proportions at any size. What `d` does is the `style`,
+    /// Photoshop's three radio buttons: **Out From Center** moves the sample
+    /// along the radius to `r + d`; **Around Center** rotates it about the
+    /// centre by `d · π / R` (a displacement of `R` pixels is a half turn);
+    /// **Pond Ripples** shifts it by `d` in both x and y, the diagonal
+    /// motion Photoshop describes as "toward the upper left or lower
+    /// right". Nearest-neighbour via [`sample_nearest`]; the whole layer
+    /// takes part, not just the inscribed circle. Amount 0 is the identity;
+    /// zero ridges, a non-finite amount or a locked/unknown layer is an
+    /// error. Whole pixels move, alpha included.
+    pub fn zig_zag(
+        &mut self,
+        id: LayerId,
+        amount: f32,
+        ridges: u32,
+        style: ZigZagStyle,
+    ) -> Result<Option<Rect>, String> {
+        if ridges == 0 {
+            return Err("ZigZag needs at least one ridge.".to_string());
+        }
+        if !amount.is_finite() {
+            return Err(format!("ZigZag amount must be a number, got {amount}."));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let reach = (width.min(height) - 1) as f32 / 2.0;
+        let amplitude = amount / 100.0 * reach / ridges as f32;
+        self.filter_pixels(id, |source, row, col| {
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let r = (dx * dx + dy * dy).sqrt();
+            let d = amplitude * (std::f32::consts::PI * ridges as f32 * r / reach).sin();
+            let (sx, sy) = match style {
+                ZigZagStyle::OutFromCenter if r > 0.0 => {
+                    let factor = (r + d) / r;
+                    (cx + dx * factor, cy + dy * factor)
+                }
+                ZigZagStyle::OutFromCenter => (col as f32, row as f32),
+                ZigZagStyle::AroundCenter => {
+                    let (sin, cos) = (d * std::f32::consts::PI / reach).sin_cos();
+                    (cx + dx * cos - dy * sin, cy + dx * sin + dy * cos)
+                }
+                ZigZagStyle::PondRipples => (col as f32 + d, row as f32 + d),
+            };
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
+    }
+
+    /// Filter > Distort > Polar Coordinates. **Rectangular to Polar**
+    /// (`to_polar`) wraps the layer into rings: each output pixel's angle
+    /// clockwise from twelve o'clock, as a fraction of a full turn, picks the
+    /// source column across the layer's width, and its normalised radius —
+    /// distance from the centre in units of the half-width horizontally and
+    /// the half-height vertically, so the rim is the inscribed ellipse —
+    /// picks the source row, the top row landing at the centre and the
+    /// bottom row on the rim; the centre itself reads the top-left corner.
+    /// **Polar to Rectangular** is the inverse reading: column `x` is the
+    /// angle `x / width` of a turn and row `y` the radius `y / (height − 1)`,
+    /// so a ring unrolls into a row. Nearest-neighbour via
+    /// [`sample_nearest`], so corners beyond the rim repeat the bottom row.
+    /// Errors on a locked/unknown layer. Whole pixels move, alpha included.
+    pub fn polar_coordinates(
+        &mut self,
+        id: LayerId,
+        to_polar: bool,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (hx, hy) = (width as f32 / 2.0, height as f32 / 2.0);
+        let (w, rows) = (width as f32, (height - 1) as f32);
+        self.filter_pixels(id, |source, row, col| {
+            let (sx, sy) = if to_polar {
+                let (nx, ny) = ((col as f32 - cx) / hx, (row as f32 - cy) / hy);
+                let rho = (nx * nx + ny * ny).sqrt();
+                let mut theta = if rho > 0.0 { nx.atan2(-ny) } else { 0.0 };
+                if theta < 0.0 {
+                    theta += std::f32::consts::TAU;
+                }
+                (theta / std::f32::consts::TAU * w, rho * rows)
+            } else {
+                let theta = col as f32 / w * std::f32::consts::TAU;
+                let rho = row as f32 / rows;
+                (cx + rho * hx * theta.sin(), cy - rho * hy * theta.cos())
+            };
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
     }
 
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
@@ -6110,6 +6217,142 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.pinch(999, 50.0).is_err());
         assert!(empty.spherize(999, 50.0).is_err());
+    }
+
+    #[test]
+    fn zig_zag_out_from_center_moves_pixels_along_the_radius() {
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        // 9x9: R = 4, so ρ = r/4 and, with two ridges, the displacement is
+        // sin(2πρ) times an amplitude of R/ridges = 2 px. One step out
+        // (ρ = 0.25) the sine is 1: (5, 4) reads r = 3 → (7, 4) = 74 and
+        // (4, 5) reads (4, 7) = 47. Three steps out (ρ = 0.75) it is −1:
+        // (7, 4) reads r = 1 → 54. Two and four steps out the sine is 0 and
+        // nothing moves, nor does the centre. The diagonal (5, 5) at r = √2
+        // reads r = 3.0 → (6.12, 6.12) → 66.
+        let (mut doc, id) = ramp_square(9);
+        doc.zig_zag(id, 100.0, 2, ZigZagStyle::OutFromCenter)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(5, 4)], 74);
+        assert_eq!(p[idx(4, 5)], 47);
+        assert_eq!(p[idx(7, 4)], 54);
+        assert_eq!(p[idx(6, 4)], 64);
+        assert_eq!(p[idx(8, 4)], 84);
+        assert_eq!(p[idx(4, 4)], 44);
+        assert_eq!(p[idx(5, 5)], 66);
+        assert_eq!(p[idx(5, 4) + 3], 255);
+
+        // A negative amount pulls the other way: (5, 4) reads r = −1, i.e.
+        // straight through the centre to (3, 4) = 34.
+        let (mut doc, id) = ramp_square(9);
+        doc.zig_zag(id, -100.0, 2, ZigZagStyle::OutFromCenter)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(5, 4)], 34);
+    }
+
+    #[test]
+    fn zig_zag_around_center_and_pond_ripples_move_the_other_ways() {
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        // Around Center turns the same 2 px displacement into a rotation of
+        // d·π/R = π/2: (5, 4) reads a quarter turn on → (4, 5) = 45, (4, 5)
+        // reads (3, 4) = 34, and (7, 4)'s −2 px is a quarter turn back →
+        // (4, 1) = 41.
+        let (mut doc, id) = ramp_square(9);
+        doc.zig_zag(id, 100.0, 2, ZigZagStyle::AroundCenter)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(5, 4)], 45);
+        assert_eq!(p[idx(4, 5)], 34);
+        assert_eq!(p[idx(7, 4)], 41);
+
+        // Pond Ripples shifts diagonally by d in both axes: (5, 4) reads
+        // (7, 6) = 76, (7, 4) reads (5, 2) = 52, (4, 5) reads (6, 7) = 67,
+        // and (6, 4), where the sine is 0, stays 64.
+        let (mut doc, id) = ramp_square(9);
+        doc.zig_zag(id, 100.0, 2, ZigZagStyle::PondRipples).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(5, 4)], 76);
+        assert_eq!(p[idx(7, 4)], 52);
+        assert_eq!(p[idx(4, 5)], 67);
+        assert_eq!(p[idx(6, 4)], 64);
+    }
+
+    #[test]
+    fn polar_coordinates_wrap_rows_into_rings_and_back() {
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        // Rectangular → Polar: the angle clockwise from twelve o'clock
+        // becomes the source column (a full turn is the width, 9) and the
+        // normalised radius the source row (the rim is row 8). On the 9x9
+        // ramp the top-centre (4, 0) is at angle 0 and ρ = 8/9 → reads
+        // (0, 7.11) → 7; three o'clock (8, 4) is a quarter turn → column
+        // 2.25 → (2, 7) = 27; nine o'clock (0, 4) is three quarters → column
+        // 6.75 → (7, 7) = 77; (6, 2) is 45° at ρ = 0.63 → (1.13, 5.03) → 15;
+        // the centre reads the top-left corner.
+        let (mut doc, id) = ramp_square(9);
+        doc.polar_coordinates(id, true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(4, 0)], 7);
+        assert_eq!(p[idx(8, 4)], 27);
+        assert_eq!(p[idx(0, 4)], 77);
+        assert_eq!(p[idx(6, 2)], 15);
+        assert_eq!(p[idx(4, 4)], 0);
+        assert_eq!(p[idx(4, 0) + 3], 255);
+
+        // Polar → Rectangular is the inverse reading: column x is the angle
+        // x/9 of a turn, row y the radius y/8. (0, 4) is straight up at half
+        // radius → (4, 1.75) → (4, 2) = 42; (2, 4) is 80° → (6.22, 3.61) →
+        // (6, 4) = 64; (6, 4) is 240° → (2.05, 5.13) → (2, 5) = 25; row 0 is
+        // the centre → 44.
+        let (mut doc, id) = ramp_square(9);
+        doc.polar_coordinates(id, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 4)], 42);
+        assert_eq!(p[idx(2, 4)], 64);
+        assert_eq!(p[idx(6, 4)], 25);
+        assert_eq!(p[idx(0, 0)], 44);
+    }
+
+    #[test]
+    fn zig_zag_and_polar_coordinates_honour_the_selection_and_propagate_errors() {
+        let idx = |x: usize, y: usize| (y * 9 + x) * 4;
+        let (mut doc, id) = ramp_square(9);
+        let before = doc.layers()[0].pixels.clone();
+        doc.zig_zag(id, 0.0, 5, ZigZagStyle::PondRipples).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        let (mut doc, id) = ramp_square(9);
+        doc.select_rectangle(5.0, 4.0, 6.0, 5.0).unwrap();
+        let dirty = doc
+            .zig_zag(id, 100.0, 2, ZigZagStyle::OutFromCenter)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(5, 4)], 74);
+        assert_eq!(doc.layers()[0].pixels[idx(7, 4)], 74); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 5,
+                y0: 4,
+                x1: 6,
+                y1: 5
+            })
+        );
+
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc
+            .zig_zag(id, 10.0, 0, ZigZagStyle::OutFromCenter)
+            .is_err());
+        assert!(doc
+            .zig_zag(id, f32::NAN, 5, ZigZagStyle::OutFromCenter)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.zig_zag(id, 10.0, 5, ZigZagStyle::AroundCenter).is_err());
+        assert!(doc.polar_coordinates(id, true).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .zig_zag(999, 10.0, 5, ZigZagStyle::PondRipples)
+            .is_err());
+        assert!(empty.polar_coordinates(999, false).is_err());
     }
 
     #[test]

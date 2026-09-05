@@ -47,6 +47,14 @@ const RIPPLE_SIZES: readonly (readonly [RippleSize, string, number])[] = [
   ["large", "Large", 32],
 ];
 
+type ZigZagStyle = "aroundCenter" | "outFromCenter" | "pondRipples";
+
+const ZIGZAG_STYLES: readonly (readonly [ZigZagStyle, string])[] = [
+  ["aroundCenter", "Around Center"],
+  ["outFromCenter", "Out From Center"],
+  ["pondRipples", "Pond Ripples"],
+];
+
 const TEXT_INPUT_TYPES = new Set(["text", "number", "search", "email", "url", "password"]);
 
 // Keyboard shortcuts must not steal Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+Z from a
@@ -279,6 +287,12 @@ export default function App() {
   const [pinchAmount, setPinchAmount] = useState(50);
   const [showSpherizeDialog, setShowSpherizeDialog] = useState(false);
   const [spherizeAmount, setSpherizeAmount] = useState(50);
+  const [showZigZagDialog, setShowZigZagDialog] = useState(false);
+  const [zigZagAmount, setZigZagAmount] = useState(10);
+  const [zigZagRidges, setZigZagRidges] = useState(5);
+  const [zigZagStyle, setZigZagStyle] = useState<ZigZagStyle>("pondRipples");
+  const [showPolarDialog, setShowPolarDialog] = useState(false);
+  const [polarToPolar, setPolarToPolar] = useState(true);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -704,6 +718,23 @@ export default function App() {
     await runCommand("spherize", { id: selectedId, amount: spherizeAmount });
     setShowSpherizeDialog(false);
   }, [runCommand, selectedId, spherizeAmount]);
+
+  const applyZigZag = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("zig_zag", {
+      id: selectedId,
+      amount: zigZagAmount,
+      ridges: zigZagRidges,
+      style: zigZagStyle,
+    });
+    setShowZigZagDialog(false);
+  }, [runCommand, selectedId, zigZagAmount, zigZagRidges, zigZagStyle]);
+
+  const applyPolarCoordinates = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("polar_coordinates", { id: selectedId, toPolar: polarToPolar });
+    setShowPolarDialog(false);
+  }, [runCommand, selectedId, polarToPolar]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1875,6 +1906,22 @@ export default function App() {
             title="Filter > Distort > Spherize"
           >
             Spherize…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowZigZagDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > ZigZag"
+          >
+            ZigZag…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPolarDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Polar Coordinates"
+          >
+            Polar Coordinates…
           </button>
           <input
             type="color"
@@ -3836,6 +3883,104 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySpherize} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showZigZagDialog && (
+        <div className="modal-overlay" onClick={() => setShowZigZagDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="ZigZag"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; ZigZag</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{zigZagAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={zigZagAmount}
+                onChange={(event) => setZigZagAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Ridges
+                <span className="control__value">{zigZagRidges}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={zigZagRidges}
+                onChange={(event) => setZigZagRidges(Number(event.target.value))}
+              />
+            </label>
+            {ZIGZAG_STYLES.map(([value, label]) => (
+              <label key={value} className="control control--row">
+                <span className="control__label">{label}</span>
+                <input
+                  type="radio"
+                  name="zigzag-style"
+                  value={value}
+                  checked={zigZagStyle === value}
+                  onChange={() => setZigZagStyle(value)}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowZigZagDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyZigZag} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPolarDialog && (
+        <div className="modal-overlay" onClick={() => setShowPolarDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Polar Coordinates"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Polar Coordinates</h2>
+            <label className="control control--row">
+              <span className="control__label">Rectangular to Polar</span>
+              <input
+                type="radio"
+                name="polar-direction"
+                checked={polarToPolar}
+                onChange={() => setPolarToPolar(true)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Polar to Rectangular</span>
+              <input
+                type="radio"
+                name="polar-direction"
+                checked={!polarToPolar}
+                onChange={() => setPolarToPolar(false)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPolarDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPolarCoordinates} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -18,7 +18,8 @@ use tauri::{Manager, State};
 use blend::BlendMode;
 use composite::Rect;
 use document::{
-    Clipboard, DiffuseMode, Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS,
+    Clipboard, DiffuseMode, Document, DocumentView, LayerId, MoveDirection, Stroke, ZigZagStyle,
+    CHANNELS,
 };
 
 /// Same order of magnitude as `png::MAX_FILE_BYTES` — a blank canvas this
@@ -893,6 +894,31 @@ fn spherize(state: State<'_, AppState>, id: LayerId, amount: f32) -> Result<Snap
     edit_checkpointed(&state, |document| document.spherize(id, amount))
 }
 
+/// Filter > Distort > ZigZag on layer `id`.
+#[tauri::command]
+fn zig_zag(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: f32,
+    ridges: u32,
+    style: ZigZagStyle,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.zig_zag(id, amount, ridges, style)
+    })
+}
+
+/// Filter > Distort > Polar Coordinates on layer `id`; `to_polar` picks
+/// Rectangular to Polar (true) or Polar to Rectangular (false).
+#[tauri::command]
+fn polar_coordinates(
+    state: State<'_, AppState>,
+    id: LayerId,
+    to_polar: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.polar_coordinates(id, to_polar))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1369,6 +1395,8 @@ pub fn run() {
             twirl,
             pinch,
             spherize,
+            zig_zag,
+            polar_coordinates,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

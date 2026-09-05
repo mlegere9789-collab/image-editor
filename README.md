@@ -3061,6 +3061,68 @@ middle. Undo restored the original after each.
 **429 Rust tests total** (426 → 429, 422 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 39 — Filter > Distort: ZigZag and Polar Coordinates
+
+The last two Distort filters. **ZigZag** sends concentric ripples out
+from the centre, like a stone dropped in a pond: each pixel's
+normalised radius `ρ = r / R` (`R` the distance from the centre to the
+nearest edge) becomes a displacement `d = A · sin(π · ridges · ρ)`
+pixels, with amplitude `A = amount / 100 · R / ridges`, so `ridges`
+counts the half-waves between the centre and the rim and the pattern
+keeps its proportions at any canvas size. What `d` does is Photoshop's
+`style` radio group: **Out From Center** moves the sample along the
+radius to `r + d`; **Around Center** rotates it about the centre by
+`d · π / R` (a displacement of `R` pixels is a half turn); **Pond
+Ripples** shifts it by `d` in both x and y, the diagonal motion
+Photoshop itself describes as "toward the upper left or lower right".
+**Polar Coordinates** has two directions. Rectangular to Polar wraps
+the layer into rings: each output pixel's angle clockwise from twelve
+o'clock, as a fraction of a full turn, picks the source column, and its
+normalised radius — distance from the centre in units of the
+half-width and half-height, so the rim is the inscribed ellipse — picks
+the source row, top row at the centre and bottom row on the rim,
+which is why the centre pixel itself reads the top-left corner. Polar
+to Rectangular is the inverse reading: column `x` is the angle `x /
+width` of a turn and row `y` the radius `y / (height − 1)`, unrolling a
+ring into a row. Both filters use the same nearest-neighbour
+`sample_nearest` the whole Distort submenu shares, act on the whole
+layer (not just an inscribed shape, for ZigZag), and move whole pixels
+including alpha. The frontend adds **ZigZag…** (Amount −100..100 %,
+Ridges 1..20, style radios) and **Polar Coordinates…** (a two-way radio
+choice) dialogs.
+
+**Verified two ways.** Four new `document.rs` tests on the 9×9
+`ramp_square` fixture (red `10·x + y`), every position worked by hand
+and cross-checked with a scripted evaluation of the same formulas. With
+`R = 4` and 2 ridges the displacement amplitude is `R / ridges = 2 px`.
+Out From Center at 100 %: one step out (`ρ = 0.25`) the sine is 1, so
+(5, 4) reads `r = 3` → (7, 4) = 74 and (4, 5) reads (4, 7) = 47; three
+steps out (`ρ = 0.75`) it is −1, so (7, 4) reads `r = 1` → 54; at two
+and four steps the sine is 0 and nothing moves, nor does the centre; a
+diagonal pixel at `r = √2` reads `r = 3.0` → 66; a negative amount
+sends (5, 4) clean through the centre to (3, 4) = 34. Around Center
+turns the same 2 px into a `π/2` rotation: (5, 4) reads a quarter turn
+on, (4, 5) = 45; (7, 4)'s −2 px is a quarter turn back, (4, 1) = 41.
+Pond Ripples shifts diagonally: (5, 4) reads (7, 6) = 76, (7, 4) reads
+(5, 2) = 52, and (6, 4), where the sine is 0, stays 64. For Polar
+Coordinates, Rectangular to Polar sends the top-centre pixel (angle 0,
+`ρ = 8/9`) to (0, 7.11) → 7, three o'clock (a quarter turn) to (2, 7) =
+27, nine o'clock (three quarters) to (7, 7) = 77, and a 45° point to
+(1.13, 5.03) → 15; Polar to Rectangular inverts the same map, sending
+(0, 4) — straight up at half radius — to (4, 1.75) → 42 and (6, 4) —
+240° — to (2.05, 5.13) → 25. Amount 0 is the identity for ZigZag; a
+one-pixel selection confines each filter to a 1×1 dirty rect; zero
+ridges, non-finite amounts, locked layers and unknown ids all error.
+All passing on first run. Live under Xvfb on the bundled gradient
+sample: ZigZag Out From Center at 53 % turned every straight grid line
+into a smooth ripple radiating from the canvas centre; after an undo,
+Rectangular to Polar wrapped the whole grid into concentric rings
+crossed by radial spokes, exactly the unrolled-cylinder mapping the
+formula predicts. Undo restored the original after each.
+
+**433 Rust tests total** (429 → 433, 426 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
