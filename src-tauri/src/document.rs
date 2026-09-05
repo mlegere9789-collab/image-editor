@@ -296,6 +296,44 @@ fn median_at(
     median
 }
 
+/// The per-channel maximum (`want_max`) or minimum of `source`'s pixels in
+/// the same `(2*radius+1)`-square, edge-clamped window [`median_at`] and
+/// [`box_blur_at`] use. Photoshop's Maximum and Minimum filters are the
+/// morphological *dilate* and *erode*: Maximum grows light regions into
+/// dark ones (every pixel becomes the brightest thing within `radius`),
+/// Minimum grows dark regions into light ones. Each channel is treated
+/// independently, alpha included, like the other window filters.
+fn extreme_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (u32, u32),
+    radius: i64,
+    want_max: bool,
+) -> [u8; CHANNELS] {
+    let mut out = if want_max {
+        [0u8; CHANNELS]
+    } else {
+        [255u8; CHANNELS]
+    };
+    for dy in -radius..=radius {
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        for dx in -radius..=radius {
+            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+            let base = (sy * doc_width + sx) * CHANNELS;
+            for (c, slot) in out.iter_mut().enumerate() {
+                let v = source[base + c];
+                *slot = if want_max {
+                    (*slot).max(v)
+                } else {
+                    (*slot).min(v)
+                };
+            }
+        }
+    }
+    out
+}
+
 /// A tiny, dependency-free pseudo-random generator (Marsaglia's
 /// xorshift32) for [`Document::add_noise`]. Chosen over pulling in the
 /// `rand` crate for one reason that matters more than statistical
@@ -1540,6 +1578,141 @@ impl Document {
             }
         }
         Ok(Some(target_bounds))
+    }
+
+    /// Filter > Other > Maximum: every channel of each selected pixel
+    /// becomes the largest value of that channel within `radius` — the
+    /// morphological dilate, which spreads light areas into dark ones
+    /// (Photoshop suggests it for choking a mask's dark edges). See
+    /// [`extreme_at`]. Same edge clamping, pre-pass snapshot, selection
+    /// confinement, and error conditions as [`Self::box_blur`].
+    pub fn maximum(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        self.extreme_filter(id, radius, true)
+    }
+
+    /// Filter > Other > Minimum: the counterpart of [`Self::maximum`] —
+    /// every channel becomes the smallest value within `radius`, the
+    /// morphological erode, spreading dark areas into light ones.
+    pub fn minimum(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        self.extreme_filter(id, radius, false)
+    }
+
+    fn extreme_filter(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        want_max: bool,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Radius must be at least 1 pixel.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let picked =
+                    extreme_at(&source, doc_width, (width, height), (row, col), r, want_max);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&picked);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Other > High Pass: keeps only each pixel's deviation from
+    /// its local average, centred on mid-grey — `out = original -
+    /// box_blurred + 128` per colour channel, clamped. Flat areas come
+    /// out a uniform 128 and only edges and fine detail survive, which is
+    /// why Photoshop's High Pass is the usual starting point for
+    /// "overlay-blend sharpening" and for finding detail before a
+    /// Threshold. Built on [`box_blur_at`], so the "local average" is the
+    /// same flat `(2*radius+1)`-square mean [`Self::box_blur`] uses rather
+    /// than Photoshop's Gaussian — the same simplification `box_blur`
+    /// itself makes. Alpha is untouched: it's a colour-detail filter, not
+    /// a transparency one. Errors on a zero radius or a locked/unknown
+    /// layer.
+    pub fn high_pass(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("High Pass radius must be at least 1 pixel.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let v = source[dst + c] as i32 - blurred[c] as i32 + 128;
+                    layer.pixels[dst + c] = v.clamp(0, 255) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Filter > Other > Offset: shifts the whole layer by `dx` pixels
+    /// right and `dy` pixels down, with whatever slides off one edge
+    /// wrapping back in on the opposite one — Photoshop's "Wrap Around"
+    /// mode, the one that matters for making seamless tiles (shift by
+    /// half the canvas and the old edges meet in the middle, where you
+    /// can retouch the seam). Negative or oversized amounts are taken
+    /// modulo the layer size, so `dx = -1` and `dx = width - 1` are the
+    /// same shift and `dx = width` is a no-op. Photoshop's other two
+    /// fill modes for the vacated area (Repeat Edge Pixels, Set to
+    /// Transparent) and its confine-to-selection behaviour are
+    /// deliberate scope cuts: this always moves the entire layer,
+    /// selection ignored, the same whole-layer stance
+    /// [`Self::flip_layer_horizontal`] takes. Errors on a locked/unknown
+    /// layer.
+    pub fn offset(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for y in 0..height {
+            let sy = (y - dy as i64).rem_euclid(height) as usize;
+            for x in 0..width {
+                let sx = (x - dx as i64).rem_euclid(width) as usize;
+                let src = (sy * doc_width + sx) * CHANNELS;
+                let dst = (y as usize * doc_width + x as usize) * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&source[src..src + CHANNELS]);
+            }
+        }
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        }))
     }
 
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
@@ -4108,6 +4281,120 @@ mod tests {
         assert!(err.contains("locked"), "{err}");
         assert_eq!(reds(&doc), [10, 20, 30, 40]);
         assert!(doc.equalize(999, false).is_err());
+    }
+
+    // Filter > Other, on the ramped 3x3 layer whose radius-1 windows are
+    // already listed sample-by-sample in the box-blur and median tests.
+
+    #[test]
+    fn maximum_takes_the_neighbourhood_maximum() {
+        let (mut doc, id) = ramped_3x3();
+        doc.maximum(id, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Top-left window {10,10,20,10,10,20,40,40,50} -> 50; the centre
+        // sees the whole grid -> 90; the top edge pixel (1,0) sees rows
+        // 0,0,1 x cols 0,1,2 -> 60.
+        assert_eq!(p[idx(0, 0)], 50);
+        assert_eq!(p[idx(1, 1)], 90);
+        assert_eq!(p[idx(1, 0)], 60);
+        assert_eq!(p[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn minimum_takes_the_neighbourhood_minimum() {
+        let (mut doc, id) = ramped_3x3();
+        doc.minimum(id, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(1, 1)], 10);
+        // Bottom-right window {50,60,60,80,90,90,80,90,90} -> 50.
+        assert_eq!(p[idx(2, 2)], 50);
+    }
+
+    #[test]
+    fn maximum_and_minimum_are_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.maximum(id, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 50);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 20);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.minimum(id, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(2, 2)], 50);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 50); // untouched original
+    }
+
+    #[test]
+    fn high_pass_keeps_only_the_deviation_from_the_local_mean() {
+        let (mut doc, id) = ramped_3x3();
+        doc.high_pass(id, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Box-blurred values from the box-blur test: 23 / 50 / 76.
+        assert_eq!(p[idx(0, 0)], 115); // 10 - 23 + 128
+        assert_eq!(p[idx(1, 1)], 128);
+        assert_eq!(p[idx(2, 2)], 142); // 90 - 76 + 128
+
+        // A flat channel (green is 0 everywhere) becomes uniform mid-grey;
+        // alpha is not a colour channel and stays put.
+        assert_eq!(p[idx(0, 0) + 1], 128);
+        assert_eq!(p[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn offset_wraps_pixels_around_the_layer() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.offset(id, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Each row rotates right by one: 10,20,30 -> 30,10,20.
+        assert_eq!([p[idx(0, 0)], p[idx(1, 0)], p[idx(2, 0)]], [30, 10, 20]);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.offset(id, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // Rows move down by one; the old bottom row wraps to the top.
+        assert_eq!([p[idx(0, 0)], p[idx(1, 0)], p[idx(2, 0)]], [70, 80, 90]);
+        assert_eq!([p[idx(0, 1)], p[idx(1, 1)], p[idx(2, 1)]], [10, 20, 30]);
+    }
+
+    #[test]
+    fn offset_by_a_full_dimension_is_a_no_op_and_negative_amounts_wrap() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.offset(id, 3, -3).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        let (mut a, ida) = ramped_3x3();
+        let (mut b, idb) = ramped_3x3();
+        a.offset(ida, -1, 0).unwrap();
+        b.offset(idb, 2, 0).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+        let p = &a.layers()[0].pixels;
+        assert_eq!([p[idx(0, 0)], p[idx(1, 0)], p[idx(2, 0)]], [20, 30, 10]);
+    }
+
+    #[test]
+    fn other_filters_propagate_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.maximum(id, 0).is_err());
+        assert!(doc.minimum(id, 0).is_err());
+        assert!(doc.high_pass(id, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.maximum(id, 1).is_err());
+        assert!(doc.minimum(id, 1).is_err());
+        assert!(doc.high_pass(id, 1).is_err());
+        assert!(doc.offset(id, 1, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.maximum(999, 1).is_err());
+        assert!(empty.offset(999, 1, 0).is_err());
     }
 
     #[test]

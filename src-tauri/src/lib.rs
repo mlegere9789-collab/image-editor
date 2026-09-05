@@ -752,6 +752,30 @@ fn equalize(
     edit_checkpointed(&state, |document| document.equalize(id, entire_image))
 }
 
+/// Filter > Other > Maximum on layer `id`.
+#[tauri::command]
+fn maximum(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.maximum(id, radius))
+}
+
+/// Filter > Other > Minimum on layer `id`.
+#[tauri::command]
+fn minimum(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.minimum(id, radius))
+}
+
+/// Filter > Other > High Pass on layer `id`.
+#[tauri::command]
+fn high_pass(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.high_pass(id, radius))
+}
+
+/// Filter > Other > Offset (wrap around) on layer `id`.
+#[tauri::command]
+fn offset(state: State<'_, AppState>, id: LayerId, dx: i32, dy: i32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.offset(id, dx, dy))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1184,6 +1208,10 @@ pub fn run() {
             dust_and_scratches,
             add_noise,
             equalize,
+            maximum,
+            minimum,
+            high_pass,
+            offset,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

@@ -2466,6 +2466,84 @@ maps to 255 — the "based on selected area" semantics made visible.
 **378 Rust tests total** (371 → 378, 371 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 29 — Filter > Other: Maximum, Minimum, High Pass, Offset
+
+Photoshop's "Other" submenu is four unrelated utilities that share
+nothing but a home, and they land here as four methods that reuse the
+neighbourhood machinery the blur and noise filters already built.
+**Maximum** and **Minimum** are the morphological dilate and erode:
+every channel of every pixel becomes the largest (or smallest) value
+found anywhere in the `(2·radius + 1)`-square window around it, the
+window clamped at the layer edges the way `median_at` clamps. A shared
+`extreme_at` helper walks that window once per pixel and keeps a
+running max or min per channel, so `Document::maximum` and
+`Document::minimum` are one `extreme_filter(id, radius, want_max)`
+differing only in the comparison. Light regions spread into dark ones
+under Maximum (a one-pixel white line becomes `2·radius + 1` wide);
+dark regions spread into light ones under Minimum (that same line
+vanishes once the radius exceeds half its width). Both honour the
+selection and the layer lock, and both reject a zero radius — a
+zero-radius max is the identity and Photoshop refuses it too.
+
+**High Pass** keeps only what differs from the local average:
+`out = original − box_blurred + 128` per colour channel, clamped to
+0..=255. It reuses `box_blur_at`, so its "local average" is the same
+flat square mean `Document::box_blur` uses rather than Photoshop's
+Gaussian — the simplification `box_blur` itself already makes. A
+region with no detail comes out a uniform mid-grey 128; only edges and
+texture survive, which is why Photoshop's High Pass is the classic
+first step of overlay-blend sharpening. Alpha is not a colour channel
+and is left alone.
+
+**Offset** shifts the whole layer by `dx` pixels right and `dy` down,
+with everything that slides off one edge wrapping back in on the
+opposite one — Photoshop's Wrap Around mode, the one that makes
+seamless tiles (shift by half the canvas and the old outer edges meet
+in the middle where the seam can be retouched). The source coordinate
+is `(x − dx).rem_euclid(width)`, so negative and oversized amounts fold
+correctly: `dx = −1` is `dx = width − 1`, and `dx = width` is a no-op.
+Photoshop's other two fill modes for the vacated area (Repeat Edge
+Pixels, Set to Transparent) and its confine-to-selection behaviour are
+deliberate scope cuts, documented on the method: Offset here always
+moves the entire layer and ignores the selection, the same
+whole-layer stance `flip_layer_horizontal` takes. The frontend adds
+**Maximum…**, **Minimum…**, **High Pass…** (radius sliders) and
+**Offset…** (horizontal and vertical sliders spanning ±document
+width/height) after Equalize.
+
+**Verified two ways.** Seven new `document.rs` tests on the 3×3
+red-ramp fixture (10, 20, 30 / 40, 50, 60 / 70, 80, 90), whose
+neighbourhoods are small enough to list by hand. Maximum at radius 1:
+the top-left corner's clamped window is {10, 10, 20, 10, 10, 20, 40,
+40, 50} → 50, the centre sees the whole grid → 90, and the top-edge
+pixel (1, 0) sees rows 0, 0, 1 × columns 0, 1, 2 → 60. Minimum on the
+same layer: 10, 10, and the bottom-right window {50, 60, 60, 80, 90,
+90, 80, 90, 90} → 50. A selection test confines each: Maximum with
+only pixel (0, 0) selected changes it to 50 while its neighbour (1, 0)
+stays 20; Minimum with only (2, 2) selected changes it to 50 while the
+centre keeps its original 50. High Pass at radius 1 reuses the
+box-blur test's already-verified local means (23, 50, 76) to expect
+`10 − 23 + 128 = 115`, `50 − 50 + 128 = 128`, `90 − 76 + 128 = 142`,
+with the flat green channel collapsing to 128 and alpha untouched at
+255. Offset by (1, 0) rotates each row right — 10, 20, 30 → 30, 10, 20
+— and by (0, 1) moves the bottom row to the top (70, 80, 90 above 10,
+20, 30). A second Offset test pins the wrap arithmetic: shifting by
+(3, −3) on a 3×3 layer is pixel-for-pixel identical to the original,
+and `dx = −1` produces exactly the same pixels as `dx = 2` (20, 30,
+10). Zero radii, locked layers and unknown ids all error without
+touching the pixels. All passing on first run. Live under Xvfb on the
+bundled gradient sample: **Maximum** at radius 6 dilated the thin
+white grid lines into thick white bands, **Minimum** at radius 2 on
+the original erased those same thin lines entirely (erosion by a
+window wider than the line), **High Pass** at radius 3 flattened every
+smooth gradient tile to neutral grey while the grid-line edges survived
+as coloured fringes, and **Offset** by 206 px horizontally produced the
+expected seam with the right-hand third of the image wrapped round to
+the left edge. Undo restored the original after each.
+
+**385 Rust tests total** (378 → 385, 378 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

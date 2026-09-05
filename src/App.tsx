@@ -243,6 +243,16 @@ export default function App() {
   const [noiseGaussian, setNoiseGaussian] = useState(false);
   const [noiseMonochromatic, setNoiseMonochromatic] = useState(false);
 
+  const [showMaximumDialog, setShowMaximumDialog] = useState(false);
+  const [maximumRadius, setMaximumRadius] = useState(1);
+  const [showMinimumDialog, setShowMinimumDialog] = useState(false);
+  const [minimumRadius, setMinimumRadius] = useState(1);
+  const [showHighPassDialog, setShowHighPassDialog] = useState(false);
+  const [highPassRadius, setHighPassRadius] = useState(3);
+  const [showOffsetDialog, setShowOffsetDialog] = useState(false);
+  const [offsetX, setOffsetX] = useState(0);
+  const [offsetY, setOffsetY] = useState(0);
+
   const [tool, setTool] = useState<Tool>("brush");
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -614,6 +624,30 @@ export default function App() {
     });
     setShowAddNoiseDialog(false);
   }, [runCommand, selectedId, noiseAmount, noiseGaussian, noiseMonochromatic]);
+
+  const applyMaximum = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("maximum", { id: selectedId, radius: maximumRadius });
+    setShowMaximumDialog(false);
+  }, [runCommand, selectedId, maximumRadius]);
+
+  const applyMinimum = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("minimum", { id: selectedId, radius: minimumRadius });
+    setShowMinimumDialog(false);
+  }, [runCommand, selectedId, minimumRadius]);
+
+  const applyHighPass = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("high_pass", { id: selectedId, radius: highPassRadius });
+    setShowHighPassDialog(false);
+  }, [runCommand, selectedId, highPassRadius]);
+
+  const applyOffset = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("offset", { id: selectedId, dx: offsetX, dy: offsetY });
+    setShowOffsetDialog(false);
+  }, [runCommand, selectedId, offsetX, offsetY]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1520,6 +1554,38 @@ export default function App() {
             title="Image > Adjustments > Equalize > Equalize entire image based on selected area"
           >
             Equalize from Sel.
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMaximumDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Other > Maximum"
+          >
+            Maximum…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMinimumDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Other > Minimum"
+          >
+            Minimum…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowHighPassDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Other > High Pass"
+          >
+            High Pass…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowOffsetDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Other > Offset (wrap around)"
+          >
+            Offset…
           </button>
           <input
             type="color"
@@ -2774,6 +2840,155 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyAddNoise} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMaximumDialog && (
+        <div className="modal-overlay" onClick={() => setShowMaximumDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Maximum"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Other &gt; Maximum</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{maximumRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={maximumRadius}
+                onChange={(event) => setMaximumRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowMaximumDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyMaximum} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMinimumDialog && (
+        <div className="modal-overlay" onClick={() => setShowMinimumDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Minimum"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Other &gt; Minimum</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{minimumRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={minimumRadius}
+                onChange={(event) => setMinimumRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowMinimumDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyMinimum} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHighPassDialog && (
+        <div className="modal-overlay" onClick={() => setShowHighPassDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="High Pass"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Other &gt; High Pass</h2>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{highPassRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={40}
+                value={highPassRadius}
+                onChange={(event) => setHighPassRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowHighPassDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyHighPass} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOffsetDialog && (
+        <div className="modal-overlay" onClick={() => setShowOffsetDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Offset"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Other &gt; Offset</h2>
+            <label className="control">
+              <span className="control__label">
+                Horizontal
+                <span className="control__value">{offsetX}px</span>
+              </span>
+              <input
+                type="range"
+                min={-(document?.width ?? 1)}
+                max={document?.width ?? 1}
+                value={offsetX}
+                onChange={(event) => setOffsetX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Vertical
+                <span className="control__value">{offsetY}px</span>
+              </span>
+              <input
+                type="range"
+                min={-(document?.height ?? 1)}
+                max={document?.height ?? 1}
+                value={offsetY}
+                onChange={(event) => setOffsetY(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowOffsetDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyOffset} disabled={busy}>
                 Apply
               </button>
             </div>
