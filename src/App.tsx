@@ -317,6 +317,11 @@ export default function App() {
   const [showDifferenceCloudsDialog, setShowDifferenceCloudsDialog] = useState(false);
   const [differenceCloudsForeground, setDifferenceCloudsForeground] = useState("#ffffff");
   const [differenceCloudsBackground, setDifferenceCloudsBackground] = useState("#000000");
+  const [showFibersDialog, setShowFibersDialog] = useState(false);
+  const [fibersVariance, setFibersVariance] = useState(50);
+  const [fibersStrength, setFibersStrength] = useState(4);
+  const [fibersForeground, setFibersForeground] = useState("#ffffff");
+  const [fibersBackground, setFibersBackground] = useState("#000000");
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -861,6 +866,23 @@ export default function App() {
     });
     setShowDifferenceCloudsDialog(false);
   }, [runCommand, selectedId, differenceCloudsForeground, differenceCloudsBackground]);
+
+  const applyFibers = useCallback(async () => {
+    if (selectedId === null) return;
+    const [fr, fg, fb] = hexToRgb(fibersForeground);
+    const [br, bg, bb] = hexToRgb(fibersBackground);
+    // A fresh seed per apply, as with Add Noise/Clouds.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("fibers", {
+      id: selectedId,
+      variance: fibersVariance,
+      strength: fibersStrength,
+      foreground: [fr, fg, fb, 255],
+      background: [br, bg, bb, 255],
+      seed,
+    });
+    setShowFibersDialog(false);
+  }, [runCommand, selectedId, fibersVariance, fibersStrength, fibersForeground, fibersBackground]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -2112,6 +2134,14 @@ export default function App() {
             title="Filter > Render > Difference Clouds"
           >
             Difference Clouds…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFibersDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Render > Fibers"
+          >
+            Fibers…
           </button>
           <input
             type="color"
@@ -4574,6 +4604,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDifferenceClouds} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFibersDialog && (
+        <div className="modal-overlay" onClick={() => setShowFibersDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Fibers"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Render &gt; Fibers</h2>
+            <label className="control">
+              <span className="control__label">
+                Variance
+                <span className="control__value">{fibersVariance}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={fibersVariance}
+                onChange={(event) => setFibersVariance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{fibersStrength}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={64}
+                value={fibersStrength}
+                onChange={(event) => setFibersStrength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Foreground</span>
+              <input
+                type="color"
+                value={fibersForeground}
+                onChange={(event) => setFibersForeground(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Background</span>
+              <input
+                type="color"
+                value={fibersBackground}
+                onChange={(event) => setFibersBackground(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFibersDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyFibers} disabled={busy}>
                 Apply
               </button>
             </div>

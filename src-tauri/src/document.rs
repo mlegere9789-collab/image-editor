@@ -3169,6 +3169,78 @@ impl Document {
         })
     }
 
+    /// Filter > Render > Fibers: another content-generating Render filter,
+    /// like [`Self::clouds`], but built from independent per-pixel white
+    /// noise smoothed vertically instead of [`Self::clouds_field`]'s
+    /// smooth, bilinearly-interpolated grid — a documented approximation
+    /// of Photoshop's own undocumented fibre renderer, chosen because
+    /// vertical streaks are exactly what averaging *along a column* of
+    /// noise naturally produces. `variance` (Photoshop's own 1..=100
+    /// range) draws one value per pixel from the seeded [`XorShift32`]
+    /// generator and scales how far it can stray from grey: `0.5 + (n −
+    /// 0.5) · variance / 100`, so 100 keeps the raw `[0, 1)` draw
+    /// untouched and 1 collapses almost everything to a flat 0.5 — low
+    /// variance means long, uniform-looking fibres once smoothed, high
+    /// variance means short, choppy ones, matching Photoshop's own
+    /// description. `strength` (Photoshop's own 1..=64 range) is the
+    /// radius of a vertical box average taken independently down each
+    /// column, `2 · strength + 1` samples with edge repeat past the top
+    /// and bottom — a higher strength smooths further, stretching the
+    /// fibres out; the result is the fraction lerped, channel by channel
+    /// including alpha, between `background` and `foreground`, replacing
+    /// every selected pixel outright the same way `clouds` does. Errors on
+    /// a variance outside `1..=100`, a zero strength, or a locked/unknown
+    /// layer.
+    pub fn fibers(
+        &mut self,
+        id: LayerId,
+        variance: u32,
+        strength: u32,
+        foreground: [u8; CHANNELS],
+        background: [u8; CHANNELS],
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if variance == 0 || variance > 100 {
+            return Err("Fibers variance must be between 1 and 100.".to_string());
+        }
+        if strength == 0 {
+            return Err("Fibers strength must be at least 1.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let doc_width = width;
+        let mut rng = XorShift32::new(seed);
+        let scale = variance as f32 / 100.0;
+        let noise: Vec<f32> = (0..width * height)
+            .map(|_| {
+                let n = rng.next_u32() as f32 / 4_294_967_296.0;
+                (0.5 + (n - 0.5) * scale).clamp(0.0, 1.0)
+            })
+            .collect();
+        let radius = strength as i64;
+        let h = height as i64;
+        let samples = 2 * radius + 1;
+        let mut field = vec![0f32; width * height];
+        for x in 0..width {
+            for y in 0..h {
+                let mut sum = 0f32;
+                for dy in -radius..=radius {
+                    let sy = (y + dy).clamp(0, h - 1) as usize;
+                    sum += noise[sy * width + x];
+                }
+                field[y as usize * width + x] = sum / samples as f32;
+            }
+        }
+        self.filter_pixels(id, |_source, row, col| {
+            let t = field[row as usize * doc_width + col as usize];
+            let mut out = [0u8; CHANNELS];
+            for c in 0..CHANNELS {
+                let (bg, fg) = (background[c] as f32, foreground[c] as f32);
+                out[c] = (bg + (fg - bg) * t).round() as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -7432,6 +7504,97 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty
             .difference_clouds(999, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+    }
+
+    #[test]
+    fn fibers_lerps_between_background_and_foreground_by_the_smoothed_noise_field() {
+        // 3x5, strength 1 (a 3-sample vertical average with edge repeat),
+        // variance 100 (the raw [0, 1) draw passes through unscaled),
+        // seed 1. A Python port of fibers()'s exact arithmetic (same
+        // XorShift32 sequence, same 0.5 + (n - 0.5) * variance/100
+        // scaling, same vertical box average with edge-clamped indices)
+        // computed the field independently: t(0,0) =
+        // 0.023914845117057364, t(1,2) = 0.42619942237312597, t(2,4) =
+        // 0.12960797804407775. Lerping background=[10,10,200,255] to
+        // foreground=[220,30,30,255] by those and rounding gives [15, 10,
+        // 196, 255], [100, 19, 128, 255] and [37, 13, 178, 255]
+        // respectively.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let mut doc = Document::new(3, 5).unwrap();
+        let id = doc
+            .add_layer("blank", &solid(3, 5, [0, 0, 0, 0]), 3, 5)
+            .unwrap();
+        doc.fibers(id, 100, 1, [220, 30, 30, 255], [10, 10, 200, 255], 1)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [15, 10, 196, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [100, 19, 128, 255]);
+        assert_eq!(&p[idx(2, 4)..idx(2, 4) + 4], [37, 13, 178, 255]);
+    }
+
+    #[test]
+    fn fibers_variance_scales_how_far_the_noise_strays_from_grey() {
+        // Same 3x5/seed 1/strength 1 fixture and colours as the test
+        // above, but variance 1 instead of 100: the same Python port
+        // gives t(0,0) = 0.4952391484511706 (compressed almost onto 0.5,
+        // since a variance of 1 keeps everything within 1% of grey before
+        // smoothing) instead of 100's 0.023914845117057364, lerping to
+        // [114, 20, 116, 255] — near the exact midpoint between
+        // background and foreground, unlike the 100 case's colour close
+        // to the background end.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let mut doc = Document::new(3, 5).unwrap();
+        let id = doc
+            .add_layer("blank", &solid(3, 5, [0, 0, 0, 0]), 3, 5)
+            .unwrap();
+        doc.fibers(id, 1, 1, [220, 30, 30, 255], [10, 10, 200, 255], 1)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [114, 20, 116, 255]);
+    }
+
+    #[test]
+    fn fibers_is_confined_to_the_selection() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc
+            .fibers(id, 100, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .unwrap();
+        assert_ne!(doc.layers()[0].pixels[0..4], before[0..4]);
+        assert_eq!(doc.layers()[0].pixels[4..], before[4..]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn fibers_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc
+            .fibers(id, 0, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        assert!(doc
+            .fibers(id, 101, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        assert!(doc
+            .fibers(id, 50, 0, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .fibers(id, 50, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .fibers(999, 50, 1, [255, 255, 255, 255], [0, 0, 0, 255], 1)
             .is_err());
     }
 

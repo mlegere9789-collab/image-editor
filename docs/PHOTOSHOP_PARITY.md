@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 105.**
+**618 distinct capabilities tracked. Currently shipped: 106.**
 
 ## PART I — EVERY TOOL
 
@@ -526,7 +526,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] ZigZag (radial sine displacement A·sin(π·ridges·ρ) with Around Center / Out From Center / Pond Ripples styles, nearest-neighbour — see README Phase 39)
 - [x] Clouds (fractal value-noise field lerped between foreground and background colours, four octaves of bilinearly-interpolated seeded noise; a documented approximation of Photoshop's own proprietary renderer, not a port — see README Phase 45)
 - [x] Difference Clouds (same noise field as Clouds, combined with the existing colour via |existing − cloud| instead of replacing it — see README Phase 45)
-- [ ] Fibers (Filter > Render; added with the Render audit)
+- [x] Fibers (independent per-pixel white noise averaged vertically per column into streaks, Variance/Strength match Photoshop's own 1-100/1-64 ranges; a documented approximation of Photoshop's own proprietary renderer, not a port — see README Phase 47)
 - [ ] Lens Flare (Filter > Render; added with the Render audit)
 - [ ] Lighting Effects (Filter > Render; added with the Render audit)
 - [ ] Liquify

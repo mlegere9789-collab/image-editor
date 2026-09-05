@@ -1045,6 +1045,26 @@ fn difference_clouds(
     })
 }
 
+/// Filter > Render > Fibers on layer `id`. `variance` is Photoshop's own
+/// 1..=100 range and `strength` its own 1..=64 range. The frontend sends a
+/// fresh `seed` on every apply so repeated applications differ, as with Add
+/// Noise.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn fibers(
+    state: State<'_, AppState>,
+    id: LayerId,
+    variance: u32,
+    strength: u32,
+    foreground: [u8; CHANNELS],
+    background: [u8; CHANNELS],
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.fibers(id, variance, strength, foreground, background, seed)
+    })
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1531,6 +1551,7 @@ pub fn run() {
             pointillize,
             clouds,
             difference_clouds,
+            fibers,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

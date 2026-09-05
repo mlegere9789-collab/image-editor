@@ -3509,6 +3509,59 @@ original.
 **462 Rust tests total** (460 → 462, 455 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 47 — Filter > Render > Fibers
+
+The third Render filter, and — like `clouds` — a documented approximation
+of an undocumented, proprietary Photoshop renderer rather than a port of
+one. Where `clouds_field` builds smooth noise from a coarse grid
+bilinearly interpolated per pixel, `Document::fibers` takes the opposite
+approach: independent per-pixel white noise, one draw per pixel from the
+seeded `XorShift32` generator, then averaged vertically down each column
+— averaging along a single axis is exactly what turns noise into
+streaks, so this is the natural way to get a fibrous, woven look rather
+than Clouds' soft blobs. `variance` (Photoshop's own 1..=100 range)
+scales how far each raw draw can stray from grey before smoothing: `0.5
++ (n − 0.5) · variance / 100`, so 100 passes the full `[0, 1)` draw
+through unscaled and 1 collapses nearly everything to a flat 0.5 — low
+variance means long, uniform fibres once smoothed; high variance means
+short, choppy ones, matching Photoshop's own description of the control.
+`strength` (Photoshop's own 1..=64 range) is the radius of the vertical
+box average taken independently down each column, `2 · strength + 1`
+samples with edge repeat past the top and bottom; a higher strength
+smooths further, stretching the fibres out. The resulting `[0, 1]`
+fraction is lerped, channel by channel including alpha, between
+`background` and `foreground`, replacing every selected pixel outright
+the same way `clouds` does. A **Fibers…** dialog exposes both of
+Photoshop's own numeric controls (Variance, Strength) plus the
+Foreground/Background colour pickers `clouds` and `difference_clouds`
+already use.
+
+**Verified two ways.** Four new `document.rs` tests, all grounded in a
+Python port of `fibers`'s exact arithmetic (same `XorShift32` sequence,
+same variance scaling, same vertical box average with edge-clamped
+indices) run independently on a 3×5 canvas. At variance 100 and strength
+1 (a 3-sample vertical average), seed 1, the port gives `t(0,0) =
+0.023914845117057364`, `t(1,2) = 0.42619942237312597` and `t(2,4) =
+0.12960797804407775`; lerping `background = [10, 10, 200, 255]` to
+`foreground = [220, 30, 30, 255]` by those and rounding predicts `[15,
+10, 196, 255]`, `[100, 19, 128, 255]` and `[37, 13, 178, 255]`
+respectively — exactly what the Rust implementation produced. A second
+test re-runs the same fixture at variance 1 instead of 100: the same
+port gives `t(0,0) = 0.4952391484511706`, almost exactly grey, lerping to
+`[114, 20, 116, 255]` — near the midpoint between the two colours,
+demonstrating the variance scaling's compression toward 0.5 concretely
+rather than just asserting an inequality. Selection-confinement and
+error-propagation (a variance outside `1..=100`, a zero strength, a
+locked/unknown layer) tests round it out. All four passed on the first
+run. Live under Xvfb on the bundled gradient sample, Fibers with the
+default variance (50), strength (4), white foreground and black
+background produced a clean, fine, vertically-streaked grey texture —
+visually indistinguishable from Photoshop's own "brushed metal" look for
+this filter — and Undo restored the original colour gradient.
+
+**466 Rust tests total** (462 → 466, 459 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
