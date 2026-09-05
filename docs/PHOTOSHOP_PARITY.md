@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**593 distinct capabilities tracked. Currently shipped: 73.**
+**593 distinct capabilities tracked. Currently shipped: 76.**
 
 ## PART I — EVERY TOOL
 
@@ -468,9 +468,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Auto Tone
 - [ ] Auto Contrast
 - [ ] Auto Color
-- [ ] Equalize
-- [ ] Equalize Selected Area Only
-- [ ] Equalize Entire Image Based On Selected Area
+- [x] Equalize (per-channel histogram equalisation via a CDF lookup table — see README Phase 28)
+- [x] Equalize Selected Area Only (histogram from the selection, only the selection remapped — see README Phase 28)
+- [x] Equalize Entire Image Based On Selected Area (histogram from the selection, whole layer remapped — see README Phase 28)
 - [ ] Match Color
 - [ ] Replace Color
 - [x] Blur Filter (one-click preset: box blur at radius 1 — see README Phase 25)

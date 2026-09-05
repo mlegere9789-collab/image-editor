@@ -1449,6 +1449,99 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Image > Adjustments > Equalize: redistributes each channel's values
+    /// so its histogram is as flat as possible — the darkest level present
+    /// becomes 0, the brightest 255, and every level in between lands
+    /// where its cumulative share of the pixels puts it. Classic histogram
+    /// equalisation, per channel, via a 256-entry lookup table:
+    /// `out(v) = round((cdf(v) - cdf_min) / (n - cdf_min) * 255)`, where
+    /// `cdf(v)` counts sampled pixels at or below `v`, `cdf_min` is the
+    /// count at the darkest populated level, and `n` is the number of
+    /// sampled pixels. A channel with a single value everywhere
+    /// (`cdf_min == n`) has nothing to spread and is left unchanged
+    /// rather than dividing by zero. R, G, and B are equalised
+    /// independently (Photoshop's own Equalize is likewise per-channel);
+    /// alpha is untouched.
+    ///
+    /// With a selection active, Photoshop asks which of two things you
+    /// meant, and `entire_image` answers it: `false` is "Equalize
+    /// selected area only" (the histogram is built from the selected
+    /// pixels and only they are remapped), `true` is "Equalize entire
+    /// image based on selected area" (the same selection-built table,
+    /// applied to every pixel of the layer). With no selection both are
+    /// the plain menu command: whole layer in, whole layer out. Errors
+    /// on a locked/unknown layer.
+    pub fn equalize(&mut self, id: LayerId, entire_image: bool) -> Result<Option<Rect>, String> {
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let sample_bounds = self.copy_bounds();
+        let full = Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        };
+        let remap_everything = entire_image || selection.is_none();
+        let target_bounds = if remap_everything {
+            full
+        } else {
+            sample_bounds
+        };
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+
+        let mut histogram = [[0u32; 256]; 3];
+        let mut sampled = 0u32;
+        for row in sample_bounds.y0..sample_bounds.y1 {
+            for col in sample_bounds.x0..sample_bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                sampled += 1;
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (c, counts) in histogram.iter_mut().enumerate() {
+                    counts[layer.pixels[base + c] as usize] += 1;
+                }
+            }
+        }
+
+        let mut lut = [[0u8; 256]; 3];
+        for (table, counts) in lut.iter_mut().zip(&histogram) {
+            let cdf_min = counts.iter().copied().find(|&count| count > 0).unwrap_or(0);
+            let spread = sampled.saturating_sub(cdf_min);
+            let mut cdf = 0u32;
+            for (value, slot) in table.iter_mut().enumerate() {
+                cdf += counts[value];
+                *slot = if spread == 0 {
+                    value as u8
+                } else {
+                    (cdf.saturating_sub(cdf_min) as f32 / spread as f32 * 255.0).round() as u8
+                };
+            }
+        }
+
+        for row in target_bounds.y0..target_bounds.y1 {
+            for col in target_bounds.x0..target_bounds.x1 {
+                if !remap_everything {
+                    let keep =
+                        selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                    if !keep {
+                        continue;
+                    }
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (c, table) in lut.iter().enumerate() {
+                    layer.pixels[base + c] = table[layer.pixels[base + c] as usize];
+                }
+            }
+        }
+        Ok(Some(target_bounds))
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -3913,6 +4006,108 @@ mod tests {
         assert!(err.contains("locked"), "{err}");
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [128, 128, 128, 255]));
         assert!(doc.add_noise(999, 0.25, false, false, 1).is_err());
+    }
+
+    /// A 2x2 layer whose four pixels are the greys `values[0..4]` (R = G =
+    /// B, alpha 255), for the equalize tests.
+    fn greys_2x2(values: [u8; 4]) -> (Document, LayerId) {
+        let mut doc = Document::new(2, 2).unwrap();
+        let mut pixels = Vec::with_capacity(16);
+        for v in values {
+            pixels.extend_from_slice(&[v, v, v, 255]);
+        }
+        let id = doc.add_layer("greys", &pixels, 2, 2).unwrap();
+        (doc, id)
+    }
+
+    fn reds(doc: &Document) -> [u8; 4] {
+        let p = &doc.layers()[0].pixels;
+        [p[0], p[4], p[8], p[12]]
+    }
+
+    #[test]
+    fn equalize_spreads_distinct_values_evenly_across_the_full_range() {
+        // Four distinct levels: cdf = 1,2,3,4, cdf_min = 1, so
+        // out = (cdf-1)/3 * 255 = 0, 85, 170, 255.
+        let (mut doc, id) = greys_2x2([10, 20, 30, 40]);
+        doc.equalize(id, false).unwrap();
+        assert_eq!(reds(&doc), [0, 85, 170, 255]);
+        // Every channel got the same table, alpha stayed put.
+        assert_eq!(&doc.layers()[0].pixels[4..8], &[85, 85, 85, 255]);
+    }
+
+    #[test]
+    fn equalize_uses_the_cumulative_count_for_repeated_values() {
+        // cdf(50) = 3 (= cdf_min), cdf(200) = 4: 50 -> 0, 200 -> 255.
+        let (mut doc, id) = greys_2x2([50, 50, 50, 200]);
+        doc.equalize(id, false).unwrap();
+        assert_eq!(reds(&doc), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn equalize_leaves_a_single_valued_channel_unchanged() {
+        let (mut doc, id) = greys_2x2([77, 77, 77, 77]);
+        doc.equalize(id, false).unwrap();
+        assert_eq!(reds(&doc), [77, 77, 77, 77]);
+    }
+
+    #[test]
+    fn equalize_selected_area_only_samples_and_remaps_just_the_selection() {
+        // Select column 0 (pixels 0 and 2, values 10 and 30): n = 2,
+        // cdf(10) = 1 = cdf_min, cdf(30) = 2 -> 10 -> 0, 30 -> 255. The
+        // unselected pixels (20, 40) are left exactly as they were.
+        let (mut doc, id) = greys_2x2([10, 20, 30, 40]);
+        doc.select_rectangle(0.0, 0.0, 1.0, 2.0).unwrap();
+        let rect = doc.equalize(id, false).unwrap();
+        assert_eq!(reds(&doc), [0, 20, 255, 40]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn equalize_entire_image_based_on_selection_applies_the_selection_table_everywhere() {
+        // Same selection-built table as above (cdf over {10, 30}), applied
+        // to all four pixels: 20 sits above only 10 (cdf 1 -> 0), 40 above
+        // both (cdf 2 -> 255).
+        let (mut doc, id) = greys_2x2([10, 20, 30, 40]);
+        doc.select_rectangle(0.0, 0.0, 1.0, 2.0).unwrap();
+        let rect = doc.equalize(id, true).unwrap();
+        assert_eq!(reds(&doc), [0, 0, 255, 255]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn equalize_flag_makes_no_difference_without_a_selection() {
+        let (mut a, ida) = greys_2x2([10, 20, 30, 40]);
+        let (mut b, idb) = greys_2x2([10, 20, 30, 40]);
+        a.equalize(ida, false).unwrap();
+        b.equalize(idb, true).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+    }
+
+    #[test]
+    fn equalize_on_a_locked_or_unknown_layer_is_an_error() {
+        let (mut doc, id) = greys_2x2([10, 20, 30, 40]);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.equalize(id, false).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(reds(&doc), [10, 20, 30, 40]);
+        assert!(doc.equalize(999, false).is_err());
     }
 
     #[test]

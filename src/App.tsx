@@ -1499,6 +1499,28 @@ export default function App() {
           >
             Add Noise…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("equalize", { id: selectedId, entireImage: false })
+            }
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Equalize (with a selection: equalize the selected area only)"
+          >
+            Equalize
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("equalize", { id: selectedId, entireImage: true })
+            }
+            disabled={busy || !canPaint || !hasSelection}
+            title="Image > Adjustments > Equalize > Equalize entire image based on selected area"
+          >
+            Equalize from Sel.
+          </button>
           <input
             type="color"
             className="tools__color"

@@ -2412,6 +2412,60 @@ pinned by its unit test rather than toggled live: it lives in a native
 **371 Rust tests total** (362 → 371, 364 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 28 — Image > Adjustments > Equalize (and its two selection variants)
+
+Classic histogram equalisation: each channel's values are redistributed
+so the darkest level present becomes 0, the brightest 255, and every
+level in between lands where its cumulative share of the pixels puts
+it. `Document::equalize(id, entire_image)` builds a 256-entry lookup
+table per channel from a histogram of the sampled pixels —
+`out(v) = round((cdf(v) − cdf_min) / (n − cdf_min) · 255)`, with
+`cdf(v)` the count of sampled pixels at or below `v`, `cdf_min` the
+count at the darkest populated level and `n` the sample count — and
+then remaps the target pixels through it. A channel that holds a
+single value everywhere (`cdf_min == n`) has nothing to spread and is
+left unchanged rather than dividing by zero. R, G and B are equalised
+independently, as Photoshop's own Equalize does; alpha is untouched.
+
+With a selection active, Photoshop asks which of two things you meant,
+and the `entire_image` flag is that question: `false` is "Equalize
+selected area only" (histogram from the selected pixels, only they are
+remapped), `true` is "Equalize entire image based on selected area"
+(the same selection-built table applied to every pixel of the layer).
+With no selection both are the plain menu command, so the three tracked
+capabilities share one method and differ only in which pixels build
+the histogram and which get remapped. The frontend adds an **Equalize**
+button (selected-area-only when a selection exists, whole layer
+otherwise) and an **Equalize from Sel.** button that is enabled only
+while a selection exists.
+
+**Verified two ways.** Seven new `document.rs` tests on 2×2 grey
+layers small enough to run the CDF by hand: four distinct levels
+(10, 20, 30, 40) have cdf 1, 2, 3, 4 with cdf_min 1, so they spread to
+exactly 0, 85, 170, 255; repeated values (50, 50, 50, 200) give
+cdf(50) = 3 = cdf_min and cdf(200) = 4, hence 0, 0, 0, 255; a
+single-valued channel stays put. The two selection variants are pinned
+on the same 10/20/30/40 layer with column 0 (values 10 and 30) selected:
+"selected area only" yields 0, 20, 255, 40 — the unselected 20 and 40
+untouched — while "entire image based on selection" yields 0, 0, 255,
+255, because 20 sits above only one selected value (cdf 1 → 0) and 40
+above both (cdf 2 → 255); both assert their dirty rect too. A further
+test confirms the flag makes no difference without a selection, and
+the usual locked/unknown-layer errors close the set — all passing on
+first run. Live under Xvfb on the bundled gradient sample: **Equalize**
+remapped the whole image dramatically (the blue/magenta/cyan/cream
+gradient became green/red/yellow — the sample's narrow red channel
+stretched to the full range while the wide blue channel barely moved,
+which is exactly what per-channel equalisation predicts). After an
+undo, a rectangle over the dark top-left tiles and **Equalize from
+Sel.** applied that selection's table everywhere: inside it the dark
+blues stretched up from black, and everything brighter outside
+saturated to red/yellow, since every level above the selection's range
+maps to 255 — the "based on selected area" semantics made visible.
+
+**378 Rust tests total** (371 → 378, 371 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

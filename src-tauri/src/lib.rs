@@ -739,6 +739,19 @@ fn add_noise(
     })
 }
 
+/// Image > Adjustments > Equalize on layer `id`. With a selection active,
+/// `entire_image = false` is Photoshop's "Equalize selected area only" and
+/// `true` is "Equalize entire image based on selected area"; with no
+/// selection the flag makes no difference.
+#[tauri::command]
+fn equalize(
+    state: State<'_, AppState>,
+    id: LayerId,
+    entire_image: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.equalize(id, entire_image))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1170,6 +1183,7 @@ pub fn run() {
             despeckle,
             dust_and_scratches,
             add_noise,
+            equalize,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
