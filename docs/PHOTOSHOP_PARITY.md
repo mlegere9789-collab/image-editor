@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**597 distinct capabilities tracked. Currently shipped: 86.**
+**597 distinct capabilities tracked. Currently shipped: 87.**
 
 ## PART I — EVERY TOOL
 
@@ -561,7 +561,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] StampReduces imagery to a simplified stamped graphic.
 - [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
 - [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
-- [ ] Diffuse (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
+- [x] Diffuse (seeded neighbour shuffle with Normal / Darken Only / Lighten Only, plus deterministic closest-neighbour Anisotropic — see README Phase 33)
 - [x] Emboss (relief lit from an angle: 128 + (away − toward) · amount%, nearest-neighbour sampling at the given height — see README Phase 31)
 - [ ] Extrude (Filter > Stylize; missing from the original audit, added while shipping the Stylize batch)
 - [x] Find Edges (inverted Sobel |Gx|+|Gy| per channel, white where flat — see README Phase 31)

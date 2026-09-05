@@ -29,6 +29,15 @@ function toInteger(text: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+type DiffuseMode = "normal" | "darkenOnly" | "lightenOnly" | "anisotropic";
+
+const DIFFUSE_MODES: readonly (readonly [DiffuseMode, string])[] = [
+  ["normal", "Normal"],
+  ["darkenOnly", "Darken Only"],
+  ["lightenOnly", "Lighten Only"],
+  ["anisotropic", "Anisotropic"],
+];
+
 const TEXT_INPUT_TYPES = new Set(["text", "number", "search", "email", "url", "password"]);
 
 // Keyboard shortcuts must not steal Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+Z from a
@@ -243,6 +252,8 @@ export default function App() {
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
   const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
   const [gaussianBlurRadius, setGaussianBlurRadius] = useState(2);
+  const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
+  const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
   const [showUnsharpMaskDialog, setShowUnsharpMaskDialog] = useState(false);
   const [unsharpMaskRadius, setUnsharpMaskRadius] = useState(2);
@@ -611,6 +622,14 @@ export default function App() {
     await runCommand("gaussian_blur", { id: selectedId, radius: gaussianBlurRadius });
     setShowGaussianBlurDialog(false);
   }, [runCommand, selectedId, gaussianBlurRadius]);
+
+  const applyDiffuse = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Add Noise: the backend is deterministic per seed.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("diffuse", { id: selectedId, mode: diffuseMode, seed });
+    setShowDiffuseDialog(false);
+  }, [runCommand, selectedId, diffuseMode]);
 
   const applyUnsharpMask = useCallback(async () => {
     if (selectedId === null) return;
@@ -1702,6 +1721,14 @@ export default function App() {
             title="Filter > Stylize > Trace Contour"
           >
             Trace Contour…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDiffuseDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Diffuse"
+          >
+            Diffuse…
           </button>
           <input
             type="color"
@@ -3327,6 +3354,39 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGaussianBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDiffuseDialog && (
+        <div className="modal-overlay" onClick={() => setShowDiffuseDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Diffuse"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Diffuse</h2>
+            {DIFFUSE_MODES.map(([value, label]) => (
+              <label key={value} className="control control--row">
+                <span className="control__label">{label}</span>
+                <input
+                  type="radio"
+                  name="diffuse-mode"
+                  value={value}
+                  checked={diffuseMode === value}
+                  onChange={() => setDiffuseMode(value)}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowDiffuseDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyDiffuse} disabled={busy}>
                 Apply
               </button>
             </div>

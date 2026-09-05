@@ -81,6 +81,20 @@ pub struct Document {
     last_selection: Option<Selection>,
 }
 
+/// How Filter > Stylize > Diffuse decides which neighbour a pixel takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffuseMode {
+    /// Take the randomly chosen neighbour unconditionally.
+    Normal,
+    /// Take the random neighbour only if it is darker (smaller R+G+B).
+    DarkenOnly,
+    /// Take the random neighbour only if it is lighter (larger R+G+B).
+    LightenOnly,
+    /// No randomness: take the in-bounds neighbour closest in colour.
+    Anisotropic,
+}
+
 /// The shape of the region a [`Selection`] covers within its bounding box.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2095,6 +2109,80 @@ impl Document {
             for (slot, sum) in out.iter_mut().zip(&acc) {
                 *slot = round(sum);
             }
+            out
+        })
+    }
+
+    /// Filter > Stylize > Diffuse: shuffles each pixel with one of its
+    /// eight neighbours so hard edges soften into a grainy, out-of-focus
+    /// texture. For every selected pixel in scan order, two seeded
+    /// [`XorShift32`] draws pick a horizontal and a vertical offset in
+    /// −1..=1 (`draw % 3 − 1`), clamped to the layer, and the pixel takes
+    /// that neighbour's colour: always in `Normal`, only when the
+    /// neighbour is darker (smaller R+G+B) in `DarkenOnly`, only when it is
+    /// lighter in `LightenOnly`. `Anisotropic` uses no randomness at all:
+    /// the pixel takes whichever in-bounds neighbour is closest in colour
+    /// (smallest summed R, G, B difference; the first in scan order on a
+    /// tie), which shuffles along edges rather than across them. Whole
+    /// pixels move, alpha included, so a copied neighbour keeps its own
+    /// transparency. Deterministic for a given seed and selection; the
+    /// frontend sends a fresh seed per apply, as with Add Noise.
+    pub fn diffuse(
+        &mut self,
+        id: LayerId,
+        mode: DiffuseMode,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, |source, row, col| {
+            let at = |x: i64, y: i64| (y as usize * doc_width + x as usize) * CHANNELS;
+            let (x, y) = (col as i64, row as i64);
+            let centre = at(x, y);
+            let brightness =
+                |base: usize| -> i32 { source[base..base + 3].iter().map(|&v| v as i32).sum() };
+            let chosen = match mode {
+                DiffuseMode::Anisotropic => {
+                    let mut best: Option<(i32, usize)> = None;
+                    for ny in (y - 1)..=(y + 1) {
+                        for nx in (x - 1)..=(x + 1) {
+                            let in_bounds = nx >= 0 && ny >= 0 && nx < width && ny < height;
+                            if !in_bounds || (nx, ny) == (x, y) {
+                                continue;
+                            }
+                            let base = at(nx, ny);
+                            let distance: i32 = (0..3)
+                                .map(|c| {
+                                    (source[base + c] as i32 - source[centre + c] as i32).abs()
+                                })
+                                .sum();
+                            match best {
+                                Some((closest, _)) if distance >= closest => {}
+                                _ => best = Some((distance, base)),
+                            }
+                        }
+                    }
+                    best.map_or(centre, |(_, base)| base)
+                }
+                _ => {
+                    let dx = (rng.next_u32() % 3) as i64 - 1;
+                    let dy = (rng.next_u32() % 3) as i64 - 1;
+                    let neighbour = at((x + dx).clamp(0, width - 1), (y + dy).clamp(0, height - 1));
+                    match mode {
+                        DiffuseMode::Normal => neighbour,
+                        DiffuseMode::DarkenOnly if brightness(neighbour) < brightness(centre) => {
+                            neighbour
+                        }
+                        DiffuseMode::LightenOnly if brightness(neighbour) > brightness(centre) => {
+                            neighbour
+                        }
+                        _ => centre,
+                    }
+                }
+            };
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[chosen..chosen + CHANNELS]);
             out
         })
     }
@@ -5141,6 +5229,91 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.gaussian_blur(999, 1).is_err());
+    }
+
+    fn reds_3x3(doc: &Document) -> Vec<u8> {
+        (0..9).map(|i| doc.layers()[0].pixels[i * 4]).collect()
+    }
+
+    #[test]
+    fn diffuse_normal_takes_the_seeded_neighbour() {
+        let (mut doc, id) = ramped_3x3();
+        doc.diffuse(id, DiffuseMode::Normal, 1).unwrap();
+        // Seed 1's xorshift32 draws, two per pixel in scan order and mapped
+        // through `draw % 3 - 1`: (-1,0) (-1,+1) (+1,0) / (0,-1) (+1,0)
+        // (-1,+1) / (0,+1) (+1,-1) (0,-1). The first two draws, 270369 and
+        // 67634689, are the ones the Add Noise tests already pin (0 and 1
+        // mod 3). Each pixel takes that clamped neighbour's red: the centre
+        // takes its right-hand 60, the bottom row reads 70 (clamped onto
+        // itself), 60 and 60.
+        assert_eq!(reds_3x3(&doc), [10, 40, 30, 10, 60, 80, 70, 60, 60]);
+        assert_eq!(doc.layers()[0].pixels[3], 255);
+    }
+
+    #[test]
+    fn diffuse_darken_and_lighten_only_move_in_one_direction() {
+        // The same draws as Normal; a neighbour is taken only when it is
+        // darker (or, below, lighter) than the pixel it would replace.
+        let (mut doc, id) = ramped_3x3();
+        doc.diffuse(id, DiffuseMode::DarkenOnly, 1).unwrap();
+        assert_eq!(reds_3x3(&doc), [10, 20, 30, 10, 50, 60, 70, 60, 60]);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.diffuse(id, DiffuseMode::LightenOnly, 1).unwrap();
+        assert_eq!(reds_3x3(&doc), [10, 40, 30, 40, 60, 80, 70, 80, 90]);
+    }
+
+    #[test]
+    fn diffuse_anisotropic_takes_the_closest_neighbour_deterministically() {
+        let (mut doc, id) = ramped_3x3();
+        doc.diffuse(id, DiffuseMode::Anisotropic, 1).unwrap();
+        let first = reds_3x3(&doc);
+        // Each pixel takes its nearest-valued in-bounds neighbour, the first
+        // in scan order on a tie: the centre's 40 and 60 both differ by 10,
+        // so it takes the 40; the corner 10's neighbours are 20, 40 and 50.
+        assert_eq!(first, [20, 10, 20, 50, 40, 50, 80, 70, 80]);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.diffuse(id, DiffuseMode::Anisotropic, 99).unwrap();
+        assert_eq!(reds_3x3(&doc), first); // the seed plays no part
+    }
+
+    #[test]
+    fn diffuse_is_seeded_and_confined_to_the_selection() {
+        let (mut a, ida) = ramped_3x3();
+        let (mut b, idb) = ramped_3x3();
+        a.diffuse(ida, DiffuseMode::Normal, 7).unwrap();
+        b.diffuse(idb, DiffuseMode::Normal, 7).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.diffuse(id, DiffuseMode::Normal, 1).unwrap();
+        // The one selected pixel gets the *first* draw pair, (-1, 0), and
+        // takes its left neighbour's 10; nothing else moves.
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 10);
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 10);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 1)], 50);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn diffuse_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.diffuse(id, DiffuseMode::Normal, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.diffuse(999, DiffuseMode::Anisotropic, 1).is_err());
     }
 
     #[test]

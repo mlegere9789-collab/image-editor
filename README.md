@@ -2744,6 +2744,59 @@ visibly unchanged. Undo restored the original.
 **404 Rust tests total** (400 → 404, 397 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 33 — Filter > Stylize > Diffuse
+
+Diffuse shuffles each pixel with one of its eight neighbours, so hard
+edges dissolve into a grainy, out-of-focus texture without any
+averaging. `Document::diffuse(id, mode, seed)` walks the selected
+pixels in scan order and, for each, takes two draws from the seeded
+`XorShift32` generator Add Noise already uses, mapping each through
+`draw % 3 − 1` to a horizontal and a vertical offset in −1..=1 (clamped
+to the layer). What happens next is the mode, a `DiffuseMode` enum
+mirroring Photoshop's four radio buttons: **Normal** takes that
+neighbour's colour unconditionally; **Darken Only** takes it only when
+it is darker (a smaller R+G+B); **Lighten Only** only when it is
+lighter. **Anisotropic** uses no randomness at all — the pixel takes
+whichever in-bounds neighbour is closest in colour (the smallest summed
+R, G, B difference, the first in scan order on a tie), which shuffles
+along edges rather than across them. Whole pixels move, alpha
+included, so a copied neighbour keeps its own transparency. The result
+is deterministic for a given seed and selection, and the frontend sends
+a fresh seed on every apply, as Add Noise does, so re-applying gives a
+different shuffle. The dialog uses four radio buttons rather than a
+native `<select>`, so it can be driven headlessly like every other
+control here.
+
+**Verified two ways.** Five new `document.rs` tests on the 3×3 red ramp
+(10..90 by tens). The seed-1 draw sequence is the one the Add Noise
+tests already pin — 270369, 67634689, 2647435461, … — and mapped two
+per pixel through `% 3 − 1` it gives the offsets (−1, 0), (−1, +1),
+(+1, 0) / (0, −1), (+1, 0), (−1, +1) / (0, +1), (+1, −1), (0, −1), all
+cross-checked against a scripted xorshift. Normal therefore produces
+reds 10, 40, 30 / 10, 60, 80 / 70, 60, 60 — the corner clamps onto
+itself, the centre takes its right-hand 60, the bottom row reads a
+clamped 70 then 60, 60. Darken Only on the same draws keeps every
+lighter neighbour out (10, 20, 30 / 10, 50, 60 / 70, 60, 60) and
+Lighten Only every darker one (10, 40, 30 / 40, 60, 80 / 70, 80, 90).
+Anisotropic is worked purely by hand: each pixel takes its
+nearest-valued in-bounds neighbour, so the corner 10 (neighbours 20,
+40, 50) becomes 20 and the centre, whose 40 and 60 both differ by 10,
+takes the first, giving 20, 10, 20 / 50, 40, 50 / 80, 70, 80 — and the
+seed is shown to play no part. Two documents diffused with the same
+seed are identical; with only pixel (1, 0) selected it receives the
+*first* draw pair and takes its left neighbour's 10 while everything
+else stays put and the dirty rect is that one pixel; a locked layer and
+an unknown id error without touching pixels. All passing on first run.
+Live under Xvfb on the bundled gradient sample: **Normal** turned the
+crisp one-pixel grid lines into jittery, broken, one-pixel-scattered
+edges — the classic dissolved look — and after an undo **Lighten Only**
+left every line continuous and only spread its white outward into
+ragged neighbours, never breaking it, exactly the one-directional
+rule. Undo restored the original after each.
+
+**409 Rust tests total** (404 → 409, 402 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

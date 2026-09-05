@@ -17,7 +17,9 @@ use tauri::{Manager, State};
 
 use blend::BlendMode;
 use composite::Rect;
-use document::{Clipboard, Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS};
+use document::{
+    Clipboard, DiffuseMode, Document, DocumentView, LayerId, MoveDirection, Stroke, CHANNELS,
+};
 
 /// Same order of magnitude as `png::MAX_FILE_BYTES` — a blank canvas this
 /// large would be as much of a memory problem as a PNG that big.
@@ -833,6 +835,18 @@ fn gaussian_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result
     edit_checkpointed(&state, |document| document.gaussian_blur(id, radius))
 }
 
+/// Filter > Stylize > Diffuse on layer `id`. The frontend sends a fresh
+/// `seed` on every apply so repeated applications differ, as in Photoshop.
+#[tauri::command]
+fn diffuse(
+    state: State<'_, AppState>,
+    id: LayerId,
+    mode: DiffuseMode,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.diffuse(id, mode, seed))
+}
+
 /// Filter > Blur > Motion Blur on layer `id`.
 #[tauri::command]
 fn motion_blur(
@@ -1275,6 +1289,7 @@ pub fn run() {
             emboss,
             trace_contour,
             gaussian_blur,
+            diffuse,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,
