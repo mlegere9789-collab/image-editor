@@ -988,6 +988,14 @@ fn crystallize(
     edit_checkpointed(&state, |document| document.crystallize(id, cell_size, seed))
 }
 
+/// Filter > Pixelate > Facet on layer `id`. No dialog, matching Photoshop's
+/// own Facet; the frontend sends a fresh `seed` on every apply so repeated
+/// applications differ, as with Add Noise.
+#[tauri::command]
+fn facet(state: State<'_, AppState>, id: LayerId, seed: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.facet(id, seed))
+}
+
 /// Filter > Pixelate > Pointillize on layer `id`. `background` is an RGBA
 /// colour for the gaps between dots. The frontend sends a fresh `seed` on
 /// every apply so repeated applications differ, as with Add Noise.
@@ -1519,6 +1527,7 @@ pub fn run() {
             shear,
             color_halftone,
             crystallize,
+            facet,
             pointillize,
             clouds,
             difference_clouds,

@@ -2990,6 +2990,23 @@ impl Document {
         })
     }
 
+    /// Filter > Pixelate > Facet: Photoshop's own Facet has no dialog at
+    /// all — it just clumps pixels of similar colour into small blocks
+    /// using its own undocumented algorithm, described as giving flat art
+    /// "a hand-painted appearance." That's the same shape of effect
+    /// [`Self::crystallize`] already produces at a small scale, so rather
+    /// than invent a second, separately-tuned clumping algorithm this is a
+    /// documented delegation to it: a small, fixed cell size
+    /// (`FACET_CELL_SIZE`, chosen small enough that the cells read as
+    /// paint-like clumps rather than Crystallize's own showcase-sized
+    /// crystals) and no user-facing parameters beyond the seed, matching
+    /// Photoshop's own parameterless dialog. Errors on a locked/unknown
+    /// layer.
+    pub fn facet(&mut self, id: LayerId, seed: u32) -> Result<Option<Rect>, String> {
+        const FACET_CELL_SIZE: u32 = 4;
+        self.crystallize(id, FACET_CELL_SIZE, seed)
+    }
+
     /// Filter > Pixelate > Pointillize: the same jittered-site scatter as
     /// [`Self::crystallize`], but instead of tiling the whole layer with
     /// Voronoi cells, it stamps a solid, `cell_size / 2`-pixel-radius dot at
@@ -7209,6 +7226,28 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.crystallize(999, 1, 1).is_err());
+    }
+
+    #[test]
+    fn facet_matches_crystallize_at_its_fixed_cell_size() {
+        let (mut facet_doc, facet_id) = ramp_square(8);
+        let (mut crystallize_doc, crystallize_id) = ramp_square(8);
+        facet_doc.facet(facet_id, 7).unwrap();
+        crystallize_doc.crystallize(crystallize_id, 4, 7).unwrap();
+        assert_eq!(
+            facet_doc.layers()[0].pixels,
+            crystallize_doc.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn facet_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.facet(id, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.facet(999, 1).is_err());
     }
 
     #[test]

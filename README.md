@@ -3477,6 +3477,38 @@ restored the original gradient.
 **460 Rust tests total** (454 → 460, 453 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 46 — Filter > Pixelate > Facet
+
+Photoshop's own Facet has no dialog at all — it clumps pixels of similar
+colour into small blocks using its own undocumented algorithm, described
+as giving flat art "a hand-painted appearance." That's the same shape of
+effect Crystallize already produces, just at a smaller, fixed scale, so
+rather than invent and separately verify a second clumping algorithm,
+`Document::facet(id, seed)` is a documented delegation: `self.crystallize(id,
+FACET_CELL_SIZE, seed)` with `FACET_CELL_SIZE` a fixed constant (4 pixels)
+chosen small enough that the cells read as paint-like clumps rather than
+Crystallize's own showcase-sized crystals, and no user-facing parameters
+beyond the seed — matching Photoshop's own parameterless dialog. A
+**Facet** button applies it directly, no modal, the same direct-apply
+pattern Find Edges and Solarize already use for parameterless filters.
+
+**Verified two ways.** Two new `document.rs` tests. Since the algorithm
+itself is exactly Crystallize's, already covered by that filter's own
+five tests, `facet`'s test doesn't re-derive the maths — it instead pins
+the delegation: running `facet(id, 7)` on one document and
+`crystallize(id, 4, 7)` on an identical one produces byte-identical
+pixels, confirming `FACET_CELL_SIZE` really is 4 and the seed really does
+pass straight through. A second test confirms a locked layer and an
+unknown id both error. Both passed on the first run. Live under Xvfb on
+the bundled gradient sample, Facet's small fixed cell size showed up as
+fine, irregular jittered-cell edges breaking up the smooth gradient and
+its ruled grid lines — visibly finer and more painterly than
+Crystallize's own default-sized crystals — and Undo restored the crisp
+original.
+
+**462 Rust tests total** (460 → 462, 455 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

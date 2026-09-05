@@ -812,6 +812,13 @@ export default function App() {
     setShowCrystallizeDialog(false);
   }, [runCommand, selectedId, crystallizeCellSize]);
 
+  const applyFacet = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Add Noise/Crystallize.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("facet", { id: selectedId, seed });
+  }, [runCommand, selectedId]);
+
   const applyPointillize = useCallback(async () => {
     if (selectedId === null) return;
     const [r, g, b] = hexToRgb(pointillizeBackground);
@@ -2073,6 +2080,14 @@ export default function App() {
             title="Filter > Pixelate > Crystallize"
           >
             Crystallize…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyFacet()}
+            disabled={busy || !canPaint}
+            title="Filter > Pixelate > Facet"
+          >
+            Facet
           </button>
           <button
             className="button button--quiet"
