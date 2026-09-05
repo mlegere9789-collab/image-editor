@@ -293,6 +293,8 @@ export default function App() {
   const [zigZagStyle, setZigZagStyle] = useState<ZigZagStyle>("pondRipples");
   const [showPolarDialog, setShowPolarDialog] = useState(false);
   const [polarToPolar, setPolarToPolar] = useState(true);
+  const [showColorHalftoneDialog, setShowColorHalftoneDialog] = useState(false);
+  const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -735,6 +737,12 @@ export default function App() {
     await runCommand("polar_coordinates", { id: selectedId, toPolar: polarToPolar });
     setShowPolarDialog(false);
   }, [runCommand, selectedId, polarToPolar]);
+
+  const applyColorHalftone = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("color_halftone", { id: selectedId, maxRadius: colorHalftoneRadius });
+    setShowColorHalftoneDialog(false);
+  }, [runCommand, selectedId, colorHalftoneRadius]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1922,6 +1930,14 @@ export default function App() {
             title="Filter > Distort > Polar Coordinates"
           >
             Polar Coordinates…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowColorHalftoneDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Pixelate > Color Halftone"
+          >
+            Color Halftone…
           </button>
           <input
             type="color"
@@ -3981,6 +3997,47 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPolarCoordinates} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorHalftoneDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorHalftoneDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Halftone"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Color Halftone</h2>
+            <label className="control">
+              <span className="control__label">
+                Max Radius
+                <span className="control__value">{colorHalftoneRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={64}
+                value={colorHalftoneRadius}
+                onChange={(event) => setColorHalftoneRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorHalftoneDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorHalftone} disabled={busy}>
                 Apply
               </button>
             </div>

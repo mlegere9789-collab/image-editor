@@ -2643,6 +2643,65 @@ impl Document {
         })
     }
 
+    /// Filter > Pixelate > Color Halftone: reduces the layer to a grid of
+    /// solid-colour circular dots, echoing a colour newspaper print. Each
+    /// colour channel gets its own square screen of `2 · max_radius`-pixel
+    /// cells, offset from the other two — R at `(0, 0)`, G at
+    /// `(max_radius, 0)`, B at `(0, max_radius)` — so the three screens
+    /// don't stack exactly, the same role Photoshop's four *rotated*
+    /// screens play; using an offset instead of a rotation is a documented
+    /// simplification, since a rotated grid would need anti-aliased circles
+    /// to look right at these radii and this project favours exact,
+    /// hand-checkable integer arithmetic over that. For each cell, the
+    /// channel's *average* value over every pixel in that cell becomes a
+    /// dot centred on the cell: its area is proportional to that average
+    /// (a circle's area grows with the square of its radius, so the
+    /// comparison is the integer inequality `(dx² + dy²) · 255 ≤
+    /// max_radius² · average`, avoiding a square root entirely). A pixel
+    /// inside its channel's dot for that cell becomes that channel at full
+    /// value (255); outside, 0 — so the output is always one of eight
+    /// colours (black, the three primaries, the three secondaries, white),
+    /// the blocky "overlapping ink dots" look of the real filter. Alpha is
+    /// untouched. Errors on a zero radius or a locked/unknown layer.
+    pub fn color_halftone(&mut self, id: LayerId, max_radius: u32) -> Result<Option<Rect>, String> {
+        if max_radius == 0 {
+            return Err("Color Halftone radius must be at least 1 pixel.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let r = max_radius as i64;
+        let cell = 2 * r;
+        let offsets = [(0i64, 0i64), (r, 0i64), (0i64, r)];
+        self.filter_pixels(id, |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out[3] = source[base + 3];
+            for (c, &(ox, oy)) in offsets.iter().enumerate() {
+                let icx = (col as i64 - ox).div_euclid(cell);
+                let icy = (row as i64 - oy).div_euclid(cell);
+                let x0 = (icx * cell + ox).max(0);
+                let y0 = (icy * cell + oy).max(0);
+                let x1 = (icx * cell + ox + cell).min(width);
+                let y1 = (icy * cell + oy + cell).min(height);
+                let center_x = icx * cell + ox + r;
+                let center_y = icy * cell + oy + r;
+                let mut sum = 0i64;
+                let mut count = 0i64;
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        sum += source[(y as usize * doc_width + x as usize) * CHANNELS + c] as i64;
+                        count += 1;
+                    }
+                }
+                let average = sum / count;
+                let (dx, dy) = (col as i64 - center_x, row as i64 - center_y);
+                let inside = (dx * dx + dy * dy) * 255 <= r * r * average;
+                out[c] = if inside { 255 } else { 0 };
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -6353,6 +6412,101 @@ mod tests {
             .zig_zag(999, 10.0, 5, ZigZagStyle::PondRipples)
             .is_err());
         assert!(empty.polar_coordinates(999, false).is_err());
+    }
+
+    #[test]
+    fn color_halftone_uses_per_channel_offsets_to_separate_the_screens() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // A solid white 4x4 layer, radius 2 (cell 4 = the whole canvas), so
+        // every channel's average is 255 and the inequality reduces to
+        // dx² + dy² ≤ 4. R's single cell is centred at (2, 2) (untouched);
+        // G's is shifted to x-centres 0 and 4 (cols 0-1 vs 2-3); B's the
+        // same shift on y. Working out the eleven pixels within radius 2 of
+        // each of those three different centres gives four distinct output
+        // colours from a perfectly flat white input — the whole point of
+        // offsetting the screens.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("white", &solid(4, 4, [255, 255, 255, 255]), 4, 4)
+            .unwrap();
+        doc.color_halftone(id, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let px = |x: usize, y: usize| &p[idx(x, y)..idx(x, y) + 4];
+        assert_eq!(px(0, 0), [0, 255, 255, 255]); // cyan: R outside, G+B inside
+        assert_eq!(px(1, 0), [0, 0, 255, 255]); // blue: only B inside
+        assert_eq!(px(0, 1), [0, 255, 0, 255]); // green: only G inside
+        assert_eq!(px(2, 2), [255, 255, 255, 255]); // white: all three inside
+        assert_eq!(px(3, 3), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn color_halftone_averages_each_cell_before_thresholding() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // Top half of a 4x4 layer is black, bottom half white: the single
+        // R cell (radius 2, offset (0, 0)) averages to (0*8 + 255*8)/16 =
+        // 127 (truncated). The inequality (dx²+dy²)*255 <= 4*127 = 508
+        // keeps only dx²+dy² <= 1 (2*255 = 510 > 508), a small plus shape
+        // around the centre (2, 2) — smaller than the 11-pixel dot a full
+        // average of 255 would give, and bigger than the single pixel a
+        // wrongly-computed average of 0 would give, so the test pins the
+        // averaging itself, not just the geometry.
+        let mut doc = Document::new(4, 4).unwrap();
+        let mut pixels = Vec::with_capacity(64);
+        for y in 0..4u8 {
+            for _ in 0..4 {
+                let v = if y < 2 { 0 } else { 255 };
+                pixels.extend_from_slice(&[v, 0, 0, 255]);
+            }
+        }
+        let id = doc.add_layer("halves", &pixels, 4, 4).unwrap();
+        doc.color_halftone(id, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let reds: Vec<u8> = (0..4)
+            .flat_map(|y| (0..4).map(move |x| (x, y)))
+            .map(|(x, y)| p[idx(x, y)])
+            .collect();
+        #[rustfmt::skip]
+        let expected = [
+            0,   0,   0,   0,
+            0,   0,   255, 0,
+            0,   255, 255, 255,
+            0,   0,   255, 0,
+        ];
+        assert_eq!(reds, expected);
+    }
+
+    #[test]
+    fn color_halftone_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("white", &solid(4, 4, [255, 255, 255, 255]), 4, 4)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.color_halftone(id, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 255, 255, 255]); // cyan
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]); // untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn color_halftone_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.color_halftone(id, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.color_halftone(id, 2).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.color_halftone(999, 2).is_err());
     }
 
     #[test]

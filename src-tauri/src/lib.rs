@@ -919,6 +919,16 @@ fn polar_coordinates(
     edit_checkpointed(&state, |document| document.polar_coordinates(id, to_polar))
 }
 
+/// Filter > Pixelate > Color Halftone on layer `id`.
+#[tauri::command]
+fn color_halftone(
+    state: State<'_, AppState>,
+    id: LayerId,
+    max_radius: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.color_halftone(id, max_radius))
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1397,6 +1407,7 @@ pub fn run() {
             spherize,
             zig_zag,
             polar_coordinates,
+            color_halftone,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

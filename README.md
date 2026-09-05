@@ -3123,6 +3123,66 @@ formula predicts. Undo restored the original after each.
 **433 Rust tests total** (429 → 433, 426 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 40 — Filter > Pixelate > Color Halftone
+
+Auditing the earlier Pixelate batch left this one unshipped: the filter
+that reduces a photo to a grid of solid-colour circular dots, echoing a
+colour newspaper print. `Document::color_halftone(id, max_radius)` gives
+each colour channel its own square screen of `2 · max_radius`-pixel
+cells — but instead of Photoshop's four *rotated* screens (one angle per
+channel), the three channels here get three *offset* screens: R at
+`(0, 0)`, G at `(max_radius, 0)`, B at `(0, max_radius)`. A rotated grid
+would need anti-aliased circles to look right at the radii this dialog
+allows, and this project has consistently favoured exact, hand-checkable
+integer arithmetic over that (the same trade-off Motion Blur, Ripple and
+Twirl already made with nearest-neighbour sampling) — offsetting the
+grids instead still keeps the three screens from stacking exactly, which
+is all the rotation is really for. For each cell, the channel's
+*average* value over every pixel in that cell becomes a dot centred on
+the cell, with the dot's area proportional to that average — a circle's
+area grows with the square of its radius, so "area ∝ average" becomes
+the single integer inequality `(dx² + dy²) · 255 ≤ max_radius² ·
+average`, with no square root anywhere. A pixel inside its channel's dot
+for that cell becomes that channel at full value (255); outside, 0 — so
+every output pixel is one of eight colours (black, the three primaries,
+the three secondaries, white), the blocky "overlapping ink dots" look of
+the real filter. Alpha is untouched, the selection is honoured, and a
+zero radius errors. The frontend adds a **Color Halftone…** button with
+a Max Radius slider (1–64, Photoshop's own dialog runs 4–127).
+
+**Verified two ways.** Four new `document.rs` tests. On a solid white 4×4
+layer at radius 2 (one cell per channel, spanning the whole canvas, so
+every average is 255 and the inequality reduces to `dx² + dy² ≤ 4`): R's
+single cell is centred at (2, 2); G's is shifted to two half-canvas
+cells centred at x = 0 and x = 4; B's the same shift on y. Because those
+three centres differ, a perfectly flat white input still splits into
+four distinct colours — (0, 0) comes out cyan (R's dot excludes it, G's
+and B's both include it), (1, 0) blue, (0, 1) green, and (2, 2) and
+(3, 3) both land in every dot and stay white — which is the whole point
+of offsetting the screens, all four values worked out from the three
+centres by hand. A second test isolates the averaging itself: a 4×4
+layer whose top half is black and bottom half white averages to
+`(0·8 + 255·8) / 16 = 127` (truncated) in R's one cell, and
+`(dx² + dy²) · 255 ≤ 4 · 127 = 508` keeps only `dx² + dy² ≤ 1`, a
+five-pixel plus shape around the centre — smaller than the eleven-pixel
+dot a full average of 255 gives and bigger than the single centre pixel
+a wrongly-computed average of 0 would give, so the test pins the average
+itself and not just the geometry, with all five plus-shape coordinates
+listed. A one-pixel selection changes only that pixel (to cyan) and
+reports a 1×1 dirty rect; a zero radius, a locked layer and an unknown
+id all error without touching pixels. All four hand-derived value sets
+matched on the first run, cross-checked with a small Python script before
+being written into the test. Live under Xvfb on the bundled gradient
+sample at radius 8, the whole canvas resolved into a regular grid of
+overlapping blue, green and magenta dots that grow and shrink with the
+local tone — blue-dominant where the sample is darkest blue, magenta
+where red and blue both run high, green and yellow toward the bright
+corner — exactly the expected colour-halftone look. Undo restored the
+original crisp gradient and grid lines.
+
+**437 Rust tests total** (433 → 437, 430 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
