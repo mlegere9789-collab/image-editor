@@ -255,6 +255,10 @@ export default function App() {
   const [showSurfaceBlurDialog, setShowSurfaceBlurDialog] = useState(false);
   const [surfaceBlurRadius, setSurfaceBlurRadius] = useState(5);
   const [surfaceBlurThreshold, setSurfaceBlurThreshold] = useState(15);
+  const [showGlowingEdgesDialog, setShowGlowingEdgesDialog] = useState(false);
+  const [glowEdgeWidth, setGlowEdgeWidth] = useState(2);
+  const [glowEdgeBrightness, setGlowEdgeBrightness] = useState(6);
+  const [glowSmoothness, setGlowSmoothness] = useState(5);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -635,6 +639,17 @@ export default function App() {
     });
     setShowSurfaceBlurDialog(false);
   }, [runCommand, selectedId, surfaceBlurRadius, surfaceBlurThreshold]);
+
+  const applyGlowingEdges = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("glowing_edges", {
+      id: selectedId,
+      edgeWidth: glowEdgeWidth,
+      edgeBrightness: glowEdgeBrightness,
+      smoothness: glowSmoothness,
+    });
+    setShowGlowingEdgesDialog(false);
+  }, [runCommand, selectedId, glowEdgeWidth, glowEdgeBrightness, glowSmoothness]);
 
   const applyDiffuse = useCallback(async () => {
     if (selectedId === null) return;
@@ -1750,6 +1765,14 @@ export default function App() {
             title="Filter > Stylize > Diffuse"
           >
             Diffuse…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGlowingEdgesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Glowing Edges"
+          >
+            Glowing Edges…
           </button>
           <input
             type="color"
@@ -3462,6 +3485,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySurfaceBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGlowingEdgesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGlowingEdgesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Glowing Edges"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Glowing Edges</h2>
+            <label className="control">
+              <span className="control__label">
+                Edge Width
+                <span className="control__value">{glowEdgeWidth}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={14}
+                value={glowEdgeWidth}
+                onChange={(event) => setGlowEdgeWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Edge Brightness
+                <span className="control__value">{glowEdgeBrightness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={glowEdgeBrightness}
+                onChange={(event) => setGlowEdgeBrightness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{glowSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={glowSmoothness}
+                onChange={(event) => setGlowSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGlowingEdgesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGlowingEdges} disabled={busy}>
                 Apply
               </button>
             </div>

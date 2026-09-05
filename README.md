@@ -2844,6 +2844,52 @@ showed sharp single-pixel edges. Undo restored the original.
 **413 Rust tests total** (409 → 413, 406 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 35 — Filter > Stylize > Glowing Edges
+
+Find Edges' neon cousin: the same edges, drawn bright on black instead
+of dark on white, then widened, brightened and softened by Photoshop's
+three controls. `Document::glowing_edges(id, edge_width,
+edge_brightness, smoothness)` runs a four-stage pipeline over the whole
+layer into scratch buffers, so every stage sees its neighbours: (1) the
+`sobel_at` edge magnitude per colour channel — the buffer Find Edges
+inverts, used here as-is; (2) a maximum filter of radius `edge_width −
+1`, the same `extreme_at` that Maximum uses, so a one-pixel edge
+becomes `2·edge_width − 1` pixels wide (width 1 is no dilation); (3)
+each value scaled by `edge_brightness / 5`, truncated and clamped, so
+brightness 5 is the raw magnitude, 0 is black and Photoshop's default 6
+lifts it by a fifth; (4) a box blur of radius `smoothness − 1`, the
+same `box_blur_at` Box Blur uses, with smoothness 1 meaning none. Only
+the selected pixels are written, from the final buffer, and alpha is
+untouched. Photoshop's ranges are kept — Edge Width 1–14, Edge
+Brightness 0–20, Smoothness 1–15 — and a zero width or smoothness is
+rejected. The frontend adds a **Glowing Edges…** button with the three
+sliders, defaulting to Photoshop's 2 / 6 / 5.
+
+**Verified two ways.** Four new `document.rs` tests on the 3×3 red ramp
+(10..90 by tens), building on the Sobel values the Find Edges test
+already derived by hand. With width 1, brightness 5 and smoothness 1
+the result *is* the Sobel L1 magnitude: 160 in the corners, 200
+mid-top and mid-bottom, a clamped 255 across the middle row (the
+mid-top pixel, for instance, has `Gx = (30 + 60 + 60) − (10 + 20 + 40)
+= 80` and `Gy = (40 + 100 + 60) − (10 + 40 + 30) = 120`); the flat
+green channel is black and alpha stays 255. Brightness 6 scales those
+to 192, 240 and a clamped 255; brightness 3 to 96, 120, 153; brightness
+0 to black. Width 2 is a radius-1 maximum and, since every 3×3 window
+on this layer contains a 255, turns the whole layer white; smoothness
+2 is a radius-1 box blur and, since every clamped window holds four
+160s, two 200s and three 255s, turns every pixel into `1805 / 9 = 200`.
+A flat grey layer comes out black at 2 / 6 / 3; with only the top-left
+pixel selected it alone becomes 160 while its neighbour keeps 20 and
+the dirty rect is that pixel; zero width, zero smoothness, a locked
+layer and an unknown id all error. All passing on first run. Live under
+Xvfb on the bundled gradient sample at the defaults, the canvas went
+black and the grid became wide, soft, luminous lines — the neon look —
+picking up colour near the saturated edges where only one channel has
+an edge. Undo restored the original.
+
+**417 Rust tests total** (413 → 417, 410 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

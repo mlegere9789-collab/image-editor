@@ -835,6 +835,20 @@ fn gaussian_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result
     edit_checkpointed(&state, |document| document.gaussian_blur(id, radius))
 }
 
+/// Filter > Stylize > Glowing Edges on layer `id`.
+#[tauri::command]
+fn glowing_edges(
+    state: State<'_, AppState>,
+    id: LayerId,
+    edge_width: u32,
+    edge_brightness: u32,
+    smoothness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.glowing_edges(id, edge_width, edge_brightness, smoothness)
+    })
+}
+
 /// Filter > Blur > Surface Blur on layer `id`.
 #[tauri::command]
 fn surface_blur(
@@ -1304,6 +1318,7 @@ pub fn run() {
             gaussian_blur,
             diffuse,
             surface_blur,
+            glowing_edges,
             set_layer_opacity,
             set_layer_blend_mode,
             remove_layer,

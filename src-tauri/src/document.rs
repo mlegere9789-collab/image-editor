@@ -2239,6 +2239,85 @@ impl Document {
         })
     }
 
+    /// Filter > Stylize > Glowing Edges: Find Edges' neon cousin — edges
+    /// drawn bright on black instead of dark on white, then widened,
+    /// brightened and softened by Photoshop's three controls. The pipeline
+    /// runs over the whole layer into scratch buffers so every stage sees
+    /// its neighbours: (1) the [`sobel_at`] edge magnitude per colour
+    /// channel; (2) a maximum filter of radius `edge_width − 1` (the same
+    /// [`extreme_at`] Maximum uses), so a one-pixel edge becomes
+    /// `2·edge_width − 1` pixels wide — width 1 is no dilation; (3) each
+    /// value scaled by `edge_brightness / 5`, truncated and clamped, so
+    /// brightness 5 is the raw magnitude, 0 is black and Photoshop's
+    /// default 6 lifts it by a fifth; (4) a box blur of radius
+    /// `smoothness − 1` (the same [`box_blur_at`] Box Blur uses) —
+    /// smoothness 1 is none. Only the selected pixels are written, from the
+    /// final buffer, and alpha is untouched. Photoshop's ranges are Edge
+    /// Width 1..=14, Edge Brightness 0..=20, Smoothness 1..=15. Errors on a
+    /// zero width or smoothness or a locked/unknown layer.
+    pub fn glowing_edges(
+        &mut self,
+        id: LayerId,
+        edge_width: u32,
+        edge_brightness: u32,
+        smoothness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if edge_width == 0 {
+            return Err("Edge width must be at least 1 pixel.".to_string());
+        }
+        if smoothness == 0 {
+            return Err("Smoothness must be at least 1.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut stage = source.clone();
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&source, doc_width, (width, height), (row, col));
+                stage[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        if edge_width > 1 {
+            let edges = stage.clone();
+            let radius = edge_width as i64 - 1;
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened =
+                        extreme_at(&edges, doc_width, (width, height), (row, col), radius, true);
+                    stage[dst..dst + 3].copy_from_slice(&widened[..3]);
+                }
+            }
+        }
+        for px in stage.chunks_mut(CHANNELS) {
+            for v in &mut px[..3] {
+                *v = (*v as u32 * edge_brightness / 5).min(255) as u8;
+            }
+        }
+        let glow = stage;
+        let blur_radius = smoothness as i64 - 1;
+        self.filter_pixels(id, |original, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = if blur_radius > 0 {
+                box_blur_at(&glow, doc_width, width, height, row, col, blur_radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&glow[base..base + CHANNELS]);
+                px
+            };
+            out[3] = original[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -5436,6 +5515,90 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.surface_blur(999, 1, 25).is_err());
+    }
+
+    #[test]
+    fn glowing_edges_is_the_scaled_sobel_magnitude_on_black() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        // Width 1, brightness 5, smoothness 1 is exactly the Sobel L1
+        // magnitude the Find Edges test derived by hand: 160 in the corners,
+        // 200 mid-top and mid-bottom, 255 (clamped) across the middle row.
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 1, 5, 1).unwrap();
+        assert_eq!(
+            reds_3x3(&doc),
+            [160, 200, 160, 255, 255, 255, 160, 200, 160]
+        );
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0) + 1], 0); // flat green: no edge, black
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0) + 3], 255); // alpha untouched
+
+        // Photoshop's default brightness 6 scales by 6/5: 192, 240 and a
+        // clamped 255.
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 1, 6, 1).unwrap();
+        assert_eq!(
+            reds_3x3(&doc),
+            [192, 240, 192, 255, 255, 255, 192, 240, 192]
+        );
+
+        // Brightness 3 dims to 3/5, truncating: 96, 120, 153. Brightness 0
+        // is black.
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 1, 3, 1).unwrap();
+        assert_eq!(reds_3x3(&doc), [96, 120, 96, 153, 153, 153, 96, 120, 96]);
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 1, 0, 1).unwrap();
+        assert!(reds_3x3(&doc).iter().all(|&v| v == 0));
+    }
+
+    #[test]
+    fn glowing_edges_width_dilates_and_smoothness_blurs() {
+        // Width 2 is a radius-1 maximum: every 3x3 window holds a 255.
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 2, 5, 1).unwrap();
+        assert!(reds_3x3(&doc).iter().all(|&v| v == 255));
+
+        // Smoothness 2 is a radius-1 box blur of the magnitudes; on the
+        // clamped 3x3 every window holds four 160s, two 200s and three 255s,
+        // 1805 / 9 = 200.
+        let (mut doc, id) = ramped_3x3();
+        doc.glowing_edges(id, 1, 5, 2).unwrap();
+        assert!(reds_3x3(&doc).iter().all(|&v| v == 200));
+    }
+
+    #[test]
+    fn glowing_edges_is_black_on_a_flat_layer_and_confined_to_the_selection() {
+        let (mut doc, id) = grey_2x2();
+        doc.glowing_edges(id, 2, 6, 3).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [0, 0, 0, 255]));
+
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.glowing_edges(id, 1, 5, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(0, 0)], 160);
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 20);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn glowing_edges_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.glowing_edges(id, 0, 6, 1).is_err());
+        assert!(doc.glowing_edges(id, 1, 6, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.glowing_edges(id, 1, 6, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.glowing_edges(999, 1, 6, 1).is_err());
     }
 
     #[test]
