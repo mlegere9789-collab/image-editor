@@ -950,6 +950,22 @@ fn wave(
     })
 }
 
+/// Filter > Distort > Shear on layer `id`. `control_points` are evenly
+/// spaced horizontal-offset anchors from the top row to the bottom row;
+/// `wrap_around` picks Photoshop's Wrap Around undefined-area mode (true)
+/// over the default Repeat Edge Pixels (false).
+#[tauri::command]
+fn shear(
+    state: State<'_, AppState>,
+    id: LayerId,
+    control_points: Vec<f32>,
+    wrap_around: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.shear(id, control_points, wrap_around)
+    })
+}
+
 /// Filter > Pixelate > Color Halftone on layer `id`.
 #[tauri::command]
 fn color_halftone(
@@ -1467,6 +1483,7 @@ pub fn run() {
             zig_zag,
             polar_coordinates,
             wave,
+            shear,
             color_halftone,
             crystallize,
             pointillize,

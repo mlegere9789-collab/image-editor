@@ -301,6 +301,9 @@ export default function App() {
   const [waveAmplitudeMax, setWaveAmplitudeMax] = useState(20);
   const [waveHorizontalScale, setWaveHorizontalScale] = useState(100);
   const [waveVerticalScale, setWaveVerticalScale] = useState(100);
+  const [showShearDialog, setShowShearDialog] = useState(false);
+  const [shearControlPoints, setShearControlPoints] = useState([0, 0, 0, 0, 0]);
+  const [shearWrapAround, setShearWrapAround] = useState(false);
   const [showColorHalftoneDialog, setShowColorHalftoneDialog] = useState(false);
   const [colorHalftoneRadius, setColorHalftoneRadius] = useState(8);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
@@ -778,6 +781,16 @@ export default function App() {
     waveHorizontalScale,
     waveVerticalScale,
   ]);
+
+  const applyShear = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("shear", {
+      id: selectedId,
+      controlPoints: shearControlPoints,
+      wrapAround: shearWrapAround,
+    });
+    setShowShearDialog(false);
+  }, [runCommand, selectedId, shearControlPoints, shearWrapAround]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
@@ -2001,6 +2014,14 @@ export default function App() {
             title="Filter > Distort > Wave"
           >
             Wave…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowShearDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Distort > Shear"
+          >
+            Shear…
           </button>
           <button
             className="button button--quiet"
@@ -4212,6 +4233,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWave} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showShearDialog && (
+        <div className="modal-overlay" onClick={() => setShowShearDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Shear"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Distort &gt; Shear</h2>
+            {shearControlPoints.map((point, index) => (
+              <label className="control" key={index}>
+                <span className="control__label">
+                  {index === 0
+                    ? "Top"
+                    : index === shearControlPoints.length - 1
+                      ? "Bottom"
+                      : `Anchor ${index}`}
+                  <span className="control__value">{point}px</span>
+                </span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={point}
+                  onChange={(event) => {
+                    const next = Number(event.target.value);
+                    setShearControlPoints((points) =>
+                      points.map((p, i) => (i === index ? next : p)),
+                    );
+                  }}
+                />
+              </label>
+            ))}
+            <label className="control control--row">
+              <span className="control__label">Repeat Edge Pixels</span>
+              <input
+                type="radio"
+                name="shear-undefined-areas"
+                checked={!shearWrapAround}
+                onChange={() => setShearWrapAround(false)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Wrap Around</span>
+              <input
+                type="radio"
+                name="shear-undefined-areas"
+                checked={shearWrapAround}
+                onChange={() => setShearWrapAround(true)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowShearDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyShear} disabled={busy}>
                 Apply
               </button>
             </div>

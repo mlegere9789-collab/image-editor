@@ -2818,6 +2818,72 @@ impl Document {
         })
     }
 
+    /// Filter > Distort > Shear: bends the layer horizontally along a
+    /// vertical curve. Photoshop's dialog is a spline you drag inside a
+    /// vertical strip; here the curve is `control_points.len()` anchors
+    /// evenly spaced from the top row to the bottom row, each an
+    /// independent horizontal offset in pixels, linearly interpolated
+    /// between neighbouring anchors — straight segments instead of
+    /// Photoshop's smooth spline is a documented scope cut, made because
+    /// straight segments between the same handful of slider values are
+    /// easier to hand-verify and easier to expose as plain sliders than a
+    /// spline. Every pixel in row `y` is pulled from `x − offset(y)` in
+    /// that same row, so a positive offset drags the row's content to the
+    /// right; offsets are rounded to the nearest whole pixel first, so
+    /// this filter moves whole rows rather than resampling them.
+    /// `undefined_areas` is Photoshop's own radio choice for what happens
+    /// off the left/right edge: `false` (**Repeat Edge Pixels**) clamps
+    /// the source column into range, the convention every other Distort
+    /// filter here uses via [`sample_nearest`]; `true` (**Wrap Around**)
+    /// wraps it with `rem_euclid` instead, so content sheared off one edge
+    /// reappears on the other — the mode [`Self::wave`] leaves as a scope
+    /// cut, implemented here since Shear is the filter Photoshop actually
+    /// exposes it on. Errors on fewer than two control points, a
+    /// non-finite one, or a locked/unknown layer.
+    pub fn shear(
+        &mut self,
+        id: LayerId,
+        control_points: Vec<f32>,
+        wrap_around: bool,
+    ) -> Result<Option<Rect>, String> {
+        if control_points.len() < 2 {
+            return Err("Shear needs at least two control points.".to_string());
+        }
+        if control_points.iter().any(|p| !p.is_finite()) {
+            return Err("Shear control points must all be numbers.".to_string());
+        }
+        let width = self.width as i64;
+        let doc_width = self.width as usize;
+        let height = self.height as usize;
+        let segments = control_points.len() - 1;
+        let row_offsets: Vec<i64> = (0..height)
+            .map(|y| {
+                let t = if height > 1 {
+                    y as f32 / (height - 1) as f32
+                } else {
+                    0.0
+                };
+                let pos = t * segments as f32;
+                let i = (pos as usize).min(segments - 1);
+                let frac = pos - i as f32;
+                let offset = control_points[i] + frac * (control_points[i + 1] - control_points[i]);
+                offset.round() as i64
+            })
+            .collect();
+        self.filter_pixels(id, |source, row, col| {
+            let shifted = col as i64 - row_offsets[row as usize];
+            let sx = if wrap_around {
+                shifted.rem_euclid(width)
+            } else {
+                shifted.clamp(0, width - 1)
+            } as usize;
+            let base = (row as usize * doc_width + sx) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Filter > Pixelate > Color Halftone: reduces the layer to a grid of
     /// solid-colour circular dots, echoing a colour newspaper print. Each
     /// colour channel gets its own square screen of `2 · max_radius`-pixel
@@ -6767,6 +6833,97 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.wave(999, 1, 1, 4, 1, 1, 100.0, 100.0, 1).is_err());
+    }
+
+    #[test]
+    fn shear_with_a_flat_curve_is_the_identity() {
+        let (mut doc, id) = ramp_square(4);
+        let before = doc.layers()[0].pixels.clone();
+        doc.shear(id, vec![0.0, 0.0], false).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        doc.shear(id, vec![0.0, 0.0], true).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn shear_interpolates_between_control_points_and_clamps_by_default() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // Three anchors [0, 3, 0] over 4 rows (segments = 2): row 0 sits
+        // exactly on the first anchor (t=0, offset 0); row 3 exactly on the
+        // last (t=1, offset 0); row 1 (t=1/3) is 2/3 of the way through the
+        // first segment, 0 + 2/3*3 = 2.0; row 2 (t=2/3) is 1/3 through the
+        // second, 3 + 1/3*(0-3) = 2.0. So offsets are [0, 2, 2, 0] — cross-
+        // checked by hand with the same linear-interpolation formula the
+        // implementation uses. Repeat Edge Pixels (wrap_around = false)
+        // clamps the shifted-off-the-left columns to column 0.
+        let (mut doc, id) = ramp_square(4);
+        doc.shear(id, vec![0.0, 3.0, 0.0], false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        // row 0: offset 0, untouched.
+        assert_eq!(p[idx(0, 0)], 0);
+        assert_eq!(p[idx(3, 0)], 30);
+        // row 1: offset 2, source x = col - 2, clamped: -2,-1,0,1 -> 0,0,0,1
+        // read at row 1 (10*x + 1): 1, 1, 1, 11.
+        assert_eq!(p[idx(0, 1)], 1);
+        assert_eq!(p[idx(1, 1)], 1);
+        assert_eq!(p[idx(2, 1)], 1);
+        assert_eq!(p[idx(3, 1)], 11);
+        // row 2: same shift, row 2 (10*x + 2): 2, 2, 2, 12.
+        assert_eq!(p[idx(0, 2)], 2);
+        assert_eq!(p[idx(3, 2)], 12);
+        // row 3: offset 0, untouched.
+        assert_eq!(p[idx(0, 3)], 3);
+        assert_eq!(p[idx(3, 3)], 33);
+    }
+
+    #[test]
+    fn shear_wrap_around_wraps_instead_of_clamping() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        // Same curve and row-1 offset of 2 as the clamp test above, but
+        // wrap_around = true: source x = (col - 2).rem_euclid(4), so
+        // columns 0 and 1 (which clamp to 0 in the other test) instead wrap
+        // to columns 2 and 3, reading further along row 1 (10*x + 1)
+        // instead of repeating the left edge.
+        let (mut doc, id) = ramp_square(4);
+        doc.shear(id, vec![0.0, 3.0, 0.0], true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 1)], 21); // (0-2).rem_euclid(4) = 2 -> 10*2+1
+        assert_eq!(p[idx(1, 1)], 31); // (1-2).rem_euclid(4) = 3 -> 10*3+1
+        assert_eq!(p[idx(2, 1)], 1); // (2-2) = 0 -> 10*0+1, same as clamp
+        assert_eq!(p[idx(3, 1)], 11); // (3-2) = 1 -> 10*1+1, same as clamp
+    }
+
+    #[test]
+    fn shear_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ramp_square(4);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.shear(id, vec![-2.0, -2.0], false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 20); // selected: source x = 0-(-2) = 2 -> 10*2+0
+        assert_eq!(p[idx(1, 0)], 10); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn shear_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.shear(id, vec![0.0], false).is_err());
+        assert!(doc.shear(id, vec![], true).is_err());
+        assert!(doc.shear(id, vec![f32::NAN, 0.0], false).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.shear(id, vec![1.0, 1.0], false).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.shear(999, vec![1.0, 1.0], false).is_err());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 101.**
+**618 distinct capabilities tracked. Currently shipped: 102.**
 
 ## PART I — EVERY TOOL
 
@@ -519,7 +519,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Pinch (radial lens map ρ → ρ·(1 + 0.75·a·(1 − ρ)) inside the inscribed ellipse, nearest-neighbour — see README Phase 38)
 - [x] Polar Coordinates (Rectangular to Polar and Polar to Rectangular, angle clockwise from twelve o'clock, rim = inscribed ellipse — see README Phase 39)
 - [x] Ripple (sinusoidal displacement, amplitude × sin(2π·y/λ) horizontally and the transpose vertically, nearest-neighbour, Small/Medium/Large = 8/16/32 px — see README Phase 37)
-- [ ] Shear (Filter > Distort; added with the Distort audit)
+- [x] Shear (piecewise-linear vertical curve of horizontal offsets, whole-row shifts; Repeat Edge Pixels and Wrap Around both implemented, spline curve is a documented scope cut — see README Phase 44)
 - [x] Spherize (radial lens map ρ → ρ·(1 − 0.75·a·(1 − ρ)), the mirror of Pinch; Horizontal/Vertical Only modes are a documented scope cut — see README Phase 38)
 - [x] Twirl (rotation about the centre by angle · (1 − r/R)², nearest-neighbour — see README Phase 37)
 - [x] Wave (sum of independently randomised sine generators, each with a seeded wavelength/amplitude/phase within a range; Triangle/Square types and Wrap Around are documented scope cuts — see README Phase 43)

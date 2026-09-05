@@ -3358,6 +3358,58 @@ original crisp gradient and grid lines.
 **449 Rust tests total** (445 → 449, 442 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 44 — Filter > Distort > Shear
+
+Photoshop's Shear bends a layer along a vertical curve dragged in its own
+dialog strip; `Document::shear(id, control_points, wrap_around)` keeps the
+spirit — a curve of horizontal offsets running top to bottom — but trades
+Photoshop's smooth spline for `control_points.len()` evenly spaced
+anchors joined by straight segments, a documented scope cut made because
+straight segments between a handful of slider values are easy to
+hand-verify and easy to expose as plain sliders, unlike a spline. For row
+`y`, the anchor curve is sampled at `t = y / (height − 1)` by linearly
+interpolating between the two anchors `t`'s position falls between, and
+the result is rounded to the nearest whole pixel — this filter shifts
+whole rows rather than resampling them. Every pixel in that row is then
+pulled from `x − offset(y)` in the same row, so a positive offset drags
+the row's content right. What happens off the left or right edge is
+`wrap_around`, Photoshop's own radio choice: `false` clamps the source
+column into range (**Repeat Edge Pixels**, the convention every other
+Distort filter here uses via `sample_nearest`); `true` wraps it with
+`rem_euclid` instead (**Wrap Around**), so content sheared off one edge
+reappears on the other — the one mode Wave's own write-up above left as a
+scope cut, implemented here since Shear is the filter Photoshop actually
+puts it on. A **Shear…** dialog exposes five control-point sliders
+(Top, three intermediate anchors, Bottom, each −100..=100 px) plus the
+Repeat Edge Pixels / Wrap Around radio pair.
+
+**Verified two ways.** Five new `document.rs` tests, all hand-derived
+against the implementation's own linear-interpolation formula. A flat
+curve (`[0, 0]`) is confirmed the identity under both edge modes. A
+three-anchor curve `[0, 3, 0]` over a 4-row `ramp_square` fixture (red =
+`10x + y`) gives row offsets `[0, 2, 2, 0]` by hand — row 1 and row 2 sit
+2/3 and 1/3 through their respective segments — and the resulting pixels
+under Repeat Edge Pixels were worked out by hand from that: row 0 and row
+3 (offset 0) untouched, rows 1 and 2 (offset 2) reading columns clamped
+at 0 for the two left columns that shift off the edge. A second test
+reuses that same curve and row-1 offset with `wrap_around = true` and
+confirms the two columns that clamped to 0 in the previous test instead
+wrap to columns 2 and 3, reading further along the row. A third confirms
+a one-pixel selection moves only that pixel with a 1×1 dirty rect. The
+fourth checks that fewer than two control points, a non-finite one, a
+locked layer, and an unknown id all error without touching pixels. All
+five passed on the first run. Live under Xvfb on the bundled gradient
+sample, a curve with the top anchor at +87 px and the bottom at −91 px
+(Wrap Around selected) turned the crisp rectangular grid into a
+consistent diagonal slant, with the wrapped-around content visible as
+small triangular slivers of the opposite edge's colour tucked into the
+top-left and bottom-right corners — exactly the "this edge reappears on
+that one" behaviour `rem_euclid` is meant to produce. Undo restored the
+original, unsheared grid.
+
+**454 Rust tests total** (449 → 454, 447 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
