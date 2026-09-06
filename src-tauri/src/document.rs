@@ -8420,6 +8420,88 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Texturizer: a global, alpha-agnostic
+    /// bump-embossing filter, unlike this project's Layer Style filters
+    /// which only shade pixels near an alpha edge. Reuses two ideas this
+    /// project already has rather than inventing new ones: a two-level
+    /// checkerboard "height" field, the same `((row / scale) + (col /
+    /// scale)) % 2` cell formula [`Self::pattern_overlay`] and
+    /// [`Self::texture`] already use (standing in for Photoshop's own
+    /// "Canvas" built-in texture, the same kind of single-preset
+    /// substitution [`Self::texture`] itself already documents —
+    /// Photoshop's own Brick, Burlap, and Sandstone textures, and loading
+    /// a custom texture file, are a documented scope cut); and
+    /// [`Self::emboss`] and [`Self::plaster`]'s own "away − toward"
+    /// relief convention, sampled one pixel out along their shared
+    /// 8-direction angle table. `shade = (height(away) − height(toward))
+    /// * relief` is added to each colour channel (clamped to `0..=255`),
+    /// exactly the same additive shape [`Self::bevel_emboss`] already
+    /// uses. Unlike every Layer Style filter here, this ignores alpha
+    /// entirely — every pixel is shaded the same way regardless of
+    /// transparency, matching how [`Self::plaster`], [`Self::grain`],
+    /// and [`Self::emboss`] already apply globally rather than only near
+    /// an edge — and alpha itself always passes through untouched.
+    /// `invert` swaps which checkerboard cell counts as "raised".
+    /// `scale` (`1..=250`) shares [`Self::pattern_overlay`]'s own
+    /// cell-size range; `relief` (`0..=50`, Photoshop's own dialog
+    /// range) is a per-channel intensity added directly, not a percent;
+    /// `light_direction` is `0..=7`.
+    pub fn texturizer(
+        &mut self,
+        id: LayerId,
+        scale: u32,
+        relief: u32,
+        light_direction: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&scale) {
+            return Err("Texturizer scale must be between 1 and 250.".to_string());
+        }
+        if relief > 50 {
+            return Err("Texturizer relief must be between 0 and 50.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Texturizer light direction must be between 0 and 7.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let scale = scale as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let relief = relief as f32;
+        let height_at = move |r: i64, c: i64| -> i64 {
+            let r = r.clamp(0, height - 1);
+            let c = c.clamp(0, width - 1);
+            let up = (r / scale + c / scale) % 2 == 0;
+            let up = if invert { !up } else { up };
+            i64::from(up)
+        };
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let (row, col) = (row as i64, col as i64);
+            let toward = height_at(row + dy, col + dx);
+            let away = height_at(row - dy, col - dx);
+            let shade = (away - toward) as f32 * relief;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -19258,6 +19340,146 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.texture(999, 2, 0, 100, 2, 1).is_err());
+    }
+
+    #[test]
+    fn texturizer_shades_at_the_checkerboard_boundary() {
+        // A 4x4 solid grey (100, 100, 100, 255) layer. Scale 2, relief
+        // 10, direction 2 (0 degrees, dx=1, dy=0). The scale-2
+        // checkerboard's own cells are 2x2, so row 0's own height field
+        // is [1, 1, 0, 0] across columns 0-3 (raised where (row/2 +
+        // col/2) is even). Pixel (row 0, col 1): toward = height(0, 2)
+        // = 0, away = height(0, 0) = 1 (edge-clamped), relief = 1 - 0 =
+        // 1, shade = 1 * 10 = 10, giving a real (110, 110, 110). Pixel
+        // (row 0, col 0), deep inside its own cell (both neighbours
+        // land on the very same height as itself once edge-clamped),
+        // has toward = height(0, 1) = 1 and away = height(0, -1)
+        // clamped to height(0, 0) = 1, relief 0, unchanged (100, 100,
+        // 100). Pixel (row 2, col 1) sits on the very same boundary but
+        // one cell-row down, where the height field flips (raised
+        // becomes lowered), giving the opposite sign: relief = 0 - 1 =
+        // -1, shade = -10, a real (90, 90, 90).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        doc.texturizer(id, 2, 10, 2, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [110, 110, 110, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [90, 90, 90, 255]);
+    }
+
+    #[test]
+    fn texturizer_relief_scales_the_shade() {
+        // Same pixel (0, 1), same scale/direction, but relief 5 halves
+        // the shade to 1 * 5 = 5, giving a real (105, 105, 105) instead
+        // of the relief-10 test's own (110, 110, 110), not a
+        // coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        doc.texturizer(id, 2, 5, 2, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [105, 105, 105, 255]);
+    }
+
+    #[test]
+    fn texturizer_light_direction_flips_the_sign() {
+        // Same pixel (0, 1), scale 2, relief 10, but direction 6 (180
+        // degrees, dx=-1, dy=0) swaps toward and away relative to
+        // direction 2, negating the relief: toward = height(0, 0) = 1,
+        // away = height(0, 2) = 0, relief = 0 - 1 = -1, shade = -10,
+        // giving a real (90, 90, 90) -- the mirror image of the
+        // direction-2 test's own (110, 110, 110) at the very same
+        // pixel.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        doc.texturizer(id, 2, 10, 6, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [90, 90, 90, 255]);
+    }
+
+    #[test]
+    fn texturizer_invert_flips_which_cell_is_raised() {
+        // Same pixel (0, 1), scale 2, relief 10, direction 2, but
+        // invert true swaps which checkerboard cell counts as raised,
+        // negating the relief exactly like the light-direction-6 test
+        // does: a real (90, 90, 90) instead of the non-inverted test's
+        // own (110, 110, 110), not a coincidental match with the
+        // light-direction test's own result.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        doc.texturizer(id, 2, 10, 2, true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [90, 90, 90, 255]);
+    }
+
+    #[test]
+    fn texturizer_scale_moves_the_checkerboard_boundary() {
+        // Same pixel (0, 1), relief 10, direction 2, but scale 1
+        // shrinks the checkerboard to single pixels: height(0, 1) = 0
+        // and both its own neighbours, height(0, 2) and height(0, 0),
+        // are 1, giving relief 1 - 1 = 0 and no change at all: a real,
+        // hand-computed (100, 100, 100), a genuine structural
+        // difference from the scale-2 test's own (110, 110, 110), not
+        // just a smaller magnitude.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        doc.texturizer(id, 1, 10, 2, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn texturizer_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(4, 4, [100, 100, 100, 255]), 4, 4)
+            .unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.texturizer(id, 2, 10, 2, false).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [110, 110, 110, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn texturizer_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.texturizer(id, 0, 10, 0, false).is_err());
+        assert!(doc.texturizer(id, 251, 10, 0, false).is_err());
+        assert!(doc.texturizer(id, 2, 51, 0, false).is_err());
+        assert!(doc.texturizer(id, 2, 10, 8, false).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.texturizer(id, 2, 10, 0, false).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.texturizer(999, 2, 10, 0, false).is_err());
     }
 
     #[test]

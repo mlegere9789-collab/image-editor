@@ -2205,6 +2205,21 @@ fn texture(
     })
 }
 
+/// Filter Gallery > Texture > Texturizer on layer `id`.
+#[tauri::command]
+fn texturizer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    scale: u32,
+    relief: u32,
+    light_direction: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.texturizer(id, scale, relief, light_direction, invert)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2554,6 +2569,7 @@ pub fn run() {
             bevel_emboss,
             contour,
             texture,
+            texturizer,
             hue_saturation,
             black_and_white,
             vibrance,

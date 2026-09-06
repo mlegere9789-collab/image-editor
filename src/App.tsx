@@ -292,6 +292,11 @@ export default function App() {
   const [textureStrength, setTextureStrength] = useState(50);
   const [textureScale, setTextureScale] = useState(10);
   const [textureDepth, setTextureDepth] = useState(20);
+  const [showTexturizerDialog, setShowTexturizerDialog] = useState(false);
+  const [texturizerScale, setTexturizerScale] = useState(10);
+  const [texturizerRelief, setTexturizerRelief] = useState(10);
+  const [texturizerLightDirection, setTexturizerLightDirection] = useState(7);
+  const [texturizerInvert, setTexturizerInvert] = useState(false);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -1016,6 +1021,25 @@ export default function App() {
     textureStrength,
     textureScale,
     textureDepth,
+  ]);
+
+  const applyTexturizer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("texturizer", {
+      id: selectedId,
+      scale: texturizerScale,
+      relief: texturizerRelief,
+      lightDirection: texturizerLightDirection,
+      invert: texturizerInvert,
+    });
+    setShowTexturizerDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    texturizerScale,
+    texturizerRelief,
+    texturizerLightDirection,
+    texturizerInvert,
   ]);
 
   const applyLevels = useCallback(async () => {
@@ -3250,6 +3274,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowTexturizerDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Texturizer"
+          >
+            Texturizer…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowColoredPencilDialog(true)}
             disabled={busy || !canPaint}
             title="Filter Gallery > Artistic > Colored Pencil"
@@ -5194,6 +5226,84 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTexture} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTexturizerDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTexturizerDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Texturizer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Texturizer</h2>
+            <label className="control">
+              <span className="control__label">
+                Scale
+                <span className="control__value">{texturizerScale}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={texturizerScale}
+                onChange={(event) => setTexturizerScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Relief
+                <span className="control__value">{texturizerRelief}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={texturizerRelief}
+                onChange={(event) => setTexturizerRelief(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={texturizerLightDirection}
+                onChange={(event) => setTexturizerLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Invert</span>
+              <input
+                type="checkbox"
+                checked={texturizerInvert}
+                onChange={(event) => setTexturizerInvert(event.target.checked)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTexturizerDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTexturizer} disabled={busy}>
                 Apply
               </button>
             </div>

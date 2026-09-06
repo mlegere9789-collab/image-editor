@@ -7298,6 +7298,79 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **771 Rust tests total** (764 → 771, 764 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 110 — Filter Gallery > Texture > Texturizer
+
+`texturizer(id, scale, relief, light_direction, invert)` was
+previously documented as a deferred gap ("needs a bump map this
+project doesn't have the machinery for"), but the last three phases'
+own height-field and checkerboard-cell work turned out to build
+exactly that machinery. Unlike every Layer Style filter shipped so
+far, Texturizer is a *global*, alpha-agnostic filter — Photoshop's own
+version shades the whole layer's content regardless of transparency,
+the same way `plaster`, `grain`, and `emboss` already apply globally
+here rather than only near an alpha edge. The implementation composes
+two ideas this project already has: a two-level checkerboard "height"
+field using the exact `((row / scale) + (col / scale)) % 2` cell
+formula `pattern_overlay` and `texture` already share (standing in for
+Photoshop's own "Canvas" built-in texture, the same kind of
+single-preset substitution `texture` itself already documents —
+Photoshop's own Brick, Burlap, and Sandstone textures, and loading a
+custom texture file, are a documented scope cut), and `emboss` /
+`plaster`'s own "away − toward" relief convention, sampled one pixel
+out along their shared 8-direction angle table. `shade = (height(away)
+− height(toward)) * relief` is added to each colour channel (clamped),
+exactly the same additive shape `bevel_emboss` already uses; alpha
+always passes through untouched. `invert` swaps which checkerboard
+cell counts as raised. `scale` (`1..=250`) shares `pattern_overlay`'s
+own cell-size range; `relief` (`0..=50`, Photoshop's own dialog range)
+is a per-channel intensity added directly, not a percent;
+`light_direction` is `0..=7`. A new **Texturizer…** dialog exposes
+Scale, Relief, the same eight-direction Light Direction dropdown, and
+an Invert checkbox.
+
+**Verified two ways.** Seven new `document.rs` tests, on a plain 4x4
+solid grey `(100, 100, 100, 255)` layer rather than an alpha-based
+fixture, since Texturizer's own shading depends only on position, not
+on alpha or on the underlying colour's own value. Scale `2`, relief
+`10`, direction `2` (`dx=1, dy=0`): the scale-2 checkerboard's own
+height field across row `0` is `[1, 1, 0, 0]` (raised where `row/2 +
+col/2` is even). Pixel `(row 0, col 1)` has `toward = height(0, 2) =
+0` and `away = height(0, 0) = 1`, `relief = 1`, `shade = 10`, a real
+`(110, 110, 110)`; pixel `(row 0, col 0)`, deep inside its own cell
+once edge-clamped, has both neighbours at its own height, `relief =
+0`, unchanged `(100, 100, 100)`; pixel `(row 2, col 1)`, one cell-row
+down where the field flips, gives the opposite sign, a real `(90, 90,
+90)`. A second test halves relief to `5` for a real `(105, 105, 105)`.
+A third flips direction to `6` (180°), swapping toward and away for
+the mirror `(90, 90, 90)`. A fourth sets `invert` true, which negates
+the relief exactly like the direction flip does, landing on the very
+same `(90, 90, 90)` through an entirely different mechanism — not a
+coincidental match, a genuine consequence of inverting which cell
+counts as raised. A fifth narrows scale to `1`, shrinking the
+checkerboard to single pixels so pixel `(0, 1)`'s own two neighbours
+both land on height `1` (the same as each other), cancelling the
+relief to `0` — a real structural difference from the scale-`2` test's
+own `(110, 110, 110)`, not just a smaller magnitude. A sixth confines
+a single pixel to a selection. A seventh confirms out-of-range scale,
+relief, and light direction, plus a locked/unknown layer, all error.
+All seven tests passed on the first run, cross-checked against an
+independent Python script that emulates Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-seven: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**778 Rust tests total** (771 → 778, 771 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
