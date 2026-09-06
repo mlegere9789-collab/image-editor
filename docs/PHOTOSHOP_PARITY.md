@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 130.**
+**618 distinct capabilities tracked. Currently shipped: 131.**
 
 ## PART I — EVERY TOOL
 
@@ -551,7 +551,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Neon Glow (Filter Gallery → Artistic; each pixel pulled toward a chosen glow colour in proportion to a dilated Sobel edge strength, leaving flat areas untouched — a documented, hand-verifiable approximation of Photoshop's own whole-image tonal rework — see README Phase 57)
 - [x] Paint Daubs (Filter Gallery → Artistic; a `box_blur_at` soften blended back toward the original by Sharpness, the same blend-back shape `dry_brush` already uses — Photoshop's six-way Brush Type dropdown is a documented scope cut, always daubing the way "Simple" does — see README Phase 70)
 - [x] Palette Knife (Filter Gallery → Artistic; composes `posterize` with a `box_blur_at` pass rounding off the band boundaries, the same composition pattern `poster_edges` already established — see README Phase 71)
-- [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
+- [x] Plastic Wrap (Filter Gallery → Artistic; pulls edges toward white in proportion to a dilated-then-smoothed Sobel edge strength, the same white push `neon_glow` uses and the same two-stage edge-map pipeline `accented_edges` already established — see README Phase 72)
 - [x] Poster Edges (Filter Gallery → Artistic; composes the existing `posterize` with a dark outline drawn from a dilated Sobel edge map measured on the posterized result itself — see README Phase 58)
 - [ ] Rough PastelsSimulates pastel artwork on a textured surface.
 - [x] Smudge Stick (Filter Gallery → Artistic; a single-diagonal `motion_blur_at` smudge, then brightens whichever pixels land in the smudged result's own upper tonal range, the same white-pull shape `dark_strokes`'s highlight side uses — see README Phase 69)

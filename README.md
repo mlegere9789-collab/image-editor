@@ -4968,6 +4968,66 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **568 Rust tests total** (563 → 568, 561 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 72 — Filter Gallery > Artistic > Plastic Wrap
+
+Pulls every pixel toward white in proportion to its own edge strength —
+the same push `neon_glow` already uses, just with the glow colour fixed
+to white — measured on a dilated-then-smoothed Sobel edge map, the same
+two-stage `extreme_at`-then-`box_blur_at` edge-map pipeline
+`accented_edges` already established. The combination reads as a
+glossy, plastic-coated sheen sitting along detail while leaving flat
+areas untouched. A documented approximation, not a port of Photoshop's
+own renderer. `Document::plastic_wrap(id, highlight_strength, detail,
+smoothness)`: `detail` (Photoshop's own `0..=15` range) dilates the
+measured edge map by `detail / 3`; `smoothness` (Photoshop's own
+`1..=15` range) then box-blurs that edge map by `(smoothness / 3)
+.max(1)`, always applying at least some smoothing since Photoshop's own
+range never reaches `0`; `highlight_strength` (Photoshop's own `0..=20`
+range) scales how far each pixel travels toward white, `orig + (255 -
+orig) * (edge / 255) * (highlight_strength / 20)`. Alpha untouched.
+Only the final push respects the selection; the edge-detection,
+dilation, and smoothing passes always see the whole layer, the same
+scope cut `accented_edges` already makes. A new **Plastic Wrap…**
+dialog exposes Highlight Strength, Detail, and Smoothness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`
+all already share (4×4, columns 0-1 solid `200`, columns 2-3 solid
+`50`, raw Sobel magnitude `[0, 255, 255, 0]`). At detail `0` (no
+dilation) and smoothness `3` (smoothing radius `1`), the edge map
+reduces to `accented_edges`'s own already-verified smoothed row `[85,
+170, 170, 85]`. At highlight strength `20` (maximum): column `0`
+(`200`, edge `85/255 = 1/3`) pushes to `200 + 55/3 = 218.33 -> 218`;
+column `1` (`200`, edge `2/3`) to `200 + 55*2/3 = 236.67 -> 237`;
+column `2` (`50`, edge `2/3`) to `50 + 205*2/3 = 186.67 -> 187`; column
+`3` (`50`, edge `1/3`) to `50 + 205/3 = 118.33 -> 118` — cross-checked
+against an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping. A second test halves the
+highlight strength to `10`, halving the push accordingly. A third
+raises detail to `6` (dilation radius `2`), wide enough on this 4-wide
+fixture to spread the raw edge map to a uniform `255` everywhere
+(smoothing a uniform value changes nothing), so at highlight strength
+`20` every pixel pushes fully to white regardless of its own original
+shade. A fourth confines the fixture to a one-pixel selection. A fifth
+confirms out-of-range highlight strength, detail, and smoothness, plus
+a locked/unknown layer, all error. All five passed on the first run,
+matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous nineteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**573 Rust tests total** (568 → 573, 566 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

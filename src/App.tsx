@@ -387,6 +387,10 @@ export default function App() {
   const [paletteKnifeStrokeSize, setPaletteKnifeStrokeSize] = useState(10);
   const [paletteKnifeStrokeDetail, setPaletteKnifeStrokeDetail] = useState(2);
   const [paletteKnifeSoftness, setPaletteKnifeSoftness] = useState(2);
+  const [showPlasticWrapDialog, setShowPlasticWrapDialog] = useState(false);
+  const [plasticWrapHighlightStrength, setPlasticWrapHighlightStrength] = useState(15);
+  const [plasticWrapDetail, setPlasticWrapDetail] = useState(7);
+  const [plasticWrapSmoothness, setPlasticWrapSmoothness] = useState(7);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1174,6 +1178,17 @@ export default function App() {
     });
     setShowPaletteKnifeDialog(false);
   }, [runCommand, selectedId, paletteKnifeStrokeSize, paletteKnifeStrokeDetail, paletteKnifeSoftness]);
+
+  const applyPlasticWrap = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("plastic_wrap", {
+      id: selectedId,
+      highlightStrength: plasticWrapHighlightStrength,
+      detail: plasticWrapDetail,
+      smoothness: plasticWrapSmoothness,
+    });
+    setShowPlasticWrapDialog(false);
+  }, [runCommand, selectedId, plasticWrapHighlightStrength, plasticWrapDetail, plasticWrapSmoothness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2517,6 +2532,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Palette Knife"
           >
             Palette Knife…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPlasticWrapDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Plastic Wrap"
+          >
+            Plastic Wrap…
           </button>
           <button
             className="button button--quiet"
@@ -5226,6 +5249,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPaletteKnife} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPlasticWrapDialog && (
+        <div className="modal-overlay" onClick={() => setShowPlasticWrapDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Plastic Wrap"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Plastic Wrap</h2>
+            <label className="control">
+              <span className="control__label">
+                Highlight Strength
+                <span className="control__value">{plasticWrapHighlightStrength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={plasticWrapHighlightStrength}
+                onChange={(event) => setPlasticWrapHighlightStrength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Detail
+                <span className="control__value">{plasticWrapDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={plasticWrapDetail}
+                onChange={(event) => setPlasticWrapDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{plasticWrapSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={plasticWrapSmoothness}
+                onChange={(event) => setPlasticWrapSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPlasticWrapDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPlasticWrap} disabled={busy}>
                 Apply
               </button>
             </div>

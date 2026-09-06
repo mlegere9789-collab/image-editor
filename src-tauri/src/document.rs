@@ -5707,6 +5707,116 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Plastic Wrap: pulls every pixel toward
+    /// white in proportion to its own edge strength — the same push
+    /// [`Self::neon_glow`] already uses, just with the glow colour fixed
+    /// to white — measured on a dilated-then-smoothed Sobel edge map, the
+    /// same two-stage `extreme_at`-then-`box_blur_at` edge-map pipeline
+    /// [`Self::accented_edges`] already established. The combination
+    /// reads as a glossy, plastic-coated sheen sitting along detail while
+    /// leaving flat areas untouched. A documented approximation, not a
+    /// port of Photoshop's own renderer. `detail` (Photoshop's own
+    /// `0..=15` range) dilates the measured edge map by `detail / 3`;
+    /// `smoothness` (Photoshop's own `1..=15` range) then box-blurs that
+    /// edge map by `(smoothness / 3).max(1)`, always applying at least
+    /// some smoothing since Photoshop's own range never reaches `0`;
+    /// `highlight_strength` (Photoshop's own `0..=20` range) scales how
+    /// far each pixel travels toward white, `orig + (255 - orig) *
+    /// (edge / 255) * (highlight_strength / 20)`. Alpha untouched.
+    /// Confined to the selection (only the final push respects it; the
+    /// edge-detection, dilation, and smoothing passes always see the
+    /// whole layer, the same scope cut `accented_edges` already makes).
+    /// Errors on an out-of-range parameter or a locked/unknown layer.
+    pub fn plastic_wrap(
+        &mut self,
+        id: LayerId,
+        highlight_strength: u32,
+        detail: u32,
+        smoothness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if highlight_strength > 20 {
+            return Err("Plastic Wrap highlight strength must be between 0 and 20.".to_string());
+        }
+        if detail > 15 {
+            return Err("Plastic Wrap detail must be between 0 and 15.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Plastic Wrap smoothness must be between 1 and 15.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        let dilate_radius = (detail / 3) as i64;
+        if dilate_radius > 0 {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened = extreme_at(
+                        &edges,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        dilate_radius,
+                        true,
+                    );
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let smooth_radius = (smoothness / 3).max(1) as i64;
+        {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let smoothed =
+                        box_blur_at(&edges, doc_width, width, height, row, col, smooth_radius);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&smoothed);
+                }
+            }
+        }
+        let strength_f = highlight_strength as f32 / 20.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let e = mag_buf[base] as f32 / 255.0;
+            let strength = (e * strength_f).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let val = orig + (255.0 - orig) * strength;
+                out[c] = val.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -12632,6 +12742,104 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.palette_knife(999, 10, 1, 0).is_err());
+    }
+
+    #[test]
+    fn plastic_wrap_pulls_edges_toward_white_by_highlight_strength() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife all already
+        // share: 4x4, columns 0-1 solid 200, columns 2-3 solid 50, raw
+        // Sobel magnitude [0, 255, 255, 0] across every row. Detail 0
+        // means no dilation; smoothness 3 gives a smoothing radius of 1,
+        // which is exactly accented_edges's own already-verified
+        // box-blur smoothing case on this same raw edge map: [85, 170,
+        // 170, 85]. At highlight strength 20 (maximum, strength factor
+        // 1.0): column 0 (orig 200, edge 85/255 = 1/3) pushes to 200 +
+        // 55 * 1/3 = 218.33 -> 218; column 1 (orig 200, edge 170/255 =
+        // 2/3) pushes to 200 + 55 * 2/3 = 236.67 -> 237; column 2 (orig
+        // 50, edge 2/3) pushes to 50 + 205 * 2/3 = 186.67 -> 187; column
+        // 3 (orig 50, edge 1/3) pushes to 50 + 205 * 1/3 = 118.33 -> 118.
+        // Cross-checked against an independent Python script emulating
+        // f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plastic_wrap(id, 20, 0, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [218, 218, 218, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [237, 237, 237, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [187, 187, 187, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [118, 118, 118, 255]);
+    }
+
+    #[test]
+    fn plastic_wrap_highlight_strength_scales_the_push() {
+        // Same smoothed edge map as the first test, but highlight
+        // strength 10 halves the strength factor to 0.5: column 0 pushes
+        // to 200 + 55 * (85/255 * 0.5) = 200 + 55 * 0.166667 = 209.17 ->
+        // 209; column 3 pushes to 50 + 205 * (85/255 * 0.5) = 50 + 205 *
+        // 0.166667 = 84.17 -> 84.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plastic_wrap(id, 10, 0, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [209, 209, 209, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [84, 84, 84, 255]);
+    }
+
+    #[test]
+    fn plastic_wrap_detail_dilates_the_edge_map_to_full_saturation() {
+        // Detail 6 gives a dilation radius of 2, wide enough on this
+        // 4-wide fixture to spread the raw edge map's 255-magnitude
+        // columns across every column (the same dilation reasoning
+        // ink_outlines's and accented_edges's own width tests already
+        // use), so after dilation the edge map is a uniform 255
+        // everywhere -- smoothing a uniform value changes nothing. At
+        // highlight strength 20 (strength factor 1.0), every pixel's
+        // strength is 255/255 * 1.0 = 1.0 exactly, pushing every pixel
+        // fully to white regardless of its own original shade.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plastic_wrap(id, 20, 6, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 255, 255, 255]);
+        }
+    }
+
+    #[test]
+    fn plastic_wrap_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.plastic_wrap(id, 20, 0, 3).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [237, 237, 237, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn plastic_wrap_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.plastic_wrap(id, 21, 0, 3).is_err());
+        assert!(doc.plastic_wrap(id, 20, 16, 3).is_err());
+        assert!(doc.plastic_wrap(id, 20, 0, 0).is_err());
+        assert!(doc.plastic_wrap(id, 20, 0, 16).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.plastic_wrap(id, 20, 0, 3).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.plastic_wrap(999, 20, 0, 3).is_err());
     }
 
     #[test]

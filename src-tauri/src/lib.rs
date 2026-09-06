@@ -1651,6 +1651,20 @@ fn palette_knife(
     })
 }
 
+/// Filter Gallery > Artistic > Plastic Wrap on layer `id`.
+#[tauri::command]
+fn plastic_wrap(
+    state: State<'_, AppState>,
+    id: LayerId,
+    highlight_strength: u32,
+    detail: u32,
+    smoothness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.plastic_wrap(id, highlight_strength, detail, smoothness)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -1962,6 +1976,7 @@ pub fn run() {
             smudge_stick,
             paint_daubs,
             palette_knife,
+            plastic_wrap,
             hue_saturation,
             black_and_white,
             vibrance,
