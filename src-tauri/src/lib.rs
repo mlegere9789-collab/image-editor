@@ -2484,6 +2484,21 @@ fn tilt_shift(
     })
 }
 
+/// Filter Gallery > Blur Gallery > Iris Blur on layer `id`.
+#[tauri::command]
+fn iris_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    blur_radius: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.iris_blur(id, center_x, center_y, radius, blur_radius)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2727,6 +2742,7 @@ pub fn run() {
             clarity,
             defringe,
             tilt_shift,
+            iris_blur,
             select_rectangle,
             select_ellipse,
             select_all,

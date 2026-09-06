@@ -9535,6 +9535,69 @@ impl Document {
         }
         Ok(Some(bounds))
     }
+
+    /// Filter Gallery > Blur Gallery > Iris Blur (circular only):
+    /// [`Self::tilt_shift`]'s own gradient-blur shape, but the sharp zone
+    /// is a circle around `(center_x, center_y)` instead of a horizontal
+    /// band — a pixel's own Euclidean `distance` from that centre is
+    /// compared against `radius` (within it, `blend = 0`, fully sharp)
+    /// and a `blur_radius`-pixel transition beyond it (`blend = (distance
+    /// − radius) / blur_radius`, clamped to `0.0..=1.0`), blending toward
+    /// a [`box_blur_at`] average by that same fraction per RGB channel;
+    /// alpha untouched. Photoshop's own Iris Blur lets the ellipse be
+    /// stretched and rotated and gives it four independently draggable
+    /// feather handles rather than one uniform ring; this project's own
+    /// circle-only, single-radius version is a documented scope cut, the
+    /// same kind of narrowing [`Self::tilt_shift`]'s own horizontal-only
+    /// band already makes relative to Photoshop's arbitrary-angle one.
+    pub fn iris_blur(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        blur_radius: u32,
+    ) -> Result<Option<Rect>, String> {
+        if blur_radius == 0 {
+            return Err("Iris Blur blur radius must be at least 1 pixel.".to_string());
+        }
+        if !center_x.is_finite() || !center_y.is_finite() || !radius.is_finite() || radius < 0.0 {
+            return Err(
+                "Iris Blur center and radius must be finite, and radius non-negative.".to_string(),
+            );
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = blur_radius as i64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let dx = col as f32 - center_x;
+                let dy = row as f32 - center_y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                let blend = ((distance - radius) / blur_radius as f32).clamp(0.0, 1.0);
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as f32;
+                    let final_value = original * (1.0 - blend) + blurred[c] as f32 * blend;
+                    layer.pixels[dst + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22122,6 +22185,77 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.tilt_shift(999, 1, 0, 2).is_err());
+    }
+
+    #[test]
+    fn iris_blur_keeps_the_centre_sharp_and_blurs_outward() {
+        // ramped_3x3's own R-only ramp. Centre (1.0, 1.0) (the grid's
+        // own middle pixel), radius 0.0, blur radius 2. The centre
+        // pixel (1, 1) sits at distance 0, so blend = 0 and it's left
+        // byte-for-byte at its own original 50. Pixel (1, 0) sits a
+        // Euclidean distance of 1.0 away, giving blend = 1.0/2 = 0.5,
+        // blending its own original 20 halfway with its own radius-2
+        // box-blur average, 38, for a real 29. Pixel (0, 0), a diagonal
+        // distance of sqrt(2) = 1.41421 away, gives blend = 0.70711,
+        // blending its own original 10 with its own average 34 for a
+        // real 27; pixel (2, 2), the opposite diagonal corner, blends
+        // its own original 90 with its own average 66 for a real 73.
+        // All four values hand-computed and cross-checked in Python.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.iris_blur(id, 1.0, 1.0, 0.0, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(1, 0)], 29);
+        assert_eq!(p[idx(0, 0)], 27);
+        assert_eq!(p[idx(2, 2)], 73);
+    }
+
+    #[test]
+    fn iris_blur_radius_widens_the_sharp_zone() {
+        // Same centre and blur radius, but radius 2.0 now covers every
+        // pixel in the 3x3 grid (the farthest corner sits only sqrt(2)
+        // = 1.41421 away, under 2.0), leaving the entire image
+        // untouched -- a real, hand-computed difference from the
+        // radius-0 test's own blended pixels.
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.iris_blur(id, 1.0, 1.0, 2.0, 2).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn iris_blur_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.iris_blur(id, 1.0, 1.0, 0.0, 2).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 27);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn iris_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.iris_blur(id, 1.0, 1.0, 0.0, 0).is_err());
+        assert!(doc.iris_blur(id, f32::NAN, 1.0, 0.0, 2).is_err());
+        assert!(doc.iris_blur(id, 1.0, 1.0, -1.0, 2).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.iris_blur(id, 1.0, 1.0, 0.0, 2).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.iris_blur(999, 1.0, 1.0, 0.0, 2).is_err());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 183.**
+**618 distinct capabilities tracked. Currently shipped: 184.**
 
 ## PART I — EVERY TOOL
 
@@ -484,7 +484,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Lens Blur
 - [ ] Blur Gallery
 - [ ] Field Blur
-- [ ] Iris Blur
+- [x] Iris Blur (`iris_blur`, circular only: `tilt_shift`'s own gradient-blur shape with a circular sharp zone instead of a horizontal band, blending toward a `box_blur_at` average by Euclidean distance from a chosen centre past a given radius. Photoshop's own stretchable/rotatable ellipse and four independently draggable feather handles are a documented scope cut — see README Phase 122)
 - [x] Tilt-Shift (`tilt_shift`, horizontal band only: a `box_blur_at` gradient blur that keeps a horizontal band fully sharp and blurs everything else, ramping linearly over a `blur_radius`-row transition. Photoshop's own arbitrary-angle band, independently draggable feather rings, and Distortion slider are a documented scope cut — see README Phase 121)
 - [ ] Path Blur
 - [ ] Spin Blur

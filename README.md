@@ -8077,6 +8077,62 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **847 Rust tests total** (843 → 847, 840 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 122 — Filter Gallery > Blur Gallery > Iris Blur
+
+`iris_blur(id, center_x, center_y, radius, blur_radius)` (circular
+only) reuses `tilt_shift`'s own gradient-blur shape, but the sharp zone
+is a circle around `(center_x, center_y)` instead of a horizontal
+band — a pixel's own Euclidean `distance` from that centre is compared
+against `radius` (within it, `blend = 0`, fully sharp) and a
+`blur_radius`-pixel transition beyond it (`blend = (distance - radius)
+/ blur_radius`, clamped to `0.0..=1.0`), blending toward a
+`box_blur_at` average by that same fraction per RGB channel; alpha
+untouched. Photoshop's own Iris Blur lets the ellipse be stretched and
+rotated and gives it four independently draggable feather handles
+rather than one uniform ring; this project's own circle-only, single-
+radius version is a documented scope cut, the same kind of narrowing
+`tilt_shift`'s own horizontal-only band already makes relative to
+Photoshop's arbitrary-angle one. A new **Iris Blur…** dialog exposes
+Center X, Center Y, Sharp Radius, and Blur Radius, defaulting the
+centre to the canvas's own middle when the dialog opens.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture. Centre `(1.0, 1.0)` (the
+grid's own middle pixel), radius `0.0`, blur radius `2`: the centre
+pixel `(1, 1)` sits at distance `0`, so `blend = 0` and it's left
+byte-for-byte at its own original `50`. Pixel `(1, 0)` sits a Euclidean
+distance of `1.0` away, giving `blend = 1.0/2 = 0.5`, blending its own
+original `20` halfway with its own radius-2 box-blur average, `38`,
+for a real `29`. Pixel `(0, 0)`, a diagonal distance of `sqrt(2) =
+1.41421` away, gives `blend = 0.70711`, blending its own original `10`
+with its own average `34` for a real `27`; pixel `(2, 2)`, the opposite
+diagonal corner, blends its own original `90` with its own average
+`66` for a real `73`. All four values hand-computed and cross-checked
+in Python. A second test widens radius to `2.0`, now covering every
+pixel in the 3x3 grid (the farthest corner sits only `sqrt(2) =
+1.41421` away, under `2.0`), leaving the entire image untouched — a
+real, hand-computed difference from the radius-`0` test's own blended
+pixels. A third confines a single pixel to a selection. A fourth
+confirms a zero blur radius, a non-finite centre coordinate, a negative
+radius, and a locked/unknown layer, all error. All four tests passed
+on the first run, cross-checked against an independent Python script
+emulating Rust's own `f32` rounding via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**851 Rust tests total** (847 → 851, 844 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

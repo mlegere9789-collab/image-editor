@@ -367,6 +367,11 @@ export default function App() {
   const [tiltShiftFocusRow, setTiltShiftFocusRow] = useState(0);
   const [tiltShiftHalfHeight, setTiltShiftHalfHeight] = useState(20);
   const [tiltShiftBlurRadius, setTiltShiftBlurRadius] = useState(15);
+  const [showIrisBlurDialog, setShowIrisBlurDialog] = useState(false);
+  const [irisBlurCenterX, setIrisBlurCenterX] = useState(0);
+  const [irisBlurCenterY, setIrisBlurCenterY] = useState(0);
+  const [irisBlurRadius, setIrisBlurRadius] = useState(50);
+  const [irisBlurBlurRadius, setIrisBlurBlurRadius] = useState(15);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -2084,6 +2089,31 @@ export default function App() {
     });
     setShowTiltShiftDialog(false);
   }, [runCommand, selectedId, tiltShiftFocusRow, tiltShiftHalfHeight, tiltShiftBlurRadius]);
+
+  const openIrisBlurDialog = useCallback(() => {
+    setIrisBlurCenterX(Math.round((document?.width ?? 2) / 2));
+    setIrisBlurCenterY(Math.round((document?.height ?? 2) / 2));
+    setShowIrisBlurDialog(true);
+  }, [document]);
+
+  const applyIrisBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("iris_blur", {
+      id: selectedId,
+      centerX: irisBlurCenterX,
+      centerY: irisBlurCenterY,
+      radius: irisBlurRadius,
+      blurRadius: irisBlurBlurRadius,
+    });
+    setShowIrisBlurDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    irisBlurCenterX,
+    irisBlurCenterY,
+    irisBlurRadius,
+    irisBlurBlurRadius,
+  ]);
 
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
@@ -3841,6 +3871,14 @@ export default function App() {
             title="Filter Gallery > Blur Gallery > Tilt-Shift"
           >
             Tilt-Shift…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openIrisBlurDialog}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Blur Gallery > Iris Blur"
+          >
+            Iris Blur…
           </button>
           <button
             className="button button--quiet"
@@ -10938,6 +10976,88 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTiltShift} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showIrisBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowIrisBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Iris Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Blur Gallery &gt; Iris Blur
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                Center X
+                <span className="control__value">{irisBlurCenterX}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.width ?? 1}
+                value={irisBlurCenterX}
+                onChange={(event) => setIrisBlurCenterX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Center Y
+                <span className="control__value">{irisBlurCenterY}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={irisBlurCenterY}
+                onChange={(event) => setIrisBlurCenterY(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharp Radius
+                <span className="control__value">{irisBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={Math.max(document?.width ?? 1, document?.height ?? 1)}
+                value={irisBlurRadius}
+                onChange={(event) => setIrisBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Blur Radius
+                <span className="control__value">{irisBlurBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={irisBlurBlurRadius}
+                onChange={(event) => setIrisBlurBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowIrisBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyIrisBlur} disabled={busy}>
                 Apply
               </button>
             </div>
