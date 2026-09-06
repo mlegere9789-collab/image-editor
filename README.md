@@ -6552,6 +6552,68 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **697 Rust tests total** (692 → 697, 690 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 98 — Image > Adjustments > Selective Color
+
+Nudges each channel toward or away from its own subtractive
+complement — Cyan against Red, Magenta against Green, Yellow against
+Blue — scaled by how much a pixel belongs to the "Neutrals" colour
+range, using Photoshop's own Relative method.
+`Document::selective_color(id, cyan, magenta, yellow, black)`: a
+pixel's own Neutrals membership weight is `1 - |luma - 128| / 128`
+(peaking at the neutral midtone, falling to `0` at pure black or
+white); each of `cyan`/`magenta`/`yellow` (Photoshop's own `-100..=100`
+range) is applied to its own channel as `v - weight * (slider / 100) *
+v` when positive (removing that much of the channel, i.e. adding more
+of its complementary ink) or `v - weight * (slider / 100) * (255 - v)`
+when negative (adding back toward the channel's own headroom); `black`
+is then applied identically to all three already-adjusted channels,
+darkening or lightening them together. This project implements only
+the Neutrals colour range and the Relative method; Photoshop's other
+eight ranges (Reds, Yellows, Greens, Cyans, Blues, Magentas, Whites,
+Blacks) each need their own distinct per-channel-dominance weighting
+formula, and the Absolute method a different slider interpretation
+entirely — both are a documented scope cut, the same kind of
+partial-coverage narrowing `grain`'s own "Regular"-type-only cut and
+`halftone_pattern`'s own Line/Dot-only cut already make. Alpha
+untouched. A new **Selective Color…** dialog exposes Cyan, Magenta,
+Yellow, and Black sliders, labelled "Selective Color (Neutrals)" to be
+upfront about the scope cut.
+
+**Verified two ways.** Six new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`), grayscale so luma equals the channel
+value exactly. Neutrals weight for each column: `0.078125`, `0.15625`,
+`0.234375`, `0.3125`. At cyan `100` (magenta and yellow both `0`, only
+red touched): `r = v - weight*1.0*v` gives `9`, `17`, `23`, and `28`
+(the last one landing exactly on a rounding half-boundary, `27.5`,
+confirmed to round up matching Rust's own half-away-from-zero
+`f32::round()`) — green and blue stay at their own original value
+throughout. A second test flips cyan to `-100`: `r = v +
+weight*(255-v)` gives `29`, `57`, `83`, and `107` — real, hand-computed
+changes in the opposite direction from the first test's own `9`, `17`,
+`23`, `28`, not a coincidental match. A third applies black `50` alone
+to all three (still-unchanged) channels uniformly, keeping column `1`
+gray at `18` instead of `20`. A fourth confirms all-zero sliders are a
+true no-op. A fifth confines the fixture to a full-column selection at
+column `1`. A sixth confirms out-of-range cyan, magenta, yellow, and
+black, plus a locked/unknown layer, all error. All six tests passed on
+the first run, cross-checked against an independent Python script
+emulating `f32` arithmetic via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**703 Rust tests total** (697 → 703, 696 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

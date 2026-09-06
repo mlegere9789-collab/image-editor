@@ -236,6 +236,11 @@ export default function App() {
   const [gradientMapHighlight, setGradientMapHighlight] = useState("#ffffff");
 
   const [showChannelMixerDialog, setShowChannelMixerDialog] = useState(false);
+  const [showSelectiveColorDialog, setShowSelectiveColorDialog] = useState(false);
+  const [selectiveColorCyan, setSelectiveColorCyan] = useState(0);
+  const [selectiveColorMagenta, setSelectiveColorMagenta] = useState(0);
+  const [selectiveColorYellow, setSelectiveColorYellow] = useState(0);
+  const [selectiveColorBlack, setSelectiveColorBlack] = useState(0);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -766,6 +771,25 @@ export default function App() {
     await runCommand("channel_mixer", { id: selectedId, matrix: channelMixerMatrix });
     setShowChannelMixerDialog(false);
   }, [runCommand, selectedId, channelMixerMatrix]);
+
+  const applySelectiveColor = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("selective_color", {
+      id: selectedId,
+      cyan: selectiveColorCyan,
+      magenta: selectiveColorMagenta,
+      yellow: selectiveColorYellow,
+      black: selectiveColorBlack,
+    });
+    setShowSelectiveColorDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    selectiveColorCyan,
+    selectiveColorMagenta,
+    selectiveColorYellow,
+    selectiveColorBlack,
+  ]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2585,6 +2609,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowSelectiveColorDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Selective Color"
+          >
+            Selective Color…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -3983,6 +4015,86 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyChannelMixer} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSelectiveColorDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSelectiveColorDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Selective Color"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Selective Color (Neutrals)</h2>
+            <label className="control">
+              <span className="control__label">
+                Cyan
+                <span className="control__value">{selectiveColorCyan}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={selectiveColorCyan}
+                onChange={(event) => setSelectiveColorCyan(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Magenta
+                <span className="control__value">{selectiveColorMagenta}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={selectiveColorMagenta}
+                onChange={(event) => setSelectiveColorMagenta(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Yellow
+                <span className="control__value">{selectiveColorYellow}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={selectiveColorYellow}
+                onChange={(event) => setSelectiveColorYellow(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Black
+                <span className="control__value">{selectiveColorBlack}%</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={selectiveColorBlack}
+                onChange={(event) => setSelectiveColorBlack(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSelectiveColorDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySelectiveColor} disabled={busy}>
                 Apply
               </button>
             </div>

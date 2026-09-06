@@ -7498,6 +7498,74 @@ impl Document {
         })
     }
 
+    /// Image > Adjustments > Selective Color: nudges each channel toward
+    /// or away from its own subtractive complement — Cyan against Red,
+    /// Magenta against Green, Yellow against Blue — scaled by how much a
+    /// pixel belongs to the "Neutrals" colour range, using Photoshop's
+    /// own Relative method. `Document::selective_color(id, cyan, magenta,
+    /// yellow, black)`: a pixel's own Neutrals membership weight is `1 -
+    /// |luma - 128| / 128` (peaking at the neutral midtone, falling to
+    /// `0` at pure black or white); each of `cyan`/`magenta`/`yellow`
+    /// (Photoshop's own `-100..=100` range) is applied to its own channel
+    /// as `v - weight * (slider / 100) * v` when positive (removing that
+    /// much of the channel, i.e. adding more of its complementary ink) or
+    /// `v - weight * (slider / 100) * (255 - v)` when negative (adding
+    /// back toward the channel's own headroom); `black` is then applied
+    /// identically to all three already-adjusted channels, darkening or
+    /// lightening them together. This project implements only the
+    /// Neutrals colour range and the Relative method; Photoshop's other
+    /// eight ranges (Reds, Yellows, Greens, Cyans, Blues, Magentas,
+    /// Whites, Blacks) each need their own distinct per-channel-dominance
+    /// weighting formula, and the Absolute method a different slider
+    /// interpretation entirely — both are a documented scope cut, the
+    /// same kind of partial-coverage narrowing [`Self::grain`]'s own
+    /// "Regular" -type-only cut and [`Self::halftone_pattern`]'s own
+    /// Line/Dot-only cut already make. Alpha untouched.
+    pub fn selective_color(
+        &mut self,
+        id: LayerId,
+        cyan: i32,
+        magenta: i32,
+        yellow: i32,
+        black: i32,
+    ) -> Result<Option<Rect>, String> {
+        for (name, value) in [
+            ("cyan", cyan),
+            ("magenta", magenta),
+            ("yellow", yellow),
+            ("black", black),
+        ] {
+            if !(-100..=100).contains(&value) {
+                return Err(format!(
+                    "Selective Color {name} must be between -100 and 100."
+                ));
+            }
+        }
+        let apply_slider = |v: f32, slider: i32, weight: f32| -> f32 {
+            if slider >= 0 {
+                v - weight * slider as f32 / 100.0 * v
+            } else {
+                v - weight * slider as f32 / 100.0 * (255.0 - v)
+            }
+        };
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let weight = 1.0 - (luma - 128.0).abs() / 128.0;
+            let mut rf = apply_slider(r as f32, cyan, weight);
+            let mut gf = apply_slider(g as f32, magenta, weight);
+            let mut bf = apply_slider(b as f32, yellow, weight);
+            rf = apply_slider(rf, black, weight);
+            gf = apply_slider(gf, black, weight);
+            bf = apply_slider(bf, black, weight);
+            [
+                rf.round().clamp(0.0, 255.0) as u8,
+                gf.round().clamp(0.0, 255.0) as u8,
+                bf.round().clamp(0.0, 255.0) as u8,
+                a,
+            ]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17039,6 +17107,118 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.craquelure(999, 2, 0, 0, 1).is_err());
+    }
+
+    #[test]
+    fn selective_color_cyan_removes_red_from_neutrals() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40),
+        // grayscale so luma equals the channel value exactly. Neutrals
+        // weight is 1 - |luma-128|/128: column 0 (luma 10) gives
+        // 0.078125, column 1 (20) gives 0.15625, column 2 (30) gives
+        // 0.234375, column 3 (40) gives 0.3125. Cyan 100 (magenta and
+        // yellow both 0) only touches red: r = v - weight*1.0*v.
+        //   col 0: r = 10 - 0.078125*10 = 9.21875 -> 9.
+        //   col 1: r = 20 - 0.15625*20 = 16.875 -> 17.
+        //   col 2: r = 30 - 0.234375*30 = 22.96875 -> 23.
+        //   col 3: r = 40 - 0.3125*40 = 27.5 -> 28 (half rounds away from
+        //     zero, matching Rust's own f32::round()).
+        // Green and blue stay at their own original value throughout,
+        // since magenta and yellow are both 0. Cross-checked against an
+        // independent Python script emulating f32 arithmetic via
+        // struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.selective_color(id, 100, 0, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [9, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [17, 20, 20, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [23, 30, 30, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [28, 40, 40, 255]);
+    }
+
+    #[test]
+    fn selective_color_negative_slider_adds_the_complementary_colour() {
+        // Same fixture, cyan -100 instead: for a negative slider,
+        // r = v - weight*(-1.0)*(255-v) = v + weight*(255-v).
+        //   col 0: r = 10 + 0.078125*(255-10) = 10 + 19.140625 = 29.14
+        //     -> 29.
+        //   col 1: r = 20 + 0.15625*(235) = 20 + 36.71875 = 56.72 -> 57.
+        //   col 2: r = 30 + 0.234375*(225) = 30 + 52.734375 = 82.73 ->
+        //     83.
+        //   col 3: r = 40 + 0.3125*(215) = 40 + 67.1875 = 107.19 -> 107.
+        // Real, hand-computed changes -- and in the opposite direction
+        // from the cyan-100 test's own 9, 17, 23, 28 -- not a
+        // coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.selective_color(id, -100, 0, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [29, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [57, 20, 20, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [83, 30, 30, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [107, 40, 40, 255]);
+    }
+
+    #[test]
+    fn selective_color_black_darkens_all_channels_together() {
+        // Black 50 (cyan/magenta/yellow all 0) applies the same positive-
+        // slider formula to all three already-unchanged channels: at
+        // column 1 (v=20, weight 0.15625), each channel becomes
+        // 20 - 0.15625*0.5*20 = 20 - 1.5625 = 18.4375 -> 18, staying
+        // gray (all three channels equal) since the same slider and
+        // weight apply uniformly.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.selective_color(id, 0, 0, 0, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [18, 18, 18, 255]);
+    }
+
+    #[test]
+    fn selective_color_zero_sliders_is_a_no_op() {
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.selective_color(id, 0, 0, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn selective_color_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.selective_color(id, 100, 0, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [17, 20, 20, 255]);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn selective_color_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.selective_color(id, 101, 0, 0, 0).is_err());
+        assert!(doc.selective_color(id, -101, 0, 0, 0).is_err());
+        assert!(doc.selective_color(id, 0, 101, 0, 0).is_err());
+        assert!(doc.selective_color(id, 0, 0, 101, 0).is_err());
+        assert!(doc.selective_color(id, 0, 0, 0, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.selective_color(id, 0, 0, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.selective_color(999, 0, 0, 0, 0).is_err());
     }
 
     #[test]

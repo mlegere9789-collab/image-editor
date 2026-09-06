@@ -2021,6 +2021,21 @@ fn craquelure(
     })
 }
 
+/// Image > Adjustments > Selective Color on layer `id`.
+#[tauri::command]
+fn selective_color(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cyan: i32,
+    magenta: i32,
+    yellow: i32,
+    black: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.selective_color(id, cyan, magenta, yellow, black)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2358,6 +2373,7 @@ pub fn run() {
             patchwork,
             stained_glass,
             craquelure,
+            selective_color,
             hue_saturation,
             black_and_white,
             vibrance,
