@@ -7944,6 +7944,61 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Pattern Overlay, baked in destructively:
+    /// [`Self::color_overlay`]'s own blend-toward-a-target formula, but
+    /// the target alternates between `color1` and `color2` in a
+    /// `scale`-pixel-square checkerboard, `((row / scale) + (col /
+    /// scale)) % 2`. Photoshop's own Pattern Overlay fills with a
+    /// user-supplied pattern asset (a saved swatch, or one of its own
+    /// built-in presets); this project has no pattern-asset library or
+    /// file-loading UI to draw from, so a procedural two-colour
+    /// checkerboard is a documented scope cut standing in for it, the
+    /// same kind of substitution [`Self::mosaic_tiles`] and
+    /// [`Self::stained_glass`] already make for their own procedural
+    /// cell grids. `scale` is a pixel cell size (Photoshop's own dialog
+    /// is a `1..=100` *percent* scale of the pattern asset's own size;
+    /// this project substitutes a direct `1..=250` pixel size, the same
+    /// parameter substitution `mosaic_tiles`'s own `tile_size` already
+    /// makes); `opacity` is Photoshop's own `0..=100` range, scaling the
+    /// blend exactly as `color_overlay`'s own does. A fully-transparent
+    /// pixel is left completely alone, matching `color_overlay`'s own
+    /// treatment. Alpha untouched.
+    pub fn pattern_overlay(
+        &mut self,
+        id: LayerId,
+        scale: u32,
+        color1: [u8; 3],
+        color2: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&scale) {
+            return Err("Pattern Overlay scale must be between 1 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Pattern Overlay opacity must be between 0 and 100.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let a = src[base + 3];
+            if a == 0 {
+                return [src[base], src[base + 1], src[base + 2], a];
+            }
+            let cell = (row / scale + col / scale) % 2;
+            let target = if cell == 0 { color1 } else { color2 };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let v = src[base + c] as f32;
+                out[c] = (v * (1.0 - frac) + target[c] as f32 * frac)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = a;
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -18191,6 +18246,127 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.drop_shadow(999, 1, 0.0, 0, [0, 0, 0], 100).is_err());
+    }
+
+    #[test]
+    fn pattern_overlay_paints_a_checkerboard() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40),
+        // fully opaque. Scale 2, opacity 100 (a full replace), color1
+        // red, color2 blue: cell = (row/2 + col/2) % 2. Row 0 (row/2=0):
+        // columns 0-1 (col/2=0) give cell 0 -> red; columns 2-3
+        // (col/2=1) give cell 1 -> blue. Row 2 (row/2=1) flips the
+        // pattern: columns 0-1 give cell 1 -> blue; columns 2-3 give
+        // cell 0 -> red.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 255, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [0, 0, 255, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [0, 0, 255, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn pattern_overlay_opacity_blends_with_the_original() {
+        // Same scale 2 checkerboard, but opacity 50 blends column 0's
+        // own original 10 halfway toward red (255, 0, 0):
+        //   R: 10*0.5 + 255*0.5 = 132.5 -> 133 (half away from zero).
+        //   G: 10*0.5 + 0*0.5 = 5. B: 10*0.5 + 0*0.5 = 5.
+        // Real, hand-computed change from the opacity-100 test's own
+        // (255, 0, 0), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 50)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [133, 5, 5, 255]);
+    }
+
+    #[test]
+    fn pattern_overlay_scale_changes_the_cell_size() {
+        // Scale 1 checkerboards every single pixel: row 0 alternates
+        // red, blue, red, blue -- a genuinely different pattern from
+        // the scale-2 test's own two-wide bands, not a coincidental
+        // match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.pattern_overlay(id, 1, [255, 0, 0], [0, 0, 255], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn pattern_overlay_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn pattern_overlay_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc
+            .pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 100)
+            .unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            let expected = if y / 2 == 0 {
+                [255, 0, 0, 255]
+            } else {
+                [0, 0, 255, 255]
+            };
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], expected);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn pattern_overlay_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc
+            .pattern_overlay(id, 0, [255, 0, 0], [0, 0, 255], 100)
+            .is_err());
+        assert!(doc
+            .pattern_overlay(id, 251, [255, 0, 0], [0, 0, 255], 100)
+            .is_err());
+        assert!(doc
+            .pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 101)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .pattern_overlay(id, 2, [255, 0, 0], [0, 0, 255], 100)
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .pattern_overlay(999, 2, [255, 0, 0], [0, 0, 255], 100)
+            .is_err());
     }
 
     #[test]

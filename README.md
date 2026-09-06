@@ -6940,6 +6940,64 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **737 Rust tests total** (732 → 737, 730 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 105 — Layer > Layer Style > Pattern Overlay
+
+`color_overlay`'s own blend-toward-a-target formula, but the target
+alternates between `color1` and `color2` in a `scale`-pixel-square
+checkerboard, `((row / scale) + (col / scale)) % 2`. Photoshop's own
+Pattern Overlay fills with a user-supplied pattern asset (a saved
+swatch, or one of its own built-in presets); this project has no
+pattern-asset library or file-loading UI to draw from, so a procedural
+two-colour checkerboard is a documented scope cut standing in for it,
+the same kind of substitution `mosaic_tiles` and `stained_glass`
+already make for their own procedural cell grids. `scale` is a pixel
+cell size (Photoshop's own dialog is a `1..=100` *percent* scale of
+the pattern asset's own size; this project substitutes a direct
+`1..=250` pixel size, the same parameter substitution `mosaic_tiles`'s
+own `tile_size` already makes); `opacity` is Photoshop's own `0..=100`
+range, scaling the blend exactly as `color_overlay`'s own does. A
+fully-transparent pixel is left completely alone, matching
+`color_overlay`'s own treatment. Alpha untouched. A new **Pattern
+Overlay…** dialog exposes Scale, two colour pickers, and Opacity. This
+completes this project's own Layer Style category: Stroke, Color
+Overlay, Gradient Overlay, Outer Glow, Inner Glow, Drop Shadow, and
+Pattern Overlay are all now shipped (Bevel & Emboss, Contour, Texture,
+and Satin remain a documented gap, each needing either a height-field
+bevel model or a wavy alpha-intersection sheen this project hasn't
+built the machinery for yet).
+
+**Verified two ways.** Six new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`), fully opaque. Scale `2`, opacity `100`,
+red/blue: row `0` (`row/2=0`) gives red across columns `0`-`1` and
+blue across columns `2`-`3`; row `2` (`row/2=1`) flips the pattern,
+blue then red. A second test drops opacity to `50`, blending column
+`0`'s own original `10` halfway to red (`133, 5, 5`, the `133` landing
+on a `.5` rounding boundary confirmed to round away from zero) — real,
+hand-computed, not a coincidental match. A third narrows scale to `1`,
+checkerboarding every single pixel (`red, blue, red, blue` across row
+`0`) — a genuinely different pattern from the scale-`2` test's own
+two-wide bands. A fourth reuses Stroke Outline's own fixture to
+confirm a transparent pixel is left completely alone. A fifth confines
+the fixture to a full-column selection at column `1`. A sixth confirms
+out-of-range scale and opacity, plus a locked/unknown layer, all
+error. All six tests passed on the first run, cross-checked against an
+independent Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**743 Rust tests total** (737 → 743, 736 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

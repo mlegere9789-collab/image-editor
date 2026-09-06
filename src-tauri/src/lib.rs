@@ -2127,6 +2127,22 @@ fn drop_shadow(
     })
 }
 
+/// Layer > Layer Style > Pattern Overlay on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn pattern_overlay(
+    state: State<'_, AppState>,
+    id: LayerId,
+    scale: u32,
+    color1: [u8; 3],
+    color2: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.pattern_overlay(id, scale, color1, color2, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2471,6 +2487,7 @@ pub fn run() {
             outer_glow,
             inner_glow,
             drop_shadow,
+            pattern_overlay,
             hue_saturation,
             black_and_white,
             vibrance,

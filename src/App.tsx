@@ -267,6 +267,11 @@ export default function App() {
   const [dropShadowSize, setDropShadowSize] = useState(5);
   const [dropShadowColor, setDropShadowColor] = useState("#000000");
   const [dropShadowOpacity, setDropShadowOpacity] = useState(75);
+  const [showPatternOverlayDialog, setShowPatternOverlayDialog] = useState(false);
+  const [patternOverlayScale, setPatternOverlayScale] = useState(10);
+  const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
+  const [patternOverlayColor2, setPatternOverlayColor2] = useState("#ffffff");
+  const [patternOverlayOpacity, setPatternOverlayOpacity] = useState(100);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -905,6 +910,27 @@ export default function App() {
     dropShadowSize,
     dropShadowColor,
     dropShadowOpacity,
+  ]);
+
+  const applyPatternOverlay = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r1, g1, b1] = hexToRgb(patternOverlayColor1);
+    const [r2, g2, b2] = hexToRgb(patternOverlayColor2);
+    await runCommand("pattern_overlay", {
+      id: selectedId,
+      scale: patternOverlayScale,
+      color1: [r1, g1, b1],
+      color2: [r2, g2, b2],
+      opacity: patternOverlayOpacity,
+    });
+    setShowPatternOverlayDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    patternOverlayScale,
+    patternOverlayColor1,
+    patternOverlayColor2,
+    patternOverlayOpacity,
   ]);
 
   const applyLevels = useCallback(async () => {
@@ -2781,6 +2807,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowPatternOverlayDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Pattern Overlay"
+          >
+            Pattern Overlay…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4649,6 +4683,76 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDropShadow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPatternOverlayDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPatternOverlayDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Pattern Overlay"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Pattern Overlay</h2>
+            <label className="control">
+              <span className="control__label">
+                Scale
+                <span className="control__value">{patternOverlayScale}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={patternOverlayScale}
+                onChange={(event) => setPatternOverlayScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color 1</span>
+              <input
+                type="color"
+                value={patternOverlayColor1}
+                onChange={(event) => setPatternOverlayColor1(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color 2</span>
+              <input
+                type="color"
+                value={patternOverlayColor2}
+                onChange={(event) => setPatternOverlayColor2(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{patternOverlayOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={patternOverlayOpacity}
+                onChange={(event) => setPatternOverlayOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPatternOverlayDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPatternOverlay} disabled={busy}>
                 Apply
               </button>
             </div>
