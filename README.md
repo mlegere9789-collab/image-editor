@@ -6875,6 +6875,71 @@ run build`) is fully green.
 **732 Rust tests total** (726 → 732, 725 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 104 — Layer > Layer Style > Drop Shadow
+
+A solid-coloured copy of the layer's own alpha silhouette, offset by
+`distance` pixels at `angle` (the same "0° from the right, increasing
+anticlockwise" convention `emboss` and `plaster` already use) and
+softened by averaging alpha over a `size`-pixel-radius window
+(edge-clamped, truncating integer division — the same shape
+`box_blur_at` uses, just restricted to the alpha channel alone), shown
+only where the layer's own foreground is transparent — an
+already-opaque pixel always shows its own foreground content
+untouched, exactly the visual stacking order Photoshop's own Drop
+Shadow has (the shadow sits behind the layer). `distance` (Photoshop's
+own `0..=30`-ish range, though this project accepts up to `100`) and
+`size` (Photoshop's own `0..=250` range) are both pixel counts;
+`opacity` is Photoshop's own `0..=100` range, scaling the softened
+alpha directly. A pixel whose own resulting shadow alpha rounds to `0`
+is left byte-for-byte at its own original value rather than writing a
+zero-alpha copy of `color`. Alpha blending, Blend Mode, Spread,
+Contour, and Noise are all a documented scope cut, the same kind of
+narrowing `stroke_outline`'s own Blend-Mode cut already makes — this
+project's layer model also has no non-destructive style stack, so
+like every other layer style here this bakes in directly rather than
+staying live and editable. A new **Drop Shadow…** dialog exposes
+Distance, Angle, Size, a colour picker, and Opacity.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Stroke
+Outline's own fixture (6x6, an opaque 2x2 block at rows 2-3, columns
+2-3, everywhere else transparent). Distance `1`, angle `0` (`dx=1,
+dy=0`), size `0` (a single sample), opacity `100`: pixel `(2, 4)` is
+transparent in the original and its own shadow-source position,
+`(2, 3)`, lands on the block's own opaque pixel, giving shadow alpha
+`255` — solid black; pixel `(0, 0)`'s own shadow-source position,
+clamped to `(0, 0)`, is itself transparent, so its computed shadow
+alpha rounds to `0` and it's left byte-for-byte at its own original
+value. This test needed one mid-design correction: an initial draft's
+own assertion for `(2, 4)` was mistakenly transcribed as the
+unchanged-transparent value instead of the actual computed `255`,
+caught immediately by the test itself failing rather than by a later
+review, and fixed before the phase landed. A second test drops
+opacity to `50`, halving `(2, 4)`'s own alpha to `128` — a real,
+hand-computed change, not a coincidental match. A third raises size to
+`1`, averaging alpha over a `3x3` window (four of the nine samples the
+block's own opaque `255`, five transparent `0`) to a truncating
+`1020/9 = 113` — a real difference from the unsoftened size-`0` test's
+own `255`. A fourth confines the fixture to a single-pixel selection
+at `(4, 2)`. A fifth confirms out-of-range distance, a non-finite
+angle, out-of-range size, and out-of-range opacity, plus a
+locked/unknown layer, all error. All five tests passed after the one
+documented correction, cross-checked against an independent Python
+script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**737 Rust tests total** (732 → 737, 730 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

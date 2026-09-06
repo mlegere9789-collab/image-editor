@@ -261,6 +261,12 @@ export default function App() {
   const [innerGlowSize, setInnerGlowSize] = useState(10);
   const [innerGlowColor, setInnerGlowColor] = useState("#ffff00");
   const [innerGlowOpacity, setInnerGlowOpacity] = useState(75);
+  const [showDropShadowDialog, setShowDropShadowDialog] = useState(false);
+  const [dropShadowDistance, setDropShadowDistance] = useState(5);
+  const [dropShadowAngle, setDropShadowAngle] = useState(135);
+  const [dropShadowSize, setDropShadowSize] = useState(5);
+  const [dropShadowColor, setDropShadowColor] = useState("#000000");
+  const [dropShadowOpacity, setDropShadowOpacity] = useState(75);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -878,6 +884,28 @@ export default function App() {
     });
     setShowInnerGlowDialog(false);
   }, [runCommand, selectedId, innerGlowSize, innerGlowColor, innerGlowOpacity]);
+
+  const applyDropShadow = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(dropShadowColor);
+    await runCommand("drop_shadow", {
+      id: selectedId,
+      distance: dropShadowDistance,
+      angle: dropShadowAngle,
+      size: dropShadowSize,
+      color: [r, g, b],
+      opacity: dropShadowOpacity,
+    });
+    setShowDropShadowDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    dropShadowDistance,
+    dropShadowAngle,
+    dropShadowSize,
+    dropShadowColor,
+    dropShadowOpacity,
+  ]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2745,6 +2773,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowDropShadowDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Drop Shadow"
+          >
+            Drop Shadow…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4525,6 +4561,94 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyInnerGlow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDropShadowDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDropShadowDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Drop Shadow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Drop Shadow</h2>
+            <label className="control">
+              <span className="control__label">
+                Distance
+                <span className="control__value">{dropShadowDistance}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={dropShadowDistance}
+                onChange={(event) => setDropShadowDistance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{dropShadowAngle}&deg;</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={dropShadowAngle}
+                onChange={(event) => setDropShadowAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{dropShadowSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={250}
+                value={dropShadowSize}
+                onChange={(event) => setDropShadowSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={dropShadowColor}
+                onChange={(event) => setDropShadowColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{dropShadowOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={dropShadowOpacity}
+                onChange={(event) => setDropShadowOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDropShadowDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDropShadow} disabled={busy}>
                 Apply
               </button>
             </div>

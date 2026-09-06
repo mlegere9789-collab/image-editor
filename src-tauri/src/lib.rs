@@ -2110,6 +2110,23 @@ fn inner_glow(
     })
 }
 
+/// Layer > Layer Style > Drop Shadow on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn drop_shadow(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distance: u32,
+    angle: f32,
+    size: u32,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.drop_shadow(id, distance, angle, size, color, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2453,6 +2470,7 @@ pub fn run() {
             gradient_overlay,
             outer_glow,
             inner_glow,
+            drop_shadow,
             hue_saturation,
             black_and_white,
             vibrance,
