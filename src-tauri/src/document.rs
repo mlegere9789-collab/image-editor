@@ -7944,6 +7944,97 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Inner Shadow, baked in destructively: the
+    /// mirror image of [`Self::drop_shadow`] — the exact same offset
+    /// (`distance`/`angle`, [`Self::emboss`] and [`Self::plaster`]'s own
+    /// "0° from the right, increasing anticlockwise" convention) and
+    /// edge-clamped box-average-over-`size` machinery, just sourced from
+    /// each sampled pixel's own *inverse* alpha (`255 - alpha`, how much
+    /// background shows through) instead of its alpha, and applied only
+    /// to already-opaque pixels instead of only to transparent ones. An
+    /// opaque pixel whose own `(row - dy, col - dx)` neighbourhood
+    /// (averaged over a `size`-pixel-radius window, truncating integer
+    /// division, the same shape [`box_blur_at`] uses) sits mostly outside
+    /// the layer gets a shadow blended over its own colour in proportion
+    /// to that averaged transparency, scaled by `opacity`; a pixel whose
+    /// neighbourhood is fully opaque (deep interior, or facing away from
+    /// the light) gets a shadow alpha of `0` and is left byte-for-byte at
+    /// its own original value. Unlike [`Self::drop_shadow`], which
+    /// replaces a transparent pixel outright, this blends the shadow
+    /// colour onto the pixel's own existing colour (`orig * (1 - frac) +
+    /// color * frac`), the same linear blend shape [`Self::inner_glow`]
+    /// already uses, since there is existing content here to shade rather
+    /// than empty space to fill; the pixel's own alpha is always
+    /// preserved untouched. `distance` and `size` are pixel counts
+    /// (Photoshop's own `distance` is closer to a `0..=30` range, though
+    /// this project accepts up to `100` like [`Self::drop_shadow`] does;
+    /// `size` is Photoshop's own `0..=250` range); `opacity` is
+    /// Photoshop's own `0..=100` range. Blend Mode, Choke, Contour, and
+    /// Noise are all a documented scope cut, the same kind of narrowing
+    /// [`Self::drop_shadow`]'s own scope cut already makes.
+    pub fn inner_shadow(
+        &mut self,
+        id: LayerId,
+        distance: u32,
+        angle: f32,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if distance > 100 {
+            return Err("Inner Shadow distance must be between 0 and 100.".to_string());
+        }
+        if !angle.is_finite() {
+            return Err(format!("Inner Shadow angle must be a number, got {angle}."));
+        }
+        if size > 250 {
+            return Err("Inner Shadow size must be between 0 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Inner Shadow opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = (distance as f32 * cos).round() as i64;
+        let dy = -(distance as f32 * sin).round() as i64;
+        let radius = size as i64;
+        let opacity_frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (scy, scx) = (row as i64 - dy, col as i64 - dx);
+            let mut sum: u32 = 0;
+            let mut count: u32 = 0;
+            for wy in -radius..=radius {
+                let y = (scy + wy).clamp(0, height - 1) as usize;
+                for wx in -radius..=radius {
+                    let x = (scx + wx).clamp(0, width - 1) as usize;
+                    sum += 255 - src[(y * doc_width + x) * CHANNELS + 3] as u32;
+                    count += 1;
+                }
+            }
+            let avg = sum / count;
+            let shadow_alpha = (avg as f32 * opacity_frac).round().clamp(0.0, 255.0) as u8;
+            if shadow_alpha == 0 {
+                [src[base], src[base + 1], src[base + 2], src[base + 3]]
+            } else {
+                let frac = shadow_alpha as f32 / 255.0;
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    let v = src[base + c] as f32;
+                    out[c] = (v * (1.0 - frac) + color[c] as f32 * frac)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                out[3] = src[base + 3];
+                out
+            }
+        })
+    }
+
     /// Layer > Layer Style > Pattern Overlay, baked in destructively:
     /// [`Self::color_overlay`]'s own blend-toward-a-target formula, but
     /// the target alternates between `color1` and `color2` in a
@@ -18350,6 +18441,128 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.drop_shadow(999, 1, 0.0, 0, [0, 0, 0], 100).is_err());
+    }
+
+    #[test]
+    fn inner_shadow_darkens_the_edge_facing_away_from_the_light() {
+        // Stroke Outline's own fixture (6x6, opaque 2x2 block at rows
+        // 2-3, columns 2-3, everywhere else transparent). Distance 1,
+        // angle 0 (dx=1, dy=0, drop_shadow's own convention), size 0,
+        // opacity 100, colour black. Pixel (2, 2), the block's own left
+        // column, samples inverse-alpha at (2, 2-1=1), which is
+        // transparent (inverse alpha 255), so its own shadow alpha is
+        // 255 and it blends fully to black: (0, 0, 0, 255) -- its own
+        // alpha is preserved, unlike drop_shadow's outright replacement.
+        // Pixel (2, 3), the block's own right column, samples (2, 2),
+        // which is opaque (inverse alpha 0), so its own shadow alpha is
+        // 0 and it's left byte-for-byte at its own original
+        // (100, 150, 200, 255) -- the side facing the light stays lit.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [100, 150, 200, 255]);
+        assert_eq!(&p[idx(2, 3)..idx(2, 3) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn inner_shadow_opacity_scales_the_blend() {
+        // Same distance/angle/size, opacity 50: shadow alpha at (2, 2)
+        // becomes round(255*0.5) = 128, blending (100, 150, 200) toward
+        // black by 128/255 = 0.50196 -> (50, 75, 100) -- a real,
+        // hand-computed change from the opacity-100 test's own
+        // (0, 0, 0), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [50, 75, 100, 255]);
+    }
+
+    #[test]
+    fn inner_shadow_angle_flips_which_edge_darkens() {
+        // Same distance/size/opacity, but angle 180 (dx=-1, dy=0) flips
+        // the sample direction: pixel (2, 2) now samples (2, 3), which
+        // is opaque, so it stays unchanged at (100, 150, 200); pixel
+        // (2, 3) now samples (2, 4), which is transparent, so it blends
+        // fully to black -- the mirror image of the angle-0 test's own
+        // result at the very same pixels.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.inner_shadow(id, 1, 180.0, 0, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 150, 200, 255]);
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn inner_shadow_size_softens_the_shadow() {
+        // Size 1 averages inverse-alpha over a 3x3 window. At (2, 2),
+        // centred on (2, 1): rows 1-3, columns 0-2 hold only one opaque
+        // sample (2, 2) itself is outside the window -- actually the
+        // nine samples are (1,0)..(3,2), of which (2,2) and (3,2) are
+        // opaque (2 opaque, 7 transparent), giving inverse-alpha sum
+        // 7*255 = 1785, truncating average 1785/9 = 198, shadow alpha
+        // round(198) = 198, blending (100, 150, 200) by 198/255 =
+        // 0.77647 toward black -> (22, 34, 45) -- a real, hand-computed,
+        // more-softened change from the size-0 test's own crisp
+        // (0, 0, 0), not a coincidental match. Cross-checked against an
+        // independent Python script.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.inner_shadow(id, 1, 0.0, 1, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [22, 34, 45, 255]);
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [45, 67, 89, 255]);
+    }
+
+    #[test]
+    fn inner_shadow_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn inner_shadow_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        let dirty = doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 2)..idx(2, 2) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(2, 2)], before[..idx(2, 2)]); // unselected, untouched
+        assert_eq!(after[idx(2, 2) + 4..], before[idx(2, 2) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 2,
+                x1: 3,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn inner_shadow_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.inner_shadow(id, 101, 0.0, 0, [0, 0, 0], 100).is_err());
+        assert!(doc
+            .inner_shadow(id, 1, f32::NAN, 0, [0, 0, 0], 100)
+            .is_err());
+        assert!(doc.inner_shadow(id, 1, 0.0, 251, [0, 0, 0], 100).is_err());
+        assert!(doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.inner_shadow(id, 1, 0.0, 0, [0, 0, 0], 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.inner_shadow(999, 1, 0.0, 0, [0, 0, 0], 100).is_err());
     }
 
     #[test]

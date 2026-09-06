@@ -2127,6 +2127,23 @@ fn drop_shadow(
     })
 }
 
+/// Layer > Layer Style > Inner Shadow on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn inner_shadow(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distance: u32,
+    angle: f32,
+    size: u32,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.inner_shadow(id, distance, angle, size, color, opacity)
+    })
+}
+
 /// Layer > Layer Style > Pattern Overlay on layer `id`, baked in
 /// destructively.
 #[tauri::command]
@@ -2502,6 +2519,7 @@ pub fn run() {
             outer_glow,
             inner_glow,
             drop_shadow,
+            inner_shadow,
             pattern_overlay,
             bevel_emboss,
             hue_saturation,

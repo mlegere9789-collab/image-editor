@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 165.**
+**618 distinct capabilities tracked. Currently shipped: 166.**
 
 ## PART I — EVERY TOOL
 
@@ -118,7 +118,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] CONTOUR
 - [ ] TEXTURE
 - [x] STROKE (`stroke_outline`, baked in destructively: Photoshop's own "Outside" position only — a transparent pixel with an opaque neighbour within a Chebyshev-distance `size` becomes stroke, every opaque pixel untouched. Inside/Center positions, Blend Mode, and non-destructive editability are documented scope cuts — see README Phase 99)
-- [ ] INNER SHADOW
+- [x] INNER SHADOW (`inner_shadow`, baked in destructively: the mirror image of `drop_shadow` — the exact same offset/box-average machinery, but sourced from each sampled pixel's own inverse alpha instead of its alpha, and blended onto already-opaque pixels instead of replacing already-transparent ones — see README Phase 107)
 - [x] INNER GLOW (`inner_glow`, baked in destructively: the mirror image of `outer_glow` — an opaque pixel `d < size` pixels from the nearest transparent neighbour blends toward the glow colour by `(1 - d/size) * opacity`, leaving deep-interior pixels with no transparent neighbour within `size` completely alone — see README Phase 103)
 - [ ] SATIN
 - [x] COLOR OVERLAY (`color_overlay`, baked in destructively: blends every already-opaque pixel's own RGB toward a solid colour by Opacity, Photoshop's own Normal blend mode only — a fully-transparent pixel has nothing to overlay onto and is left alone — see README Phase 100)

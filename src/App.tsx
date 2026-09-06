@@ -267,6 +267,12 @@ export default function App() {
   const [dropShadowSize, setDropShadowSize] = useState(5);
   const [dropShadowColor, setDropShadowColor] = useState("#000000");
   const [dropShadowOpacity, setDropShadowOpacity] = useState(75);
+  const [showInnerShadowDialog, setShowInnerShadowDialog] = useState(false);
+  const [innerShadowDistance, setInnerShadowDistance] = useState(5);
+  const [innerShadowAngle, setInnerShadowAngle] = useState(135);
+  const [innerShadowSize, setInnerShadowSize] = useState(5);
+  const [innerShadowColor, setInnerShadowColor] = useState("#000000");
+  const [innerShadowOpacity, setInnerShadowOpacity] = useState(75);
   const [showPatternOverlayDialog, setShowPatternOverlayDialog] = useState(false);
   const [patternOverlayScale, setPatternOverlayScale] = useState(10);
   const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
@@ -914,6 +920,28 @@ export default function App() {
     dropShadowSize,
     dropShadowColor,
     dropShadowOpacity,
+  ]);
+
+  const applyInnerShadow = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(innerShadowColor);
+    await runCommand("inner_shadow", {
+      id: selectedId,
+      distance: innerShadowDistance,
+      angle: innerShadowAngle,
+      size: innerShadowSize,
+      color: [r, g, b],
+      opacity: innerShadowOpacity,
+    });
+    setShowInnerShadowDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    innerShadowDistance,
+    innerShadowAngle,
+    innerShadowSize,
+    innerShadowColor,
+    innerShadowOpacity,
   ]);
 
   const applyPatternOverlay = useCallback(async () => {
@@ -2822,6 +2850,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowInnerShadowDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Inner Shadow"
+          >
+            Inner Shadow…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowPatternOverlayDialog(true)}
             disabled={busy || !canPaint}
             title="Layer > Layer Style > Pattern Overlay"
@@ -4706,6 +4742,94 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDropShadow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInnerShadowDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowInnerShadowDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Inner Shadow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Inner Shadow</h2>
+            <label className="control">
+              <span className="control__label">
+                Distance
+                <span className="control__value">{innerShadowDistance}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={innerShadowDistance}
+                onChange={(event) => setInnerShadowDistance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{innerShadowAngle}&deg;</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={innerShadowAngle}
+                onChange={(event) => setInnerShadowAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{innerShadowSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={250}
+                value={innerShadowSize}
+                onChange={(event) => setInnerShadowSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={innerShadowColor}
+                onChange={(event) => setInnerShadowColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{innerShadowOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={innerShadowOpacity}
+                onChange={(event) => setInnerShadowOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowInnerShadowDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyInnerShadow} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -7076,6 +7076,77 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **750 Rust tests total** (743 → 750, 743 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 107 — Layer > Layer Style > Inner Shadow
+
+`inner_shadow(id, distance, angle, size, color, opacity)` is the mirror
+image of `drop_shadow`, reusing its exact offset math (`dx`/`dy` from
+`distance` and `angle`, the same "0° from the right, increasing
+anticlockwise" convention `emboss`/`plaster` already use) and its exact
+edge-clamped box-average-over-`size` window (truncating integer
+division, the same shape `box_blur_at` uses). The two differences: the
+window averages each sampled pixel's own *inverse* alpha (`255 -
+alpha`, how much background shows through) instead of its alpha, and
+the result is applied only to already-opaque pixels instead of only to
+already-transparent ones. An opaque pixel whose own `(row - dy, col -
+dx)` neighbourhood sits mostly outside the layer's own silhouette gets
+a shadow blended onto its own colour in proportion to that averaged
+transparency, scaled by `opacity`; a pixel whose neighbourhood is
+fully opaque (deep interior, or on the edge facing toward the light)
+gets a shadow alpha of `0` and is left byte-for-byte at its own
+original value. Unlike `drop_shadow`, which replaces a transparent
+pixel outright since there's nothing there to preserve, this blends
+the shadow colour onto the pixel's own existing colour (`orig * (1 -
+frac) + color * frac`), the same linear blend shape `inner_glow`
+already uses — the pixel's own alpha always stays untouched. `distance`
+and `size` are pixel counts (`distance` up to `100`, `size` up to
+`250`, the same ranges `drop_shadow` already accepts); `opacity` is
+Photoshop's own `0..=100` range. Blend Mode, Choke, Contour, and Noise
+are all a documented scope cut, the same kind of narrowing
+`drop_shadow`'s own scope cut already makes.
+
+**Verified two ways.** Seven new `document.rs` tests, reusing Stroke
+Outline's own fixture (6x6, a solid opaque 2x2 block `(100, 150, 200,
+255)` at rows 2-3, columns 2-3, everywhere else fully transparent).
+Distance `1`, angle `0` (`dx=1, dy=0`), size `0`, opacity `100`, colour
+black: pixel `(row 2, col 2)`, the block's own left column, samples
+inverse-alpha at `(2, 1)`, which is transparent, so its own shadow
+alpha is `255` and it blends fully to black, `(0, 0, 0, 255)` — its own
+alpha is preserved, unlike `drop_shadow`'s outright replacement; pixel
+`(row 2, col 3)`, the block's own right column, samples `(2, 2)`,
+which is opaque, so its own shadow alpha is `0` and it's left
+byte-for-byte at its own original `(100, 150, 200, 255)` — the side
+facing the light stays lit. A second test halves opacity to `50`,
+giving shadow alpha `round(255*0.5) = 128` and a real, hand-computed
+`(50, 75, 100)` instead of the opacity-100 test's own `(0, 0, 0)`. A
+third flips angle to `180` (`dx=-1, dy=0`), swapping which column
+darkens at the very same pixels — the mirror image of the angle-`0`
+result. A fourth widens size to `1`, averaging inverse-alpha over a
+3x3 window (`7` of `9` samples transparent) for a truncating average
+of `1785/9 = 198`, blending `(100, 150, 200)` by `198/255 = 0.77647`
+toward black to a real, more-softened `(22, 34, 45)` at column `2` and
+`(45, 67, 89)` at column `3`, distinct from the crisp size-`0` result.
+A fifth confirms a fully-transparent pixel is left completely alone. A
+sixth confines the fixture to a single-pixel selection. A seventh
+confirms out-of-range distance, a non-finite angle, out-of-range size
+and opacity, plus a locked/unknown layer, all error. All seven tests
+passed on the first run, cross-checked against an independent Python
+script that emulates Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**757 Rust tests total** (750 → 757, 750 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
