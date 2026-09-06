@@ -4717,6 +4717,73 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **549 Rust tests total** (544 → 549, 542 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 68 — Filter Gallery > Brush Strokes > Sumi-e
+
+Widens dark ink strokes by eroding each colour channel toward its own
+darkest neighbour — the same `extreme_at` neighbourhood-extreme helper
+`ink_outlines` and `poster_edges` already use for dilation, just
+asking for the minimum instead of the maximum — then reapplies
+`brightness_contrast`'s own contrast formula to push the widened
+strokes toward saturated black-on-white, the flat, high-contrast look
+of a sumi-e ink wash. A documented approximation, not a port of
+Photoshop's own brush-and-wash renderer. `Document::sumi_e(id,
+stroke_width, stroke_pressure, contrast)`: `stroke_width` (Photoshop's
+own `3..=15` range) scales down into the erosion radius, `(stroke_width
+/ 5).max(1)`, for the same reason `ink_outlines` scales its own stroke
+length down; `stroke_pressure` (Photoshop's own `0..=15` range) blends
+that eroded result back with the original, so `0` leaves ink strokes at
+their original width and `15` is full erosion; `contrast` (Photoshop's
+own `0..=40` range) is rescaled onto `brightness_contrast`'s own
+`-255..=255` domain and fed through its exact same formula, pulling
+every channel away from mid-grey. Alpha is carried over unchanged. This
+is the last capability in the Brush Strokes gallery — all eight of its
+filters (Accented Edges, Angled Strokes, Crosshatch, Dark Strokes, Ink
+Outlines, Spatter, Sprayed Strokes, and Sumi-e) now ship. A new
+**Sumi-e…** dialog exposes Stroke Width, Stroke Pressure, and Contrast
+sliders.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges` all already share (4×4, columns 0-1 solid `200`,
+columns 2-3 solid `50`). At stroke width `5` (erosion radius `1`), full
+stroke pressure (`15`, an identity blend), and contrast `0` (mapped
+contrast `0`, a `factor` of exactly `259 * 255 / (255 * 259) = 1.0`,
+also an identity): column `0`'s radius-1 neighbourhood is `(200, 200,
+200)`, staying `200`; column `1`'s is `(200, 200, 50)`, eroding to `50`
+as ink spreads in from column `2`; columns `2` and `3` are already `50`
+and stay `50`. A second test confirms stroke pressure `0` round-trips
+the whole fixture to its own original values exactly, since the erosion
+pass then contributes nothing to the blend. A third raises contrast to
+`40` (maximum), rescaling to `brightness_contrast`'s own domain as
+`255` and giving `factor = 259 * 510 / (255 * 4) = 129.5` exactly:
+`129.5 * (200 - 128) + 128 = 9452`, clamped to `255`, and `129.5 * (50
+- 128) + 128 = -9973`, clamped to `0` — both so far past their clamp
+boundary that no rounding rule could change the outcome. A fourth
+raises stroke width to `10` (erosion radius `2`), wide enough that
+every column's neighbourhood on this 4-wide fixture reaches a
+50-valued column, eroding the whole row to `50`. A fifth confines the
+fixture to a one-pixel selection. A sixth confirms out-of-range stroke
+width, stroke pressure, and contrast, plus a locked/unknown layer, all
+error. All six passed on the first run — no independent Python script
+was needed since every value here reuses `extreme_at`'s and
+`brightness_contrast`'s own already-verified arithmetic directly, with
+the remaining combination (a linear blend and a formula already proven
+by `brightness_contrast`'s own tests) simple enough to verify by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**555 Rust tests total** (549 → 555, 548 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

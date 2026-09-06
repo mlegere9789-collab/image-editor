@@ -5467,6 +5467,74 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Sumi-e: widens dark ink strokes by
+    /// eroding each colour channel toward its own darkest neighbour — the
+    /// same [`extreme_at`] neighbourhood-extreme helper `ink_outlines` and
+    /// `poster_edges` already use for dilation, just asking for the
+    /// minimum instead of the maximum — then reapplies
+    /// [`Self::brightness_contrast`]'s own contrast formula to push the
+    /// widened strokes toward saturated black-on-white, the flat,
+    /// high-contrast look of a sumi-e ink wash. A documented
+    /// approximation, not a port of Photoshop's own brush-and-wash
+    /// renderer. `stroke_width` (Photoshop's own `3..=15` range) scales
+    /// down into the erosion radius, `(stroke_width / 5).max(1)`, for the
+    /// same reason `ink_outlines` scales its own stroke length down — a
+    /// literal 1:1 mapping would be needlessly slow. `stroke_pressure`
+    /// (Photoshop's own `0..=15` range) blends that eroded result back
+    /// with the original, `orig * (1 - stroke_pressure / 15) + eroded *
+    /// (stroke_pressure / 15)`, so `0` leaves ink strokes at their
+    /// original width and `15` is full erosion. `contrast` (Photoshop's
+    /// own `0..=40` range) is rescaled onto `brightness_contrast`'s own
+    /// `-255..=255` domain (`contrast / 40 * 255`) and fed through its
+    /// exact same `259 * (c + 255) / (255 * (259 - c))` formula, pulling
+    /// every channel away from mid-grey. Alpha is carried over unchanged.
+    /// Confined to the selection, like every other filter here built on
+    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn sumi_e(
+        &mut self,
+        id: LayerId,
+        stroke_width: u32,
+        stroke_pressure: u32,
+        contrast: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(3..=15).contains(&stroke_width) {
+            return Err("Sumi-e stroke width must be between 3 and 15.".to_string());
+        }
+        if stroke_pressure > 15 {
+            return Err("Sumi-e stroke pressure must be between 0 and 15.".to_string());
+        }
+        if contrast > 40 {
+            return Err("Sumi-e contrast must be between 0 and 40.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (stroke_width / 5).max(1) as i64;
+        let pressure_f = stroke_pressure as f32 / 15.0;
+        let mapped_contrast = contrast as f32 / 40.0 * 255.0;
+        let factor = 259.0 * (mapped_contrast + 255.0) / (255.0 * (259.0 - mapped_contrast));
+        self.filter_pixels(id, move |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let eroded = extreme_at(
+                source,
+                doc_width,
+                (width, height),
+                (row, col),
+                radius,
+                false,
+            );
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = source[base + c] as f32;
+                let widened = orig * (1.0 - pressure_f) + eroded[c] as f32 * pressure_f;
+                let contrasted = (factor * (widened - 128.0) + 128.0).clamp(0.0, 255.0);
+                out[c] = contrasted as u8;
+            }
+            out[3] = source[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -11980,6 +12048,114 @@ mod tests {
     fn brightness_contrast_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.brightness_contrast(999, 10, 10).is_err());
+    }
+
+    #[test]
+    fn sumi_e_erodes_toward_the_darkest_neighbour() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges all
+        // already share: 4x4, columns 0-1 solid (200,200,200,255),
+        // columns 2-3 solid (50,50,50,255). Stroke width 5 maps to
+        // erosion radius 1: column 0's radius-1 neighbourhood is
+        // (200, 200, 200) -> min 200 (untouched); column 1's is (200,
+        // 200, 50) -> min 50 (ink spreads in from column 2); columns 2
+        // and 3 are already 50 and stay 50. At full stroke pressure (15,
+        // pressure_f 1.0) and contrast 0 (mapped contrast 0, factor
+        // exactly 259*255/(255*259) = 1.0, an identity), the output is
+        // exactly that eroded row.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.sumi_e(id, 5, 15, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn sumi_e_stroke_pressure_zero_leaves_the_original_untouched() {
+        // Stroke pressure 0 makes pressure_f exactly 0, so the erosion
+        // pass contributes nothing to the blend, and contrast 0 is the
+        // same identity factor as above -- the whole fixture round-trips
+        // to its own original values.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.sumi_e(id, 5, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn sumi_e_contrast_pushes_toward_saturated_black_and_white() {
+        // Same fully-eroded row as the first test ([200, 50, 50, 50]),
+        // but contrast 40 (maximum) rescales to brightness_contrast's own
+        // domain as 255, giving factor = 259 * 510 / (255 * 4) = 129.5
+        // exactly. 129.5 * (200 - 128) + 128 = 9452, clamped to 255;
+        // 129.5 * (50 - 128) + 128 = -9973, clamped to 0 -- both so far
+        // past their clamp boundary that no rounding rule could change
+        // the outcome.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.sumi_e(id, 5, 15, 40).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn sumi_e_stroke_width_widens_the_erosion_radius() {
+        // Stroke width 10 maps to erosion radius 2, wide enough that
+        // every column's neighbourhood on this 4-wide fixture reaches at
+        // least one of the 50-valued columns 2-3, so the whole row erodes
+        // to 50 at full stroke pressure and identity contrast.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.sumi_e(id, 10, 15, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [50, 50, 50, 255]);
+        }
+    }
+
+    #[test]
+    fn sumi_e_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.sumi_e(id, 5, 15, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn sumi_e_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.sumi_e(id, 2, 0, 0).is_err());
+        assert!(doc.sumi_e(id, 16, 0, 0).is_err());
+        assert!(doc.sumi_e(id, 5, 16, 0).is_err());
+        assert!(doc.sumi_e(id, 5, 0, 41).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.sumi_e(id, 5, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.sumi_e(999, 5, 0, 0).is_err());
     }
 
     #[test]

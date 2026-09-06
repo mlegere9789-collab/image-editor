@@ -372,6 +372,10 @@ export default function App() {
   const [sprayedStrokesLength, setSprayedStrokesLength] = useState(10);
   const [sprayedStrokesRadius, setSprayedStrokesRadius] = useState(10);
   const [sprayedStrokesDirection, setSprayedStrokesDirection] = useState(1);
+  const [showSumiEDialog, setShowSumiEDialog] = useState(false);
+  const [sumiEStrokeWidth, setSumiEStrokeWidth] = useState(5);
+  const [sumiEStrokePressure, setSumiEStrokePressure] = useState(8);
+  const [sumiEContrast, setSumiEContrast] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1116,6 +1120,17 @@ export default function App() {
     });
     setShowSprayedStrokesDialog(false);
   }, [runCommand, selectedId, sprayedStrokesLength, sprayedStrokesRadius, sprayedStrokesDirection]);
+
+  const applySumiE = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("sumi_e", {
+      id: selectedId,
+      strokeWidth: sumiEStrokeWidth,
+      strokePressure: sumiEStrokePressure,
+      contrast: sumiEContrast,
+    });
+    setShowSumiEDialog(false);
+  }, [runCommand, selectedId, sumiEStrokeWidth, sumiEStrokePressure, sumiEContrast]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2491,6 +2506,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Sprayed Strokes"
           >
             Sprayed Strokes…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSumiEDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Sumi-e"
+          >
+            Sumi-e…
           </button>
           <button
             className="button button--quiet"
@@ -5389,6 +5412,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySprayedStrokes} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSumiEDialog && (
+        <div className="modal-overlay" onClick={() => setShowSumiEDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Sumi-e"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Sumi-e</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Width
+                <span className="control__value">{sumiEStrokeWidth}</span>
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={15}
+                value={sumiEStrokeWidth}
+                onChange={(event) => setSumiEStrokeWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Pressure
+                <span className="control__value">{sumiEStrokePressure}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={sumiEStrokePressure}
+                onChange={(event) => setSumiEStrokePressure(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{sumiEContrast}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={sumiEContrast}
+                onChange={(event) => setSumiEContrast(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSumiEDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySumiE} disabled={busy}>
                 Apply
               </button>
             </div>
