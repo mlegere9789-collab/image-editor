@@ -6434,6 +6434,71 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **687 Rust tests total** (682 → 687, 680 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 96 — Filter Gallery > Texture > Stained Glass
+
+`crystallize`'s own jittered-site Voronoi cells (`jittered_sites`,
+`nearest_site`, and `voronoi_site_averages` reused directly), with a
+solid border drawn wherever a pixel sits within `border_thickness`
+pixels of a cell boundary — detected, rather than by computing the
+true distance to the second-nearest site, by checking whether the
+pixel `border_thickness` away in each of the four cardinal directions
+(edge-clamped) belongs to a *different* cell, a documented
+approximation of the true geometric Voronoi edge that keeps the check
+a handful of extra `nearest_site` lookups rather than a second
+distance computation. `light_intensity` (Photoshop's own `0..=10`
+range) scales the border's own brightness as a fraction of its cell's
+own average, `avg * light_intensity / 10.0` — `0` a solid black leaded
+border, `10` bright enough to be indistinguishable from the glass
+itself — a documented simplification standing in for Photoshop's own
+simulated light source shining through the glass. `cell_size`
+(Photoshop's own `2..=50` range) and `border_thickness` (Photoshop's
+own `1..=20` range) are both validated. Alpha is each cell's own
+averaged alpha outside the border, and fully opaque within it.
+Confined to the selection: sites, cell averages, and border membership
+are always computed from the whole, unmodified source regardless of
+selection (the same convention `crystallize` and `mosaic` already
+establish). A new **Stained Glass…** dialog exposes Cell Size, Border
+Thickness, and Light Intensity sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`). Cell size `2` and seed `1` produce four
+jittered sites (via the same `jittered_sites` `crystallize` already
+uses) at `(1,1)`, `(3,1)`, `(1,2)`, `(2,2)` — one per `2x2` grid square
+— assigning every pixel to its own nearest site and averaging each
+site's own pixels: site `0` averages `20`, site `2` averages `15`. At
+border thickness `1`, pixels `(0, 0)` and `(0, 3)` have every 1-away
+neighbour in their own site, so they show their own cell's raw average
+untouched (`20` and `15`); `(3, 0)` and `(0, 2)` each border a
+different site, so at light intensity `0` (a solid black border) they
+become `0`. A second test raises light intensity to `5`, mapping
+`(2, 0)`'s own border to `20 * 5/10 = 10` instead of `0` — a real,
+hand-computed change, not a coincidental match. A third widens border
+thickness to `2`, making `(0, 0)` check neighbours 2 pixels away and
+reach a different site, flipping it from the first test's own interior
+value of `20` to a border pixel (`0` at light intensity `0`) — a real
+difference caused only by the wider border check. A fourth confines
+the fixture to a single-pixel selection at `(0, 0)`. A fifth confirms
+out-of-range cell size, border thickness, and light intensity, plus a
+locked/unknown layer, all error. All five tests passed on the first
+run, cross-checked against an independent Python script that
+reproduces `jittered_sites`, `nearest_site`, and the border check
+exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**692 Rust tests total** (687 → 692, 685 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

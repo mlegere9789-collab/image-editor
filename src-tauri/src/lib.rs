@@ -1989,6 +1989,22 @@ fn patchwork(
     })
 }
 
+/// Filter Gallery > Texture > Stained Glass on layer `id`. The frontend
+/// sends a fresh `seed` on every apply, as with Crystallize.
+#[tauri::command]
+fn stained_glass(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    border_thickness: u32,
+    light_intensity: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.stained_glass(id, cell_size, border_thickness, light_intensity, seed)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2324,6 +2340,7 @@ pub fn run() {
             tiles,
             mosaic_tiles,
             patchwork,
+            stained_glass,
             hue_saturation,
             black_and_white,
             vibrance,

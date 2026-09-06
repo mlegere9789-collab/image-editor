@@ -7356,6 +7356,80 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Stained Glass: [`Self::crystallize`]'s
+    /// own jittered-site Voronoi cells (`jittered_sites`, `nearest_site`,
+    /// and `voronoi_site_averages` reused directly), with a solid border
+    /// drawn wherever a pixel sits within `border_thickness` pixels of a
+    /// cell boundary — detected, rather than by computing the true
+    /// distance to the second-nearest site, by checking whether the
+    /// pixel `border_thickness` away in each of the four cardinal
+    /// directions (edge-clamped) belongs to a *different* cell, a
+    /// documented approximation of the true geometric Voronoi edge that
+    /// keeps the check a handful of extra [`nearest_site`] lookups rather
+    /// than a second distance computation. `light_intensity`
+    /// (Photoshop's own `0..=10` range) scales the border's own
+    /// brightness as a fraction of its cell's own average,
+    /// `avg * light_intensity / 10.0` — `0` a solid black leaded border,
+    /// `10` bright enough to be indistinguishable from the glass itself
+    /// — a documented simplification standing in for Photoshop's own
+    /// simulated light source shining through the glass. `cell_size`
+    /// (Photoshop's own `2..=50` range) and `border_thickness`
+    /// (Photoshop's own `1..=20` range) are both validated. Alpha is
+    /// each cell's own averaged alpha outside the border, and fully
+    /// opaque within it. Confined to the selection: sites, cell
+    /// averages, and border membership are always computed from the
+    /// whole, unmodified source regardless of selection (the same
+    /// convention `crystallize` and `mosaic` already establish), and
+    /// only the selected pixels' output is written back.
+    pub fn stained_glass(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        border_thickness: u32,
+        light_intensity: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=50).contains(&cell_size) {
+            return Err("Stained Glass cell size must be between 2 and 50.".to_string());
+        }
+        if !(1..=20).contains(&border_thickness) {
+            return Err("Stained Glass border thickness must be between 1 and 20.".to_string());
+        }
+        if light_intensity > 10 {
+            return Err("Stained Glass light intensity must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = cell_size as i64;
+        let bt = border_thickness as i64;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let (sites, grid) = jittered_sites(width, height, cell_size, seed);
+        let averages = voronoi_site_averages(&source, width, &sites, cell, grid);
+        self.filter_pixels(id, move |_, row, col| {
+            let (x, y) = (col as i64, row as i64);
+            let (idx, _) = nearest_site(&sites, cell, grid, (x, y));
+            let is_border = [(bt, 0), (-bt, 0), (0, bt), (0, -bt)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let nx = (x + dx).clamp(0, width as i64 - 1);
+                    let ny = (y + dy).clamp(0, height as i64 - 1);
+                    nearest_site(&sites, cell, grid, (nx, ny)).0 != idx
+                });
+            let avg = averages[idx];
+            if is_border {
+                let v = |c: u8| (c as f32 * light_intensity as f32 / 10.0).round() as u8;
+                [v(avg[0]), v(avg[1]), v(avg[2]), 255]
+            } else {
+                avg
+            }
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16711,6 +16785,104 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.patchwork(999, 4, 25).is_err());
+    }
+
+    #[test]
+    fn stained_glass_shows_cell_averages_with_a_black_border() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40).
+        // Cell size 2 and seed 1 produce four jittered sites (via the
+        // same jittered_sites crystallize already uses) at (1,1), (3,1),
+        // (1,2), (2,2) -- one per 2x2 grid square -- assigning every
+        // pixel to its own nearest site and averaging each site's own
+        // pixels: site 0 (top-left quadrant plus (2,0)/(2,1)) averages
+        // 20, site 2 (bottom-left) averages 15. At border thickness 1,
+        // a pixel is border if the pixel 1 away in any cardinal
+        // direction (edge-clamped) belongs to a different site: (0, 0)
+        // and (0, 3) both have every 1-away neighbour in their own site,
+        // so they show their own cell's raw average untouched (20 and
+        // 15); (3, 0) and (0, 2) each border a different site, so at
+        // light intensity 0 (a solid black border) they become 0.
+        // Cross-checked against an independent Python script that
+        // reproduces jittered_sites, nearest_site, and this border
+        // check exactly.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.stained_glass(id, 2, 1, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(&p[idx(0, 3)..idx(0, 3) + 4], [15, 15, 15, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stained_glass_light_intensity_brightens_the_border() {
+        // Same layout as above; (2, 0) belongs to site 0 (average 20)
+        // but is a border pixel (its neighbour at (3, 0) belongs to a
+        // different site). Light intensity 5 maps to 20 * 5/10 = 10 --
+        // a real, hand-computed change from light intensity 0's own 0,
+        // not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.stained_glass(id, 2, 1, 5, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [10, 10, 10, 255]);
+    }
+
+    #[test]
+    fn stained_glass_border_thickness_widens_the_border() {
+        // Widening border thickness to 2 makes (0, 0) check neighbours
+        // 2 pixels away instead of 1, reaching a different site in at
+        // least one direction, so it flips from the first test's own
+        // interior value of 20 to a border pixel: at light intensity 0,
+        // that's 0 -- a real, hand-computed difference caused only by
+        // the wider border check, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.stained_glass(id, 2, 2, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stained_glass_is_confined_to_the_selection() {
+        // Sites, cell averages, and border membership are always
+        // computed from the whole, unmodified source regardless of
+        // selection (the same convention crystallize and mosaic already
+        // establish), so selecting only (0, 0) still produces the same
+        // 20 the unselected first test's own (0, 0) computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.stained_glass(id, 2, 1, 0, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn stained_glass_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.stained_glass(id, 1, 1, 0, 1).is_err());
+        assert!(doc.stained_glass(id, 51, 1, 0, 1).is_err());
+        assert!(doc.stained_glass(id, 2, 0, 0, 1).is_err());
+        assert!(doc.stained_glass(id, 2, 21, 0, 1).is_err());
+        assert!(doc.stained_glass(id, 2, 1, 11, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stained_glass(id, 2, 1, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.stained_glass(999, 2, 1, 0, 1).is_err());
     }
 
     #[test]

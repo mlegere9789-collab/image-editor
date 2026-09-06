@@ -472,6 +472,10 @@ export default function App() {
   const [showPatchworkDialog, setShowPatchworkDialog] = useState(false);
   const [patchworkSquareSize, setPatchworkSquareSize] = useState(10);
   const [patchworkRelief, setPatchworkRelief] = useState(10);
+  const [showStainedGlassDialog, setShowStainedGlassDialog] = useState(false);
+  const [stainedGlassCellSize, setStainedGlassCellSize] = useState(10);
+  const [stainedGlassBorderThickness, setStainedGlassBorderThickness] = useState(2);
+  const [stainedGlassLightIntensity, setStainedGlassLightIntensity] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1543,6 +1547,25 @@ export default function App() {
     });
     setShowPatchworkDialog(false);
   }, [runCommand, selectedId, patchworkSquareSize, patchworkRelief]);
+
+  const applyStainedGlass = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("stained_glass", {
+      id: selectedId,
+      cellSize: stainedGlassCellSize,
+      borderThickness: stainedGlassBorderThickness,
+      lightIntensity: stainedGlassLightIntensity,
+      seed,
+    });
+    setShowStainedGlassDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    stainedGlassCellSize,
+    stainedGlassBorderThickness,
+    stainedGlassLightIntensity,
+  ]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2838,6 +2861,14 @@ export default function App() {
             title="Filter Gallery > Texture > Patchwork"
           >
             Patchwork…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowStainedGlassDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Stained Glass"
+          >
+            Stained Glass…
           </button>
           <button
             className="button button--quiet"
@@ -5435,6 +5466,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPatchwork} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStainedGlassDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowStainedGlassDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Stained Glass"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Stained Glass</h2>
+            <label className="control">
+              <span className="control__label">
+                Cell Size
+                <span className="control__value">{stainedGlassCellSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={50}
+                value={stainedGlassCellSize}
+                onChange={(event) => setStainedGlassCellSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Border Thickness
+                <span className="control__value">{stainedGlassBorderThickness}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={stainedGlassBorderThickness}
+                onChange={(event) => setStainedGlassBorderThickness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Light Intensity
+                <span className="control__value">{stainedGlassLightIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={stainedGlassLightIntensity}
+                onChange={(event) => setStainedGlassLightIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowStainedGlassDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyStainedGlass} disabled={busy}>
                 Apply
               </button>
             </div>

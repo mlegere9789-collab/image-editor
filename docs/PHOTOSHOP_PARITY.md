@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 154.**
+**618 distinct capabilities tracked. Currently shipped: 155.**
 
 ## PART I — EVERY TOOL
 
@@ -595,7 +595,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Grain (Filter Gallery → Texture; adds a seeded `XorShift32` draw to each pixel's own RGB channels identically, then reapplies `brightness_contrast`'s own tone-curve formula (reimplemented inline, as `fresco`/`rough_pastels` already do) — supports Photoshop's own "Regular" grain type only, the other nine (Soft, Sprinkles, Clumped, Contrasty, Enlarged, Stippled, Horizontal, Vertical, Speckle) are a documented scope cut — see README Phase 92)
 - [x] Mosaic Tiles (Filter Gallery → Texture; reuses `mosaic`'s own per-cell flat-average grid, overlaid with a solid grayscale grout border along every cell's own edges — Lighten Grout sets the border's grayscale value rather than a genuine tint, a documented simplification — see README Phase 94)
 - [x] Patchwork (Filter Gallery → Texture; `mosaic_tiles`'s own per-cell flat-average grid given a closed-form diagonal bevel shade reused verbatim from `extrude`'s own non-random mode, each square's own luma standing in for its own bevel steepness — see README Phase 95)
-- [ ] Stained GlassReconstructs the image as adjacent colored cells resembling stained glass.
+- [x] Stained Glass (Filter Gallery → Texture; `crystallize`'s own jittered-site Voronoi cells (`jittered_sites`/`nearest_site`/`voronoi_site_averages` reused directly), with a solid border wherever a pixel sits within Border Thickness of a different cell, brightened by Light Intensity as a fraction of its own cell's average — see README Phase 96)
 - [ ] TexturizerApplies a texture to the image, including built-in texture types or a loaded texture file.
 - [ ] Neural Filters
 - [ ] Featured Neural Filters
