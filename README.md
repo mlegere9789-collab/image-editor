@@ -7371,6 +7371,83 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **778 Rust tests total** (771 → 778, 771 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 111 — Image > Adjustments > Auto Tone, Auto Contrast
+
+`auto_tone(id)` and `auto_contrast(id)` both share a single private
+`auto_stretch(id, shared)` implementation, following the same two-pass
+sample-then-remap shape `equalize` already established: a first pass
+samples the active selection (or the whole layer, with none — the same
+sampling-region convention `equalize` already uses) to find each
+channel's own minimum and maximum; a second pass linearly stretches
+`out = (in - low) / (high - low) * 255`, clamped, the same per-channel
+formula `levels` already applies with a user-typed `input_black`/
+`input_white`, just with `low`/`high` computed automatically instead.
+The one difference between the two filters is exactly what
+distinguishes them in Photoshop itself: `auto_tone` (`shared = false`)
+stretches each of the three channels using its own independently
+sampled low/high, which can shift a colour cast; `auto_contrast`
+(`shared = true`) takes the single darkest and lightest sampled values
+across all three channels together and applies that one shared
+low/high to every channel, which is exactly what keeps it from
+shifting colour balance the way `auto_tone` can. A channel whose
+sampled low equals its own high (or, for `auto_contrast`, whose shared
+low equals the shared high) is left untouched rather than dividing by
+zero, and a selection that samples nothing leaves the layer untouched
+entirely. Alpha untouched throughout. Photoshop's own 0.5%-per-end
+histogram clipping and Auto Color's own midtone-neutralizing "average
+key" heuristic are both a documented scope cut — Auto Color in
+particular is deferred rather than approximated, the same kind of
+fabrication risk already documented for Color Lookup, since this
+project doesn't have a defensible reference for Photoshop's own
+proprietary neutralization formula.
+
+**Verified two ways.** Five new `document.rs` tests, on a new
+dedicated fixture (`varying_channels_fixture`, a 2x1 image: pixel 0 is
+`(50, 100, 20)`, pixel 1 is `(150, 200, 220)`) chosen because each
+channel has its own distinct range — a single-channel grayscale
+fixture can't tell `auto_tone` and `auto_contrast` apart, since a
+shared low/high over identical per-channel ranges is just that same
+range. The shared low/high across all three channels and both pixels
+is `20` (blue at pixel 0) to `220` (blue at pixel 1): `auto_contrast`
+gives pixel 0 `R (50-20)/200*255 = 38.25 -> 38`, `G (100-20)/200*255 =
+102`, `B (20-20)/200*255 = 0`, and pixel 1 `R 165.75 -> 166`, `G 229.5
+-> 230` (rounding away from zero), `B 255` — neither R nor G reaches
+full black/white, since the shared range is wider than either
+channel's own. `auto_tone` on the identical fixture instead stretches
+each channel using its own two sampled values as low/high exactly, so
+every channel of both pixels reaches pure `0` or pure `255` — a real,
+hand-computed difference confirming the actual property distinguishing
+the two filters. A third test, on a genuinely flat `(128, 128, 128)`
+solid layer (chosen deliberately over a per-channel-different flat
+layer like `(10, 20, 30)` solid, which is flat for `auto_tone`'s own
+per-channel view but is *not* flat for `auto_contrast`'s own shared
+view, since its shared low `10` and high `30` still genuinely differ —
+a real distinction this test's own comment documents, caught by the
+test suite itself when an earlier draft used exactly that fixture and
+failed), confirms both filters leave a uniformly grey layer completely
+unchanged. A fourth confines sampling and remapping to a single-pixel
+selection. A fifth confirms a locked or unknown layer errors for both
+filters. All five tests passed (after that one caught and corrected
+fixture choice), cross-checked against an independent Python script
+that emulates Rust's own `f32` rounding via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-eight: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. Both new one-click toolbar buttons (**Auto Tone**,
+**Auto Contrast**, following the same parameter-free pattern
+**Equalize**'s own toolbar button already uses) were reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand/script-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**783 Rust tests total** (778 → 783, 776 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

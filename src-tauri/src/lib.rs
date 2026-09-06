@@ -755,6 +755,18 @@ fn equalize(
     edit_checkpointed(&state, |document| document.equalize(id, entire_image))
 }
 
+/// Image > Adjustments > Auto Tone on layer `id`.
+#[tauri::command]
+fn auto_tone(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.auto_tone(id))
+}
+
+/// Image > Adjustments > Auto Contrast on layer `id`.
+#[tauri::command]
+fn auto_contrast(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.auto_contrast(id))
+}
+
 /// Filter > Other > Maximum on layer `id`.
 #[tauri::command]
 fn maximum(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
@@ -2461,6 +2473,8 @@ pub fn run() {
             dust_and_scratches,
             add_noise,
             equalize,
+            auto_tone,
+            auto_contrast,
             maximum,
             minimum,
             high_pass,

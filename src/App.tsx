@@ -3122,6 +3122,24 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => selectedId !== null && void runCommand("auto_tone", { id: selectedId })}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Auto Tone"
+          >
+            Auto Tone
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("auto_contrast", { id: selectedId })
+            }
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Auto Contrast"
+          >
+            Auto Contrast
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowMaximumDialog(true)}
             disabled={busy || !canPaint}
             title="Filter > Other > Maximum"

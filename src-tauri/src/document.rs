@@ -1889,6 +1889,107 @@ impl Document {
         Ok(Some(target_bounds))
     }
 
+    /// Image > Adjustments > Auto Tone: stretches each RGB channel
+    /// independently so its own darkest sampled value maps to `0` and its
+    /// own brightest maps to `255` — `out = (in − low) / (high − low) *
+    /// 255`, clamped, per channel — the same per-channel linear remap
+    /// [`Self::levels`] already applies with a user-chosen `input_black`/
+    /// `input_white`, just with `low`/`high` computed automatically from
+    /// the sampled pixels (the active selection, or the whole layer with
+    /// none — the same sampling-region convention [`Self::equalize`]
+    /// already uses) instead of typed in. Because each channel stretches
+    /// independently, a colour cast can shift or intensify, exactly the
+    /// trade-off distinguishing Photoshop's own Auto Tone from
+    /// [`Self::auto_contrast`]. A channel whose sampled pixels are
+    /// already a single flat value (`low == high`) is left untouched
+    /// rather than dividing by zero, and sampling nothing (an empty
+    /// selection) leaves the layer untouched entirely. Alpha untouched.
+    /// Photoshop's own 0.5%-per-end histogram clipping and its per-channel
+    /// Auto Options dialog are a documented scope cut — this project
+    /// always stretches from the true sampled minimum and maximum.
+    pub fn auto_tone(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.auto_stretch(id, false)
+    }
+
+    /// Image > Adjustments > Auto Contrast: the same linear stretch
+    /// [`Self::auto_tone`] applies, but using one shared `low`/`high`
+    /// computed across all three channels together (the single darkest
+    /// and lightest sampled values, whichever channel each falls in)
+    /// rather than each channel's own — the property that keeps Auto
+    /// Contrast from shifting colour balance the way [`Self::auto_tone`]
+    /// can. Photoshop's own 0.5%-per-end histogram clipping is a
+    /// documented scope cut, the same as [`Self::auto_tone`]'s own.
+    pub fn auto_contrast(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.auto_stretch(id, true)
+    }
+
+    /// Shared implementation behind [`Self::auto_tone`] (`shared = false`,
+    /// each channel stretched by its own sampled range) and
+    /// [`Self::auto_contrast`] (`shared = true`, every channel stretched
+    /// by the same range, the single darkest-to-lightest span across all
+    /// three). A first pass samples the active selection (or the whole
+    /// layer) to find each channel's own low/high; a second pass applies
+    /// the resulting per-channel stretch, the same two-pass
+    /// sample-then-remap shape [`Self::equalize`] already uses.
+    fn auto_stretch(&mut self, id: LayerId, shared: bool) -> Result<Option<Rect>, String> {
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let bounds = self.copy_bounds();
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+
+        let mut lo = [255u8; 3];
+        let mut hi = [0u8; 3];
+        let mut sampled = false;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                sampled = true;
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let v = layer.pixels[base + c];
+                    lo[c] = lo[c].min(v);
+                    hi[c] = hi[c].max(v);
+                }
+            }
+        }
+        if !sampled {
+            return Ok(None);
+        }
+        if shared {
+            let glo = lo.iter().copied().min().unwrap();
+            let ghi = hi.iter().copied().max().unwrap();
+            lo = [glo; 3];
+            hi = [ghi; 3];
+        }
+
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    if hi[c] == lo[c] {
+                        continue;
+                    }
+                    let v = layer.pixels[base + c] as f32;
+                    let normalized = (v - lo[c] as f32) / (hi[c] as f32 - lo[c] as f32);
+                    layer.pixels[base + c] = (normalized * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Filter > Other > Maximum: every channel of each selected pixel
     /// becomes the largest value of that channel within `radius` — the
     /// morphological dilate, which spreads light areas into dark ones
@@ -10488,6 +10589,120 @@ mod tests {
         assert!(err.contains("locked"), "{err}");
         assert_eq!(reds(&doc), [10, 20, 30, 40]);
         assert!(doc.equalize(999, false).is_err());
+    }
+
+    fn varying_channels_fixture() -> (Document, LayerId) {
+        // 2x1: pixel 0 is (50, 100, 20), pixel 1 is (150, 200, 220).
+        // Each channel has its own distinct range (R: 50-150, G:
+        // 100-200, B: 20-220) so auto_tone's own per-channel stretch
+        // and auto_contrast's own shared stretch produce genuinely
+        // different results -- a single-channel (grayscale) fixture
+        // can't tell them apart, since a shared low/high over identical
+        // per-channel ranges is just that same range.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("varied", &[50, 100, 20, 255, 150, 200, 220, 255], 2, 1)
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn auto_contrast_stretches_using_one_shared_low_and_high() {
+        // The shared low/high across all three channels and both
+        // pixels is 20 (blue at pixel 0) to 220 (blue at pixel 1).
+        // Pixel 0: R (50-20)/200*255 = 38.25 -> 38, G (100-20)/200*255
+        // = 102, B (20-20)/200*255 = 0. Pixel 1: R (150-20)/200*255 =
+        // 165.75 -> 166, G (200-20)/200*255 = 229.5 -> 230 (rounding
+        // away from zero), B (220-20)/200*255 = 255. Neither R nor G
+        // reaches full black/white, since the shared range is wider
+        // than either channel's own -- the property that keeps colour
+        // balance intact, unlike auto_tone's own per-channel stretch at
+        // the very same pixels.
+        let (mut doc, id) = varying_channels_fixture();
+        doc.auto_contrast(id).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], [38, 102, 0, 255]);
+        assert_eq!(&p[4..8], [166, 230, 255, 255]);
+    }
+
+    #[test]
+    fn auto_tone_stretches_each_channel_independently() {
+        // Each channel's own low and high are exactly its two sampled
+        // values (R: 50/150, G: 100/200, B: 20/220), so every channel
+        // of both pixels stretches all the way to 0 or 255 -- a real,
+        // hand-computed difference from auto_contrast's own partial
+        // stretch on the very same fixture, demonstrating the actual
+        // property distinguishing the two: independent per-channel
+        // stretching can shift colour balance, here all the way to
+        // pure black and pure white.
+        let (mut doc, id) = varying_channels_fixture();
+        doc.auto_tone(id).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], [0, 0, 0, 255]);
+        assert_eq!(&p[4..8], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn auto_stretch_leaves_a_uniformly_grey_layer_unchanged() {
+        // A solid (128, 128, 128, 255) layer: every channel's own low
+        // equals its own high (128), AND the shared low/high across
+        // all three channels together is also 128 == 128, so both
+        // auto_tone's own per-channel check and auto_contrast's own
+        // shared check hit the divide-by-zero guard and leave every
+        // pixel exactly as it was. (A layer whose channels each have
+        // their own different flat value, like (10, 20, 30) solid,
+        // is NOT this kind of no-op for auto_contrast: its own shared
+        // low (10) and high (30) genuinely differ, so auto_contrast
+        // correctly stretches it even though no single channel varies
+        // across pixels -- a real distinction between the two filters,
+        // not a bug, covered by the two tests above.)
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(2, 2, [128, 128, 128, 255]), 2, 2)
+            .unwrap();
+        let before = doc.layers()[0].pixels.clone();
+        doc.auto_tone(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        doc.auto_contrast(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn auto_stretch_is_confined_to_the_selection() {
+        let (mut doc, id) = varying_channels_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.auto_tone(id).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[0..4], &before[0..4]); // unselected, untouched
+                                                 // Selected alone, pixel 1's own channels are each already flat
+                                                 // (a single sampled value per channel), so the stretch is a
+                                                 // no-op and it stays at its own original (150, 200, 220, 255)
+                                                 // -- confirming the selection confined sampling to just this
+                                                 // one pixel rather than reusing the whole layer's own range.
+        assert_eq!(&after[4..8], [150, 200, 220, 255]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn auto_stretch_on_a_locked_or_unknown_layer_is_an_error() {
+        let (mut doc, id) = varying_channels_fixture();
+        doc.set_locked(id, true).unwrap();
+        let err = doc.auto_tone(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        let err = doc.auto_contrast(id).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.auto_tone(999).is_err());
+        assert!(empty.auto_contrast(999).is_err());
     }
 
     // Filter > Other, on the ramped 3x3 layer whose radius-1 windows are
