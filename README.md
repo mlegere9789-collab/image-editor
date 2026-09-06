@@ -5378,6 +5378,65 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **604 Rust tests total** (600 → 604, 597 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 79 — Filter Gallery > Sketch > Note Paper
+
+Nudges each pixel's own luma by a seeded `XorShift32` draw — the same
+per-pixel seeded noise `film_grain` and `reticulation` already use,
+just added to the source luma instead of standing alone — then
+hard-thresholds the result to pure black or white by `image_balance`,
+the same threshold idea `stamp` already uses. The grain breaks up the
+threshold boundary into a mottled, hand-torn edge rather than a clean
+line, reading as paper fibre. A documented approximation — Photoshop's
+real Note Paper also embosses the result with a Relief slider this
+project doesn't model — not a port of Photoshop's own renderer.
+`Document::note_paper(id, image_balance, graininess, seed)`:
+`graininess` (this project's own `0..=10` range, a documented
+simplification of Photoshop's own dialog) scales the draw's spread,
+`draw * (graininess / 10) * 128`, added to the pixel's own luma before
+thresholding; `image_balance` (Photoshop's own `0..=50` range) sets the
+threshold, `image_balance / 50 * 255`. Alpha untouched. The frontend
+sends a fresh `seed` on every apply, as with Film Grain. A new **Note
+Paper…** dialog exposes Image Balance and Graininess sliders.
+
+**Verified two ways.** Four new `document.rs` tests on a fresh 3×1 grey
+fixture (luma `100`), reusing seed `1`'s own already-documented
+`XorShift32` sequence directly (`270369`, `67634689`, `2647435461` out
+of `u32::MAX`, mapping to `next_unit` values of roughly `-0.999874`,
+`-0.968505`, and `0.232808`). At graininess `10` (factor `1.0`,
+spread `128`) and image balance `25` (threshold `127.5`): pixel `0`'s
+offset (`-127.98`) and pixel `1`'s (`-123.97`) both push the luma of
+`100` to a clamped `0`, well below the threshold, rendering black;
+pixel `2`'s offset (`+29.80`) pushes it to `129.80`, clearing the
+threshold with a clean margin and rendering white — cross-checked
+against an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping. A second test confirms
+graininess `0` makes every offset exactly `0` regardless of the seeded
+draw, so the threshold applies straight to the plain luma of `100`,
+rendering every pixel black at the same balance. A third confines the
+fixture to a one-pixel selection, confirming the same architectural
+fact `spatter`'s own selection test already documents: `filter_pixels`
+skips the seeded draw entirely for unselected pixels, so the selected
+pixel becomes the first to consume the generator's own draws. A fourth
+confirms out-of-range image balance and graininess, plus a
+locked/unknown layer, all error. All four passed on the first run — no
+independent Python script was needed beyond confirming the arithmetic,
+since every draw value here reuses `XorShift32`'s own already-documented
+sequence directly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**608 Rust tests total** (604 → 608, 601 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

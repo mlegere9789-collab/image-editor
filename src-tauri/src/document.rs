@@ -6193,6 +6193,57 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Note Paper: nudges each pixel's own
+    /// luma by a seeded [`XorShift32`] draw — the same per-pixel seeded
+    /// noise [`Self::film_grain`] and [`Self::reticulation`] already
+    /// use, just added to the source luma instead of standing alone —
+    /// then hard-thresholds the result to pure black or white by
+    /// `image_balance`, the same threshold idea [`Self::stamp`] already
+    /// uses. The grain breaks up the threshold boundary into a mottled,
+    /// hand-torn edge rather than a clean line, reading as paper fibre.
+    /// A documented approximation — Photoshop's real Note Paper also
+    /// embosses the result with a Relief slider this project doesn't
+    /// model — not a port of Photoshop's own renderer. `graininess`
+    /// (this project's own `0..=10` range, a documented simplification
+    /// of Photoshop's own dialog) scales the draw's spread, `draw *
+    /// (graininess / 10) * 128`, added to the pixel's own luma before
+    /// thresholding; `image_balance` (Photoshop's own `0..=50` range)
+    /// sets the threshold, `image_balance / 50 * 255`. Alpha untouched.
+    /// The frontend sends a fresh `seed` on every apply, as with Film
+    /// Grain. Confined to the selection — since [`Self::filter_pixels`]
+    /// skips the seeded draw entirely for unselected pixels, the same
+    /// architectural fact `spatter`'s own selection test already
+    /// documents. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn note_paper(
+        &mut self,
+        id: LayerId,
+        image_balance: u32,
+        graininess: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if image_balance > 50 {
+            return Err("Note Paper image balance must be between 0 and 50.".to_string());
+        }
+        if graininess > 10 {
+            return Err("Note Paper graininess must be between 0 and 10.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let threshold = image_balance as f32 / 50.0 * 255.0;
+        let factor = graininess as f32 / 10.0;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let luma = 0.299 * src[base] as f32
+                + 0.587 * src[base + 1] as f32
+                + 0.114 * src[base + 2] as f32;
+            let offset = rng.next_unit() * factor * 128.0;
+            let adjusted = (luma + offset).clamp(0.0, 255.0);
+            let v = if adjusted >= threshold { 255 } else { 0 };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13800,6 +13851,81 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.reticulation(999, 10, 10, 10, 1).is_err());
+    }
+
+    #[test]
+    fn note_paper_grains_the_luma_before_thresholding() {
+        // Seed 1's first three XorShift32 draws (270369, 67634689,
+        // 2647435461 out of u32::MAX) map to next_unit values of
+        // roughly -0.999874, -0.968505, and 0.232808. Graininess 10
+        // (factor 1.0) scales each by 128, giving offsets of roughly
+        // -127.98, -123.97, and 29.80, added to the fixture's own luma
+        // of 100: pixel 0 (100 - 127.98) and pixel 1 (100 - 123.97) both
+        // clamp to 0, well below image balance 25's threshold of
+        // 25/50*255 = 127.5, so they render black; pixel 2 (100 + 29.80
+        // = 129.80) clears the threshold with a clean margin and renders
+        // white. Cross-checked against an independent Python script
+        // emulating f32 arithmetic via struct.pack/unpack round-tripping.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        doc.note_paper(id, 25, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], [0, 0, 0, 255]);
+        assert_eq!(&p[4..8], [0, 0, 0, 255]);
+        assert_eq!(&p[8..12], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn note_paper_graininess_zero_thresholds_the_plain_luma() {
+        // Graininess 0 makes the factor exactly 0, so every offset is 0
+        // regardless of the seeded draw, and the threshold applies
+        // straight to the fixture's own luma of 100. At image balance
+        // 25 (threshold 127.5), 100 falls short, so every pixel renders
+        // black -- a clean identity check that grain contributes
+        // nothing at this setting.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        doc.note_paper(id, 25, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for i in 0..3 {
+            assert_eq!(&p[i * 4..i * 4 + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn note_paper_is_confined_to_the_selection() {
+        // Selecting only the middle pixel makes it the first to consume
+        // the generator's own draws (the same architectural fact
+        // spatter's own selection test already documents), landing on
+        // the same black result the first test's pixel 0 got from that
+        // same first draw.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.note_paper(id, 25, 10, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[4..8], [0, 0, 0, 255]);
+        assert_eq!(after[0..4], before[0..4]); // unselected, untouched
+        assert_eq!(after[8..12], before[8..12]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn note_paper_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.note_paper(id, 51, 5, 1).is_err());
+        assert!(doc.note_paper(id, 25, 11, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.note_paper(id, 25, 5, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.note_paper(999, 25, 5, 1).is_err());
     }
 
     #[test]

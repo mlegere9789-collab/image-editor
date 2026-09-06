@@ -412,6 +412,9 @@ export default function App() {
   const [reticulationDensity, setReticulationDensity] = useState(15);
   const [reticulationForegroundLevel, setReticulationForegroundLevel] = useState(10);
   const [reticulationBackgroundLevel, setReticulationBackgroundLevel] = useState(40);
+  const [showNotePaperDialog, setShowNotePaperDialog] = useState(false);
+  const [notePaperImageBalance, setNotePaperImageBalance] = useState(25);
+  const [notePaperGraininess, setNotePaperGraininess] = useState(5);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1276,6 +1279,19 @@ export default function App() {
     });
     setShowReticulationDialog(false);
   }, [runCommand, selectedId, reticulationDensity, reticulationForegroundLevel, reticulationBackgroundLevel]);
+
+  const applyNotePaper = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Film Grain.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("note_paper", {
+      id: selectedId,
+      imageBalance: notePaperImageBalance,
+      graininess: notePaperGraininess,
+      seed,
+    });
+    setShowNotePaperDialog(false);
+  }, [runCommand, selectedId, notePaperImageBalance, notePaperGraininess]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2675,6 +2691,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Reticulation"
           >
             Reticulation…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowNotePaperDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Note Paper"
+          >
+            Note Paper…
           </button>
           <button
             className="button button--quiet"
@@ -5765,6 +5789,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyReticulation} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showNotePaperDialog && (
+        <div className="modal-overlay" onClick={() => setShowNotePaperDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Note Paper"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Note Paper</h2>
+            <label className="control">
+              <span className="control__label">
+                Image Balance
+                <span className="control__value">{notePaperImageBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={notePaperImageBalance}
+                onChange={(event) => setNotePaperImageBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Graininess
+                <span className="control__value">{notePaperGraininess}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={notePaperGraininess}
+                onChange={(event) => setNotePaperGraininess(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowNotePaperDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyNotePaper} disabled={busy}>
                 Apply
               </button>
             </div>
