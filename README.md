@@ -4399,6 +4399,61 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **524 Rust tests total** (520 → 524, 517 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 63 — Filter Gallery > Brush Strokes > Spatter
+
+Generalises `diffuse`'s own random-neighbour pick (its `Normal` mode
+draws one uniformly random offset in `-1..=1` on each axis) into a
+wider, seeded scatter radius, then averages several such draws per
+pixel instead of keeping only one — more draws pull the average back
+toward the local neighbourhood's own colour, reading as a smoother
+spray rather than Diffuse's single-sample jitter. A documented
+approximation of Photoshop's real spray-paint renderer, not a port.
+`Document::spatter(id, spray_radius, smoothness, seed)`: `spray_radius`
+(Photoshop's own `0..=25` range) is the scatter radius each draw's
+`(dx, dy)` offset is drawn uniformly from (`0` makes every draw the
+pixel itself, a no-op); `smoothness` (Photoshop's own `1..=15` range) is
+literally how many such draws are averaged together per pixel — at `1`
+this is exactly `diffuse`'s own `Normal` mode when `spray_radius` is
+`1`, an algebraic identity, not a coincidence. Each draw is
+edge-clamped, matching every other neighbourhood operation in this
+file. The frontend sends a fresh `seed` on every apply, as with
+Diffuse. A new **Spatter…** dialog exposes Spray Radius and Smoothness
+sliders.
+
+**Verified two ways.** Five new `document.rs` tests, cross-checked
+against an independent Python port of the same `XorShift32` generator.
+At spray radius `1`, smoothness `1`, seed `1` on the `ramped_3x3`
+fixture, the output matches `diffuse`'s own already-verified `Normal`
+mode output exactly (`[10, 40, 30, 10, 60, 80, 70, 60, 60]`), confirming
+the algebraic identity rather than merely asserting it. A second test
+raises smoothness to `2`: pixel `(0, 0)` consumes seed `1`'s first four
+draws as two `(dx, dy)` pairs — the first clamps to the pixel's own
+position (`10`), the second clamps to `(0, 1)` (`40`) — averaging to
+`25.0` exactly. A third confirms spray radius `0` is a byte-for-byte
+no-op (every draw resolves to the pixel itself regardless of
+smoothness). A fourth confines the fixture to a one-pixel selection —
+which, since `filter_pixels` skips the seeded draw entirely for
+unselected pixels, makes the *selected* pixel the first to consume the
+generator's own draws, landing on `10` rather than its own original
+value `20`, a real change worked out by hand rather than assumed. A
+fifth confirms an out-of-range spray radius or smoothness and a
+locked/unknown layer all error. All five passed on the first run,
+matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous ten: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**529 Rust tests total** (524 → 529, 522 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

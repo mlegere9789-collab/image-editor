@@ -1202,6 +1202,21 @@ fn ink_outlines(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Spatter on layer `id`. The frontend
+/// sends a fresh `seed` on every apply, as with Diffuse.
+#[tauri::command]
+fn spatter(
+    state: State<'_, AppState>,
+    id: LayerId,
+    spray_radius: u32,
+    smoothness: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.spatter(id, spray_radius, smoothness, seed)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1802,6 +1817,7 @@ pub fn run() {
             watercolor,
             dark_strokes,
             ink_outlines,
+            spatter,
             crystallize,
             facet,
             pointillize,

@@ -4349,6 +4349,63 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Spatter: generalises
+    /// [`Self::diffuse`]'s own random-neighbour pick (its `Normal` mode
+    /// draws one uniformly random offset in `-1..=1` on each axis) into a
+    /// wider, seeded scatter radius, then averages several such draws per
+    /// pixel instead of keeping only one — more draws pull the average
+    /// back toward the local neighbourhood's own colour, reading as a
+    /// smoother spray rather than Diffuse's single-sample jitter. A
+    /// documented approximation of Photoshop's real spray-paint
+    /// renderer, not a port. `spray_radius` (Photoshop's own `0..=25`
+    /// range) is the scatter radius each draw's `(dx, dy)` offset is
+    /// drawn uniformly from (`0` makes every draw the pixel itself, a
+    /// no-op); `smoothness` (Photoshop's own `1..=15` range) is literally
+    /// how many such draws are averaged together per pixel — at `1` this
+    /// is exactly [`Self::diffuse`]'s own `Normal` mode when `spray_radius`
+    /// is `1`, an algebraic identity, not a coincidence. Each of the two
+    /// draws per sample is edge-clamped, matching every other neighbourhood
+    /// operation in this file. The frontend sends a fresh `seed` on every
+    /// apply, as with Diffuse. Errors on a locked/unknown layer.
+    pub fn spatter(
+        &mut self,
+        id: LayerId,
+        spray_radius: u32,
+        smoothness: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if spray_radius > 25 {
+            return Err("Spatter spray radius must be between 0 and 25.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Spatter smoothness must be between 1 and 15.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = spray_radius as i64;
+        let span = (2 * radius + 1) as u32;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |source, row, col| {
+            let (x, y) = (col as i64, row as i64);
+            let mut sums = [0u32; CHANNELS];
+            for _ in 0..smoothness {
+                let dx = (rng.next_u32() % span) as i64 - radius;
+                let dy = (rng.next_u32() % span) as i64 - radius;
+                let sx = (x + dx).clamp(0, width - 1) as usize;
+                let sy = (y + dy).clamp(0, height - 1) as usize;
+                let base = (sy * doc_width + sx) * CHANNELS;
+                for (sum, &v) in sums.iter_mut().zip(&source[base..base + CHANNELS]) {
+                    *sum += v as u32;
+                }
+            }
+            let mut out = [0u8; CHANNELS];
+            for (slot, sum) in out.iter_mut().zip(sums) {
+                *slot = (sum as f32 / smoothness as f32).round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -10049,6 +10106,87 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.ink_outlines(999, 1, 50, 0).is_err());
+    }
+
+    #[test]
+    fn spatter_at_smoothness_one_matches_diffuse_normal_exactly() {
+        // Spray radius 1, smoothness 1 draws exactly one sample per pixel
+        // from dx, dy in -1..=1 -- the same formula diffuse's own Normal
+        // mode uses -- so the two must agree exactly. Reuses
+        // diffuse_normal_takes_the_seeded_neighbour's own already-verified
+        // seed-1 output on ramped_3x3.
+        let (mut doc, id) = ramped_3x3();
+        doc.spatter(id, 1, 1, 1).unwrap();
+        assert_eq!(reds_3x3(&doc), [10, 40, 30, 10, 60, 80, 70, 60, 60]);
+    }
+
+    #[test]
+    fn spatter_smoothness_averages_multiple_seeded_draws() {
+        // Spray radius 1, smoothness 2: pixel (0,0) consumes seed 1's
+        // first four xorshift32 draws as two (dx,dy) pairs. The first
+        // pair (draws 1-2, mod 3: 0,1 -> dx=-1,dy=0) clamps to the pixel's
+        // own position (0,0) = 10; the second pair (draws 3-4, mod 3:
+        // 0,2 -> dx=-1,dy=+1) clamps to (0,1) = 40. Average = (10+40)/2 =
+        // 25.0 exactly, cross-checked with an independent Python port of
+        // the same generator.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.spatter(id, 1, 2, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 25);
+        assert_eq!(p[idx(0, 0) + 1], 0); // flat green channel, still flat
+        assert_eq!(p[idx(0, 0) + 3], 255); // alpha, averaged too, unchanged here
+    }
+
+    #[test]
+    fn spatter_zero_radius_is_a_no_op() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.spatter(id, 0, 5, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn spatter_is_confined_to_the_selection() {
+        // With only pixel (1,0) selected, filter_pixels skips pick() for
+        // every unselected pixel entirely (the seeded rng never advances
+        // for them), so the selected pixel becomes the very first to
+        // consume draws, using seed 1's first pair exactly as
+        // spatter_at_smoothness_one_matches_diffuse_normal_exactly's own
+        // pixel (0,0) does: dx=-1, dy=0, clamping to position (0,0),
+        // whose red is 10 — different from this pixel's own original
+        // value, 20, so this is a real change, not a coincidental no-op.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.spatter(id, 1, 1, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(1, 0)], 10);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn spatter_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.spatter(id, 26, 1, 1).is_err());
+        assert!(doc.spatter(id, 1, 0, 1).is_err());
+        assert!(doc.spatter(id, 1, 16, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.spatter(id, 1, 1, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.spatter(999, 1, 1, 1).is_err());
     }
 
     #[test]
