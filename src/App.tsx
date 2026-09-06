@@ -232,6 +232,9 @@ export default function App() {
   const [showPhotoFilterDialog, setShowPhotoFilterDialog] = useState(false);
   const [photoFilterColor, setPhotoFilterColor] = useState("#ff9933");
   const [photoFilterDensity, setPhotoFilterDensity] = useState(25);
+  const [showTemperatureTintDialog, setShowTemperatureTintDialog] = useState(false);
+  const [temperatureValue, setTemperatureValue] = useState(0);
+  const [tintValue, setTintValue] = useState(0);
 
   const [showExposureDialog, setShowExposureDialog] = useState(false);
   const [exposureStops, setExposureStops] = useState(0);
@@ -835,6 +838,16 @@ export default function App() {
     });
     setShowPhotoFilterDialog(false);
   }, [runCommand, selectedId, photoFilterColor, photoFilterDensity]);
+
+  const applyTemperatureTint = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("temperature_tint", {
+      id: selectedId,
+      temperature: temperatureValue,
+      tint: tintValue,
+    });
+    setShowTemperatureTintDialog(false);
+  }, [runCommand, selectedId, temperatureValue, tintValue]);
 
   const applyExposure = useCallback(async () => {
     if (selectedId === null) return;
@@ -2950,6 +2963,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowTemperatureTintDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Temperature/Tint"
+          >
+            Temperature/Tint…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowExposureDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Exposure"
@@ -4487,6 +4508,62 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPhotoFilter} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTemperatureTintDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTemperatureTintDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Temperature/Tint"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Temperature/Tint
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                Temperature
+                <span className="control__value">{temperatureValue}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={temperatureValue}
+                onChange={(event) => setTemperatureValue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Tint
+                <span className="control__value">{tintValue}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={tintValue}
+                onChange={(event) => setTintValue(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTemperatureTintDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTemperatureTint} disabled={busy}>
                 Apply
               </button>
             </div>

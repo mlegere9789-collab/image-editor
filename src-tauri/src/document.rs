@@ -9072,6 +9072,39 @@ impl Document {
         })
     }
 
+    /// Camera Raw Filter > Temperature/Tint: a direct per-channel shift
+    /// standing in for Photoshop's own colour-science-based white-balance
+    /// model — `temperature` adds directly to red and subtracts from
+    /// blue (positive warms the image toward orange, negative cools it
+    /// toward blue, the same "blue versus yellow" axis Camera Raw's own
+    /// slider describes), while `tint` adds directly to green alone (the
+    /// "green versus magenta" axis), each clamped to `0..=255`. Both
+    /// sliders share Photoshop's own `-100..=100` Camera Raw range,
+    /// clamped rather than erroring on an out-of-range value, the same
+    /// saturating convention `brightness_contrast` already uses.
+    /// Photoshop's own Temperature slider works in absolute Kelvin
+    /// relative to a raw file's own embedded native white balance — a
+    /// concept this project has no raw-metadata source for — so this is
+    /// a documented linear approximation rather than that colour-science
+    /// model, the same kind of honest substitution `chrome` and `glass`
+    /// already make elsewhere for filters this project can't port
+    /// exactly. Alpha untouched.
+    pub fn temperature_tint(
+        &mut self,
+        id: LayerId,
+        temperature: i32,
+        tint: i32,
+    ) -> Result<Option<Rect>, String> {
+        let temperature = temperature.clamp(-100, 100) as f32;
+        let tint = tint.clamp(-100, 100) as f32;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let new_r = (r as f32 + temperature).round().clamp(0.0, 255.0) as u8;
+            let new_g = (g as f32 + tint).round().clamp(0.0, 255.0) as u8;
+            let new_b = (b as f32 - temperature).round().clamp(0.0, 255.0) as u8;
+            [new_r, new_g, new_b, a]
+        })
+    }
+
     /// Image > Adjustments > Exposure: the same three-control model
     /// Photoshop's own dialog uses, applied per channel to a `0.0..=1.0`
     /// working value — `exposure` (a stop count, `2^exposure` multiplies
@@ -20897,6 +20930,86 @@ mod tests {
     fn photo_filter_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.photo_filter(999, [255, 128, 0], 50).is_err());
+    }
+
+    #[test]
+    fn temperature_tint_warms_reds_up_and_blues_down() {
+        // Temperature +50 adds 50 to red and subtracts 50 from blue;
+        // tint -30 subtracts 30 from green. (100, 150, 200) becomes
+        // (150, 120, 150).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 150, 200, 255], 1, 1).unwrap();
+        doc.temperature_tint(id, 50, -30).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 120, 150, 255]);
+    }
+
+    #[test]
+    fn temperature_tint_negative_temperature_cools_the_other_way() {
+        // Temperature -50 subtracts from red and adds to blue instead,
+        // the mirror image of the positive-temperature test's own
+        // shift at the very same original pixel: (100, 150, 200)
+        // becomes (50, 150, 250).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 150, 200, 255], 1, 1).unwrap();
+        doc.temperature_tint(id, -50, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 150, 250, 255]);
+    }
+
+    #[test]
+    fn temperature_tint_clamps_at_the_channel_bounds() {
+        // (240, 10, 240) with temperature +50 (red 240+50=290, clamped
+        // to 255; blue 240-50=190) and tint -50 (green 10-50=-40,
+        // clamped to 0): (255, 0, 190).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[240, 10, 240, 255], 1, 1).unwrap();
+        doc.temperature_tint(id, 50, -50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 190, 255]);
+    }
+
+    #[test]
+    fn temperature_tint_sliders_are_clamped_to_their_range() {
+        // Temperature/tint values past +-100 saturate at +-100 rather
+        // than erroring: 500 behaves exactly like 100.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 150, 200, 255], 1, 1).unwrap();
+        doc.temperature_tint(id, 500, -500).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 50, 100, 255]);
+    }
+
+    #[test]
+    fn temperature_tint_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[100, 150, 200, 128], 1, 1).unwrap();
+        doc.temperature_tint(id, 50, -30).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 120, 150, 128]);
+    }
+
+    #[test]
+    fn temperature_tint_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [100u8, 150, 200, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.temperature_tint(id, 50, -30).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 120, 150, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 120, 150, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn temperature_tint_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.temperature_tint(id, 50, -30).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn temperature_tint_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.temperature_tint(999, 50, -30).is_err());
     }
 
     #[test]

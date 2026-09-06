@@ -7788,6 +7788,56 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **813 Rust tests total** (807 → 813, 806 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 117 — Camera Raw Filter > Temperature/Tint
+
+`temperature_tint(id, temperature, tint)` is a direct per-channel shift
+standing in for Photoshop's own colour-science-based white-balance
+model: `temperature` adds directly to red and subtracts from blue
+(positive warms the image toward orange, negative cools it toward
+blue, the same "blue versus yellow" axis Camera Raw's own slider
+describes), while `tint` adds directly to green alone (the "green
+versus magenta" axis), each clamped to `0..=255`. Both sliders share
+Photoshop's own `-100..=100` Camera Raw range, clamped rather than
+erroring on an out-of-range value, the same saturating convention
+`brightness_contrast` already uses. Photoshop's own Temperature slider
+works in absolute Kelvin relative to a raw file's own embedded native
+white balance — a concept this project has no raw-metadata source
+for — so this is a documented linear approximation rather than that
+colour-science model, the same kind of honest substitution `chrome`
+and `glass` already make elsewhere for filters this project can't port
+exactly. Alpha untouched. A new **Temperature/Tint…** dialog exposes
+both sliders.
+
+**Verified two ways.** Eight new `document.rs` tests, entirely
+integer arithmetic (every shift is a whole-number add or subtract, so
+`.round()` is always a no-op — no Python cross-check needed for this
+one, just direct hand arithmetic). Temperature `+50`, tint `-30` on
+`(100, 150, 200)`: red `100+50=150`, green `150-30=120`, blue
+`200-50=150`, giving `(150, 120, 150)`. A second test flips temperature
+to `-50`, the mirror image at the very same original pixel: `(50, 150,
+250)`. A third confirms clamping at both channel bounds:
+`(240, 10, 240)` with temperature `+50` and tint `-50` gives
+`(255, 0, 190)` (red saturates high, green saturates low). A fourth
+confirms slider values past `±100` saturate at `±100` rather than
+erroring, matching `500`/`-500` against `100`/`-100`'s own identical
+result. A fifth confirms alpha stays untouched. A sixth confines the
+shift to a two-pixel selection. A seventh and eighth confirm a locked
+or unknown layer both error.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**821 Rust tests total** (813 → 821, 814 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

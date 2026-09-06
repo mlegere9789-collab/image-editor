@@ -2348,6 +2348,19 @@ fn photo_filter(
     edit_checkpointed(&state, |document| document.photo_filter(id, color, density))
 }
 
+/// Camera Raw Filter > Temperature/Tint on layer `id`.
+#[tauri::command]
+fn temperature_tint(
+    state: State<'_, AppState>,
+    id: LayerId,
+    temperature: i32,
+    tint: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.temperature_tint(id, temperature, tint)
+    })
+}
+
 /// Image > Adjustments > Exposure on layer `id`.
 #[tauri::command]
 fn exposure(
@@ -2664,6 +2677,7 @@ pub fn run() {
             black_and_white,
             vibrance,
             photo_filter,
+            temperature_tint,
             exposure,
             gradient_map,
             channel_mixer,
