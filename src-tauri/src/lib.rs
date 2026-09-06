@@ -1187,6 +1187,21 @@ fn dark_strokes(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Ink Outlines on layer `id`.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn ink_outlines(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    dark_intensity: u32,
+    light_intensity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.ink_outlines(id, stroke_length, dark_intensity, light_intensity)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1786,6 +1801,7 @@ pub fn run() {
             sponge,
             watercolor,
             dark_strokes,
+            ink_outlines,
             crystallize,
             facet,
             pointillize,

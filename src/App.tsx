@@ -349,6 +349,10 @@ export default function App() {
   const [darkStrokesBalance, setDarkStrokesBalance] = useState(4);
   const [darkStrokesBlackIntensity, setDarkStrokesBlackIntensity] = useState(6);
   const [darkStrokesWhiteIntensity, setDarkStrokesWhiteIntensity] = useState(3);
+  const [showInkOutlinesDialog, setShowInkOutlinesDialog] = useState(false);
+  const [inkOutlinesStrokeLength, setInkOutlinesStrokeLength] = useState(1);
+  const [inkOutlinesDarkIntensity, setInkOutlinesDarkIntensity] = useState(20);
+  const [inkOutlinesLightIntensity, setInkOutlinesLightIntensity] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1018,6 +1022,23 @@ export default function App() {
     darkStrokesBalance,
     darkStrokesBlackIntensity,
     darkStrokesWhiteIntensity,
+  ]);
+
+  const applyInkOutlines = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("ink_outlines", {
+      id: selectedId,
+      strokeLength: inkOutlinesStrokeLength,
+      darkIntensity: inkOutlinesDarkIntensity,
+      lightIntensity: inkOutlinesLightIntensity,
+    });
+    setShowInkOutlinesDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    inkOutlinesStrokeLength,
+    inkOutlinesDarkIntensity,
+    inkOutlinesLightIntensity,
   ]);
 
   const applyCrystallize = useCallback(async () => {
@@ -2346,6 +2367,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Dark Strokes"
           >
             Dark Strokes…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowInkOutlinesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Ink Outlines"
+          >
+            Ink Outlines…
           </button>
           <button
             className="button button--quiet"
@@ -4891,6 +4920,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDarkStrokes} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInkOutlinesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowInkOutlinesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Ink Outlines"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Ink Outlines</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{inkOutlinesStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={inkOutlinesStrokeLength}
+                onChange={(event) => setInkOutlinesStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Dark Intensity
+                <span className="control__value">{inkOutlinesDarkIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={inkOutlinesDarkIntensity}
+                onChange={(event) => setInkOutlinesDarkIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Light Intensity
+                <span className="control__value">{inkOutlinesLightIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={inkOutlinesLightIntensity}
+                onChange={(event) => setInkOutlinesLightIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowInkOutlinesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyInkOutlines} disabled={busy}>
                 Apply
               </button>
             </div>

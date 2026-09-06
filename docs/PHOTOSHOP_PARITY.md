@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 120.**
+**618 distinct capabilities tracked. Currently shipped: 121.**
 
 ## PART I — EVERY TOOL
 
@@ -562,7 +562,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Angled StrokesCreates directional brush strokes that follow an angular orientation.
 - [ ] CrosshatchCreates intersecting strokes resembling crosshatching in drawing.
 - [x] Dark Strokes (Filter Gallery → Brush Strokes; a per-pixel luma-threshold split-tone that pulls dark pixels toward black and light ones toward white, rather than a port of Photoshop's directional-stroke renderer — see README Phase 61)
-- [ ] Ink OutlinesCreates an ink-drawing effect by emphasizing image edges.
+- [x] Ink Outlines (Filter Gallery → Brush Strokes; a dilated-Sobel two-sided push, dark toward edges and light toward flat areas, reusing colored_pencil/neon_glow/poster_edges's own edge machinery — see README Phase 62)
 - [ ] SpatterSimulates sprayed or splattered paint.
 - [ ] Sprayed StrokesCreates a sprayed-brush appearance using directional strokes.
 - [ ] Sumi-eSimulates Japanese ink-wash painting, emphasizing broad tonal brushwork.

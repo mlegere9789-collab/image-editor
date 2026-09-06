@@ -4344,6 +4344,61 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **520 Rust tests total** (516 → 520, 513 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 62 — Filter Gallery > Brush Strokes > Ink Outlines
+
+Pushes each pixel toward black in proportion to its own edge strength
+and toward white in proportion to how *flat* it is, drawing dark ink
+lines along detail while washing out everything in between — the same
+[`sobel_at`]/[`extreme_at`] edge-and-dilate machinery
+`colored_pencil`/`neon_glow`/`poster_edges` already use, combined into a
+genuinely two-sided push (unlike `dark_strokes`'s luma threshold, the
+split here is driven entirely by edge strength). A documented
+approximation, not a port of Photoshop's own directional-stroke
+renderer. `Document::ink_outlines(id, stroke_length, dark_intensity,
+light_intensity)`: `stroke_length` (Photoshop's own `1..=50` range) is
+scaled down into a dilation radius, `(stroke_length − 1) / 10`
+(`0..=4`), since a literal 1:1 mapping onto `extreme_at`'s own
+O(radius²) search would be needlessly slow at Photoshop's full range —
+a documented scope simplification, not a faithful unit conversion.
+`dark_intensity` and `light_intensity` (Photoshop's own `0..=50` ranges)
+each scale their own side of the split: every colour channel becomes
+`orig − orig · (dark_intensity / 50) · edge + (255 − orig) ·
+(light_intensity / 50) · (1 − edge)`, where `edge` is the widened Sobel
+magnitude over `255`. Alpha is untouched. A new **Ink Outlines…** dialog
+exposes Stroke Length, Dark Intensity, and Light Intensity sliders.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python script, reusing the same bright/dark split
+4×4 fixture `colored_pencil`/`neon_glow`/`poster_edges`'s own tests
+already established (Sobel magnitude map `[0, 255, 255, 0]` across every
+row). At stroke length `1` (radius `0`), dark intensity `50`, light
+intensity `0`: the flat columns are untouched (`200`, `50`) and the edge
+columns go fully black (`orig − orig × 1.0 × 1.0 = 0`) regardless of
+their own shade. At dark intensity `0`, light intensity `50`: the flat
+columns fully lighten to `255` and the edge columns stay untouched (`1 −
+edge = 0` there). At dark intensity `25` (factor `0.5`): the edge
+columns dim by exactly half, `200 × 0.5 = 100` and `50 × 0.5 = 25`,
+clean integers with no rounding needed. A second test confirms stroke
+length `11` (radius `1`) dilates the edge map across every column, so
+every pixel goes black at full dark intensity. A third confines the
+fixture to a one-pixel selection. A fourth confirms an out-of-range
+parameter and a locked/unknown layer all error. All four passed on the
+first run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous nine: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**524 Rust tests total** (520 → 524, 517 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

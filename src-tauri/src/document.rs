@@ -4256,6 +4256,99 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Ink Outlines: pushes each pixel
+    /// toward black in proportion to its own edge strength and toward
+    /// white in proportion to how *flat* it is, drawing dark ink lines
+    /// along detail while washing out everything in between — the same
+    /// [`sobel_at`]/[`extreme_at`] edge-and-dilate machinery
+    /// `colored_pencil`/`neon_glow`/`poster_edges` already use, combined
+    /// into a genuinely two-sided push (unlike `dark_strokes`'s luma
+    /// threshold, the split here is driven entirely by edge strength). A
+    /// documented approximation, not a port of Photoshop's own
+    /// directional-stroke renderer. `stroke_length` (Photoshop's own
+    /// `1..=50` range) is scaled down into a dilation radius,
+    /// `(stroke_length − 1) / 10` (`0..=4`), since a literal 1:1 mapping
+    /// onto `extreme_at`'s own O(radius²) search would be needlessly slow
+    /// at Photoshop's full range — a documented scope simplification, not
+    /// a faithful unit conversion. `dark_intensity` and `light_intensity`
+    /// (Photoshop's own `0..=50` ranges) each scale their own side of the
+    /// split: every colour channel becomes `orig − orig · (dark_intensity
+    /// / 50) · edge + (255 − orig) · (light_intensity / 50) · (1 − edge)`,
+    /// where `edge` is the widened Sobel magnitude over `255`. Alpha is
+    /// untouched. Confined to the selection and errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn ink_outlines(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        dark_intensity: u32,
+        light_intensity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=50).contains(&stroke_length) {
+            return Err("Ink Outlines stroke length must be between 1 and 50.".to_string());
+        }
+        if dark_intensity > 50 {
+            return Err("Ink Outlines dark intensity must be between 0 and 50.".to_string());
+        }
+        if light_intensity > 50 {
+            return Err("Ink Outlines light intensity must be between 0 and 50.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        let radius = (stroke_length - 1) as i64 / 10;
+        if radius > 0 {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened =
+                        extreme_at(&edges, doc_width, (width, height), (row, col), radius, true);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let dark_f = dark_intensity as f32 / 50.0;
+        let light_f = light_intensity as f32 / 50.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge = mag_buf[base] as f32 / 255.0;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let val = orig - orig * dark_f * edge + (255.0 - orig) * light_f * (1.0 - edge);
+                out[c] = val.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9846,6 +9939,116 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.dark_strokes(999, 0, 0, 0).is_err());
+    }
+
+    fn ink_outlines_cliff_fixture() -> (Document, LayerId) {
+        // Same shape as colored_pencil/neon_glow/poster_edges's own
+        // fixture: 4x4, vertically uniform, columns 0-1 solid
+        // (200,200,200,255), columns 2-3 solid (50,50,50,255). Sobel
+        // magnitude comes out to [0, 255, 255, 0] across every row.
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn ink_outlines_darkens_edges_and_lightens_flat_areas() {
+        // Stroke length 1..=10 maps to dilation radius 0, so magnitude is
+        // used exactly as measured: [0, 255, 255, 0]. At dark intensity
+        // 50 (dark_f 1.0), light intensity 0: the flat columns (edge 0)
+        // are untouched (200, 50), and the full-magnitude edge columns
+        // are fully darkened to 0 (orig - orig*1.0*1.0 = 0) regardless of
+        // their own shade. At dark intensity 0, light intensity 50
+        // (light_f 1.0): the flat columns are fully lightened to 255
+        // (orig + (255-orig)*1.0*1.0 = 255), and the edge columns are
+        // untouched (200, 50) since (1 - edge) = 0 there. A third case,
+        // dark intensity 25 (dark_f 0.5), light intensity 0: the edge
+        // columns dim by exactly half, 200*0.5 = 100 and 50*0.5 = 25,
+        // clean integers with no rounding needed.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.ink_outlines(id, 1, 50, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.ink_outlines(id, 1, 0, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [255, 255, 255, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.ink_outlines(id, 1, 25, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [25, 25, 25, 255]);
+    }
+
+    #[test]
+    fn ink_outlines_stroke_length_dilates_the_edge_map() {
+        // Stroke length 11 maps to dilation radius 1, spreading both
+        // 255-magnitude boundary columns across every column of this
+        // 4-wide fixture (the same reasoning as colored_pencil's own
+        // width-dilation test), so at full dark intensity every pixel
+        // goes black regardless of its own shade.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.ink_outlines(id, 11, 50, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn ink_outlines_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.ink_outlines(id, 1, 50, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn ink_outlines_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.ink_outlines(id, 0, 50, 0).is_err());
+        assert!(doc.ink_outlines(id, 51, 50, 0).is_err());
+        assert!(doc.ink_outlines(id, 1, 51, 0).is_err());
+        assert!(doc.ink_outlines(id, 1, 0, 51).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.ink_outlines(id, 1, 50, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.ink_outlines(999, 1, 50, 0).is_err());
     }
 
     #[test]
