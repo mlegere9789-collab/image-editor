@@ -1665,6 +1665,20 @@ fn plastic_wrap(
     })
 }
 
+/// Filter Gallery > Artistic > Fresco on layer `id`.
+#[tauri::command]
+fn fresco(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    brush_detail: u32,
+    texture: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.fresco(id, brush_size, brush_detail, texture)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -1977,6 +1991,7 @@ pub fn run() {
             paint_daubs,
             palette_knife,
             plastic_wrap,
+            fresco,
             hue_saturation,
             black_and_white,
             vibrance,

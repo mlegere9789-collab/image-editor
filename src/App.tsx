@@ -391,6 +391,10 @@ export default function App() {
   const [plasticWrapHighlightStrength, setPlasticWrapHighlightStrength] = useState(15);
   const [plasticWrapDetail, setPlasticWrapDetail] = useState(7);
   const [plasticWrapSmoothness, setPlasticWrapSmoothness] = useState(7);
+  const [showFrescoDialog, setShowFrescoDialog] = useState(false);
+  const [frescoBrushSize, setFrescoBrushSize] = useState(2);
+  const [frescoBrushDetail, setFrescoBrushDetail] = useState(5);
+  const [frescoTexture, setFrescoTexture] = useState(1);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1189,6 +1193,17 @@ export default function App() {
     });
     setShowPlasticWrapDialog(false);
   }, [runCommand, selectedId, plasticWrapHighlightStrength, plasticWrapDetail, plasticWrapSmoothness]);
+
+  const applyFresco = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("fresco", {
+      id: selectedId,
+      brushSize: frescoBrushSize,
+      brushDetail: frescoBrushDetail,
+      texture: frescoTexture,
+    });
+    setShowFrescoDialog(false);
+  }, [runCommand, selectedId, frescoBrushSize, frescoBrushDetail, frescoTexture]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2540,6 +2555,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Plastic Wrap"
           >
             Plastic Wrap…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFrescoDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Fresco"
+          >
+            Fresco…
           </button>
           <button
             className="button button--quiet"
@@ -5309,6 +5332,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPlasticWrap} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFrescoDialog && (
+        <div className="modal-overlay" onClick={() => setShowFrescoDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Fresco"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Fresco</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Size
+                <span className="control__value">{frescoBrushSize}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={frescoBrushSize}
+                onChange={(event) => setFrescoBrushSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Brush Detail
+                <span className="control__value">{frescoBrushDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={frescoBrushDetail}
+                onChange={(event) => setFrescoBrushDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Texture
+                <span className="control__value">{frescoTexture}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={frescoTexture}
+                onChange={(event) => setFrescoTexture(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFrescoDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyFresco} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 131.**
+**618 distinct capabilities tracked. Currently shipped: 132.**
 
 ## PART I — EVERY TOOL
 
@@ -547,7 +547,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Cutout (Filter Gallery → Artistic; a box-blur pre-pass composed with `posterize`'s own quantization, rather than a real segmentation into cut-paper shapes — Photoshop's separate Edge Fidelity slider is a documented scope cut — see README Phase 54)
 - [x] Dry Brush (Filter Gallery → Artistic; an edge-preserving median smoothing pass blended back toward the original by a Detail factor — Photoshop's separate canvas-grain Texture slider is a documented scope cut — see README Phase 55)
 - [x] Film Grain (Filter Gallery → Artistic; one seeded XorShift32 draw per pixel applied to all three channels, fading out toward brighter pixels by luma — a documented simplification of Photoshop's own tonal-weighting curve — see README Phase 56)
-- [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
+- [x] Fresco (Filter Gallery → Artistic; composes `dry_brush`'s own median-then-blend-back shape with `brightness_contrast`'s own contrast formula at a fixed positive contrast driven by Texture — see README Phase 73)
 - [x] Neon Glow (Filter Gallery → Artistic; each pixel pulled toward a chosen glow colour in proportion to a dilated Sobel edge strength, leaving flat areas untouched — a documented, hand-verifiable approximation of Photoshop's own whole-image tonal rework — see README Phase 57)
 - [x] Paint Daubs (Filter Gallery → Artistic; a `box_blur_at` soften blended back toward the original by Sharpness, the same blend-back shape `dry_brush` already uses — Photoshop's six-way Brush Type dropdown is a documented scope cut, always daubing the way "Simple" does — see README Phase 70)
 - [x] Palette Knife (Filter Gallery → Artistic; composes `posterize` with a `box_blur_at` pass rounding off the band boundaries, the same composition pattern `poster_edges` already established — see README Phase 71)

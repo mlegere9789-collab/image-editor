@@ -5817,6 +5817,69 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Fresco: composes three operations this
+    /// project already has rather than a new low-level algorithm —
+    /// [`median_at`] smoothing blended back toward the original by
+    /// `brush_detail`, the exact same shape [`Self::dry_brush`] already
+    /// uses for its own Brush Detail slider, then [`Self::brightness_contrast`]'s
+    /// own contrast formula applied at a fixed positive contrast driven
+    /// by `texture`, deepening the coarse, boldly-contrasted look of
+    /// fresco paint applied quickly onto wet plaster. A documented
+    /// approximation, not a port of Photoshop's own renderer. `brush_size`
+    /// (Photoshop's own `0..=10` range) is used directly as the median
+    /// radius, the same as `dry_brush`'s own `brush_size`; `brush_detail`
+    /// (Photoshop's own `0..=10` range) blends the median result back
+    /// with the original; `texture` (Photoshop's own `1..=3` range) is
+    /// rescaled onto `brightness_contrast`'s own `-255..=255` domain as
+    /// `texture * 30` (always positive, since Fresco only ever boosts
+    /// contrast) and fed through its exact same formula. Alpha
+    /// untouched. Confined to the selection, like every other filter
+    /// here built on [`Self::filter_pixels`]. Errors on an out-of-range
+    /// parameter or a locked/unknown layer.
+    pub fn fresco(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        brush_detail: u32,
+        texture: u32,
+    ) -> Result<Option<Rect>, String> {
+        if brush_size > 10 {
+            return Err("Fresco brush size must be between 0 and 10.".to_string());
+        }
+        if brush_detail > 10 {
+            return Err("Fresco brush detail must be between 0 and 10.".to_string());
+        }
+        if !(1..=3).contains(&texture) {
+            return Err("Fresco texture must be between 1 and 3.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = brush_size as i64;
+        let detail_f = brush_detail as f32 / 10.0;
+        let mapped_contrast = texture as f32 * 30.0;
+        let factor = 259.0 * (mapped_contrast + 255.0) / (255.0 * (259.0 - mapped_contrast));
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let smoothed = if radius > 0 {
+                median_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let sm = smoothed[c] as f32;
+                let blended = sm * (1.0 - detail_f) + orig * detail_f;
+                let contrasted = factor * (blended - 128.0) + 128.0;
+                out[c] = contrasted.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -12840,6 +12903,106 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.plastic_wrap(999, 20, 0, 3).is_err());
+    }
+
+    #[test]
+    fn fresco_smooths_then_boosts_contrast() {
+        // ramped_3x3's own red channel (green/blue flat 0), reusing
+        // dry_brush's already-verified radius-1 median values: corner
+        // (0,0) medians to 20 (from an original of 10), centre (1,1) to
+        // 50 (already 50), bottom-right (2,2) to 80 (from an original of
+        // 90). Brush detail 0 uses the smoothed value untouched (factor
+        // 1.0 toward smoothed). Texture 1 rescales to contrast 30,
+        // giving factor 259*285/(255*229) = 1.264064 via
+        // brightness_contrast's own formula. Applied to the smoothed
+        // red values: 1.264064*(20-128)+128 = -8.52 -> clamped to 0;
+        // 1.264064*(50-128)+128 = 29.40 -> 29; 1.264064*(80-128)+128 =
+        // 67.32 -> 67. The green/blue channels are already 0 in both
+        // the smoothed and original buffers, so they land on the same
+        // clamped-to-0 result regardless. Cross-checked against an
+        // independent Python script emulating f32 arithmetic via
+        // struct.pack/unpack round-tripping.
+        let (mut doc, id) = ramped_3x3();
+        doc.fresco(id, 1, 0, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [29, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [67, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fresco_brush_detail_blends_the_original_back_in() {
+        // Same fixture as above, but brush detail 5 (blend factor 0.5)
+        // mixes each smoothed value halfway with its own original before
+        // the contrast pass. The centre (already 50 both smoothed and
+        // original) is unaffected, but the bottom-right's blend of
+        // smoothed 80 and original 90 shifts the contrasted result from
+        // 67 to 74.
+        let (mut doc, id) = ramped_3x3();
+        doc.fresco(id, 1, 5, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [29, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [74, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fresco_texture_raises_the_contrast_factor() {
+        // Same fixture, brush detail 0 (pure smoothed), but texture 3
+        // rescales to contrast 90, giving a much steeper factor
+        // (259*345/(255*169) = 2.073442). This drives the corner and
+        // centre's smoothed values (20 and 50) far enough below mid-grey
+        // to clamp fully to 0, while the bottom-right's 80 lands at 28
+        // rather than 67.
+        let (mut doc, id) = ramped_3x3();
+        doc.fresco(id, 1, 0, 3).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [28, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fresco_brush_size_zero_skips_the_median_smoothing() {
+        // Brush size 0 uses each pixel's own original value directly
+        // (no median pass), so the contrast formula applies straight to
+        // the original ramp: 10, 50, 90 at texture 1 (factor 1.264064)
+        // become 0 (clamped from -21.16), 29, and 80.
+        let (mut doc, id) = ramped_3x3();
+        doc.fresco(id, 0, 0, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [29, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [80, 0, 0, 255]);
+    }
+
+    #[test]
+    fn fresco_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap(); // just the centre pixel
+        let dirty = doc.fresco(id, 1, 0, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [29, 0, 0, 255]);
+        // Everywhere else is untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [90, 0, 0, 255]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn fresco_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.fresco(id, 11, 0, 1).is_err());
+        assert!(doc.fresco(id, 1, 11, 1).is_err());
+        assert!(doc.fresco(id, 1, 0, 0).is_err());
+        assert!(doc.fresco(id, 1, 0, 4).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.fresco(id, 1, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.fresco(999, 1, 0, 1).is_err());
     }
 
     #[test]

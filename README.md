@@ -5028,6 +5028,63 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **573 Rust tests total** (568 → 573, 566 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 73 — Filter Gallery > Artistic > Fresco
+
+Composes three operations this project already has rather than a new
+low-level algorithm: `median_at` smoothing blended back toward the
+original by `brush_detail`, the exact same shape `dry_brush` already
+uses for its own Brush Detail slider, then `brightness_contrast`'s own
+contrast formula applied at a fixed positive contrast driven by
+`texture`, deepening the coarse, boldly-contrasted look of fresco paint
+applied quickly onto wet plaster. A documented approximation, not a
+port of Photoshop's own renderer. `Document::fresco(id, brush_size,
+brush_detail, texture)`: `brush_size` (Photoshop's own `0..=10` range)
+is used directly as the median radius, the same as `dry_brush`'s own
+`brush_size`; `brush_detail` (Photoshop's own `0..=10` range) blends
+the median result back with the original; `texture` (Photoshop's own
+`1..=3` range) is rescaled onto `brightness_contrast`'s own
+`-255..=255` domain as `texture * 30` (always positive, since Fresco
+only ever boosts contrast) and fed through its exact same formula.
+Alpha untouched. A new **Fresco…** dialog exposes Brush Size, Brush
+Detail, and Texture sliders.
+
+**Verified two ways.** Six new `document.rs` tests on the `ramped_3x3`
+fixture (reusing `dry_brush`'s own already-verified radius-1 median
+values: corner `(0,0)` medians to `20` from an original of `10`,
+centre `(1,1)` to `50` from an already-`50` original, bottom-right
+`(2,2)` to `80` from an original of `90`). At brush detail `0` (pure
+smoothed) and texture `1` (contrast `30`, giving `brightness_contrast`'s
+own formula a factor of `259 * 285 / (255 * 229) = 1.264064`): the
+smoothed values `20`, `50`, `80` push to `-8.52 -> 0` (clamped), `29.40
+-> 29`, and `67.32 -> 67`. A second test raises brush detail to `5`
+(blend factor `0.5`): the centre is unaffected (already `50` both
+smoothed and original), but the bottom-right's blend of smoothed `80`
+and original `90` shifts the contrasted result to `74`. A third raises
+texture to `3` (contrast `90`, factor `2.073442`), driving the corner's
+and centre's smoothed values far enough below mid-grey to clamp fully
+to `0`, while the bottom-right lands at `28` rather than `67`. A fourth
+confirms brush size `0` skips the median pass entirely, applying the
+contrast formula straight to the original ramp (`10`, `50`, `90`
+becoming `0`, `29`, `80`). A fifth confines the fixture to a one-pixel
+selection. A sixth confirms out-of-range brush size, brush detail, and
+texture, plus a locked/unknown layer, all error. All six passed on the
+first run, cross-checked against an independent Python script emulating
+`f32` arithmetic via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty: this session's Xvfb
+instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**579 Rust tests total** (573 → 579, 572 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
