@@ -235,6 +235,9 @@ export default function App() {
   const [showTemperatureTintDialog, setShowTemperatureTintDialog] = useState(false);
   const [temperatureValue, setTemperatureValue] = useState(0);
   const [tintValue, setTintValue] = useState(0);
+  const [showHighlightsShadowsDialog, setShowHighlightsShadowsDialog] = useState(false);
+  const [highlightsValue, setHighlightsValue] = useState(0);
+  const [shadowsValue, setShadowsValue] = useState(0);
 
   const [showExposureDialog, setShowExposureDialog] = useState(false);
   const [exposureStops, setExposureStops] = useState(0);
@@ -848,6 +851,16 @@ export default function App() {
     });
     setShowTemperatureTintDialog(false);
   }, [runCommand, selectedId, temperatureValue, tintValue]);
+
+  const applyHighlightsShadows = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("highlights_shadows", {
+      id: selectedId,
+      highlights: highlightsValue,
+      shadows: shadowsValue,
+    });
+    setShowHighlightsShadowsDialog(false);
+  }, [runCommand, selectedId, highlightsValue, shadowsValue]);
 
   const applyExposure = useCallback(async () => {
     if (selectedId === null) return;
@@ -2971,6 +2984,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowHighlightsShadowsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Highlights/Shadows"
+          >
+            Highlights/Shadows…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowExposureDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Exposure"
@@ -4564,6 +4585,62 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTemperatureTint} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHighlightsShadowsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowHighlightsShadowsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Highlights/Shadows"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Highlights/Shadows
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                Highlights
+                <span className="control__value">{highlightsValue}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={highlightsValue}
+                onChange={(event) => setHighlightsValue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Shadows
+                <span className="control__value">{shadowsValue}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={shadowsValue}
+                onChange={(event) => setShadowsValue(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowHighlightsShadowsDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyHighlightsShadows} disabled={busy}>
                 Apply
               </button>
             </div>

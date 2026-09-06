@@ -7838,6 +7838,69 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **821 Rust tests total** (813 → 821, 814 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 118 — Camera Raw Filter > Highlights/Shadows
+
+`highlights_shadows(id, highlights, shadows)` reuses `color_balance`'s
+own luma-based tonal-range weighting directly — `shadow_weight =
+clamp((127.0 - luma) / 127.0, 0.0, 1.0)` and `highlight_weight =
+clamp((luma - 128.0) / 127.0, 0.0, 1.0)` — but with a single uniform
+shift per range instead of three independent per-channel sliders,
+since Camera Raw's own Highlights and Shadows sliders don't retint,
+they only brighten or darken. `highlight_weight * highlights +
+shadow_weight * shadows` is added identically to all three RGB
+channels, so colour balance is preserved exactly the way
+`brightness_contrast` preserves it; a pure midtone pixel (luma
+`127`/`128`) has both weights at `0` and passes through completely
+untouched, tapering smoothly to a full shift at pure black
+(`shadow_weight = 1`) or pure white (`highlight_weight = 1`). Both
+sliders share Photoshop's own `-100..=100` Camera Raw range, clamped
+rather than erroring on an out-of-range value. Alpha untouched. A new
+**Highlights/Shadows…** dialog exposes both sliders.
+
+**Verified two ways.** Nine new `document.rs` tests. Pure black `(0, 0,
+0)` (100% shadow weight, 0% highlight weight) with shadows `+50`:
+every channel lifts to `50`, highlights having no effect at all. Pure
+white `(255, 255, 255)` (the mirror case) with highlights `-50`: every
+channel darkens to `205`. A pure midtone pixel, `(128, 128, 128)`
+(luma exactly `128.0`, since the BT.601 weights sum to `1.0`), has
+both weights at `0` and stays completely untouched even at both
+sliders' own maximum magnitude, `100`. A genuinely coloured shadow
+pixel, `(10, 20, 30)` (luma `18.15`, `shadow_weight = 0.8571`), with
+shadows `+100`: the identical shift, `85.71`, is added to every
+channel, giving `(96, 106, 116)` — and critically, the original
+step-of-`10` spacing between channels survives exactly
+(`p[1]-p[0] = 10`, `p[2]-p[1] = 10`), confirming colour balance isn't
+retinted the way three independent per-channel sliders could. A fifth
+test confirms slider values past `±100` saturate rather than erroring.
+A sixth confirms alpha stays untouched. A seventh confines the shift
+to a two-pixel selection. An eighth and ninth confirm a locked or
+unknown layer both error. All nine tests passed on the first run,
+cross-checked against an independent Python script that ports the
+exact luma/weight formulas and emulates Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+While writing this filter's own doc comment, `cargo clippy`'s
+`doc_lazy_continuation` lint caught a wrapped formula line beginning
+with `- luma) / 127, 0, 1)` — a line starting with `- ` reads as an
+unindented markdown bullet, the same class of false positive
+`smart_sharpen`'s own doc comment hit in Phase 114 and `color_overlay`'s
+hit back in Phase 100 — fixed the same way, by rewording the formula so
+no line starts with a bare `-` or `*`.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**830 Rust tests total** (821 → 830, 823 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

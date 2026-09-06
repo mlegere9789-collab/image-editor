@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 178.**
+**618 distinct capabilities tracked. Currently shipped: 180.**
 
 ## PART I — EVERY TOOL
 
@@ -623,8 +623,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Shadow Clipping
 - [x] Temperature (`temperature_tint`, a direct per-channel shift — adds to red, subtracts from blue — standing in for Photoshop's own Kelvin-based white-balance model, since this project has no raw-metadata source for a file's own native white balance — see README Phase 117)
 - [x] Tint (`temperature_tint`'s own second slider, adding directly to green alone — see README Phase 117)
-- [ ] Highlights
-- [ ] Shadows
+- [x] Highlights (`highlights_shadows`, reusing `color_balance`'s own luma-based tonal-range weighting with a single uniform per-range shift instead of three per-channel sliders, preserving colour balance exactly — see README Phase 118)
+- [x] Shadows (`highlights_shadows`'s own second slider — see README Phase 118)
 - [ ] Clarity
 - [ ] Saturation — Camera Raw
 - [ ] Parametric Curve

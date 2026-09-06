@@ -2445,6 +2445,19 @@ fn color_balance(
     })
 }
 
+/// Camera Raw Filter > Highlights/Shadows on layer `id`.
+#[tauri::command]
+fn highlights_shadows(
+    state: State<'_, AppState>,
+    id: LayerId,
+    highlights: i32,
+    shadows: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.highlights_shadows(id, highlights, shadows)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2684,6 +2697,7 @@ pub fn run() {
             levels,
             curves,
             color_balance,
+            highlights_shadows,
             select_rectangle,
             select_ellipse,
             select_all,

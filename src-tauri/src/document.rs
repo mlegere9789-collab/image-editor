@@ -9327,6 +9327,41 @@ impl Document {
             [apply(r, 0), apply(g, 1), apply(b, 2), a]
         })
     }
+
+    /// Camera Raw Filter > Highlights/Shadows: [`Self::color_balance`]'s
+    /// own luma-based tonal-range weighting, reused directly —
+    /// `shadow_weight = clamp((127.0 - luma) / 127.0, 0.0, 1.0)` and
+    /// `highlight_weight = clamp((luma - 128.0) / 127.0, 0.0, 1.0)` —
+    /// but with a single uniform shift per range instead of three
+    /// independent per-channel sliders, since Camera Raw's own
+    /// Highlights and Shadows sliders don't retint, they only brighten
+    /// or darken. `highlight_weight` times `highlights` plus
+    /// `shadow_weight` times `shadows` is added identically to all three
+    /// RGB channels, so colour balance is preserved exactly the way
+    /// [`Self::brightness_contrast`] preserves it; a pure midtone pixel
+    /// (luma `127`/`128`) has both weights at `0` and passes through
+    /// completely untouched, tapering smoothly to a full shift at pure
+    /// black (`shadow_weight = 1`) or pure white (`highlight_weight =
+    /// 1`). Both sliders share Photoshop's own `-100..=100` Camera Raw
+    /// range, clamped rather than erroring on an out-of-range value.
+    /// Alpha untouched.
+    pub fn highlights_shadows(
+        &mut self,
+        id: LayerId,
+        highlights: i32,
+        shadows: i32,
+    ) -> Result<Option<Rect>, String> {
+        let highlights = highlights.clamp(-100, 100) as f32;
+        let shadows = shadows.clamp(-100, 100) as f32;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let shadow_w = ((127.0 - luma) / 127.0).clamp(0.0, 1.0);
+            let highlight_w = ((luma - 128.0) / 127.0).clamp(0.0, 1.0);
+            let shift = highlight_w * highlights + shadow_w * shadows;
+            let apply = |v: u8| (v as f32 + shift).round().clamp(0.0, 255.0) as u8;
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -21536,6 +21571,109 @@ mod tests {
         assert!(doc
             .color_balance(999, [0, 0, 0], [0, 0, 0], [0, 0, 0])
             .is_err());
+    }
+
+    #[test]
+    fn highlights_shadows_lifts_pure_black_by_the_shadows_slider() {
+        // Luma 0 (pure black) is 100% shadow weight, 0% highlight
+        // weight, reusing color_balance's own weighting exactly.
+        // Shadows +50 lifts every channel by 50; highlights has no
+        // effect at all here.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.highlights_shadows(id, -30, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_darkens_pure_white_by_the_highlights_slider() {
+        // Luma 255 (pure white) is 100% highlight weight, 0% shadow
+        // weight -- the mirror case of the pure-black test above.
+        // Highlights -50 darkens every channel by 50; shadows has no
+        // effect here.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[255, 255, 255, 255], 1, 1).unwrap();
+        doc.highlights_shadows(id, -50, 30).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [205, 205, 205, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_leaves_a_pure_midtone_untouched() {
+        // Luma 128 (127*0.299 + 128*0.587 + ... actually r=g=b=128 gives
+        // luma exactly 128.0, since the BT.601 weights sum to 1.0):
+        // shadow_weight = clamp((127-128)/127, 0, 1) = 0, highlight_
+        // weight = clamp((128-128)/127, 0, 1) = 0. Both sliders at their
+        // own maximum magnitude still produce no shift at all.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.highlights_shadows(id, 100, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_preserves_colour_balance() {
+        // A genuinely coloured shadow pixel: (10, 20, 30), luma =
+        // 0.299*10 + 0.587*20 + 0.114*30 = 2.99+11.74+3.42 = 18.15,
+        // shadow_weight = clamp((127-18.15)/127, 0, 1) = 0.85709...
+        // clamped to 1.0? No -- 108.85/127 = 0.8571, under 1.0, so
+        // shadow_weight = 0.8571 (not fully 1.0, since luma isn't 0).
+        // Shadows +100 shifts every channel by the identical 85.71,
+        // rounded per channel: (10+85.71, 20+85.71, 30+85.71) rounds to
+        // (96, 106, 116) -- the exact same shift added to every
+        // channel, so the original (10, 20, 30) spacing (steps of 10)
+        // is preserved exactly in the result, confirming colour balance
+        // isn't retinted.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[10, 20, 30, 255], 1, 1).unwrap();
+        doc.highlights_shadows(id, 0, 100).unwrap();
+        let p = pixel(&doc, id, 0, 0);
+        assert_eq!(p[1] as i32 - p[0] as i32, 10);
+        assert_eq!(p[2] as i32 - p[1] as i32, 10);
+        assert_eq!(p, [96, 106, 116, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_sliders_are_clamped_to_plus_minus_100() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.highlights_shadows(id, 0, 500).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_leaves_alpha_untouched() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[0, 0, 0, 77], 1, 1).unwrap();
+        doc.highlights_shadows(id, 0, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 77);
+    }
+
+    #[test]
+    fn highlights_shadows_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [0u8, 0, 0, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.highlights_shadows(id, 0, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn highlights_shadows_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.highlights_shadows(id, 0, 50).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn highlights_shadows_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.highlights_shadows(999, 0, 50).is_err());
     }
 
     #[test]
