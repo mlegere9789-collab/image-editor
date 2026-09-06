@@ -6306,6 +6306,73 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Chalk & Charcoal: a three-way threshold
+    /// on smoothed luma, rather than the two-way black/white split
+    /// [`Self::stamp`], [`Self::photocopy`], and [`Self::graphic_pen`]
+    /// all already use — the darkest pixels render pure black
+    /// (charcoal), the lightest pure white (chalk), and everything in
+    /// between falls to a flat mid-grey (the paper showing through).
+    /// [`box_blur_at`] pre-smooths the layer by `stroke_pressure`, the
+    /// same neighbourhood-average helper `box_blur` and this project's
+    /// other smoothing filters already use. A documented approximation,
+    /// not a port of Photoshop's own charcoal-and-chalk renderer, which
+    /// also colours the result with the foreground/background colours
+    /// rather than fixed black/grey/white. `stroke_pressure` (this
+    /// project's own `0..=5` range, a documented simplification of
+    /// Photoshop's own dialog) is used directly as the blur radius;
+    /// `charcoal_area` (Photoshop's own `0..=50` range) sets the dark
+    /// threshold, `charcoal_area / 50 * 255`: a smoothed pixel at or
+    /// below it renders black; `chalk_area` (Photoshop's own `0..=20`
+    /// range) sets the light threshold, `255 - chalk_area / 20 * 255`: a
+    /// smoothed pixel at or above it renders white; anything between the
+    /// two thresholds renders mid-grey (`128`). Alpha untouched.
+    /// Confined to the selection, like every other filter here built on
+    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn chalk_and_charcoal(
+        &mut self,
+        id: LayerId,
+        charcoal_area: u32,
+        chalk_area: u32,
+        stroke_pressure: u32,
+    ) -> Result<Option<Rect>, String> {
+        if charcoal_area > 50 {
+            return Err("Chalk & Charcoal charcoal area must be between 0 and 50.".to_string());
+        }
+        if chalk_area > 20 {
+            return Err("Chalk & Charcoal chalk area must be between 0 and 20.".to_string());
+        }
+        if stroke_pressure > 5 {
+            return Err("Chalk & Charcoal stroke pressure must be between 0 and 5.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = stroke_pressure as i64;
+        let dark_threshold = charcoal_area as f32 / 50.0 * 255.0;
+        let light_threshold = 255.0 - chalk_area as f32 / 20.0 * 255.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let smoothed = if radius > 0 {
+                box_blur_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let luma = 0.299 * smoothed[0] as f32
+                + 0.587 * smoothed[1] as f32
+                + 0.114 * smoothed[2] as f32;
+            let v = if luma <= dark_threshold {
+                0
+            } else if luma >= light_threshold {
+                255
+            } else {
+                128
+            };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14091,6 +14158,106 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.graphic_pen(999, 1, 10, 1).is_err());
+    }
+
+    #[test]
+    fn chalk_and_charcoal_splits_dark_pixels_to_black_and_mid_pixels_to_grey() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp/photocopy/graphic_pen all
+        // already share: 4x4, columns 0-1 solid 200, columns 2-3 solid
+        // 50. Stroke pressure 0 skips smoothing entirely. Charcoal area
+        // 10 sets the dark threshold to 10/50*255 = 51; chalk area 0
+        // sets the light threshold to 255 (never reached here). Columns
+        // 0 and 1 (200) sit strictly between the two thresholds and
+        // render mid-grey; columns 2 and 3 (50) fall at or below the
+        // dark threshold and render black.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chalk_and_charcoal(id, 10, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [128, 128, 128, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [128, 128, 128, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn chalk_and_charcoal_splits_light_pixels_to_white_and_mid_pixels_to_grey() {
+        // Charcoal area 0 sets the dark threshold to 0 (never reached);
+        // chalk area 10 sets the light threshold to 255 - 10/20*255 =
+        // 127.5. Columns 0 and 1 (200) clear the light threshold and
+        // render white; columns 2 and 3 (50) sit strictly between the
+        // two thresholds and render mid-grey.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chalk_and_charcoal(id, 0, 10, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [128, 128, 128, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn chalk_and_charcoal_stroke_pressure_widens_the_blur_radius() {
+        // Charcoal area 21 sets the dark threshold to 21/50*255 = 107.1;
+        // chalk area 0 keeps the light threshold at 255. Stroke pressure
+        // 1 (radius 1) reuses paint_daubs's own already-verified
+        // radius-1 row [200, 150, 100, 50]: columns 0 and 1 (200, 150)
+        // clear the dark threshold and render mid-grey; column 2 (100)
+        // falls at or below it and renders black; column 3 (50) does
+        // too. Stroke pressure 2 (radius 2) reuses the radius-2 row
+        // [170, 140, 110, 80]: column 2's smoothed value rises to 110,
+        // now clearing the same 107.1 threshold and rendering mid-grey
+        // instead of black -- confirming stroke pressure genuinely
+        // widens the blur before thresholding.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chalk_and_charcoal(id, 21, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chalk_and_charcoal(id, 21, 0, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn chalk_and_charcoal_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.chalk_and_charcoal(id, 10, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [128, 128, 128, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn chalk_and_charcoal_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.chalk_and_charcoal(id, 51, 0, 0).is_err());
+        assert!(doc.chalk_and_charcoal(id, 0, 21, 0).is_err());
+        assert!(doc.chalk_and_charcoal(id, 0, 0, 6).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.chalk_and_charcoal(id, 0, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.chalk_and_charcoal(999, 0, 0, 0).is_err());
     }
 
     #[test]

@@ -5505,6 +5505,71 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **613 Rust tests total** (608 → 613, 606 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 81 — Filter Gallery > Sketch > Chalk & Charcoal
+
+A three-way threshold on smoothed luma, rather than the two-way
+black/white split `stamp`, `photocopy`, and `graphic_pen` all already
+use — the darkest pixels render pure black (charcoal), the lightest
+pure white (chalk), and everything in between falls to a flat
+mid-grey (the paper showing through). `box_blur_at` pre-smooths the
+layer by `stroke_pressure`, the same neighbourhood-average helper
+`box_blur` and this project's other smoothing filters already use. A
+documented approximation, not a port of Photoshop's own
+charcoal-and-chalk renderer, which also colours the result with the
+foreground/background colours rather than fixed black/grey/white.
+`Document::chalk_and_charcoal(id, charcoal_area, chalk_area,
+stroke_pressure)`: `stroke_pressure` (this project's own `0..=5`
+range, a documented simplification of Photoshop's own dialog) is used
+directly as the blur radius; `charcoal_area` (Photoshop's own `0..=50`
+range) sets the dark threshold, `charcoal_area / 50 * 255`: a smoothed
+pixel at or below it renders black; `chalk_area` (Photoshop's own
+`0..=20` range) sets the light threshold, `255 - chalk_area / 20 *
+255`: a smoothed pixel at or above it renders white; anything between
+the two thresholds renders mid-grey (`128`). Alpha untouched. A new
+**Chalk & Charcoal…** dialog exposes Charcoal Area, Chalk Area, and
+Stroke Pressure sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy`/
+`graphic_pen` all already share (4×4, columns 0-1 solid `200`, columns
+2-3 solid `50`). At stroke pressure `0` (no blur), charcoal area `10`
+(dark threshold `51`), chalk area `0` (light threshold `255`, never
+reached): columns `0` and `1` (`200`) sit strictly between the
+thresholds and render mid-grey; columns `2` and `3` (`50`) fall at or
+below the dark threshold and render black. A second test confirms the
+light side: charcoal area `0` (dark threshold `0`, never reached),
+chalk area `10` (light threshold `127.5`): columns `0` and `1` clear
+it and render white, columns `2` and `3` sit between the thresholds
+and render mid-grey. A third reuses `paint_daubs`'s own already-
+verified box-blur radius-1 and radius-2 rows (`[200, 150, 100, 50]`
+and `[170, 140, 110, 80]`) at charcoal area `21` (dark threshold
+`107.1`): stroke pressure `1`'s column `2` (`100`) falls at or below
+the threshold and renders black, while stroke pressure `2`'s same
+column (`110`) now clears it and renders mid-grey instead — confirming
+stroke pressure genuinely widens the blur before thresholding. A
+fourth confines the fixture to a one-pixel selection. A fifth confirms
+out-of-range charcoal area, chalk area, and stroke pressure, plus a
+locked/unknown layer, all error. All five passed on the first run — no
+independent Python script was needed since every averaged value here
+reuses `paint_daubs`'s own already-verified output directly, and the
+three-way threshold compare is simple enough to verify by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**618 Rust tests total** (613 → 618, 611 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

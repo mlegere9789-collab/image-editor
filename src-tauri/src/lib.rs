@@ -1776,6 +1776,20 @@ fn graphic_pen(
     })
 }
 
+/// Filter Gallery > Sketch > Chalk & Charcoal on layer `id`.
+#[tauri::command]
+fn chalk_and_charcoal(
+    state: State<'_, AppState>,
+    id: LayerId,
+    charcoal_area: u32,
+    chalk_area: u32,
+    stroke_pressure: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.chalk_and_charcoal(id, charcoal_area, chalk_area, stroke_pressure)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2096,6 +2110,7 @@ pub fn run() {
             reticulation,
             note_paper,
             graphic_pen,
+            chalk_and_charcoal,
             hue_saturation,
             black_and_white,
             vibrance,

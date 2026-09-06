@@ -419,6 +419,10 @@ export default function App() {
   const [graphicPenStrokeLength, setGraphicPenStrokeLength] = useState(5);
   const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] = useState(25);
   const [graphicPenDirection, setGraphicPenDirection] = useState(1);
+  const [showChalkAndCharcoalDialog, setShowChalkAndCharcoalDialog] = useState(false);
+  const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] = useState(10);
+  const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
+  const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] = useState(1);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1307,6 +1311,17 @@ export default function App() {
     });
     setShowGraphicPenDialog(false);
   }, [runCommand, selectedId, graphicPenStrokeLength, graphicPenLightDarkBalance, graphicPenDirection]);
+
+  const applyChalkAndCharcoal = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("chalk_and_charcoal", {
+      id: selectedId,
+      charcoalArea: chalkAndCharcoalCharcoalArea,
+      chalkArea: chalkAndCharcoalChalkArea,
+      strokePressure: chalkAndCharcoalStrokePressure,
+    });
+    setShowChalkAndCharcoalDialog(false);
+  }, [runCommand, selectedId, chalkAndCharcoalCharcoalArea, chalkAndCharcoalChalkArea, chalkAndCharcoalStrokePressure]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2722,6 +2737,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Graphic Pen"
           >
             Graphic Pen…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowChalkAndCharcoalDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Chalk & Charcoal"
+          >
+            Chalk &amp; Charcoal…
           </button>
           <button
             className="button button--quiet"
@@ -5918,6 +5941,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGraphicPen} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChalkAndCharcoalDialog && (
+        <div className="modal-overlay" onClick={() => setShowChalkAndCharcoalDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Chalk & Charcoal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Chalk &amp; Charcoal</h2>
+            <label className="control">
+              <span className="control__label">
+                Charcoal Area
+                <span className="control__value">{chalkAndCharcoalCharcoalArea}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={chalkAndCharcoalCharcoalArea}
+                onChange={(event) => setChalkAndCharcoalCharcoalArea(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Chalk Area
+                <span className="control__value">{chalkAndCharcoalChalkArea}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={chalkAndCharcoalChalkArea}
+                onChange={(event) => setChalkAndCharcoalChalkArea(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Pressure
+                <span className="control__value">{chalkAndCharcoalStrokePressure}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={5}
+                value={chalkAndCharcoalStrokePressure}
+                onChange={(event) => setChalkAndCharcoalStrokePressure(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowChalkAndCharcoalDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyChalkAndCharcoal} disabled={busy}>
                 Apply
               </button>
             </div>
