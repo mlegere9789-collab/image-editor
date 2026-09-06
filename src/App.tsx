@@ -356,6 +356,10 @@ export default function App() {
   const [showSpatterDialog, setShowSpatterDialog] = useState(false);
   const [spatterSprayRadius, setSpatterSprayRadius] = useState(5);
   const [spatterSmoothness, setSpatterSmoothness] = useState(3);
+  const [showCrosshatchDialog, setShowCrosshatchDialog] = useState(false);
+  const [crosshatchStrokeLength, setCrosshatchStrokeLength] = useState(10);
+  const [crosshatchSharpness, setCrosshatchSharpness] = useState(5);
+  const [crosshatchStrength, setCrosshatchStrength] = useState(1);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1056,6 +1060,17 @@ export default function App() {
     });
     setShowSpatterDialog(false);
   }, [runCommand, selectedId, spatterSprayRadius, spatterSmoothness]);
+
+  const applyCrosshatch = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("crosshatch", {
+      id: selectedId,
+      strokeLength: crosshatchStrokeLength,
+      sharpness: crosshatchSharpness,
+      strength: crosshatchStrength,
+    });
+    setShowCrosshatchDialog(false);
+  }, [runCommand, selectedId, crosshatchStrokeLength, crosshatchSharpness, crosshatchStrength]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2399,6 +2414,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Spatter"
           >
             Spatter…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCrosshatchDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Crosshatch"
+          >
+            Crosshatch…
           </button>
           <button
             className="button button--quiet"
@@ -5058,6 +5081,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySpatter} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCrosshatchDialog && (
+        <div className="modal-overlay" onClick={() => setShowCrosshatchDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Crosshatch"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Crosshatch</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{crosshatchStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={50}
+                value={crosshatchStrokeLength}
+                onChange={(event) => setCrosshatchStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharpness
+                <span className="control__value">{crosshatchSharpness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={crosshatchSharpness}
+                onChange={(event) => setCrosshatchSharpness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{crosshatchStrength}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={crosshatchStrength}
+                onChange={(event) => setCrosshatchStrength(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowCrosshatchDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyCrosshatch} disabled={busy}>
                 Apply
               </button>
             </div>

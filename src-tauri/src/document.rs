@@ -4406,6 +4406,96 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Crosshatch: two crossing diagonal
+    /// [`motion_blur_at`] passes — the same directional line-sampling
+    /// [`Self::motion_blur`] already uses, one running "\" (top-left to
+    /// bottom-right) and one "/" (bottom-left to top-right) — combined by
+    /// taking the *darker* of the two per channel, the way overlapping
+    /// hatching strokes read as ink pooling darker wherever lines cross.
+    /// A documented approximation, not a port of Photoshop's own
+    /// direction-aware renderer. `stroke_length` (Photoshop's own `3..=50`
+    /// range) is scaled down into each diagonal's own half-length,
+    /// `(stroke_length / 10).max(1)`, for the same reason `ink_outlines`
+    /// scales its own stroke length down — a literal 1:1 mapping would be
+    /// needlessly slow. `strength` (Photoshop's own `1..=3` range) is
+    /// literally how many times the whole crossing-diagonal pass repeats,
+    /// each pass darkening further wherever hatching survived the last
+    /// one. `sharpness` (Photoshop's own `0..=20` range) blends the
+    /// *original*, unhatched pixel back in: `orig · (sharpness / 20) +
+    /// hatched · (1 − sharpness / 20)`, so `0` is pure hatching and `20`
+    /// fully restores the original, cancelling the effect. Alpha is
+    /// carried through the same min-of-two-diagonals combination as the
+    /// colour channels. Confined to the selection (only the final blend
+    /// respects it; the hatching passes themselves, like `crystallize`'s
+    /// own site-averaging pass, always see the whole layer). Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn crosshatch(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        sharpness: u32,
+        strength: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(3..=50).contains(&stroke_length) {
+            return Err("Crosshatch stroke length must be between 3 and 50.".to_string());
+        }
+        if sharpness > 20 {
+            return Err("Crosshatch sharpness must be between 0 and 20.".to_string());
+        }
+        if !(1..=3).contains(&strength) {
+            return Err("Crosshatch strength must be between 1 and 3.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let half = (stroke_length as i64 / 10).max(1);
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let mut hatched = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        for _ in 0..strength {
+            let source = hatched.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let a = motion_blur_at(
+                        &source,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        (inv_sqrt2, inv_sqrt2),
+                        half,
+                    );
+                    let b = motion_blur_at(
+                        &source,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        (inv_sqrt2, -inv_sqrt2),
+                        half,
+                    );
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    for c in 0..CHANNELS {
+                        hatched[dst + c] = a[c].min(b[c]);
+                    }
+                }
+            }
+        }
+        let sharp_f = sharpness as f32 / 20.0;
+        self.filter_pixels(id, move |orig, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..CHANNELS {
+                let blended =
+                    orig[base + c] as f32 * sharp_f + hatched[base + c] as f32 * (1.0 - sharp_f);
+                out[c] = blended.round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -10187,6 +10277,113 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.spatter(999, 1, 1, 1).is_err());
+    }
+
+    fn crosshatch_spike_fixture() -> (Document, LayerId) {
+        // 3x3, flat grey (50,50,50,255) everywhere except the
+        // bottom-right corner (2,2), a bright spike (200,200,200,255).
+        // Chosen specifically so the two crossing diagonals through the
+        // centre (1,1) disagree: the "\" diagonal (0,0)-(1,1)-(2,2) runs
+        // straight through the spike, while the "/" diagonal
+        // (0,2)-(1,1)-(2,0) avoids it entirely, letting min-of-two
+        // meaningfully pick the diagonal that misses the spike.
+        let mut pixels = Vec::with_capacity(3 * 3 * 4);
+        for y in 0..3u32 {
+            for x in 0..3u32 {
+                if x == 2 && y == 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("spike", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn crosshatch_takes_the_darker_of_two_crossing_diagonals() {
+        // Stroke length 3 gives half-length 1. At the centre (1,1): the
+        // "\" diagonal averages (0,0)=50, (1,1)=50, (2,2)=200 -> 300/3 =
+        // 100; the "/" diagonal averages (0,2)=50, (1,1)=50, (2,0)=50 ->
+        // 150/3 = 50 exactly. min(100, 50) = 50, so the centre is
+        // unaffected by the spike. At the spike itself (2,2): "\" gives
+        // (1,1)=50, (2,2)=200, (2,2) again (clamped) = 200 -> 450/3 =
+        // 150; "/" gives (1,2)=50 (clamped from (1,3)), (2,2)=200,
+        // (2,1)=50 (clamped from (3,1)) -> 300/3 = 100. min(150, 100) =
+        // 100. Sharpness 0 means pure hatching, no original blended
+        // back in. Cross-checked with an independent Python script.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.crosshatch(id, 3, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn crosshatch_strength_repeats_the_pass() {
+        // A second pass runs the same crossing-diagonal min over the
+        // first pass's own output (spike corner now 100, centre still
+        // 50 everywhere else unaffected): at (2,2), "\" now averages
+        // (1,1)=50, (2,2)=100, (2,2) clamped=100 -> 250/3 = 83; "/"
+        // averages (1,2)=50, (2,2)=100, (2,1)=50 -> 200/3 = 66.
+        // min(83, 66) = 66, darkening further with each pass.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.crosshatch(id, 3, 0, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [66, 66, 66, 255]);
+    }
+
+    #[test]
+    fn crosshatch_sharpness_blends_the_original_back_in() {
+        // Same single-pass hatching as the first test (spike corner
+        // hatches to 100), but sharpness 10 (blend factor 0.5) mixes it
+        // back with the original 200 exactly halfway: 200*0.5 + 100*0.5
+        // = 150.0 exactly, no rounding needed.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.crosshatch(id, 3, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn crosshatch_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        let dirty = doc.crosshatch(id, 3, 0, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 2)..idx(2, 2) + 4], [100, 100, 100, 255]);
+        assert_eq!(after[..idx(2, 2)], before[..idx(2, 2)]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 2,
+                x1: 3,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn crosshatch_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.crosshatch(id, 2, 0, 1).is_err());
+        assert!(doc.crosshatch(id, 51, 0, 1).is_err());
+        assert!(doc.crosshatch(id, 3, 21, 1).is_err());
+        assert!(doc.crosshatch(id, 3, 0, 0).is_err());
+        assert!(doc.crosshatch(id, 3, 0, 4).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.crosshatch(id, 3, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.crosshatch(999, 3, 0, 1).is_err());
     }
 
     #[test]

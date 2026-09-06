@@ -4454,6 +4454,72 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **529 Rust tests total** (524 → 529, 522 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 64 — Filter Gallery > Brush Strokes > Crosshatch
+
+Builds Photoshop's Crosshatch as a repeated pass of two crossing
+diagonal directional blurs. Each pass reuses `motion_blur_at` (the
+same directional line-sampling helper `crystallize`'s neighbours and
+this project's other directional filters share) twice per pixel, once
+along each 45° diagonal (`(±1, ±1)` normalised by `FRAC_1_SQRT_2`), and
+keeps the darker of the two per channel — the crossing strokes read as
+hatching precisely because a bright spike gets pulled down by
+whichever diagonal line happens to run through it, while the
+diagonal that misses it stays untouched and wins the `min`.
+`Document::crosshatch(id, stroke_length, sharpness, strength)`:
+`stroke_length` (Photoshop's own `3..=50` range) sets the blur
+half-length as `(stroke_length / 10).max(1)`; `strength` (Photoshop's
+own `1..=3` range) repeats the whole crossing-diagonal pass that many
+times, darkening further with each repetition since the previous
+pass's own hatching becomes the next pass's input; `sharpness`
+(Photoshop's own `0..=20` range) blends the fully-hatched result back
+toward the untouched original by `sharpness / 20`, at `0` giving pure
+hatching and at `20` giving back the original unchanged. A documented
+approximation of Photoshop's real crosshatch-brush renderer, not a
+port. The frontend's new **Crosshatch…** dialog exposes Stroke Length,
+Sharpness, and Strength sliders.
+
+**Verified two ways.** Five new `document.rs` tests, cross-checked by
+hand and against an independent Python script. A dedicated 3×3 "spike"
+fixture (flat grey `50` everywhere except a bright `200` at the
+bottom-right corner) was chosen specifically so the two crossing
+diagonals disagree, making the min-of-two combination meaningfully
+testable — the more obvious `ramped_3x3` fixture was rejected because
+its linear ramp makes both diagonals average to the same value
+everywhere, never exercising the `min`. At stroke length `3` (half
+`1`), sharpness `0`, strength `1`: the centre pixel's "\" diagonal
+averages `(50+50+200)/3 = 100` while its "/" diagonal averages
+`(50+50+50)/3 = 50` exactly, so `min(100, 50) = 50` leaves the centre
+untouched by the spike; the spike corner itself (edge-clamped) sees
+"\" average `(50+200+200)/3 = 150` against "/"'s `(50+200+50)/3 = 100`,
+so `min(150, 100) = 100` — the corner darkens from `200` to `100`
+exactly. A second test raises strength to `2`: the second pass runs
+the same combination over the first pass's own output (corner now
+`100`), giving "\" `(50+100+100)/3 = 83` against "/" `(50+100+50)/3 =
+66`, so `min(83, 66) = 66`, confirming each pass compounds on the
+last. A third keeps strength `1` but raises sharpness to `10` (blend
+factor `0.5`): the single-pass hatched value `100` blends with the
+original `200` exactly halfway to `150.0`, needing no rounding. A
+fourth confines the fixture to a one-pixel selection covering only the
+spike corner and confirms it still darkens to `100` while every
+unselected pixel stays byte-for-byte at its original value. A fifth
+confirms out-of-range stroke length, sharpness, and strength, plus a
+locked/unknown layer, all error. All five passed on the first run,
+matching the hand/Python-computed values exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eleven: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**534 Rust tests total** (529 → 534, 527 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

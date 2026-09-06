@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 122.**
+**618 distinct capabilities tracked. Currently shipped: 123.**
 
 ## PART I — EVERY TOOL
 
@@ -560,7 +560,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Watercolor (Filter Gallery → Artistic; median smoothing darkened in proportion to each smoothed pixel's own luma, the pooled-pigment look of watercolour paint — Photoshop's canvas texture is a documented scope cut — see README Phase 60)
 - [ ] Accented EdgesEmphasizes edges with brush-like strokes, producing a hand-rendered appearance.
 - [ ] Angled StrokesCreates directional brush strokes that follow an angular orientation.
-- [ ] CrosshatchCreates intersecting strokes resembling crosshatching in drawing.
+- [x] Crosshatch (Filter Gallery → Brush Strokes; two diagonal directional blurs reusing `motion_blur_at`, combined by taking the darker of the two crossing strokes per channel and repeated `strength` times, then blended back toward the original by `sharpness` — see README Phase 64)
 - [x] Dark Strokes (Filter Gallery → Brush Strokes; a per-pixel luma-threshold split-tone that pulls dark pixels toward black and light ones toward white, rather than a port of Photoshop's directional-stroke renderer — see README Phase 61)
 - [x] Ink Outlines (Filter Gallery → Brush Strokes; a dilated-Sobel two-sided push, dark toward edges and light toward flat areas, reusing colored_pencil/neon_glow/poster_edges's own edge machinery — see README Phase 62)
 - [x] Spatter (Filter Gallery → Brush Strokes; generalises `diffuse`'s own random-neighbour pick into a wider seeded scatter radius, averaging several draws per pixel — at smoothness 1 it's an algebraic identity with Diffuse's Normal mode — see README Phase 63)

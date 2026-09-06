@@ -1217,6 +1217,20 @@ fn spatter(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Crosshatch on layer `id`.
+#[tauri::command]
+fn crosshatch(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    sharpness: u32,
+    strength: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.crosshatch(id, stroke_length, sharpness, strength)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1818,6 +1832,7 @@ pub fn run() {
             dark_strokes,
             ink_outlines,
             spatter,
+            crosshatch,
             crystallize,
             facet,
             pointillize,
