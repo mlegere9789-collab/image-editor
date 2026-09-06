@@ -6203,6 +6203,69 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **667 Rust tests total** (662 → 667, 660 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 92 — Filter Gallery > Texture > Grain
+
+Adds a seeded `XorShift32` draw to each pixel's own RGB channels
+identically — the same monochromatic-grain shape real film grain has —
+then reapplies `brightness_contrast`'s own already-verified tone-curve
+formula (reimplemented inline, the same way `fresco` and
+`rough_pastels` already do) to the grained result.
+`Document::grain(id, intensity, contrast, seed)`: `intensity`
+(Photoshop's own `0..=40` range) scales the draw's spread, `draw *
+(intensity / 40.0 * 128.0)`, added to each channel before clamping;
+`contrast` (Photoshop's own `0..=40` range) rescales onto
+`brightness_contrast`'s own `-255..=255` domain as `contrast / 40.0 *
+255.0` before being run through its exact factor formula with no
+brightness offset — Photoshop's own Grain dialog has no separate
+brightness control, only Intensity and Contrast. This project supports
+only Photoshop's "Regular" grain type; the other nine (Soft, Sprinkles,
+Clumped, Contrasty, Enlarged, Stippled, Horizontal, Vertical, Speckle)
+each need their own distinct spatial patterning and are a documented
+scope cut, the same kind of narrowing `halftone_pattern`'s own
+Circle-vs-Dot cut and `glass`'s own texture-type cut already make.
+Alpha untouched. Confined to the selection the same way every other
+seeded filter in this project is. A new **Grain…** dialog exposes
+Intensity and Contrast sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture every Sketch filter shares (4x4, columns 0-1
+solid 200, columns 2-3 solid 50). At intensity `40` (grain scale
+`128.0`) and contrast `0` (factor `1.0`, isolating the grain's own
+effect), seed `1`'s own first four `XorShift32` draws (`270369`,
+`67634689`, `2647435461`, `307599695` out of `u32::MAX`, `next_unit`
+roughly `-0.999874`, `-0.968505`, `0.232808`, and `-0.856787`) land row
+`0` at `[72, 76, 80, 0]`. A second test raises contrast to `10`
+(mapping to `63.75` on `brightness_contrast`'s own domain, factor
+`1.6581`): the row becomes `[35, 42, 48, 0]`, the factor amplifying
+each grained value's own distance from the neutral midpoint `128` — a
+real, hand-computed change, not a coincidental match. A third confirms
+intensity `0` and contrast `0` together are a true no-op. A fourth
+confines the fixture to a single-pixel selection at `(1, 0)` — the
+same architectural fact `spatter`'s own selection test already
+documents, since `filter_pixels` skips the draw entirely for
+unselected pixels, making the sole selected pixel consume the *first*
+draw rather than the *second* it would get unselected, landing on a
+genuinely different result (`72`) than the unselected first test's own
+column `1` (`76`). A fifth confirms out-of-range intensity and
+contrast, plus a locked/unknown layer, all error. All five tests
+passed on the first run, cross-checked against an independent Python
+script emulating `f32` arithmetic via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**672 Rust tests total** (667 → 672, 665 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

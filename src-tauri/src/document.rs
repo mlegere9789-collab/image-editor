@@ -7053,6 +7053,65 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Grain: adds a seeded `XorShift32` draw
+    /// to each of a pixel's own RGB channels identically (the same
+    /// monochromatic-grain shape real film grain has), then reapplies
+    /// [`Self::brightness_contrast`]'s own already-verified tone-curve
+    /// formula (reimplemented inline, the same way [`Self::fresco`] and
+    /// [`Self::rough_pastels`] already do) to the grained result.
+    /// `Document::grain(id, intensity, contrast, seed)`: `intensity`
+    /// (Photoshop's own `0..=40` range) scales the draw's spread,
+    /// `draw * (intensity / 40.0 * 128.0)`, added to each channel before
+    /// clamping; `contrast` (Photoshop's own `0..=40` range) rescales
+    /// onto `brightness_contrast`'s own `-255..=255` domain as
+    /// `contrast / 40.0 * 255.0` before being run through its exact
+    /// factor formula with no brightness offset — Photoshop's own dialog
+    /// has no separate brightness control for Grain, only Intensity and
+    /// Contrast. This project supports only Photoshop's "Regular" grain
+    /// type; the other nine (Soft, Sprinkles, Clumped, Contrasty,
+    /// Enlarged, Stippled, Horizontal, Vertical, Speckle) each need their
+    /// own distinct spatial patterning and are a documented scope cut,
+    /// the same kind of narrowing [`Self::halftone_pattern`]'s own
+    /// Circle-vs-Dot cut and [`Self::glass`]'s own texture-type cut
+    /// already make. Alpha untouched. Confined to the selection the same
+    /// way every other seeded filter in this project is: `filter_pixels`
+    /// skips the draw entirely for unselected pixels, so a selected
+    /// pixel partway through the image can consume an earlier draw than
+    /// it would in an unselected scan — the same architectural fact
+    /// `spatter`'s own selection test already documents.
+    pub fn grain(
+        &mut self,
+        id: LayerId,
+        intensity: u32,
+        contrast: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if intensity > 40 {
+            return Err("Grain intensity must be between 0 and 40.".to_string());
+        }
+        if contrast > 40 {
+            return Err("Grain contrast must be between 0 and 40.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let grain_scale = intensity as f32 / 40.0 * 128.0;
+        let contrast_mapped = contrast as f32 / 40.0 * 255.0;
+        let factor = 259.0 * (contrast_mapped + 255.0) / (255.0 * (259.0 - contrast_mapped));
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let draw = rng.next_unit();
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let grained = (src[base + c] as f32 + draw * grain_scale).clamp(0.0, 255.0);
+                out[c] = (factor * (grained - 128.0) + 128.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16033,6 +16092,105 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.wind(999, 0, 0).is_err());
+    }
+
+    #[test]
+    fn grain_adds_seeded_noise_before_a_contrast_boost() {
+        // Same cliff fixture: 4x4, columns 0-1 solid 200, columns 2-3
+        // solid 50. Intensity 40 gives the full grain scale of 128.0;
+        // contrast 0 gives factor 1.0 exactly (a no-op contrast curve),
+        // isolating the grain's own effect. Seed 1's own first four
+        // XorShift32 draws (270369, 67634689, 2647435461, 307599695 out
+        // of u32::MAX, next_unit roughly -0.999874, -0.968505, 0.232808,
+        // -0.856787) land on row 0's four pixels in scan order:
+        //   col 0: 200 + 128*-0.999874 = 72.02 -> 72.
+        //   col 1: 200 + 128*-0.968505 = 76.03 -> 76.
+        //   col 2: 50 + 128*0.232808 = 79.80 -> 80.
+        //   col 3: 50 + 128*-0.856787 = -59.67, clamped to 0.
+        // Cross-checked against an independent Python script emulating
+        // f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.grain(id, 40, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [72, 72, 72, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [76, 76, 76, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [80, 80, 80, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn grain_contrast_reshapes_the_grained_signal() {
+        // Same grained values as above, but contrast 10 maps to
+        // 10/40 * 255 = 63.75 on brightness_contrast's own domain,
+        // giving factor 259*(63.75+255)/(255*(259-63.75)) = 1.6581:
+        // column 0's own grained 72.02 becomes
+        // 1.6581*(72.02-128)+128 = 35.17 -> 35, column 1's own grained
+        // 76.03 becomes 42.0 -> 42, and column 2's own grained 79.80
+        // becomes 47.6 -> 48 -- real, hand-computed changes from the
+        // contrast-0 test's own 72, 76, and 80 (the factor amplifies
+        // each value's own distance from the neutral midpoint 128),
+        // not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.grain(id, 40, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [35, 35, 35, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [42, 42, 42, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [48, 48, 48, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn grain_zero_intensity_and_contrast_is_a_no_op() {
+        // Intensity 0 zeroes the grain scale and contrast 0 gives factor
+        // 1.0 exactly, so every pixel resolves to factor*(v-128)+128 = v
+        // unchanged, a true no-op regardless of the seed.
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.grain(id, 0, 0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn grain_is_confined_to_the_selection() {
+        // Selecting only (1, 0) makes it, rather than (0, 0), the first
+        // pixel to consume the generator's own draws (the same
+        // architectural fact spatter's own selection test already
+        // documents): it gets draw 1 (270369, unit -0.999874) instead of
+        // draw 2, giving 72 -- a real, hand-verified change from its own
+        // original value of 200, and a genuinely different result from
+        // the unselected first test's own column 1 result of 76.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.grain(id, 40, 0, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [72, 72, 72, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn grain_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.grain(id, 41, 0, 1).is_err());
+        assert!(doc.grain(id, 0, 41, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.grain(id, 0, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.grain(999, 0, 0, 1).is_err());
     }
 
     #[test]

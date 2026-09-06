@@ -459,6 +459,9 @@ export default function App() {
   const [showWindDialog, setShowWindDialog] = useState(false);
   const [windMethod, setWindMethod] = useState(0);
   const [windDirection, setWindDirection] = useState(0);
+  const [showGrainDialog, setShowGrainDialog] = useState(false);
+  const [grainIntensity, setGrainIntensity] = useState(20);
+  const [grainContrast, setGrainContrast] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1479,6 +1482,18 @@ export default function App() {
     });
     setShowWindDialog(false);
   }, [runCommand, selectedId, windMethod, windDirection]);
+
+  const applyGrain = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("grain", {
+      id: selectedId,
+      intensity: grainIntensity,
+      contrast: grainContrast,
+      seed,
+    });
+    setShowGrainDialog(false);
+  }, [runCommand, selectedId, grainIntensity, grainContrast]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2742,6 +2757,14 @@ export default function App() {
             title="Filter > Stylize > Wind"
           >
             Wind…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGrainDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Grain"
+          >
+            Grain…
           </button>
           <button
             className="button button--quiet"
@@ -5124,6 +5147,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWind} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGrainDialog && (
+        <div className="modal-overlay" onClick={() => setShowGrainDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Grain"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Grain</h2>
+            <label className="control">
+              <span className="control__label">
+                Intensity
+                <span className="control__value">{grainIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={grainIntensity}
+                onChange={(event) => setGrainIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{grainContrast}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={grainContrast}
+                onChange={(event) => setGrainContrast(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowGrainDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyGrain} disabled={busy}>
                 Apply
               </button>
             </div>
