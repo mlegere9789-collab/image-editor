@@ -456,6 +456,9 @@ export default function App() {
   const [showOceanRippleDialog, setShowOceanRippleDialog] = useState(false);
   const [oceanRippleSize, setOceanRippleSize] = useState(7);
   const [oceanRippleMagnitude, setOceanRippleMagnitude] = useState(10);
+  const [showWindDialog, setShowWindDialog] = useState(false);
+  const [windMethod, setWindMethod] = useState(0);
+  const [windDirection, setWindDirection] = useState(0);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1466,6 +1469,16 @@ export default function App() {
     });
     setShowOceanRippleDialog(false);
   }, [runCommand, selectedId, oceanRippleSize, oceanRippleMagnitude]);
+
+  const applyWind = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("wind", {
+      id: selectedId,
+      method: windMethod,
+      direction: windDirection,
+    });
+    setShowWindDialog(false);
+  }, [runCommand, selectedId, windMethod, windDirection]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2721,6 +2734,14 @@ export default function App() {
             title="Filter > Stylize > Extrude"
           >
             Extrude…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowWindDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Stylize > Wind"
+          >
+            Wind…
           </button>
           <button
             className="button button--quiet"
@@ -5037,6 +5058,72 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyExtrude} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWindDialog && (
+        <div className="modal-overlay" onClick={() => setShowWindDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Wind"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Stylize &gt; Wind</h2>
+            <label className="control control--row">
+              <span className="control__label">Wind</span>
+              <input
+                type="radio"
+                name="wind-method"
+                checked={windMethod === 0}
+                onChange={() => setWindMethod(0)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blast</span>
+              <input
+                type="radio"
+                name="wind-method"
+                checked={windMethod === 1}
+                onChange={() => setWindMethod(1)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Stagger</span>
+              <input
+                type="radio"
+                name="wind-method"
+                checked={windMethod === 2}
+                onChange={() => setWindMethod(2)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">From the Right</span>
+              <input
+                type="radio"
+                name="wind-direction"
+                checked={windDirection === 0}
+                onChange={() => setWindDirection(0)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">From the Left</span>
+              <input
+                type="radio"
+                name="wind-direction"
+                checked={windDirection === 1}
+                onChange={() => setWindDirection(1)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowWindDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyWind} disabled={busy}>
                 Apply
               </button>
             </div>

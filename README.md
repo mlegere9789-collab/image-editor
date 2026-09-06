@@ -6149,6 +6149,60 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **662 Rust tests total** (657 → 662, 655 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 91 — Filter > Stylize > Wind
+
+Streaks each pixel toward one horizontal neighbour by blending it with
+the one-directional average of the `length` pixels in that direction —
+reusing `average_samples`, the same shared primitive `box_blur_at` and
+`motion_blur_at` already build on, but with a one-sided `0..=length`
+sample range instead of either of those two's own symmetric window,
+which is what turns an ordinary blur into a directional streak. A
+documented simplification standing in for Photoshop's own tonal-edge-
+triggered, asymmetric streak renderer, and for its own Stagger method's
+actual staggered offset pattern. `Document::wind(id, method,
+direction)`: `method` (`0` Wind, `1` Blast, `2` Stagger, matching
+Photoshop's own dialog radio buttons) selects a `(length, blend)` pair
+— Wind `(3, 0.6)`, Blast `(8, 0.9)`, Stagger `(5, 0.75)` — with `blend`
+the fraction of the one-directional average mixed into the original,
+`v = orig * (1 - blend) + avg * blend`; `direction` (`0` streaks
+rightward, `1` leftward) picks which neighbour side is averaged. Each
+channel, alpha included, is streaked independently. Confined to the
+selection the same way every `filter_pixels`-based filter already is.
+A new **Wind…** dialog exposes Method and Direction as two radio-button
+groups, matching Extrude's own radio-button convention.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`), which makes a one-directional average
+unambiguous. Method `0` (Wind, length `3`, blend `0.6`) streaking
+rightward: column `0` averages `[10, 20, 30, 40]` (avg `25`,
+truncating integer division, the same convention `average_samples`
+already uses) into `v = 10*0.4 + 25*0.6 = 19`; the full row comes out
+`[19, 27, 34, 40]`. A second test flips direction to leftward, giving
+the mirror-image row `[10, 15, 22, 31]` — a real, hand-computed
+difference, not a coincidental match. A third raises method to `1`
+(Blast, length `8`, blend `0.9`): column `0` now averages nine samples
+into `33`, giving `v = 10*0.1 + 33*0.9 = 30.7` → `31`, a real change
+from Wind's own `19`. A fourth confines the fixture to a full-column
+selection at column `1`. A fifth confirms out-of-range method and
+direction, plus a locked/unknown layer, all error. All five tests
+passed on the first run, cross-checked against an independent Python
+script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**667 Rust tests total** (662 → 667, 660 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

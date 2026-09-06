@@ -1921,6 +1921,17 @@ fn ocean_ripple(
     })
 }
 
+/// Filter > Stylize > Wind on layer `id`.
+#[tauri::command]
+fn wind(
+    state: State<'_, AppState>,
+    id: LayerId,
+    method: u32,
+    direction: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.wind(id, method, direction))
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2251,6 +2262,7 @@ pub fn run() {
             diffuse_glow,
             glass,
             ocean_ripple,
+            wind,
             hue_saturation,
             black_and_white,
             vibrance,

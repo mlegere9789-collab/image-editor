@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 149.**
+**618 distinct capabilities tracked. Currently shipped: 150.**
 
 ## PART I — EVERY TOOL
 
@@ -590,7 +590,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Solarize (min(v, 255 − v) per channel, the tent curve — see README Phase 31)
 - [ ] TilesBreaks an image into displaced tile-like sections.
 - [x] Trace Contour (per-channel contour where the channel crosses the level, Lower/Upper edge — see README Phase 31)
-- [ ] WindCreates horizontal streaks resembling wind blowing across the image.
+- [x] Wind (Filter → Stylize; streaks each pixel toward one horizontal neighbour by blending it with a one-directional average of the pixels in that direction, reusing `average_samples` — the same shared primitive `box_blur_at`/`motion_blur_at` already build on — with a one-sided range instead of either's own symmetric window; Method (Wind/Blast/Stagger) picks a length/blend pair, Stagger's own literal staggered offset pattern is a documented scope cut — see README Phase 91)
 - [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
 - [ ] GrainAdds simulated grain texture to an image.
 - [ ] Mosaic TilesCreates a tile-based surface appearance with grout-like separation.

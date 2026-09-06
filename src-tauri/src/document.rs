@@ -6997,6 +6997,62 @@ impl Document {
         })
     }
 
+    /// Filter > Stylize > Wind: streaks each pixel toward one horizontal
+    /// neighbour by blending it with the one-directional average of the
+    /// `length` pixels in that direction — reusing [`average_samples`],
+    /// the same shared primitive [`box_blur_at`] and [`motion_blur_at`]
+    /// already build on, but with a one-sided `0..=length` sample range
+    /// instead of either of those two's own symmetric window, which is
+    /// what turns an ordinary blur into a directional streak. A
+    /// documented simplification standing in for Photoshop's own
+    /// tonal-edge-triggered, asymmetric streak renderer, and for its own
+    /// Stagger method's actual staggered offset pattern.
+    /// `Document::wind(id, method, direction)`: `method` (`0` Wind, `1`
+    /// Blast, `2` Stagger, matching Photoshop's own dialog radio buttons)
+    /// selects a `(length, blend)` pair — Wind `(3, 0.6)`, Blast `(8,
+    /// 0.9)`, Stagger `(5, 0.75)` — with `blend` the fraction of the
+    /// one-directional average mixed into the original,
+    /// `v = orig · (1 − blend) + avg · blend`; `direction` (`0` streaks
+    /// rightward, `1` leftward) picks which neighbour side is averaged.
+    /// Each channel, alpha included, is streaked independently. Confined
+    /// to the selection the same way every [`Self::filter_pixels`]-based
+    /// filter already is.
+    pub fn wind(
+        &mut self,
+        id: LayerId,
+        method: u32,
+        direction: u32,
+    ) -> Result<Option<Rect>, String> {
+        if method > 2 {
+            return Err("Wind method must be 0 (Wind), 1 (Blast), or 2 (Stagger).".to_string());
+        }
+        if direction > 1 {
+            return Err("Wind direction must be 0 (Right) or 1 (Left).".to_string());
+        }
+        let (length, blend) = match method {
+            0 => (3i64, 0.6f32),
+            1 => (8i64, 0.9f32),
+            _ => (5i64, 0.75f32),
+        };
+        let dx: i64 = if direction == 0 { 1 } else { -1 };
+        let width = self.width as i64;
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let samples = (0..=length).map(|t| {
+                let sx = (col as i64 + t * dx).clamp(0, width - 1) as usize;
+                (sx, row as usize)
+            });
+            let avg = average_samples(src, doc_width, samples);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..CHANNELS {
+                let v = src[base + c] as f32 * (1.0 - blend) + avg[c] as f32 * blend;
+                out[c] = v.round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -15881,6 +15937,102 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.ocean_ripple(999, 1, 10, 1).is_err());
+    }
+
+    #[test]
+    fn wind_streaks_toward_the_chosen_direction() {
+        // The column-stripes fixture (4x4, columns 10/20/30/40) makes a
+        // one-directional average unambiguous. Method 0 (Wind) gives
+        // length 3, blend 0.6; direction 0 streaks rightward, so each
+        // column averages itself and its own next three columns (edge-
+        // clamped):
+        //   col 0: samples [10, 20, 30, 40], avg = 100/4 = 25 (truncating
+        //     integer division, the same convention average_samples
+        //     already uses), v = 10*0.4 + 25*0.6 = 19.
+        //   col 1: samples [20, 30, 40, 40], avg = 130/4 = 32,
+        //     v = 20*0.4 + 32*0.6 = 27.2 -> 27.
+        //   col 2: samples [30, 40, 40, 40], avg = 150/4 = 37,
+        //     v = 30*0.4 + 37*0.6 = 34.2 -> 34.
+        //   col 3: samples [40, 40, 40, 40], avg = 40, v = 40 (unchanged,
+        //     a genuine edge-clamp coincidence at the layer's own edge).
+        // Cross-checked against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.wind(id, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [19, 19, 19, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [27, 27, 27, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [34, 34, 34, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [40, 40, 40, 255]);
+    }
+
+    #[test]
+    fn wind_direction_flips_which_side_streaks() {
+        // Same method 0 (length 3, blend 0.6), but direction 1 streaks
+        // leftward instead: column 0's own samples are all itself
+        // (edge-clamped), giving a no-op 10, while column 3 now averages
+        // [40, 30, 20, 10] (avg 25) into v = 40*0.4 + 25*0.6 = 31 -- the
+        // mirror image of the rightward test's own row, not a
+        // coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.wind(id, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [15, 15, 15, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [22, 22, 22, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [31, 31, 31, 255]);
+    }
+
+    #[test]
+    fn wind_method_lengthens_and_strengthens_the_streak() {
+        // Method 1 (Blast) gives length 8, blend 0.9 instead of Wind's
+        // own length 3, blend 0.6. Direction 0 (rightward), column 0
+        // averages nine samples ([10, 20, 30, 40] then five more repeats
+        // of the edge-clamped 40), avg = 300/9 = 33, v = 10*0.1 + 33*0.9
+        // = 30.7 -> 31 -- a real, hand-computed change from Wind's own
+        // column 0 result of 19, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.wind(id, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [31, 31, 31, 255]);
+    }
+
+    #[test]
+    fn wind_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.wind(id, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [27, 27, 27, 255]);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn wind_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.wind(id, 3, 0).is_err());
+        assert!(doc.wind(id, 0, 2).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.wind(id, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.wind(999, 0, 0).is_err());
     }
 
     #[test]
