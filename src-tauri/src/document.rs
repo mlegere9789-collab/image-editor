@@ -744,6 +744,37 @@ fn bevel_height_at(
     nearest.unwrap_or(radius).min(radius)
 }
 
+/// [`Document::match_color`]'s own per-channel `(mean, standard
+/// deviation)` over every pixel of a document-sized RGBA8 buffer — a
+/// plain population standard deviation (divided by the pixel count, not
+/// `count - 1`), computed in two passes: means first, then the sum of
+/// squared deviations from those means. Alpha is not included; only the
+/// three RGB channels get their own `(mean, std)` pair, indexed `0..3`.
+fn channel_mean_std(pixels: &[u8]) -> [(f32, f32); 3] {
+    let n = (pixels.len() / CHANNELS) as f32;
+    let mut means = [0f32; 3];
+    for chunk in pixels.chunks_exact(CHANNELS) {
+        for (c, mean) in means.iter_mut().enumerate() {
+            *mean += chunk[c] as f32;
+        }
+    }
+    for mean in means.iter_mut() {
+        *mean /= n;
+    }
+    let mut variances = [0f32; 3];
+    for chunk in pixels.chunks_exact(CHANNELS) {
+        for c in 0..3 {
+            let d = chunk[c] as f32 - means[c];
+            variances[c] += d * d;
+        }
+    }
+    let mut out = [(0f32, 0f32); 3];
+    for c in 0..3 {
+        out[c] = (means[c], (variances[c] / n).sqrt());
+    }
+    out
+}
+
 /// Where a layer should move in the stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2062,6 +2093,76 @@ impl Document {
                     let v = layer.pixels[base + c] as f32;
                     let normalized = (v - lo[c] as f32) / (hi[c] as f32 - lo[c] as f32);
                     layer.pixels[base + c] = (normalized * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
+    /// Image > Adjustments > Match Color: a standard mean/standard-
+    /// deviation colour-transfer, matching layer `id`'s own per-channel
+    /// statistics to `source_layer_id`'s. For each of the three RGB
+    /// channels independently: `normalized = (v − target_mean) /
+    /// target_std` expresses a target pixel's own channel value as how
+    /// many standard deviations it sits from its own layer's mean, then
+    /// `matched = normalized * source_std + source_mean` re-expresses
+    /// that same relative position in the source layer's own
+    /// distribution — the source's brightness level and contrast/
+    /// saturation "shape" are both carried over, without needing a
+    /// reference image outside this document. The final value blends the
+    /// original toward `matched` by `fade` percent, `orig * (1 − fade /
+    /// 100) + matched * (fade / 100)`, so `fade = 0` is the identity and
+    /// `fade = 100` is a full match. A channel whose own target
+    /// standard deviation is `0` (every sampled pixel identical) treats
+    /// `normalized` as `0` rather than dividing by zero, landing exactly
+    /// on the source's own mean for that channel. Statistics are always
+    /// computed from each layer's own entire pixel data, matching
+    /// Photoshop's own default of measuring the whole source and target
+    /// images; only the final remap respects the target's own active
+    /// selection (or the whole layer, with none). This is a real,
+    /// well-established statistical technique (mean/standard-deviation
+    /// transfer), not a guess at Photoshop's own proprietary algorithm —
+    /// Photoshop's own separate Luminance and Color Intensity sliders,
+    /// its Neutralize checkbox, and its Image Statistics panel (loading
+    /// saved source statistics rather than reading a live layer) are all
+    /// a documented scope cut, folded into this one `fade` control.
+    /// `fade` is Photoshop's own `0..=100` dialog range. Alpha untouched.
+    pub fn match_color(
+        &mut self,
+        id: LayerId,
+        source_layer_id: LayerId,
+        fade: u32,
+    ) -> Result<Option<Rect>, String> {
+        if fade > 100 {
+            return Err("Match Color fade must be between 0 and 100.".to_string());
+        }
+        let source_stats = channel_mean_std(&self.layer(source_layer_id)?.pixels);
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let bounds = self.copy_bounds();
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let target_stats = channel_mean_std(&layer.pixels);
+        let source = layer.pixels.clone();
+        let frac = fade as f32 / 100.0;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let (tmean, tstd) = target_stats[c];
+                    let (smean, sstd) = source_stats[c];
+                    let v = source[base + c] as f32;
+                    let normalized = if tstd == 0.0 { 0.0 } else { (v - tmean) / tstd };
+                    let matched = normalized * sstd + smean;
+                    let final_value = v * (1.0 - frac) + matched * frac;
+                    layer.pixels[base + c] = final_value.round().clamp(0.0, 255.0) as u8;
                 }
             }
         }
@@ -11011,6 +11112,135 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.auto_tone(999).is_err());
         assert!(empty.auto_contrast(999).is_err());
+    }
+
+    fn two_layer_doc(target_r: [u8; 4], source_r: [u8; 4]) -> (Document, LayerId, LayerId) {
+        // A 2x2 target layer and a 2x2 source layer, each with its own
+        // R values (G and B fixed at 0 in both, so their own means and
+        // standard deviations always match exactly and the "std == 0"
+        // branch keeps those two channels untouched, keeping every test
+        // focused on R alone).
+        let mut doc = Document::new(2, 2).unwrap();
+        let target_pixels: Vec<u8> = target_r.iter().flat_map(|&r| [r, 0, 0, 255]).collect();
+        let source_pixels: Vec<u8> = source_r.iter().flat_map(|&r| [r, 0, 0, 255]).collect();
+        let target_id = doc.add_layer("target", &target_pixels, 2, 2).unwrap();
+        let source_id = doc.add_layer("source", &source_pixels, 2, 2).unwrap();
+        (doc, target_id, source_id)
+    }
+
+    #[test]
+    fn match_color_transfers_mean_and_spread_from_the_source_layer() {
+        // Target R values [50, 50, 150, 150] (mean 100, population std
+        // 50); source R values [100, 100, 200, 200] (mean 150, std 50
+        // -- the identical spread, just shifted). At fade 100, every
+        // target pixel's own normalized position (-1 or +1 standard
+        // deviation) re-expressed in the source's own distribution adds
+        // exactly the 50-point mean shift: matched = normalized*50+150,
+        // giving [100, 100, 200, 200] -- a plain +50 shift, hand-
+        // computed and cross-checked in Python.
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        doc.match_color(target_id, source_id, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&[p[0], p[4], p[8], p[12]], &[100, 100, 200, 200]);
+    }
+
+    #[test]
+    fn match_color_fade_blends_toward_the_matched_result() {
+        // Same layers, fade 50: each pixel blends its own original
+        // value halfway with the fade-100 test's own fully-matched
+        // result, landing exactly halfway between the +0 and +50
+        // shifts -- a real +25 shift, [75, 75, 175, 175], not a
+        // coincidental match with either endpoint.
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        doc.match_color(target_id, source_id, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&[p[0], p[4], p[8], p[12]], &[75, 75, 175, 175]);
+    }
+
+    #[test]
+    fn match_color_scales_spread_when_the_source_is_less_varied() {
+        // Same target, but a source with half the spread: R values
+        // [125, 125, 175, 175] (mean 150, std 25). Each target pixel's
+        // own +-1 standard deviation now re-expresses as only +-25 in
+        // the source's own narrower distribution: matched =
+        // normalized*25+150, giving [125, 125, 175, 175] -- a real,
+        // hand-computed compression of the original [50,50,150,150]
+        // spread, not just a mean shift like the ratio-1 test's own
+        // ([100,100,200,200]).
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [125, 125, 175, 175]);
+        doc.match_color(target_id, source_id, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&[p[0], p[4], p[8], p[12]], &[125, 125, 175, 175]);
+    }
+
+    #[test]
+    fn match_color_a_flat_target_channel_lands_on_the_source_mean() {
+        // Target R is flat at 100 (std 0) for every pixel; source R is
+        // [100, 100, 200, 200] (mean 150, std 50). The std == 0 guard
+        // treats every pixel's own normalized position as 0 rather than
+        // dividing by zero, landing every pixel exactly on the source's
+        // own mean, 150, regardless of fade's own scaling of anything
+        // else.
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([100, 100, 100, 100], [100, 100, 200, 200]);
+        doc.match_color(target_id, source_id, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&[p[0], p[4], p[8], p[12]], &[150, 150, 150, 150]);
+    }
+
+    #[test]
+    fn match_color_a_flat_source_channel_flattens_the_target_to_it() {
+        // Target R is [50, 50, 150, 150] (mean 100, std 50) as in the
+        // first test, but the source R is flat at 120 (std 0). Every
+        // target pixel's own normalized position multiplies against a
+        // zero source spread, landing every one exactly on the source's
+        // own flat value, 120 -- collapsing the target's own contrast
+        // entirely, a real and distinct outcome from the std-0 target
+        // case above.
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [120, 120, 120, 120]);
+        doc.match_color(target_id, source_id, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&[p[0], p[4], p[8], p[12]], &[120, 120, 120, 120]);
+    }
+
+    #[test]
+    fn match_color_is_confined_to_the_selection() {
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.match_color(target_id, source_id, 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[0], 100);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn match_color_propagates_errors() {
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        assert!(doc.match_color(target_id, source_id, 101).is_err());
+        assert!(doc.match_color(target_id, 999, 100).is_err());
+        assert!(doc.match_color(999, source_id, 100).is_err());
+        doc.set_locked(target_id, true).unwrap();
+        assert!(doc.match_color(target_id, source_id, 100).is_err());
+        assert_eq!(
+            &doc.layers()[0].pixels[..],
+            &[50, 0, 0, 255, 50, 0, 0, 255, 150, 0, 0, 255, 150, 0, 0, 255][..]
+        );
     }
 
     // Filter > Other, on the ramped 3x3 layer whose radius-1 windows are

@@ -7654,6 +7654,88 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **800 Rust tests total** (794 → 800, 793 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 115 — Image > Adjustments > Match Color
+
+`match_color(id, source_layer_id, fade)` is a standard mean/standard-
+deviation colour transfer between two layers of the same document —
+this project has no separate "open documents" concept a source image
+could come from, so `source_layer_id` names another layer in the same
+document instead, the same substitution `displace`'s own `map_layer_id`
+already makes for Photoshop's own separate displacement-map file. A
+new private free function, `channel_mean_std`, computes each of the
+three RGB channels' own population mean and standard deviation across
+an entire layer's pixels in two passes (means first, then the sum of
+squared deviations from those means) — genuinely new machinery, since
+nothing existing needed a whole-layer statistical summary before.
+
+For each of the three channels independently: `normalized = (v -
+target_mean) / target_std` expresses a target pixel's own channel
+value as how many standard deviations it sits from its own layer's
+mean; `matched = normalized * source_std + source_mean` re-expresses
+that same relative position in the source layer's own distribution —
+carrying over the source's brightness level and its contrast/
+saturation "shape" together, without needing an image outside this
+document. The final value blends the original toward `matched` by
+`fade` percent, `orig * (1 - fade/100) + matched * (fade/100)`, so
+`fade = 0` is the identity and `fade = 100` is a full match. A channel
+whose own target standard deviation is `0` (every sampled pixel
+identical) treats `normalized` as `0` rather than dividing by zero,
+landing exactly on the source's own mean for that channel. Statistics
+are always computed from each layer's own entire pixel data, matching
+Photoshop's own default of measuring the whole source and target
+images; only the final remap respects the target's own active
+selection. This is a real, well-established statistical technique
+(mean/standard-deviation transfer), not a guess at Photoshop's own
+proprietary algorithm — Photoshop's own separate Luminance and Color
+Intensity sliders, its Neutralize checkbox, and its Image Statistics
+panel (loading saved source statistics rather than reading a live
+layer) are all a documented scope cut, folded into this one `fade`
+control. A new **Match Color…** dialog offers a Source Layer dropdown
+(the same "pick another layer in this document" pattern Displace's own
+Displacement Map dropdown already uses) and a Fade slider.
+
+**Verified two ways.** Seven new `document.rs` tests, on a new
+dedicated two-layer fixture (`two_layer_doc`, each a 2x2 layer with its
+own R values, G and B fixed at `0` in both so those channels' own means
+and standard deviations always match exactly and stay untouched,
+keeping every test focused on R alone). Target R `[50, 50, 150, 150]`
+(mean `100`, population std `50`); source R `[100, 100, 200, 200]`
+(mean `150`, the identical std `50`, just shifted). At fade `100`,
+every target pixel's own normalized position re-expressed in the
+source's own distribution adds exactly the `50`-point mean shift:
+`[100, 100, 200, 200]`. A second test halves fade to `50`, landing
+exactly halfway between the shift and the original for a real `[75,
+75, 175, 175]`. A third narrows the source to half the spread (`std
+25`), scaling the target's own `±1` standard deviation down to `±25`
+in the source's own narrower distribution for a real, hand-computed
+compression, `[125, 125, 175, 175]`, distinct from the ratio-`1` test's
+own plain shift. A fourth flattens the target channel to a single
+value (`std 0`), landing every pixel exactly on the source's own mean
+regardless of its own original value. A fifth flattens the *source*
+channel instead, collapsing every target pixel onto the source's own
+flat value — a real, distinct outcome from the flat-target case. A
+sixth confines a single pixel to a selection. A seventh confirms
+out-of-range fade, an unknown source layer, an unknown target layer,
+and a locked target layer, all error. All seven tests passed on the
+first run, cross-checked against an independent Python script that
+emulates Rust's own `f32` rounding via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's layer-picker wiring (mirroring
+Displace's own already-working dropdown) was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**807 Rust tests total** (800 → 807, 800 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -781,6 +781,20 @@ fn auto_contrast(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, St
     edit_checkpointed(&state, |document| document.auto_contrast(id))
 }
 
+/// Image > Adjustments > Match Color on layer `id`, transferring
+/// `source_layer_id`'s own per-channel statistics.
+#[tauri::command]
+fn match_color(
+    state: State<'_, AppState>,
+    id: LayerId,
+    source_layer_id: LayerId,
+    fade: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.match_color(id, source_layer_id, fade)
+    })
+}
+
 /// Filter > Other > Maximum on layer `id`.
 #[tauri::command]
 fn maximum(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
@@ -2520,6 +2534,7 @@ pub fn run() {
             equalize,
             auto_tone,
             auto_contrast,
+            match_color,
             maximum,
             minimum,
             high_pass,

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 174.**
+**618 distinct capabilities tracked. Currently shipped: 175.**
 
 ## PART I — EVERY TOOL
 
@@ -471,7 +471,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Equalize (per-channel histogram equalisation via a CDF lookup table — see README Phase 28)
 - [x] Equalize Selected Area Only (histogram from the selection, only the selection remapped — see README Phase 28)
 - [x] Equalize Entire Image Based On Selected Area (histogram from the selection, whole layer remapped — see README Phase 28)
-- [ ] Match Color
+- [x] Match Color (`match_color`, a standard mean/standard-deviation colour transfer between two layers of the same document: each channel's own target value is re-expressed as a standard-deviation offset from the target layer's own mean, then reapplied against the source layer's own mean/std, blended in by Fade. Photoshop's own separate Luminance/Color Intensity sliders, Neutralize checkbox, and saved Image Statistics are a documented scope cut, folded into one Fade control — see README Phase 115)
 - [x] Replace Color (`replace_color`, `hue_saturation`'s own HSL shift blended in by a Chebyshev-distance-to-target fuzziness fraction, `1 - distance/fuzziness`, standing in for Photoshop's own colour-range mask. Its eyedropper-driven interactive swatch building is a documented scope cut — `target` is a single colour chosen once — see README Phase 112)
 - [x] Blur Filter (one-click preset: box blur at radius 1 — see README Phase 25)
 - [x] Blur More (one-click preset: box blur at radius 3 — see README Phase 25)

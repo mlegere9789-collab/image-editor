@@ -378,6 +378,9 @@ export default function App() {
   const [shearWrapAround, setShearWrapAround] = useState(false);
   const [showDisplaceDialog, setShowDisplaceDialog] = useState(false);
   const [displaceMapLayerId, setDisplaceMapLayerId] = useState<number | null>(null);
+  const [showMatchColorDialog, setShowMatchColorDialog] = useState(false);
+  const [matchColorSourceLayerId, setMatchColorSourceLayerId] = useState<number | null>(null);
+  const [matchColorFade, setMatchColorFade] = useState(100);
   const [displaceHorizontalScale, setDisplaceHorizontalScale] = useState(10);
   const [displaceVerticalScale, setDisplaceVerticalScale] = useState(10);
   const [displaceWrapAround, setDisplaceWrapAround] = useState(false);
@@ -1326,6 +1329,23 @@ export default function App() {
     displaceVerticalScale,
     displaceWrapAround,
   ]);
+
+  const openMatchColorDialog = useCallback(() => {
+    const layers = document?.layers ?? [];
+    const other = layers.find((layer) => layer.id !== selectedId) ?? null;
+    setMatchColorSourceLayerId(other?.id ?? null);
+    setShowMatchColorDialog(true);
+  }, [document, selectedId]);
+
+  const applyMatchColor = useCallback(async () => {
+    if (selectedId === null || matchColorSourceLayerId === null) return;
+    await runCommand("match_color", {
+      id: selectedId,
+      sourceLayerId: matchColorSourceLayerId,
+      fade: matchColorFade,
+    });
+    setShowMatchColorDialog(false);
+  }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
@@ -2885,6 +2905,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={openMatchColorDialog}
+            disabled={busy || !canPaint || (document?.layers.length ?? 0) < 2}
+            title="Image > Adjustments > Match Color"
+          >
+            Match Color…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={blackAndWhite}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Black & White"
@@ -4274,6 +4302,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyReplaceColor} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMatchColorDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMatchColorDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Match Color"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Adjustments &gt; Match Color</h2>
+            <label className="control control--row">
+              <span className="control__label">Source Layer</span>
+              <select
+                value={matchColorSourceLayerId ?? ""}
+                onChange={(event) => setMatchColorSourceLayerId(Number(event.target.value))}
+              >
+                {(document?.layers ?? [])
+                  .filter((layer) => layer.id !== selectedId)
+                  .map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Fade
+                <span className="control__value">{matchColorFade}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={matchColorFade}
+                onChange={(event) => setMatchColorFade(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMatchColorDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyMatchColor}
+                disabled={busy || matchColorSourceLayerId === null}
+              >
                 Apply
               </button>
             </div>
