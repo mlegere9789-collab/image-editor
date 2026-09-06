@@ -5954,6 +5954,71 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **647 Rust tests total** (642 → 647, 640 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 88 — Filter Gallery > Distort > Diffuse Glow
+
+Pushes each pixel's own colour toward white, in proportion to how
+bright it already is, so highlights bloom outward while shadows stay
+comparatively clear — the first Filter Gallery filter since this
+project started the Sketch gallery to keep colour rather than reduce
+to grayscale. `Document::diffuse_glow(id, graininess, glow_amount,
+clear_amount, seed)`: `graininess` (Photoshop's own `0..=10` range)
+scales a seeded `XorShift32` draw added to each pixel's own standard-
+weighted luma before the glow calculation, `draw * (graininess / 10.0
+* 64.0)` — the same per-pixel draw `note_paper` and `reticulation`
+already use; `glow_amount` and `clear_amount` (both Photoshop's own
+`0..=20` range) combine into a single glow strength, `(glow_amount /
+20.0) * (1.0 - clear_amount / 20.0) * (grained_luma / 255.0)`, clamped
+to `0.0..=1.0` — `clear_amount` scales the overall strength down
+rather than Photoshop's own more nuanced clipping of the glow's own
+tone range, a documented simplification. Each RGB channel is pushed
+toward white by that strength, `v + (255.0 - v) * strength`; alpha
+untouched. Confined to the selection the same way every other seeded
+filter in this project is. A new **Diffuse Glow…** dialog exposes
+Graininess, Glow Amount, and Clear Amount sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture every Sketch filter shares (4x4, columns 0-1
+solid 200, columns 2-3 solid 50). With graininess `0` (zeroing the
+grain scale, making the seed irrelevant), glow amount `10` (amount
+`0.5`), and clear amount `0`: luma `200` gives `strength = 0.5 *
+200/255 = 0.392157`, `v = 200 + 55*0.392157 = 221.57` → `222`; luma
+`50` gives `v = 50 + 205*0.098039 = 70.10` → `70`. A second test raises
+clear amount to `10` (clear `0.5`), halving the `(1.0 - clear)` factor:
+`211` and `60` instead — a real, hand-computed change, not a
+coincidental match. A third raises graininess to `10` (grain scale
+`64.0`) and reuses seed `1`'s own first four `XorShift32` draws
+(`270369`, `67634689`, `2647435461`, `307599695` out of `u32::MAX`,
+mapping to `next_unit` values of roughly `-0.999874`, `-0.968505`,
+`0.232808`, and `-0.856787`) landing on row `0`'s four pixels in scan
+order: column `0` grains to `136.01`, giving `215`; column `1` grains
+to `138.02`, also rounding to `215`; column `2` grains to `64.90`,
+giving `76`; column `3` grains to a clamped `0` offset, leaving `50`
+unchanged. A fourth confines the fixture to a single-pixel selection at
+`(1, 0)` — the same architectural fact `spatter`'s own selection test
+already documents, since `filter_pixels` skips the draw entirely for
+unselected pixels, making the sole selected pixel consume the *first*
+draw rather than the *second* it would get unselected, landing on the
+same `215` column `0`'s own unselected test computes, a real change
+from its own original `200`. A fifth confirms out-of-range graininess,
+glow amount, and clear amount, plus a locked/unknown layer, all error.
+All five tests passed on the first run, cross-checked against an
+independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**652 Rust tests total** (647 → 652, 645 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

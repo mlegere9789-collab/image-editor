@@ -6817,6 +6817,72 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Distort > Diffuse Glow: pushes each pixel's own
+    /// colour toward white, in proportion to how bright it already is, so
+    /// highlights bloom outward while shadows stay comparatively clear —
+    /// unlike every Sketch-gallery filter this project has built so far,
+    /// this one keeps colour rather than reducing to grayscale.
+    /// `Document::diffuse_glow(id, graininess, glow_amount, clear_amount,
+    /// seed)`: `graininess` (Photoshop's own `0..=10` range) scales a
+    /// seeded [`XorShift32`] draw added to each pixel's own standard-
+    /// weighted luma before the glow calculation, `draw * (graininess /
+    /// 10.0 * 64.0)` — the same per-pixel draw [`Self::note_paper`] and
+    /// [`Self::reticulation`] already use, sized so full graininess can
+    /// shift the brightness estimate by roughly a quarter of the tonal
+    /// range; `glow_amount` and `clear_amount` (both Photoshop's own
+    /// `0..=20` range) combine into a single per-pixel glow strength,
+    /// `(glow_amount / 20.0) * (1.0 - clear_amount / 20.0) * (grained_luma
+    /// / 255.0)`, clamped to `0.0..=1.0` — `clear_amount` scales the
+    /// overall strength down rather than Photoshop's own more nuanced
+    /// clipping of the glow's own tone range, a documented simplification.
+    /// Each RGB channel is pushed toward white by that strength,
+    /// `v + (255.0 - v) * strength`; alpha untouched. Confined to the
+    /// selection the same way every other seeded filter in this project
+    /// is: `filter_pixels` skips the draw entirely for unselected pixels,
+    /// so a selected pixel partway through the image can consume an
+    /// earlier draw than it would in an unselected scan — the same
+    /// architectural fact `spatter`'s own selection test already
+    /// documents.
+    pub fn diffuse_glow(
+        &mut self,
+        id: LayerId,
+        graininess: u32,
+        glow_amount: u32,
+        clear_amount: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if graininess > 10 {
+            return Err("Diffuse Glow graininess must be between 0 and 10.".to_string());
+        }
+        if glow_amount > 20 {
+            return Err("Diffuse Glow amount must be between 0 and 20.".to_string());
+        }
+        if clear_amount > 20 {
+            return Err("Diffuse Glow clear amount must be between 0 and 20.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let grain_scale = graininess as f32 / 10.0 * 64.0;
+        let amount = glow_amount as f32 / 20.0;
+        let clear = clear_amount as f32 / 20.0;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let luma = 0.299 * src[base] as f32
+                + 0.587 * src[base + 1] as f32
+                + 0.114 * src[base + 2] as f32;
+            let draw = rng.next_unit();
+            let grained_luma = (luma + draw * grain_scale).clamp(0.0, 255.0);
+            let strength = (amount * (1.0 - clear) * (grained_luma / 255.0)).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let v = src[base + c] as f32;
+                out[c] = (v + (255.0 - v) * strength).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -15349,6 +15415,115 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.chrome(999, 0, 0).is_err());
+    }
+
+    #[test]
+    fn diffuse_glow_pushes_bright_pixels_further_toward_white() {
+        // Same cliff fixture: 4x4, columns 0-1 solid 200, columns 2-3
+        // solid 50 (grayscale, so luma equals the channel value exactly).
+        // Graininess 0 zeroes the grain scale, so the seed is irrelevant
+        // here. Glow amount 10 gives amount 0.5, clear amount 0 gives
+        // clear 0.0, so strength = 0.5 * 1.0 * (luma/255):
+        //   luma 200: strength = 0.5 * 200/255 = 0.392157,
+        //     v = 200 + 55*0.392157 = 221.57 -> rounds to 222.
+        //   luma 50: strength = 0.5 * 50/255 = 0.098039,
+        //     v = 50 + 205*0.098039 = 70.10 -> rounds to 70.
+        // Cross-checked against an independent Python script emulating
+        // f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.diffuse_glow(id, 0, 10, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [222, 222, 222, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [222, 222, 222, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [70, 70, 70, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [70, 70, 70, 255]);
+    }
+
+    #[test]
+    fn diffuse_glow_clear_amount_reduces_the_strength() {
+        // Same fixture and glow amount 10, but clear amount 10 gives
+        // clear 0.5, halving the (1.0 - clear) factor:
+        //   luma 200: strength = 0.5 * 0.5 * 200/255 = 0.196078,
+        //     v = 200 + 55*0.196078 = 210.78 -> rounds to 211.
+        //   luma 50: strength = 0.5 * 0.5 * 50/255 = 0.049020,
+        //     v = 50 + 205*0.049020 = 60.05 -> rounds to 60.
+        // Real, hand-computed changes from the clear-0 test's own 222
+        // and 70, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.diffuse_glow(id, 0, 10, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [211, 211, 211, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [60, 60, 60, 255]);
+    }
+
+    #[test]
+    fn diffuse_glow_graininess_adds_seeded_grain_to_the_brightness_estimate() {
+        // Graininess 10 gives the full grain scale of 64.0. Seed 1's own
+        // first four XorShift32 draws (270369, 67634689, 2647435461,
+        // 307599695 out of u32::MAX, mapping to next_unit values of
+        // roughly -0.999874, -0.968505, 0.232808, and -0.856787) land on
+        // row 0's four pixels in scan order: column 0 (luma 200, draw
+        // -0.999874) grains to 200 - 63.99 = 136.01, strength 0.5 *
+        // 136.01/255 = 0.2667, v = 200 + 55*0.2667 = 214.67 -> 215;
+        // column 1 (luma 200, draw -0.968505) grains to 138.02, strength
+        // 0.2706, v = 214.88 -> also 215; column 2 (luma 50, draw
+        // 0.232808) grains to 50 + 14.90 = 64.90, strength 0.5 *
+        // 64.90/255 = 0.1273, v = 50 + 205*0.1273 = 76.10 -> 76; column 3
+        // (luma 50, draw -0.856787) grains to 50 - 54.83, clamped to 0,
+        // strength 0, v = 50 unchanged. All four cross-checked against an
+        // independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.diffuse_glow(id, 10, 10, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [215, 215, 215, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [215, 215, 215, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [76, 76, 76, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn diffuse_glow_is_confined_to_the_selection() {
+        // Selecting only (1, 0) makes it, rather than (0, 0), the first
+        // pixel to consume the generator's own draws (the same
+        // architectural fact spatter's own selection test already
+        // documents): it gets draw 1 (270369, unit -0.999874) instead of
+        // draw 2, giving the same 215 the unselected test above computes
+        // for column 0 -- a real, hand-verified change from its own
+        // original value of 200, not a coincidental no-op.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.diffuse_glow(id, 10, 10, 0, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [215, 215, 215, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn diffuse_glow_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.diffuse_glow(id, 11, 10, 0, 1).is_err());
+        assert!(doc.diffuse_glow(id, 0, 21, 0, 1).is_err());
+        assert!(doc.diffuse_glow(id, 0, 10, 21, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.diffuse_glow(id, 0, 10, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.diffuse_glow(999, 0, 10, 0, 1).is_err());
     }
 
     #[test]

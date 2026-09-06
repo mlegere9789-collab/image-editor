@@ -446,6 +446,10 @@ export default function App() {
   const [showChromeDialog, setShowChromeDialog] = useState(false);
   const [chromeDetail, setChromeDetail] = useState(4);
   const [chromeSmoothness, setChromeSmoothness] = useState(7);
+  const [showDiffuseGlowDialog, setShowDiffuseGlowDialog] = useState(false);
+  const [diffuseGlowGraininess, setDiffuseGlowGraininess] = useState(4);
+  const [diffuseGlowGlowAmount, setDiffuseGlowGlowAmount] = useState(10);
+  const [diffuseGlowClearAmount, setDiffuseGlowClearAmount] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1413,6 +1417,25 @@ export default function App() {
     });
     setShowChromeDialog(false);
   }, [runCommand, selectedId, chromeDetail, chromeSmoothness]);
+
+  const applyDiffuseGlow = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("diffuse_glow", {
+      id: selectedId,
+      graininess: diffuseGlowGraininess,
+      glowAmount: diffuseGlowGlowAmount,
+      clearAmount: diffuseGlowClearAmount,
+      seed,
+    });
+    setShowDiffuseGlowDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    diffuseGlowGraininess,
+    diffuseGlowGlowAmount,
+    diffuseGlowClearAmount,
+  ]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -3036,6 +3059,14 @@ export default function App() {
             title="Filter > Distort > Displace"
           >
             Displace…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDiffuseGlowDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Distort > Diffuse Glow"
+          >
+            Diffuse Glow…
           </button>
           <button
             className="button button--quiet"
@@ -7539,6 +7570,73 @@ export default function App() {
                 onClick={applyDisplace}
                 disabled={busy || displaceMapLayerId === null}
               >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDiffuseGlowDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDiffuseGlowDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Diffuse Glow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Diffuse Glow</h2>
+            <label className="control">
+              <span className="control__label">
+                Graininess
+                <span className="control__value">{diffuseGlowGraininess}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={diffuseGlowGraininess}
+                onChange={(event) => setDiffuseGlowGraininess(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Glow Amount
+                <span className="control__value">{diffuseGlowGlowAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={diffuseGlowGlowAmount}
+                onChange={(event) => setDiffuseGlowGlowAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Clear Amount
+                <span className="control__value">{diffuseGlowClearAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={diffuseGlowClearAmount}
+                onChange={(event) => setDiffuseGlowClearAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDiffuseGlowDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDiffuseGlow} disabled={busy}>
                 Apply
               </button>
             </div>
