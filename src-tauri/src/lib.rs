@@ -1790,6 +1790,22 @@ fn chalk_and_charcoal(
     })
 }
 
+/// Filter Gallery > Sketch > Plaster on layer `id`. `light_direction`: 0
+/// Top, 1 Top Right, 2 Right, 3 Bottom Right, 4 Bottom, 5 Bottom Left, 6
+/// Left, 7 Top Left.
+#[tauri::command]
+fn plaster(
+    state: State<'_, AppState>,
+    id: LayerId,
+    image_balance: u32,
+    smoothness: u32,
+    light_direction: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.plaster(id, image_balance, smoothness, light_direction)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2111,6 +2127,7 @@ pub fn run() {
             note_paper,
             graphic_pen,
             chalk_and_charcoal,
+            plaster,
             hue_saturation,
             black_and_white,
             vibrance,

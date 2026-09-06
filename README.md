@@ -5570,6 +5570,65 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **618 Rust tests total** (613 → 618, 611 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 82 — Filter Gallery > Sketch > Plaster
+
+Pre-smooths the layer with `box_blur_at` — the same neighbourhood-
+average helper `box_blur` and this project's other smoothing filters
+already use — then applies `emboss`'s own directional relief formula,
+`128 + (away − toward)`, at a fixed one-pixel sample distance, reading
+as a rounded, raised-plaster surface lit from a chosen compass
+direction. A documented approximation, not a port of Photoshop's own
+renderer. `Document::plaster(id, image_balance, smoothness,
+light_direction)`: `smoothness` (Photoshop's own `1..=15` range)
+scales down into the blur radius, `(smoothness / 5).max(1)`;
+`light_direction` picks one of Photoshop's own eight compass
+directions, converted to the same `angle` convention `emboss` uses (0°
+from the right, increasing anticlockwise) — `0` Top, `1` Top Right,
+`2` Right, `3` Bottom Right, `4` Bottom, `5` Bottom Left, `6` Left, `7`
+Top Left; `image_balance` (Photoshop's own `0..=40` range) biases the
+whole relief brighter or darker around its own neutral midpoint of
+`20`, `(image_balance - 20) / 20 * 128`, added after the relief
+computation. Alpha untouched. A new **Plaster…** dialog exposes Image
+Balance and Smoothness sliders plus a Light Direction dropdown.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy`/
+`graphic_pen`/`chalk_and_charcoal` all already share, and reusing
+`paint_daubs`'s own already-verified box-blur radius-1 row (`[200,
+150, 100, 50]`) directly. At smoothness `5` (radius `1`), light
+direction `2` (Right, `(dx, dy) = (1, 0)`), and image balance `20`
+(the neutral midpoint, bias exactly `0`): column `0`'s edge-clamped
+relief (`200 - 150 = 50`) gives `178`; column `1`'s (`200 - 100 =
+100`) gives `228`; column `2`'s (`150 - 50 = 100`) gives `228`; column
+`3`'s (`100 - 50 = 50`) gives `178`. A second test confirms image
+balance biases that same relief: `40` (bias `+128`) clamps every value
+at or above `178` to `255`; `0` (bias `-128`) pulls `178` down to `50`
+and `228` down to `100`. A third confirms light direction `6` (Left)
+swaps `toward` and `away` relative to Right, negating the relief —
+column `1`'s value flips from `228` to `28`. A fourth confines the
+fixture to a one-pixel selection. A fifth confirms out-of-range image
+balance and smoothness, plus an unrecognised light direction and a
+locked/unknown layer, all error. All five passed on the first run — no
+independent Python script was needed since every averaged value here
+reuses `paint_daubs`'s own already-verified output directly, and the
+relief arithmetic is simple enough to verify by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**623 Rust tests total** (618 → 623, 616 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

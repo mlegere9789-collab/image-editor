@@ -423,6 +423,10 @@ export default function App() {
   const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] = useState(10);
   const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
   const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] = useState(1);
+  const [showPlasterDialog, setShowPlasterDialog] = useState(false);
+  const [plasterImageBalance, setPlasterImageBalance] = useState(20);
+  const [plasterSmoothness, setPlasterSmoothness] = useState(5);
+  const [plasterLightDirection, setPlasterLightDirection] = useState(7);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1322,6 +1326,17 @@ export default function App() {
     });
     setShowChalkAndCharcoalDialog(false);
   }, [runCommand, selectedId, chalkAndCharcoalCharcoalArea, chalkAndCharcoalChalkArea, chalkAndCharcoalStrokePressure]);
+
+  const applyPlaster = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("plaster", {
+      id: selectedId,
+      imageBalance: plasterImageBalance,
+      smoothness: plasterSmoothness,
+      lightDirection: plasterLightDirection,
+    });
+    setShowPlasterDialog(false);
+  }, [runCommand, selectedId, plasterImageBalance, plasterSmoothness, plasterLightDirection]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2745,6 +2760,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Chalk & Charcoal"
           >
             Chalk &amp; Charcoal…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPlasterDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Plaster"
+          >
+            Plaster…
           </button>
           <button
             className="button button--quiet"
@@ -6001,6 +6024,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyChalkAndCharcoal} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPlasterDialog && (
+        <div className="modal-overlay" onClick={() => setShowPlasterDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Plaster"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Plaster</h2>
+            <label className="control">
+              <span className="control__label">
+                Image Balance
+                <span className="control__value">{plasterImageBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={plasterImageBalance}
+                onChange={(event) => setPlasterImageBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{plasterSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={plasterSmoothness}
+                onChange={(event) => setPlasterSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={plasterLightDirection}
+                onChange={(event) => setPlasterLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPlasterDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPlaster} disabled={busy}>
                 Apply
               </button>
             </div>

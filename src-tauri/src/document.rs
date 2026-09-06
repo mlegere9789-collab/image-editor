@@ -6373,6 +6373,93 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Plaster: pre-smooths the layer with
+    /// [`box_blur_at`] — the same neighbourhood-average helper `box_blur`
+    /// and this project's other smoothing filters already use — then
+    /// applies [`Self::emboss`]'s own directional relief formula, `128 +
+    /// (away − toward)`, at a fixed one-pixel sample distance, reading as
+    /// a rounded, raised-plaster surface lit from a chosen compass
+    /// direction. A documented approximation, not a port of Photoshop's
+    /// own renderer. `smoothness` (Photoshop's own `1..=15` range) scales
+    /// down into the blur radius, `(smoothness / 5).max(1)`; `light_direction`
+    /// picks one of Photoshop's own eight compass directions, converted
+    /// to the same `angle` convention `emboss` uses (0° from the right,
+    /// increasing anticlockwise): `0` Top, `1` Top Right, `2` Right, `3`
+    /// Bottom Right, `4` Bottom, `5` Bottom Left, `6` Left, `7` Top Left;
+    /// `image_balance` (Photoshop's own `0..=40` range) biases the whole
+    /// relief brighter or darker around its own neutral midpoint of
+    /// `20`, `(image_balance - 20) / 20 * 128`, added after the relief
+    /// computation. Alpha untouched. Confined to the selection, like
+    /// every other filter here built on [`Self::filter_pixels`]. Errors
+    /// on an out-of-range parameter, an unrecognised light direction, or
+    /// a locked/unknown layer.
+    pub fn plaster(
+        &mut self,
+        id: LayerId,
+        image_balance: u32,
+        smoothness: u32,
+        light_direction: u32,
+    ) -> Result<Option<Rect>, String> {
+        if image_balance > 40 {
+            return Err("Plaster image balance must be between 0 and 40.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Plaster smoothness must be between 1 and 15.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Plaster light direction must be between 0 and 7.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (smoothness / 5).max(1) as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let bias = (image_balance as f32 - 20.0) / 20.0 * 128.0;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut smoothed_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let smoothed = box_blur_at(&source, doc_width, width, height, row, col, radius);
+                smoothed_buf[dst..dst + CHANNELS].copy_from_slice(&smoothed);
+            }
+        }
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let at = |sx: i64, sy: i64| {
+                let x = sx.clamp(0, width - 1) as usize;
+                let y = sy.clamp(0, height - 1) as usize;
+                (y * doc_width + x) * CHANNELS
+            };
+            let toward = at(col as i64 + dx, row as i64 + dy);
+            let away = at(col as i64 - dx, row as i64 - dy);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let relief = smoothed_buf[away + c] as f32 - smoothed_buf[toward + c] as f32;
+                out[c] = (128.0 + relief + bias).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14258,6 +14345,109 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.chalk_and_charcoal(999, 0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn plaster_relights_the_smoothed_relief_from_the_right() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp/photocopy/graphic_pen/
+        // chalk_and_charcoal all already share: 4x4, columns 0-1 solid
+        // 200, columns 2-3 solid 50. Smoothness 5 gives blur radius 1,
+        // reusing paint_daubs's own already-verified radius-1 row
+        // ([200, 150, 100, 50]). Light direction 2 (Right, angle 0)
+        // gives (dx, dy) = (1, 0), so `toward` is one column to the
+        // right and `away` one column to the left (both edge-clamped).
+        // At image balance 20 (the neutral midpoint, bias exactly 0):
+        // column 0's away is itself (clamped, 200), toward is column 1
+        // (150), relief 200-150=50, giving 128+50=178; column 1's away
+        // is column 0 (200), toward is column 2 (100), relief 100,
+        // giving 228; column 2's away is column 1 (150), toward is
+        // column 3 (50), relief 100, giving 228; column 3's away is
+        // column 2 (100), toward is itself (clamped, 50), relief 50,
+        // giving 178.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plaster(id, 20, 5, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [178, 178, 178, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [228, 228, 228, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [228, 228, 228, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [178, 178, 178, 255]);
+    }
+
+    #[test]
+    fn plaster_image_balance_biases_the_relief() {
+        // Same relief as the first test ([178, 228, 228, 178] before
+        // bias), but image balance 40 (maximum) biases by (40-20)/20*128
+        // = 128, pushing every value at or above 178 to a clamped 255;
+        // image balance 0 (minimum) biases by -128, pushing 178 down to
+        // 50 and 228 down to 100.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plaster(id, 40, 5, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 255, 255, 255]);
+        }
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plaster(id, 0, 5, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn plaster_light_direction_flips_the_relief_sign() {
+        // Light direction 6 (Left, angle 180) swaps toward and away
+        // relative to Right, negating every relief value: column 1's
+        // relief flips from +100 (giving 228 under Right) to -100
+        // (giving 28 under Left).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.plaster(id, 20, 5, 6).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [28, 28, 28, 255]);
+    }
+
+    #[test]
+    fn plaster_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.plaster(id, 20, 5, 2).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [228, 228, 228, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn plaster_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.plaster(id, 41, 5, 2).is_err());
+        assert!(doc.plaster(id, 20, 0, 2).is_err());
+        assert!(doc.plaster(id, 20, 16, 2).is_err());
+        assert!(doc.plaster(id, 20, 5, 8).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.plaster(id, 20, 5, 2).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.plaster(999, 20, 5, 2).is_err());
     }
 
     #[test]
