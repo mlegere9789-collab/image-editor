@@ -415,6 +415,10 @@ export default function App() {
   const [showNotePaperDialog, setShowNotePaperDialog] = useState(false);
   const [notePaperImageBalance, setNotePaperImageBalance] = useState(25);
   const [notePaperGraininess, setNotePaperGraininess] = useState(5);
+  const [showGraphicPenDialog, setShowGraphicPenDialog] = useState(false);
+  const [graphicPenStrokeLength, setGraphicPenStrokeLength] = useState(5);
+  const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] = useState(25);
+  const [graphicPenDirection, setGraphicPenDirection] = useState(1);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1292,6 +1296,17 @@ export default function App() {
     });
     setShowNotePaperDialog(false);
   }, [runCommand, selectedId, notePaperImageBalance, notePaperGraininess]);
+
+  const applyGraphicPen = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("graphic_pen", {
+      id: selectedId,
+      strokeLength: graphicPenStrokeLength,
+      lightDarkBalance: graphicPenLightDarkBalance,
+      direction: graphicPenDirection,
+    });
+    setShowGraphicPenDialog(false);
+  }, [runCommand, selectedId, graphicPenStrokeLength, graphicPenLightDarkBalance, graphicPenDirection]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2699,6 +2714,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Note Paper"
           >
             Note Paper…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGraphicPenDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Graphic Pen"
+          >
+            Graphic Pen…
           </button>
           <button
             className="button button--quiet"
@@ -5836,6 +5859,65 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyNotePaper} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGraphicPenDialog && (
+        <div className="modal-overlay" onClick={() => setShowGraphicPenDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Graphic Pen"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Graphic Pen</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{graphicPenStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={graphicPenStrokeLength}
+                onChange={(event) => setGraphicPenStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Light/Dark Balance
+                <span className="control__value">{graphicPenLightDarkBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={graphicPenLightDarkBalance}
+                onChange={(event) => setGraphicPenLightDarkBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Stroke Direction</span>
+              <select
+                value={graphicPenDirection}
+                onChange={(event) => setGraphicPenDirection(Number(event.target.value))}
+              >
+                <option value={0}>Right Diagonal</option>
+                <option value={1}>Horizontal</option>
+                <option value={2}>Left Diagonal</option>
+                <option value={3}>Vertical</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowGraphicPenDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyGraphicPen} disabled={busy}>
                 Apply
               </button>
             </div>

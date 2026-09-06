@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 138.**
+**618 distinct capabilities tracked. Currently shipped: 139.**
 
 ## PART I — EVERY TOOL
 
@@ -573,7 +573,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Chalk & CharcoalConverts imagery into a chalk-and-charcoal drawing appearance.
 - [ ] ChromeCreates a polished metallic/chrome-like tonal effect.
 - [ ] Conté CrayonSimulates drawing with Conté crayon on textured paper.
-- [ ] Graphic PenConverts image detail into pen-like strokes.
+- [x] Graphic Pen (Filter Gallery → Sketch; a single directional `motion_blur_at` streak — sharing `sprayed_strokes`'s own four-way direction convention — hard-thresholded by Light/Dark Balance, the same threshold idea `stamp` already uses — see README Phase 80)
 - [ ] Halftone PatternCreates a printed halftone appearance using dots, circles, lines, or other patterning.
 - [x] Note Paper (Filter Gallery → Sketch; a seeded `XorShift32` draw added to each pixel's own luma before a `stamp`-style hard threshold, mottling the black/white boundary into a hand-torn paper edge — Photoshop's own Relief embossing is a documented scope cut — see README Phase 79)
 - [x] Photocopy (Filter Gallery → Sketch; a dilated Sobel edge map hard-thresholded to black or white, reusing `ink_outlines`/`poster_edges`'s own edge machinery and `stamp`'s own threshold idea — Photoshop's own factoring-in of original luminance is a documented scope cut — see README Phase 77)

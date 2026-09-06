@@ -1761,6 +1761,21 @@ fn note_paper(
     })
 }
 
+/// Filter Gallery > Sketch > Graphic Pen on layer `id`.
+/// `direction`: 0 Right Diagonal, 1 Horizontal, 2 Left Diagonal, 3 Vertical.
+#[tauri::command]
+fn graphic_pen(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    light_dark_balance: u32,
+    direction: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.graphic_pen(id, stroke_length, light_dark_balance, direction)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2080,6 +2095,7 @@ pub fn run() {
             photocopy,
             reticulation,
             note_paper,
+            graphic_pen,
             hue_saturation,
             black_and_white,
             vibrance,

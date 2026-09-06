@@ -6244,6 +6244,68 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Graphic Pen: streaks the layer with a
+    /// single directional [`motion_blur_at`] pass — the same directional
+    /// line-sampling helper `motion_blur`, `crosshatch`, and
+    /// `sprayed_strokes` already use, sharing `sprayed_strokes`'s own
+    /// four-way direction convention — then hard-thresholds the result
+    /// to pure black or white by `light_dark_balance`, the same
+    /// threshold idea [`Self::stamp`] already uses. The directional
+    /// streak reads as fine, hatched pen strokes running one way rather
+    /// than the isotropic smoothing a box blur would give. A documented
+    /// approximation, not a port of Photoshop's own pen-and-ink
+    /// renderer. `direction` selects the stroke axis: `0` Right Diagonal,
+    /// `1` Horizontal, `2` Left Diagonal, `3` Vertical; `stroke_length`
+    /// (Photoshop's own `0..=15` range) is used directly as the streak's
+    /// half-length, small enough not to need this project's usual
+    /// scaling-down of longer-range stroke parameters; `light_dark_balance`
+    /// (Photoshop's own `0..=50` range) sets the threshold,
+    /// `light_dark_balance / 50 * 255`. Alpha untouched. Confined to the
+    /// selection, like every other filter here built on
+    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter, an
+    /// unrecognised direction, or a locked/unknown layer.
+    pub fn graphic_pen(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        light_dark_balance: u32,
+        direction: u32,
+    ) -> Result<Option<Rect>, String> {
+        if stroke_length > 15 {
+            return Err("Graphic Pen stroke length must be between 0 and 15.".to_string());
+        }
+        if light_dark_balance > 50 {
+            return Err("Graphic Pen light/dark balance must be between 0 and 50.".to_string());
+        }
+        if direction > 3 {
+            return Err(
+                "Graphic Pen direction must be 0 (Right Diagonal), 1 (Horizontal), 2 (Left Diagonal), or 3 (Vertical)."
+                    .to_string(),
+            );
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let half = stroke_length as i64;
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let (dx, dy): (f32, f32) = match direction {
+            0 => (inv_sqrt2, -inv_sqrt2),
+            1 => (1.0, 0.0),
+            2 => (inv_sqrt2, inv_sqrt2),
+            _ => (0.0, 1.0),
+        };
+        let threshold = light_dark_balance as f32 / 50.0 * 255.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let streaked =
+                motion_blur_at(src, doc_width, (width, height), (row, col), (dx, dy), half);
+            let luma = 0.299 * streaked[0] as f32
+                + 0.587 * streaked[1] as f32
+                + 0.114 * streaked[2] as f32;
+            let v = if luma >= threshold { 255 } else { 0 };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13926,6 +13988,109 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.note_paper(999, 25, 5, 1).is_err());
+    }
+
+    #[test]
+    fn graphic_pen_streaks_then_thresholds_to_black_or_white() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp/photocopy all already
+        // share: 4x4, columns 0-1 solid 200, columns 2-3 solid 50,
+        // vertically uniform. Direction 1 (Horizontal), stroke length 1
+        // (half 1): since dy is 0, the streak reduces to a pure
+        // horizontal 3-tap average, reusing paint_daubs's own already-
+        // verified radius-1 row ([200, 150, 100, 50]). At light/dark
+        // balance 20, the threshold is 20/50*255 = 102: columns 0 and 1
+        // (200, 150) clear it and render white; columns 2 and 3 (100,
+        // 50) fall short and render black -- the same pattern stamp's
+        // own first test already established, reached here through a
+        // directional streak instead of a box blur.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.graphic_pen(id, 1, 20, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn graphic_pen_stroke_length_widens_the_streak() {
+        // Stroke length 2 (half 2) widens the horizontal streak to the
+        // same 5-tap average paint_daubs's own radius-2 test already
+        // established: [170, 140, 110, 80]. At the same balance-20
+        // threshold of 102, column 2 (110) now clears it and renders
+        // white, unlike the shorter streak's own black result for that
+        // column -- confirming stroke length genuinely widens the
+        // streak before thresholding.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.graphic_pen(id, 2, 20, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn graphic_pen_direction_selects_the_streak_axis() {
+        // Direction 3 (Vertical) streaks along the column instead, which
+        // is a no-op on this vertically uniform fixture (every row
+        // already agrees), leaving column 1 at its own unstreaked
+        // original value of 200 -- unlike direction 1's own horizontal
+        // streak, which pulls column 1 down to 150. At light/dark
+        // balance 35 (threshold 178.5), that difference flips column 1's
+        // outcome: horizontal's streaked 150 falls short and renders
+        // black, while vertical's unstreaked 200 clears it and renders
+        // white.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.graphic_pen(id, 1, 35, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.graphic_pen(id, 1, 35, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn graphic_pen_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.graphic_pen(id, 1, 20, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn graphic_pen_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.graphic_pen(id, 16, 10, 1).is_err());
+        assert!(doc.graphic_pen(id, 1, 51, 1).is_err());
+        assert!(doc.graphic_pen(id, 1, 10, 4).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.graphic_pen(id, 1, 10, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.graphic_pen(999, 1, 10, 1).is_err());
     }
 
     #[test]

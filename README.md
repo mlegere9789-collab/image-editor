@@ -5437,6 +5437,74 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **608 Rust tests total** (604 → 608, 601 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 80 — Filter Gallery > Sketch > Graphic Pen
+
+Streaks the layer with a single directional `motion_blur_at` pass — the
+same directional line-sampling helper `motion_blur`, `crosshatch`, and
+`sprayed_strokes` already use, sharing `sprayed_strokes`'s own four-way
+direction convention — then hard-thresholds the result to pure black
+or white by `light_dark_balance`, the same threshold idea `stamp`
+already uses. The directional streak reads as fine, hatched pen
+strokes running one way rather than the isotropic smoothing a box blur
+would give. A documented approximation, not a port of Photoshop's own
+pen-and-ink renderer. `Document::graphic_pen(id, stroke_length,
+light_dark_balance, direction)`: `direction` selects the stroke axis —
+`0` Right Diagonal, `1` Horizontal, `2` Left Diagonal, `3` Vertical;
+`stroke_length` (Photoshop's own `0..=15` range) is used directly as
+the streak's half-length, small enough not to need this project's
+usual scaling-down of longer-range stroke parameters; `light_dark_balance`
+(Photoshop's own `0..=50` range) sets the threshold, `light_dark_balance
+/ 50 * 255`. Alpha untouched. A new **Graphic Pen…** dialog exposes
+Stroke Length and Light/Dark Balance sliders plus a Stroke Direction
+dropdown.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy` all
+already share (4×4, columns 0-1 solid `200`, columns 2-3 solid `50`,
+vertically uniform), and reusing `paint_daubs`'s own already-verified
+box-blur radius-1 and radius-2 rows directly, since a horizontal
+directional streak (`dy = 0`) reduces to the exact same 3-tap and
+5-tap horizontal averages a box blur produces on this fixture. At
+direction `1` (Horizontal), stroke length `1` (half `1`): the streak
+reduces to `[200, 150, 100, 50]`; at light/dark balance `20`
+(threshold `20 / 50 * 255 = 102`), columns `0` and `1` clear it and
+render white, columns `2` and `3` fall short and render black — the
+same pattern `stamp`'s own first test already established, reached
+here through a directional streak instead of a box blur. A second test
+raises stroke length to `2` (half `2`), reusing the radius-2 row
+`[170, 140, 110, 80]`: at the same threshold, column `2` (`110`) now
+clears it and renders white, confirming stroke length genuinely widens
+the streak. A third confirms direction selection: direction `3`
+(Vertical) streaks along the column instead, a no-op on this
+vertically uniform fixture, leaving column `1` at its own unstreaked
+original value of `200`; at light/dark balance `35` (threshold
+`178.5`), that difference flips column `1`'s outcome — horizontal's
+streaked `150` falls short and renders black, while vertical's
+unstreaked `200` clears it and renders white. A fourth confines the
+fixture to a one-pixel selection. A fifth confirms out-of-range stroke
+length and light/dark balance, plus an unrecognised direction and a
+locked/unknown layer, all error. All five passed on the first run — no
+independent Python script was needed since every averaged value here
+reuses `motion_blur_at`'s and `paint_daubs`'s own already-verified
+output directly, and the threshold compare is simple enough to verify
+by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**613 Rust tests total** (608 → 613, 606 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
