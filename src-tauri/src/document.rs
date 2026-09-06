@@ -6883,6 +6883,65 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Distort > Glass: displaces each pixel by a seeded
+    /// per-cell offset, sampled back with [`sample_nearest`] (the same
+    /// resampling primitive `ripple`/`twirl`/`pinch`/`spherize` and every
+    /// other Distort filter this project has already built already use)
+    /// — a blocky stand-in for a real glass texture's refraction, the
+    /// same kind of simplification Photoshop's own Texture types beyond
+    /// "Blocks" (Canvas, Frosted, Tiny Lens) and its Scaling and Invert
+    /// controls are a documented scope cut around. `smoothness`
+    /// (Photoshop's own `1..=15` range) is used directly as the cell's
+    /// own side length in pixels, the same "cell = size" convention
+    /// [`Self::halftone_pattern`]'s own `size` parameter already uses:
+    /// every pixel within a `smoothness`-pixel-square cell shares one
+    /// seeded `(dx, dy)` offset, two [`XorShift32`] draws per cell (drawn
+    /// in the same row-major cell order the pixels themselves are later
+    /// visited in) scaled by `distortion` (Photoshop's own `0..=20`
+    /// range, the offset's own maximum magnitude in pixels). Alpha is
+    /// resampled along with colour, matching every other
+    /// [`sample_nearest`]-based Distort filter. Confined to the
+    /// selection: cell offsets are always drawn for the whole,
+    /// unmodified source regardless of selection (the same approach
+    /// [`Self::plaster`] and [`Self::bas_relief`] already establish for
+    /// their own precomputed buffers), and only the selected pixels'
+    /// resampled output is written back.
+    pub fn glass(
+        &mut self,
+        id: LayerId,
+        distortion: u32,
+        smoothness: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if distortion > 20 {
+            return Err("Glass distortion must be between 0 and 20.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Glass smoothness must be between 1 and 15.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let cell = smoothness as i64;
+        let distortion = distortion as f32;
+        let cells_x = ((width + cell - 1) / cell) as usize;
+        let cells_y = ((height + cell - 1) / cell) as usize;
+        let mut rng = XorShift32::new(seed);
+        let mut offsets = vec![(0.0f32, 0.0f32); cells_x * cells_y];
+        for offset in offsets.iter_mut() {
+            let dx = distortion * rng.next_unit();
+            let dy = distortion * rng.next_unit();
+            *offset = (dx, dy);
+        }
+        self.filter_pixels(id, move |src, row, col| {
+            let icx = col as i64 / cell;
+            let icy = row as i64 / cell;
+            let (dx, dy) = offsets[icy as usize * cells_x + icx as usize];
+            let sx = col as f32 + dx;
+            let sy = row as f32 + dy;
+            sample_nearest(src, doc_width, (width, height), (sx, sy))
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -11915,6 +11974,24 @@ mod tests {
         (doc, id)
     }
 
+    fn column_stripes_fixture() -> (Document, LayerId) {
+        // 4x4, vertically uniform, each column its own solid grayscale
+        // value: column 0 is 10, column 1 is 20, column 2 is 30, column 3
+        // is 40. Used by glass's own tests, where a two-value fixture
+        // like ink_outlines_cliff_fixture's own can't tell a genuine
+        // pixel displacement apart from a coincidental no-op.
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                let v = 10 * (x + 1) as u8;
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("stripes", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
     #[test]
     fn ink_outlines_darkens_edges_and_lightens_flat_areas() {
         // Stroke length 1..=10 maps to dilation radius 0, so magnitude is
@@ -15524,6 +15601,111 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.diffuse_glow(999, 0, 10, 0, 1).is_err());
+    }
+
+    #[test]
+    fn glass_displaces_pixels_by_a_seeded_per_cell_offset() {
+        // The dedicated column-stripes fixture (4x4, columns 10/20/30/40)
+        // avoids the coincidental-no-op trap a two-value fixture would
+        // set: displacing a pixel to a differently-valued neighbour is
+        // unambiguous here. Smoothness 4 makes the whole 4x4 image one
+        // cell, so seed 1's own first two XorShift32 draws (270369,
+        // 67634689 out of u32::MAX, next_unit roughly -0.999874 and
+        // -0.968505) become every pixel's shared (dx, dy) offset at
+        // distortion 2: dx = 2*-0.999874 = -1.999748, dy =
+        // 2*-0.968505 = -1.93701. Row 0's own four pixels resample at:
+        //   col 0: (0-1.999748, 0-1.93701) = (-2.0, -1.94) -> rounds to
+        //     (-2, -2), clamped to (0, 0) -> value 10 (unchanged, a
+        //     genuine edge-clamp coincidence).
+        //   col 1: (-0.999748, -1.93701) -> rounds to (-1, -2), clamped
+        //     to (0, 0) -> value 10 (a real change from column 1's own
+        //     original 20).
+        //   col 2: (0.000252, -1.93701) -> rounds to (0, -2), clamped to
+        //     (0, 0) -> value 10 (a real change from 30).
+        //   col 3: (1.000252, -1.93701) -> rounds to (1, -2), clamped to
+        //     (0, 0) -> value 20 (a real change from 40).
+        // Cross-checked against an independent Python script that
+        // reproduces both the XorShift32 draws and sample_nearest's own
+        // half-away-from-zero rounding.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.glass(id, 2, 4, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn glass_zero_distortion_is_a_no_op() {
+        // Distortion 0 always resamples exactly at (col, row) regardless
+        // of the drawn offsets, a true no-op confirmed against the
+        // fixture's own original values.
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.glass(id, 0, 4, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn glass_smoothness_narrows_the_cell_size() {
+        // Same seed and distortion as the first test, but smoothness 2
+        // splits the image into four 2x2 cells instead of one, so column
+        // 2 (in the second cell along, covering columns 2-3) now draws
+        // its own offset from the *third* and *fourth* XorShift32 draws
+        // (2647435461, 307599695, next_unit roughly 0.232808 and
+        // -0.856787) rather than the first cell's own first two: dx =
+        // 2*0.232808 = 0.465616, dy = 2*-0.856787 = -1.713574. Column 2's
+        // pixel resamples at (2.465616, -1.713574) -> rounds to (2, -2),
+        // clamped to (2, 0) -> its own original value 30, unchanged --
+        // a real, hand-computed difference from the single-cell test's
+        // own column 2 result of 10, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.glass(id, 2, 2, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [30, 30, 30, 255]);
+    }
+
+    #[test]
+    fn glass_is_confined_to_the_selection() {
+        // Cell offsets are always drawn for the whole, unmodified source
+        // regardless of selection (the same approach plaster and
+        // bas_relief already establish), so selecting only column 1
+        // still produces the same 10 the unselected first test's own
+        // column 1 computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.glass(id, 2, 4, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn glass_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.glass(id, 21, 4, 1).is_err());
+        assert!(doc.glass(id, 2, 0, 1).is_err());
+        assert!(doc.glass(id, 2, 16, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.glass(id, 2, 4, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.glass(999, 2, 4, 1).is_err());
     }
 
     #[test]

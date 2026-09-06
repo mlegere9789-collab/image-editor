@@ -6019,6 +6019,70 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **652 Rust tests total** (647 → 652, 645 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 89 — Filter Gallery > Distort > Glass
+
+Displaces each pixel by a seeded per-cell offset, resampled with
+`sample_nearest` — the same resampling primitive `ripple`, `twirl`,
+`pinch`, `spherize`, and every other Distort filter this project has
+already built already use. A blocky stand-in for a real glass
+texture's refraction, the same kind of simplification Photoshop's own
+Texture types beyond "Blocks" (Canvas, Frosted, Tiny Lens) and its
+Scaling and Invert controls are a documented scope cut around.
+`Document::glass(id, distortion, smoothness, seed)`: `smoothness`
+(Photoshop's own `1..=15` range) is used directly as the cell's own
+side length in pixels, the same "cell = size" convention
+`halftone_pattern`'s own `size` parameter already uses — every pixel
+within a `smoothness`-pixel-square cell shares one seeded `(dx, dy)`
+offset, two `XorShift32` draws per cell (drawn in the same row-major
+cell order the pixels themselves are later visited in) scaled by
+`distortion` (Photoshop's own `0..=20` range, the offset's own maximum
+magnitude in pixels). Alpha is resampled along with colour, matching
+every other `sample_nearest`-based Distort filter. Confined to the
+selection: cell offsets are always drawn for the whole, unmodified
+source regardless of selection (the same approach `plaster` and
+`bas_relief` already establish for their own precomputed buffers), and
+only the selected pixels' resampled output is written back. A new
+**Glass…** dialog exposes Distortion and Smoothness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, introducing a
+dedicated `column_stripes_fixture` (4x4, each column its own solid
+grayscale value: `10`, `20`, `30`, `40`) specifically because the
+shared bright/dark cliff fixture's own two values can't tell a genuine
+pixel displacement apart from a coincidental no-op. With smoothness `4`
+(the whole 4x4 image one cell) and distortion `2`, seed `1`'s own first
+two `XorShift32` draws (`270369`, `67634689` out of `u32::MAX`,
+`next_unit` roughly `-0.999874` and `-0.968505`) become every pixel's
+shared offset (`dx = -1.999748`, `dy = -1.93701`): row `0`'s four
+pixels resample at positions that round (clamped to the layer) to
+`10, 10, 10, 20` — three of the four a genuine, hand-computed change
+from their own original `20`, `30`, `40`. A second test confirms
+distortion `0` is a true no-op regardless of the drawn offsets. A third
+narrows smoothness to `2` (four `2×2` cells instead of one), so column
+`2` now draws from the *third* and *fourth* `XorShift32` draws instead
+of the first cell's own first two, resampling back to its own original
+`30` unchanged — a real, hand-computed difference from the single-cell
+test's own column `2` result of `10`, not a coincidental match. A
+fourth confines the fixture to a single-pixel selection at column `1`.
+A fifth confirms out-of-range distortion and smoothness, plus a
+locked/unknown layer, all error. All five tests passed on the first
+run, cross-checked against an independent Python script that
+reproduces both the `XorShift32` draws and `sample_nearest`'s own
+half-away-from-zero rounding.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**657 Rust tests total** (652 → 657, 650 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

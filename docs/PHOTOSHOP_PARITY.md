@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 147.**
+**618 distinct capabilities tracked. Currently shipped: 148.**
 
 ## PART I — EVERY TOOL
 
@@ -567,7 +567,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Sprayed Strokes (Filter Gallery → Brush Strokes; a separable approximation built from two `motion_blur_at` passes at right angles — one streaking along the chosen direction, one thickening perpendicular to it — rather than a true 2-D rectangular brush — see README Phase 67)
 - [x] Sumi-e (Filter Gallery → Brush Strokes; erodes each channel toward its own darkest `extreme_at` neighbour to widen ink strokes, then reapplies `brightness_contrast`'s own formula to push the result toward saturated black-on-white — completes the Brush Strokes gallery — see README Phase 68)
 - [x] Diffuse Glow (Filter Gallery → Distort; pushes each pixel's own colour toward white in proportion to its own brightness, keeping colour rather than reducing to grayscale like every Sketch-gallery filter so far — Graininess adds a seeded `XorShift32` draw to the brightness estimate, the same per-pixel draw `note_paper`/`reticulation` already use — Photoshop's own more nuanced tone-range clipping for Clear Amount is a documented scope cut — see README Phase 88)
-- [ ] GlassMakes the image appear as though viewed through textured or distorted glass.
+- [x] Glass (Filter Gallery → Distort; displaces each pixel by a seeded per-cell offset resampled with `sample_nearest`, the same resampling primitive `ripple`/`twirl`/`pinch`/`spherize` already use — a blocky "Blocks"-texture stand-in for real glass refraction — Photoshop's own Canvas/Frosted/Tiny Lens textures, Scaling, and Invert are documented scope cuts — see README Phase 89)
 - [ ] Ocean RippleCreates wave-like distortions resembling an image viewed through rippling water.
 - [x] Bas Relief (Filter Gallery → Sketch; box-blurs the source, computes standard-weighted luma of the blur, then reuses `emboss`'s own `away - toward` relief shape at a fixed 1-pixel sample distance and `plaster`'s own 8-direction angle table, scaled by `detail` — grayscale output, not per-channel colour, is what distinguishes it from `plaster` — see README Phase 85)
 - [x] Chalk & Charcoal (Filter Gallery → Sketch; a three-way threshold on `box_blur_at`-smoothed luma — pure black below a dark threshold, pure white above a light threshold, mid-grey between — rather than the two-way splits `stamp`/`photocopy`/`graphic_pen` already use — Photoshop's own foreground/background colouring is a documented scope cut — see README Phase 81)

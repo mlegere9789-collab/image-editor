@@ -450,6 +450,9 @@ export default function App() {
   const [diffuseGlowGraininess, setDiffuseGlowGraininess] = useState(4);
   const [diffuseGlowGlowAmount, setDiffuseGlowGlowAmount] = useState(10);
   const [diffuseGlowClearAmount, setDiffuseGlowClearAmount] = useState(10);
+  const [showGlassDialog, setShowGlassDialog] = useState(false);
+  const [glassDistortion, setGlassDistortion] = useState(5);
+  const [glassSmoothness, setGlassSmoothness] = useState(4);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1436,6 +1439,18 @@ export default function App() {
     diffuseGlowGlowAmount,
     diffuseGlowClearAmount,
   ]);
+
+  const applyGlass = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("glass", {
+      id: selectedId,
+      distortion: glassDistortion,
+      smoothness: glassSmoothness,
+      seed,
+    });
+    setShowGlassDialog(false);
+  }, [runCommand, selectedId, glassDistortion, glassSmoothness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -3067,6 +3082,14 @@ export default function App() {
             title="Filter Gallery > Distort > Diffuse Glow"
           >
             Diffuse Glow…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGlassDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Distort > Glass"
+          >
+            Glass…
           </button>
           <button
             className="button button--quiet"
@@ -7637,6 +7660,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDiffuseGlow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGlassDialog && (
+        <div className="modal-overlay" onClick={() => setShowGlassDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Glass"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Glass</h2>
+            <label className="control">
+              <span className="control__label">
+                Distortion
+                <span className="control__value">{glassDistortion}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={glassDistortion}
+                onChange={(event) => setGlassDistortion(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{glassSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={glassSmoothness}
+                onChange={(event) => setGlassSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowGlassDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyGlass} disabled={busy}>
                 Apply
               </button>
             </div>
