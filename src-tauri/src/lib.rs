@@ -2036,6 +2036,20 @@ fn selective_color(
     })
 }
 
+/// Layer > Layer Style > Stroke on layer `id`, baked in destructively.
+#[tauri::command]
+fn stroke_outline(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.stroke_outline(id, size, color, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2374,6 +2388,7 @@ pub fn run() {
             stained_glass,
             craquelure,
             selective_color,
+            stroke_outline,
             hue_saturation,
             black_and_white,
             vibrance,

@@ -6614,6 +6614,59 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **703 Rust tests total** (697 → 703, 696 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 99 — Layer > Layer Style > Stroke
+
+Paints a solid outline in `color` around the layer's own opaque
+content, `size` pixels deep, in Photoshop's own "Outside" position,
+baked in destructively — only a fully-transparent pixel with an opaque
+neighbour within `size` pixels (Chebyshev distance, the same square-
+neighbourhood shape `extreme_at` already uses, rather than a true
+circular distance) becomes stroke; every already-opaque pixel is left
+completely alone. `Document::stroke_outline(id, size, color, opacity)`
+is named `stroke_outline` rather than `stroke` since that name is
+already taken by the brush-path paint tool. `size` is Photoshop's own
+`1..=250` range; `opacity` (Photoshop's own `0..=100` range) scales
+the stroke's own alpha, `opacity / 100.0 * 255.0`. Photoshop's own
+Inside and Center stroke positions, its Blend Mode control, and the
+fact that a real layer style stays live and editable rather than
+baking into the pixels are all documented scope cuts — this project's
+layer model has no non-destructive style stack, the same one-shot-bake
+stance every filter in this project already takes. A new **Stroke…**
+dialog exposes Size, a colour picker, and Opacity.
+
+**Verified two ways.** Five new `document.rs` tests, introducing a
+dedicated `stroke_outline_fixture` (6x6, a solid opaque 2x2 block at
+rows 2-3, columns 2-3, everywhere else fully transparent) — big enough
+that a size-1 stroke doesn't reach every corner of the canvas, unlike
+a 4x4 grid with a centred block would. Size `1` reaches `(1, 1)` (its
+own 3x3 neighbourhood includes the block's own `(2, 2)`) but not the
+far corner `(0, 0)` (whose own clamped neighbourhood never reaches row
+`2`); the block's own `(2, 2)` is left completely alone. A second test
+raises size to `2`, widening `(0, 0)`'s own neighbourhood far enough
+to reach the block and stroke it — a real, hand-computed change from
+the size-`1` test's own untouched result. A third drops opacity to
+`50`, mapping to a rounded alpha of `128` instead of the full `255` —
+real, not a coincidental match. A fourth confines the fixture to a
+single-pixel selection at `(1, 1)`. A fifth confirms out-of-range
+size and opacity, plus a locked/unknown layer, all error. All five
+tests passed on the first run, hand-derived directly from the
+Chebyshev-distance definition with no floating-point ambiguity beyond
+the opacity test's own single half-boundary rounding.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**708 Rust tests total** (703 → 708, 701 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

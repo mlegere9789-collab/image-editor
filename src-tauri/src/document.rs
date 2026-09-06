@@ -7566,6 +7566,66 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Stroke, baked in destructively: paints a
+    /// solid outline in `color` around the layer's own opaque content,
+    /// `size` pixels deep, in Photoshop's own "Outside" position — only
+    /// a fully-transparent pixel with an opaque neighbour within `size`
+    /// pixels (Chebyshev distance, the same square-neighbourhood shape
+    /// [`extreme_at`] already uses, rather than a true circular
+    /// distance) becomes stroke; every already-opaque pixel is left
+    /// completely alone. Named `stroke_outline` rather than `stroke`
+    /// since that name is already taken by the brush-path paint tool.
+    /// `size` is Photoshop's own `1..=250` range; `opacity` (Photoshop's
+    /// own `0..=100` range) scales the stroke's own alpha, `opacity /
+    /// 100.0 * 255.0`. Photoshop's own Inside and Center stroke
+    /// positions, its Blend Mode control, and the fact that a real layer
+    /// style stays live and editable rather than baking into the pixels
+    /// are all documented scope cuts — this project's layer model has no
+    /// non-destructive style stack, the same one-shot-bake stance every
+    /// filter in this project already takes.
+    pub fn stroke_outline(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Stroke size must be between 1 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Stroke opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let stroke_alpha = (opacity as f32 / 100.0 * 255.0).round().clamp(0.0, 255.0) as u8;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] > 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            for dy in -radius..=radius {
+                let ny = row + dy;
+                if ny < 0 || ny >= height {
+                    continue;
+                }
+                for dx in -radius..=radius {
+                    let nx = col + dx;
+                    if nx < 0 || nx >= width {
+                        continue;
+                    }
+                    let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
+                    if src[nbase + 3] > 0 {
+                        return [color[0], color[1], color[2], stroke_alpha];
+                    }
+                }
+            }
+            [src[base], src[base + 1], src[base + 2], src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17219,6 +17279,102 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.selective_color(999, 0, 0, 0, 0).is_err());
+    }
+
+    fn stroke_outline_fixture() -> (Document, LayerId) {
+        // 6x6, a solid opaque 2x2 block (100,150,200,255) at rows 2-3,
+        // columns 2-3, everywhere else fully transparent (0,0,0,0). Big
+        // enough that a size-1 stroke doesn't reach every corner of the
+        // canvas, unlike a 4x4 grid would with a centred block.
+        let mut pixels = Vec::with_capacity(6 * 6 * 4);
+        for row in 0..6u32 {
+            for col in 0..6u32 {
+                if (2..=3).contains(&row) && (2..=3).contains(&col) {
+                    pixels.extend_from_slice(&[100, 150, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        let mut doc = Document::new(6, 6).unwrap();
+        let id = doc.add_layer("block", &pixels, 6, 6).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn stroke_outline_paints_outside_the_shapes_edge() {
+        // Size 1 (Chebyshev distance) reaches (1, 1) -- its own 3x3
+        // neighbourhood (rows 0-2, columns 0-2) includes the opaque
+        // block cell (2, 2) -- but not the far corner (0, 0), whose own
+        // neighbourhood (rows -1..1 clamped to 0-1, columns -1..1
+        // clamped to 0-1) never reaches row 2. The block's own opaque
+        // pixel (2, 2) is left completely alone.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline(id, 1, [255, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn stroke_outline_size_widens_the_outline() {
+        // Size 2 widens (0, 0)'s own neighbourhood to rows/columns 0-2,
+        // now reaching the block's own (2, 2) -- a real, hand-computed
+        // change from the size-1 test's own untouched [0, 0, 0, 0].
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline(id, 2, [255, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stroke_outline_opacity_scales_the_alpha() {
+        // Opacity 50 maps to 0.5*255 = 127.5, rounding (half away from
+        // zero) to 128 instead of size-1's own full 255 -- a real,
+        // hand-computed change, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline(id, 1, [255, 0, 0], 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 0, 0, 128]);
+    }
+
+    #[test]
+    fn stroke_outline_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.stroke_outline(id, 1, [255, 0, 0], 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 1)..idx(1, 1) + 4], [255, 0, 0, 255]);
+        assert_eq!(after[..idx(1, 1)], before[..idx(1, 1)]); // unselected, untouched
+        assert_eq!(after[idx(1, 1) + 4..], before[idx(1, 1) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn stroke_outline_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.stroke_outline(id, 0, [255, 0, 0], 100).is_err());
+        assert!(doc.stroke_outline(id, 251, [255, 0, 0], 100).is_err());
+        assert!(doc.stroke_outline(id, 1, [255, 0, 0], 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stroke_outline(id, 1, [255, 0, 0], 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.stroke_outline(999, 1, [255, 0, 0], 100).is_err());
     }
 
     #[test]

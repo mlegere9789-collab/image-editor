@@ -241,6 +241,10 @@ export default function App() {
   const [selectiveColorMagenta, setSelectiveColorMagenta] = useState(0);
   const [selectiveColorYellow, setSelectiveColorYellow] = useState(0);
   const [selectiveColorBlack, setSelectiveColorBlack] = useState(0);
+  const [showStrokeOutlineDialog, setShowStrokeOutlineDialog] = useState(false);
+  const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
+  const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
+  const [strokeOutlineOpacity, setStrokeOutlineOpacity] = useState(100);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -790,6 +794,18 @@ export default function App() {
     selectiveColorYellow,
     selectiveColorBlack,
   ]);
+
+  const applyStrokeOutline = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(strokeOutlineColor);
+    await runCommand("stroke_outline", {
+      id: selectedId,
+      size: strokeOutlineSize,
+      color: [r, g, b],
+      opacity: strokeOutlineOpacity,
+    });
+    setShowStrokeOutlineDialog(false);
+  }, [runCommand, selectedId, strokeOutlineSize, strokeOutlineColor, strokeOutlineOpacity]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2617,6 +2633,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowStrokeOutlineDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Stroke"
+          >
+            Stroke…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4095,6 +4119,68 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySelectiveColor} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStrokeOutlineDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowStrokeOutlineDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Stroke"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Stroke</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{strokeOutlineSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={strokeOutlineSize}
+                onChange={(event) => setStrokeOutlineSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={strokeOutlineColor}
+                onChange={(event) => setStrokeOutlineColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{strokeOutlineOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={strokeOutlineOpacity}
+                onChange={(event) => setStrokeOutlineOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowStrokeOutlineDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyStrokeOutline} disabled={busy}>
                 Apply
               </button>
             </div>
