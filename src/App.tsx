@@ -587,6 +587,10 @@ export default function App() {
   const [unsharpMaskRadius, setUnsharpMaskRadius] = useState(2);
   const [unsharpMaskAmount, setUnsharpMaskAmount] = useState(100);
   const [unsharpMaskThreshold, setUnsharpMaskThreshold] = useState(4);
+  const [showSmartSharpenDialog, setShowSmartSharpenDialog] = useState(false);
+  const [smartSharpenRadius, setSmartSharpenRadius] = useState(2);
+  const [smartSharpenAmount, setSmartSharpenAmount] = useState(100);
+  const [smartSharpenReduceNoise, setSmartSharpenReduceNoise] = useState(10);
 
   const [showMotionBlurDialog, setShowMotionBlurDialog] = useState(false);
   const [motionBlurAngle, setMotionBlurAngle] = useState(0);
@@ -2058,6 +2062,17 @@ export default function App() {
     setShowUnsharpMaskDialog(false);
   }, [runCommand, selectedId, unsharpMaskRadius, unsharpMaskAmount, unsharpMaskThreshold]);
 
+  const applySmartSharpen = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("smart_sharpen", {
+      id: selectedId,
+      radius: smartSharpenRadius,
+      amount: smartSharpenAmount / 100,
+      reduceNoise: smartSharpenReduceNoise,
+    });
+    setShowSmartSharpenDialog(false);
+  }, [runCommand, selectedId, smartSharpenRadius, smartSharpenAmount, smartSharpenReduceNoise]);
+
   const applyMotionBlur = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("motion_blur", {
@@ -3067,6 +3082,14 @@ export default function App() {
             title="Filter > Sharpen > Unsharp Mask"
           >
             Unsharp Mask…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSmartSharpenDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Sharpen > Smart Sharpen"
+          >
+            Smart Sharpen…
           </button>
           <button
             className="button button--quiet"
@@ -5914,6 +5937,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyUnsharpMask} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSmartSharpenDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSmartSharpenDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Smart Sharpen"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Sharpen &gt; Smart Sharpen</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{smartSharpenAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={500}
+                value={smartSharpenAmount}
+                onChange={(event) => setSmartSharpenAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{smartSharpenRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={40}
+                value={smartSharpenRadius}
+                onChange={(event) => setSmartSharpenRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Reduce Noise
+                <span className="control__value">{smartSharpenReduceNoise}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={smartSharpenReduceNoise}
+                onChange={(event) => setSmartSharpenReduceNoise(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSmartSharpenDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySmartSharpen} disabled={busy}>
                 Apply
               </button>
             </div>

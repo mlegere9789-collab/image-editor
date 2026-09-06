@@ -1608,6 +1608,84 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Filter > Sharpen > Smart Sharpen: [`Self::unsharp_mask`]'s own
+    /// sharpening formula (`original + (original − blurred) * amount`,
+    /// clamped, no threshold gate — Photoshop's own Smart Sharpen dialog
+    /// drops Threshold entirely) blended back toward a
+    /// [`median_at`]-denoised copy of the original by `reduce_noise`
+    /// percent — `sharpened * (1.0 - frac) + denoised * frac`, where
+    /// `frac = reduce_noise / 100.0`. This is a documented, transparent
+    /// approximation of Photoshop's own proprietary noise-aware
+    /// deconvolution sharpening — composed entirely from two primitives
+    /// this project already has and has already verified independently
+    /// (`box_blur_at` behind [`Self::unsharp_mask`]'s own low-pass, and
+    /// [`median_at`] behind [`Self::median`]) rather than reverse-
+    /// engineering Photoshop's own undocumented algorithm, the same kind
+    /// of honest substitution [`Self::chrome`] and [`Self::glass`] already
+    /// make for filters this project can't port exactly. A `reduce_noise`
+    /// of zero collapses to plain [`Self::unsharp_mask`] with no
+    /// threshold; a `reduce_noise` of `100` collapses to a pure median
+    /// denoise, ignoring the sharpening pass entirely. The median denoise
+    /// radius is fixed at `1`, a documented simplification — Photoshop's
+    /// own Reduce Noise slider has no separate radius control either.
+    /// `radius` and `amount` share [`Self::unsharp_mask`]'s own ranges
+    /// and error conditions (a zero radius or a non-finite/non-positive
+    /// amount); `reduce_noise` is Photoshop's own `0..=100` dialog range.
+    /// Alpha is left untouched throughout.
+    pub fn smart_sharpen(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        amount: f32,
+        reduce_noise: u32,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Smart Sharpen radius must be at least 1 pixel.".to_string());
+        }
+        if !amount.is_finite() || amount <= 0.0 {
+            return Err(format!(
+                "Smart Sharpen amount must be a positive number, got {amount}."
+            ));
+        }
+        if reduce_noise > 100 {
+            return Err("Smart Sharpen reduce noise must be between 0 and 100.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = radius as i64;
+        let noise_frac = reduce_noise as f32 / 100.0;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let denoised = median_at(&source, doc_width, width, height, row, col, 1);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as i32;
+                    let diff = original - blurred[c] as i32;
+                    let sharpened = (original as f32 + diff as f32 * amount)
+                        .round()
+                        .clamp(0.0, 255.0);
+                    let final_value =
+                        sharpened * (1.0 - noise_frac) + denoised[c] as f32 * noise_frac;
+                    layer.pixels[dst + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Filter > Blur > Blur: Photoshop's one-click "just soften it a
     /// touch" preset — a [`Self::box_blur`] at the smallest possible
     /// radius (1, a 3x3 window), no dialog. Photoshop's own Blur is a
@@ -10145,6 +10223,102 @@ mod tests {
     fn unsharp_mask_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.unsharp_mask(999, 1, 1.0, 0).is_err());
+    }
+
+    #[test]
+    fn smart_sharpen_blends_the_sharpened_and_denoised_results() {
+        // ramped_3x3's own R-only ramp. Radius 1, amount 0.5, reduce
+        // noise 50. Pixel (0, 0): its own radius-1 box-blur average is
+        // (10+10+20+10+10+20+40+40+50)/9 = 210/9 = 23 (truncating), diff
+        // = 10-23 = -13, sharpened = 10 + (-13*0.5) = 3.5, rounds to 4.
+        // Its own radius-1 median is the middle of the sorted window
+        // [10,10,10,10,20,20,40,40,50], which is 20. Blending
+        // 4*(1-0.5) + 20*0.5 = 2+10 = 12. Pixel (2, 2): box-blur average
+        // (50+60+60+80+90+90+80+90+90)/9 = 690/9 = 76 (truncating), diff
+        // = 90-76 = 14, sharpened = 90 + 14*0.5 = 97, its own median is
+        // 80, blending 97*0.5 + 80*0.5 = 88.5, rounding away from zero
+        // to 89.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.smart_sharpen(id, 1, 0.5, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 12);
+        assert_eq!(p[idx(2, 2)], 89);
+    }
+
+    #[test]
+    fn smart_sharpen_reduce_noise_zero_matches_plain_unsharp_mask() {
+        // Reduce noise 0 collapses the blend entirely onto the
+        // sharpened value alone: pixel (0, 0)'s own sharpened value,
+        // 3.5 rounding to 4, with no threshold gate (Smart Sharpen has
+        // none) -- a real, hand-computed change from the reduce-
+        // noise-50 test's own blended 12, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.smart_sharpen(id, 1, 0.5, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 4);
+    }
+
+    #[test]
+    fn smart_sharpen_reduce_noise_100_matches_pure_median_denoise() {
+        // Reduce noise 100 collapses the blend entirely onto the
+        // median-denoised value alone, 20, ignoring the sharpening
+        // pass's own diff-and-amplify step completely.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.smart_sharpen(id, 1, 0.5, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 20);
+    }
+
+    #[test]
+    fn smart_sharpen_amount_scales_the_sharpened_half_of_the_blend() {
+        // Same pixel (0, 0), reduce noise 50, but amount 1.0 doubles
+        // the sharpening: sharpened = 10 + (-13*1.0) = -3, clamped to
+        // 0, blended 0*0.5 + 20*0.5 = 10 -- a real, hand-computed
+        // change from the amount-0.5 test's own 12, not a coincidental
+        // match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.smart_sharpen(id, 1, 1.0, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 10);
+    }
+
+    #[test]
+    fn smart_sharpen_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.smart_sharpen(id, 1, 0.5, 50).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 12);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn smart_sharpen_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.smart_sharpen(id, 0, 1.0, 50).is_err());
+        assert!(doc.smart_sharpen(id, 1, 0.0, 50).is_err());
+        assert!(doc.smart_sharpen(id, 1, f32::NAN, 50).is_err());
+        assert!(doc.smart_sharpen(id, 1, 1.0, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.smart_sharpen(id, 1, 1.0, 50).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.smart_sharpen(999, 1, 1.0, 50).is_err());
     }
 
     #[test]

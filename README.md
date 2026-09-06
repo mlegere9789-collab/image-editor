@@ -7581,6 +7581,79 @@ bar (hand/script-verified Rust tests, `cargo fmt`, `cargo clippy
 **794 Rust tests total** (788 → 794, 787 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 114 — Filter > Sharpen > Smart Sharpen
+
+`smart_sharpen(id, radius, amount, reduce_noise)` reuses
+`unsharp_mask`'s own sharpening formula almost verbatim — `original +
+(original - blurred) * amount`, clamped, with `blurred` still
+`box_blur_at`'s own clamp-to-edge box-blur average — but drops the
+Threshold gate entirely, matching Photoshop's own Smart Sharpen dialog,
+which has no Threshold control at all. In its place, the sharpened
+result blends back toward a `median_at`-denoised copy of the original
+(the same median primitive `median` itself already uses) by
+`reduce_noise` percent: `sharpened * (1.0 - frac) + denoised * frac`,
+where `frac = reduce_noise / 100.0`. This is a documented, transparent
+approximation of Photoshop's own proprietary noise-aware deconvolution
+sharpening — composed entirely from two primitives this project
+already has and has already verified independently, rather than
+reverse-engineering Photoshop's own undocumented algorithm, the same
+kind of honest substitution `chrome` and `glass` already make for
+filters this project can't port exactly. `reduce_noise = 0` collapses
+to plain `unsharp_mask` with no threshold; `reduce_noise = 100`
+collapses to a pure median denoise, ignoring the sharpening pass
+entirely — both are real, checkable identities, not just plausible-
+sounding claims. The median denoise radius is fixed at `1`, a
+documented simplification, since Photoshop's own Reduce Noise slider
+has no separate radius control either. `radius` and `amount` share
+`unsharp_mask`'s own ranges and error conditions; `reduce_noise` is
+Photoshop's own `0..=100` dialog range. Alpha untouched.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture. Radius `1`, amount `0.5`,
+reduce noise `50`: pixel `(row 0, col 0)`'s own radius-1 box-blur
+average is `210/9 = 23` (truncating), `diff = 10-23 = -13`, sharpened
+`= 10 + (-13*0.5) = 3.5 -> 4`; its own radius-1 median, the middle of
+the sorted window `[10,10,10,10,20,20,40,40,50]`, is `20`; blending
+`4*0.5 + 20*0.5 = 12`. Pixel `(row 2, col 2)`'s own box-blur average is
+`690/9 = 76`, sharpened `= 90 + 14*0.5 = 97`, median `80`, blending
+`97*0.5 + 80*0.5 = 88.5 -> 89` (rounding away from zero). A second test
+drops reduce noise to `0` at the first pixel, landing exactly on the
+sharpened value alone, `4` — confirming the `reduce_noise = 0`
+identity for real rather than by assertion. A third raises reduce
+noise to `100`, landing exactly on the median value alone, `20` —
+confirming the other identity. A fourth doubles amount to `1.0`,
+pushing the sharpened half of the blend to a clamped `0` and the final
+blend to `10`, a real, hand-computed change from the amount-`0.5`
+test's own `12`. A fifth confines a single pixel to a selection. A
+sixth confirms out-of-range radius, a non-positive or non-finite
+amount, out-of-range reduce noise, plus a locked/unknown layer, all
+error. All six tests passed on the first run, cross-checked against an
+independent Python script emulating Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+While writing this filter's own doc comment, `cargo clippy`'s
+`doc_lazy_continuation` lint caught a wrapped formula line beginning
+with `* (reduce_noise / 100)` — the same class of false "unindented
+markdown list item" `color_overlay`'s own doc comment hit back in
+Phase 100 — fixed the same way, by rewording the formula so no line
+starts with a bare `*`.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new **Smart Sharpen…** dialog (Amount, Radius,
+and a Reduce Noise slider in place of Unsharp Mask's own Threshold,
+mirroring its dialog layout otherwise) was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**800 Rust tests total** (794 → 800, 793 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

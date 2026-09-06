@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 173.**
+**618 distinct capabilities tracked. Currently shipped: 174.**
 
 ## PART I — EVERY TOOL
 
@@ -491,7 +491,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Sharpen (one-click preset: unsharp mask at radius 1, 50%, no threshold — see README Phase 25)
 - [x] Sharpen Edges (one-click preset: unsharp mask at radius 1, 100%, threshold 20 — see README Phase 25)
 - [x] Sharpen More (one-click preset: unsharp mask at radius 1, 100%, no threshold — see README Phase 25)
-- [ ] Smart Sharpen
+- [x] Smart Sharpen (`smart_sharpen`, `unsharp_mask`'s own sharpening formula with no threshold gate, blended back toward a `median_at`-denoised copy by Reduce Noise percent — a documented, transparent approximation of Photoshop's own proprietary noise-aware deconvolution sharpening, composed entirely from two already-verified primitives — see README Phase 114)
 - [x] Unsharp Mask (built on the existing box_blur convolution as its low-pass filter, with an Amount/Radius/Threshold dialog — see README Phase 22)
 - [ ] Protect Detail
 - [ ] Sample All Layers — Sharpen

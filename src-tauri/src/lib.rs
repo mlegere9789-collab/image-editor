@@ -671,6 +671,20 @@ fn unsharp_mask(
     })
 }
 
+/// Filter > Sharpen > Smart Sharpen on layer `id`.
+#[tauri::command]
+fn smart_sharpen(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    amount: f32,
+    reduce_noise: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.smart_sharpen(id, radius, amount, reduce_noise)
+    })
+}
+
 /// Filter > Blur > Blur on layer `id`.
 #[tauri::command]
 fn blur(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -2491,6 +2505,7 @@ pub fn run() {
             fill_selection,
             box_blur,
             unsharp_mask,
+            smart_sharpen,
             motion_blur,
             sprayed_strokes,
             blur,
