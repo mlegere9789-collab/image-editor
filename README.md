@@ -4592,6 +4592,69 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **539 Rust tests total** (534 → 539, 532 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 66 — Filter Gallery > Brush Strokes > Angled Strokes
+
+Repaints each pixel with one of two diagonal `motion_blur_at` passes —
+the same "\" and "/" strokes `crosshatch` already computes — chosen by
+the *original* pixel's own luma against a threshold, rather than
+combined by taking the darker of the two. `Document::angled_strokes(id,
+direction_balance, stroke_length, sharpness)`: `direction_balance`
+(Photoshop's own `0..=100` range) sets that threshold as `255 *
+direction_balance / 100`: light pixels (luma at or above the threshold)
+are painted with the "\" stroke, dark pixels with the "/" stroke, so
+raising the balance shifts more of the image into the "/" camp — this
+models Photoshop's own behaviour of angling strokes one way through
+light areas and the other way through dark ones. `stroke_length`
+(Photoshop's own `3..=50` range) scales down into each diagonal's own
+half-length the same way `crosshatch`'s own stroke length does,
+`(stroke_length / 10).max(1)`. `sharpness` (Photoshop's own `0..=10`
+range) blends the chosen stroke back toward the original pixel, `orig *
+(sharpness / 10) + stroke * (1 - sharpness / 10)`, the same blend-back
+shape `crosshatch`'s own sharpness uses over its own range. A documented
+approximation, not a port of Photoshop's real direction-aware renderer.
+A new **Angled Strokes…** dialog exposes Direction Balance, Stroke
+Length, and Sharpness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing
+`crosshatch`'s own "spike" fixture (3×3, flat grey `50` except a bright
+`200` at the bottom-right corner) and its already-verified diagonal
+averages at stroke length `3` (half `1`): the centre `(1,1)` is `100`
+along "\" and `50` along "/"; the spike corner `(2,2)` is `150` along
+"\" and `100` along "/". At direction balance `50` (threshold `127.5`)
+and sharpness `0`: the centre's own luma is `50`, below the threshold,
+so it is painted with "/" (`50`) — unchanged from its original value;
+the corner's own luma is `200`, at or above the threshold, so it is
+painted with "\" (`150`) instead of "/" (`100`), a real,
+direction-dependent change worked out by hand. A second test raises
+direction balance to `90` (threshold `229.5`), now above the corner's
+own luma of `200`, flipping it onto the "/" side and landing on `100`
+instead of `150` — confirming the threshold actually moves. A third
+keeps balance `50` but raises sharpness to `5` (blend factor `0.5`):
+the corner's chosen stroke value `150` blends with the original `200`
+exactly halfway to `175.0`, needing no rounding. A fourth confines the
+fixture to a one-pixel selection covering the spike corner and confirms
+only that pixel changes. A fifth confirms out-of-range direction
+balance, stroke length, and sharpness, plus a locked/unknown layer, all
+error. All five passed on the first run, matching the hand-computed
+values exactly — no independent Python script was needed since every
+value here reuses `crosshatch`'s own already Python-cross-checked
+diagonal averages, and the remaining arithmetic (a threshold compare
+and a linear blend) is simple enough to verify directly by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**544 Rust tests total** (539 → 544, 537 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

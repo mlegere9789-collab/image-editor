@@ -4608,6 +4608,85 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Angled Strokes: repaints each
+    /// pixel with one of two diagonal [`motion_blur_at`] passes — the same
+    /// "\" and "/" strokes [`Self::crosshatch`] already computes — chosen
+    /// by the *original* pixel's own luma against a threshold, rather than
+    /// combined by taking the darker of the two. `direction_balance`
+    /// (Photoshop's own `0..=100` range) sets that threshold as
+    /// `255 * direction_balance / 100`: light pixels (luma at or above the
+    /// threshold) are painted with the "\" stroke, dark pixels with the
+    /// "/" stroke, so raising the balance shifts more of the image into
+    /// the "/" camp. This models Photoshop's own behaviour of angling
+    /// strokes one way through light areas and the other way through dark
+    /// ones. A documented approximation, not a port of Photoshop's real
+    /// direction-aware renderer. `stroke_length` (Photoshop's own `3..=50`
+    /// range) scales down into each diagonal's own half-length the same
+    /// way `crosshatch`'s own stroke length does, `(stroke_length / 10)
+    /// .max(1)`. `sharpness` (Photoshop's own `0..=10` range) blends the
+    /// chosen stroke back toward the *original* pixel, `orig · (sharpness
+    /// / 10) + stroke · (1 − sharpness / 10)`, the same blend-back shape
+    /// `crosshatch`'s own sharpness uses (just over its own `0..=10`
+    /// range): `0` is the pure stroke and `10` fully restores the
+    /// original. Alpha is carried through the same chosen-diagonal value
+    /// as the colour channels. Confined to the selection (only the final
+    /// blend respects it; the two directional passes, like `crosshatch`'s
+    /// own hatching pass, always see the whole layer). Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn angled_strokes(
+        &mut self,
+        id: LayerId,
+        direction_balance: u32,
+        stroke_length: u32,
+        sharpness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if direction_balance > 100 {
+            return Err("Angled Strokes direction balance must be between 0 and 100.".to_string());
+        }
+        if !(3..=50).contains(&stroke_length) {
+            return Err("Angled Strokes stroke length must be between 3 and 50.".to_string());
+        }
+        if sharpness > 10 {
+            return Err("Angled Strokes sharpness must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let half = (stroke_length as i64 / 10).max(1);
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let threshold = 255.0 * direction_balance as f32 / 100.0;
+        let sharp_f = sharpness as f32 / 10.0;
+        self.filter_pixels(id, move |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let luma = 0.299 * source[base] as f32
+                + 0.587 * source[base + 1] as f32
+                + 0.114 * source[base + 2] as f32;
+            let a = motion_blur_at(
+                source,
+                doc_width,
+                (width, height),
+                (row, col),
+                (inv_sqrt2, inv_sqrt2),
+                half,
+            );
+            let b = motion_blur_at(
+                source,
+                doc_width,
+                (width, height),
+                (row, col),
+                (inv_sqrt2, -inv_sqrt2),
+                half,
+            );
+            let stroke = if luma >= threshold { a } else { b };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..CHANNELS {
+                let blended =
+                    source[base + c] as f32 * sharp_f + stroke[c] as f32 * (1.0 - sharp_f);
+                out[c] = blended.round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -10621,6 +10700,88 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.accented_edges(999, 1, 0, 0).is_err());
+    }
+
+    #[test]
+    fn angled_strokes_paints_light_and_dark_pixels_with_different_diagonals() {
+        // Reuses crosshatch's own spike fixture (3x3, flat 50 except a
+        // bright 200 at the bottom-right corner) and its own
+        // already-verified diagonal averages at stroke length 3 (half
+        // 1): the centre (1,1) is 100 along "\" and 50 along "/"; the
+        // spike corner (2,2) is 150 along "\" and 100 along "/". At
+        // direction balance 50 (threshold 127.5) and sharpness 0 (pure
+        // stroke, no blend back): the centre's own luma is 50, below the
+        // threshold, so it is painted with "/" (50) -- unchanged from its
+        // original value. The corner's own luma is 200, at or above the
+        // threshold, so it is painted with "\" (150) instead of "/"
+        // (100), a real, direction-dependent change worked out by hand.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.angled_strokes(id, 50, 3, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn angled_strokes_direction_balance_shifts_the_threshold() {
+        // Same fixture and stroke length as above, but direction balance
+        // 90 raises the threshold to 229.5 -- above the spike corner's
+        // own luma of 200, so it now falls on the "/" side instead of
+        // "\", landing on 100 rather than 150.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.angled_strokes(id, 90, 3, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn angled_strokes_sharpness_blends_the_original_back_in() {
+        // Same as the first test (corner picks the "\" stroke, 150), but
+        // sharpness 5 (blend factor 0.5) mixes it back with the original
+        // 200 exactly halfway: 200 * 0.5 + 150 * 0.5 = 175.0 exactly, no
+        // rounding needed.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        doc.angled_strokes(id, 50, 3, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [175, 175, 175, 255]);
+    }
+
+    #[test]
+    fn angled_strokes_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = crosshatch_spike_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        let dirty = doc.angled_strokes(id, 50, 3, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 2)..idx(2, 2) + 4], [150, 150, 150, 255]);
+        assert_eq!(after[..idx(2, 2)], before[..idx(2, 2)]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 2,
+                x1: 3,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn angled_strokes_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.angled_strokes(id, 101, 3, 0).is_err());
+        assert!(doc.angled_strokes(id, 50, 2, 0).is_err());
+        assert!(doc.angled_strokes(id, 50, 51, 0).is_err());
+        assert!(doc.angled_strokes(id, 50, 3, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.angled_strokes(id, 50, 3, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.angled_strokes(999, 50, 3, 0).is_err());
     }
 
     #[test]

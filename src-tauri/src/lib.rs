@@ -1245,6 +1245,20 @@ fn accented_edges(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Angled Strokes on layer `id`.
+#[tauri::command]
+fn angled_strokes(
+    state: State<'_, AppState>,
+    id: LayerId,
+    direction_balance: u32,
+    stroke_length: u32,
+    sharpness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.angled_strokes(id, direction_balance, stroke_length, sharpness)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1848,6 +1862,7 @@ pub fn run() {
             spatter,
             crosshatch,
             accented_edges,
+            angled_strokes,
             crystallize,
             facet,
             pointillize,

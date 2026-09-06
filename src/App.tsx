@@ -364,6 +364,10 @@ export default function App() {
   const [accentedEdgesWidth, setAccentedEdgesWidth] = useState(2);
   const [accentedEdgesBrightness, setAccentedEdgesBrightness] = useState(20);
   const [accentedEdgesSmoothness, setAccentedEdgesSmoothness] = useState(3);
+  const [showAngledStrokesDialog, setShowAngledStrokesDialog] = useState(false);
+  const [angledStrokesDirectionBalance, setAngledStrokesDirectionBalance] = useState(50);
+  const [angledStrokesStrokeLength, setAngledStrokesStrokeLength] = useState(10);
+  const [angledStrokesSharpness, setAngledStrokesSharpness] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1086,6 +1090,17 @@ export default function App() {
     });
     setShowAccentedEdgesDialog(false);
   }, [runCommand, selectedId, accentedEdgesWidth, accentedEdgesBrightness, accentedEdgesSmoothness]);
+
+  const applyAngledStrokes = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("angled_strokes", {
+      id: selectedId,
+      directionBalance: angledStrokesDirectionBalance,
+      strokeLength: angledStrokesStrokeLength,
+      sharpness: angledStrokesSharpness,
+    });
+    setShowAngledStrokesDialog(false);
+  }, [runCommand, selectedId, angledStrokesDirectionBalance, angledStrokesStrokeLength, angledStrokesSharpness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2445,6 +2460,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Accented Edges"
           >
             Accented Edges…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowAngledStrokesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Angled Strokes"
+          >
+            Angled Strokes…
           </button>
           <button
             className="button button--quiet"
@@ -5224,6 +5247,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyAccentedEdges} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAngledStrokesDialog && (
+        <div className="modal-overlay" onClick={() => setShowAngledStrokesDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Angled Strokes"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Angled Strokes</h2>
+            <label className="control">
+              <span className="control__label">
+                Direction Balance
+                <span className="control__value">{angledStrokesDirectionBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={angledStrokesDirectionBalance}
+                onChange={(event) => setAngledStrokesDirectionBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{angledStrokesStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={50}
+                value={angledStrokesStrokeLength}
+                onChange={(event) => setAngledStrokesStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharpness
+                <span className="control__value">{angledStrokesSharpness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={angledStrokesSharpness}
+                onChange={(event) => setAngledStrokesSharpness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowAngledStrokesDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyAngledStrokes} disabled={busy}>
                 Apply
               </button>
             </div>
