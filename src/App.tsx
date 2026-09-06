@@ -383,6 +383,10 @@ export default function App() {
   const [showPaintDaubsDialog, setShowPaintDaubsDialog] = useState(false);
   const [paintDaubsBrushSize, setPaintDaubsBrushSize] = useState(10);
   const [paintDaubsSharpness, setPaintDaubsSharpness] = useState(10);
+  const [showPaletteKnifeDialog, setShowPaletteKnifeDialog] = useState(false);
+  const [paletteKnifeStrokeSize, setPaletteKnifeStrokeSize] = useState(10);
+  const [paletteKnifeStrokeDetail, setPaletteKnifeStrokeDetail] = useState(2);
+  const [paletteKnifeSoftness, setPaletteKnifeSoftness] = useState(2);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1159,6 +1163,17 @@ export default function App() {
     });
     setShowPaintDaubsDialog(false);
   }, [runCommand, selectedId, paintDaubsBrushSize, paintDaubsSharpness]);
+
+  const applyPaletteKnife = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("palette_knife", {
+      id: selectedId,
+      strokeSize: paletteKnifeStrokeSize,
+      strokeDetail: paletteKnifeStrokeDetail,
+      softness: paletteKnifeSoftness,
+    });
+    setShowPaletteKnifeDialog(false);
+  }, [runCommand, selectedId, paletteKnifeStrokeSize, paletteKnifeStrokeDetail, paletteKnifeSoftness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2494,6 +2509,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Paint Daubs"
           >
             Paint Daubs…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPaletteKnifeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Palette Knife"
+          >
+            Palette Knife…
           </button>
           <button
             className="button button--quiet"
@@ -5143,6 +5166,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPaintDaubs} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPaletteKnifeDialog && (
+        <div className="modal-overlay" onClick={() => setShowPaletteKnifeDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Palette Knife"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Palette Knife</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Size
+                <span className="control__value">{paletteKnifeStrokeSize}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={paletteKnifeStrokeSize}
+                onChange={(event) => setPaletteKnifeStrokeSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Detail
+                <span className="control__value">{paletteKnifeStrokeDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={paletteKnifeStrokeDetail}
+                onChange={(event) => setPaletteKnifeStrokeDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Softness
+                <span className="control__value">{paletteKnifeSoftness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={paletteKnifeSoftness}
+                onChange={(event) => setPaletteKnifeSoftness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPaletteKnifeDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPaletteKnife} disabled={busy}>
                 Apply
               </button>
             </div>

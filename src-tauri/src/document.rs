@@ -5660,6 +5660,53 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Palette Knife: composes two operations
+    /// this project already has, the same way [`Self::poster_edges`]
+    /// does — [`Self::posterize`] flattens colour into broad, flat bands
+    /// first, then a [`box_blur_at`] pass rounds off the hard band
+    /// boundaries into the soft-edged, broad-stroke look of paint applied
+    /// with a palette knife. A documented approximation, not a port of
+    /// Photoshop's own segmentation-based renderer. `stroke_detail`
+    /// (Photoshop's own `1..=3` range) maps directly onto `posterize`'s
+    /// own `levels` parameter as `stroke_detail + 2` (`3..=5`), fewer
+    /// levels reading as broader, simpler strokes; `stroke_size`
+    /// (Photoshop's own `1..=50` range) scales down into a blur radius,
+    /// `(stroke_size / 10).max(1)`, the same way `ink_outlines` scales
+    /// its own stroke length down; `softness` (Photoshop's own `0..=10`
+    /// range) adds `softness / 2` more to that same radius, rounding the
+    /// strokes off further rather than being a separate pass. Because
+    /// `posterize` is itself built on [`Self::adjust_layer_pixels`], it
+    /// already respects the selection on its own — the same selection
+    /// nuance `poster_edges`'s own doc comment already notes — so an
+    /// unselected pixel is left at its raw, unposterized, unblurred
+    /// original value, never partially processed. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn palette_knife(
+        &mut self,
+        id: LayerId,
+        stroke_size: u32,
+        stroke_detail: u32,
+        softness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=50).contains(&stroke_size) {
+            return Err("Palette Knife stroke size must be between 1 and 50.".to_string());
+        }
+        if !(1..=3).contains(&stroke_detail) {
+            return Err("Palette Knife stroke detail must be between 1 and 3.".to_string());
+        }
+        if softness > 10 {
+            return Err("Palette Knife softness must be between 0 and 10.".to_string());
+        }
+        let levels = (stroke_detail + 2) as u8;
+        self.posterize(id, levels)?;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (stroke_size as i64 / 10).max(1) + softness as i64 / 2;
+        self.filter_pixels(id, move |src, row, col| {
+            box_blur_at(src, doc_width, width, height, row, col, radius)
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -12456,6 +12503,135 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.paint_daubs(999, 5, 0).is_err());
+    }
+
+    #[test]
+    fn palette_knife_posterizes_then_rounds_off_the_bands_with_a_blur() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs all already share: 4x4, columns
+        // 0-1 solid 200, columns 2-3 solid 50. Stroke detail 1 maps to 3
+        // posterize levels (step 127.5): 200 quantizes to round(200 /
+        // 127.5) * 127.5 = round(1.5686) * 127.5 = 2 * 127.5 = 255, and
+        // 50 quantizes to round(50 / 127.5) * 127.5 = round(0.3922) *
+        // 127.5 = 0 * 127.5 = 0 -- cross-checked against an independent
+        // Python script emulating f32 arithmetic. So the posterized row
+        // is [255, 255, 0, 0]. Stroke size 10 gives a base blur radius of
+        // 1, and softness 0 adds nothing, so the combined radius is 1
+        // (vertically uniform, so the 3x3 window reduces to a horizontal
+        // 3-tap average): column 0 (255, 255, 255) -> 255; column 1 (255,
+        // 255, 0) -> 510/3 = 170; column 2 (255, 0, 0) -> 255/3 = 85;
+        // column 3 (0, 0, 0) -> 0 -- every one an exact integer division.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.palette_knife(id, 10, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [170, 170, 170, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [85, 85, 85, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn palette_knife_stroke_detail_changes_the_posterization_levels() {
+        // Stroke detail 3 maps to 5 posterize levels (step 63.75): 200
+        // quantizes to round(200 / 63.75) * 63.75 = round(3.1373) *
+        // 63.75 = 3 * 63.75 = 191.25 -> 191, and 50 quantizes to
+        // round(50 / 63.75) * 63.75 = round(0.7843) * 63.75 = 1 * 63.75
+        // = 63.75 -> 64 -- both cross-checked against the same Python
+        // script. With stroke size 10 (blur radius 1) and softness 0,
+        // the posterized row [191, 191, 64, 64] blurs (integer
+        // truncating division, not every one exact this time) to:
+        // column 0 (191, 191, 191) -> 573/3 = 191; column 1 (191, 191,
+        // 64) -> 446/3 = 148 (truncated from 148.67); column 2 (191, 64,
+        // 64) -> 319/3 = 106 (truncated from 106.33); column 3 (64, 64,
+        // 64) -> 192/3 = 64.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.palette_knife(id, 10, 3, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [191, 191, 191, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [148, 148, 148, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [106, 106, 106, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [64, 64, 64, 255]);
+    }
+
+    #[test]
+    fn palette_knife_softness_widens_the_blur_radius() {
+        // Same stroke detail 1 posterized row as the first test ([255,
+        // 255, 0, 0]), but softness 2 adds 1 to stroke size 10's own
+        // blur radius of 1, giving a combined radius of 2 (a 5-tap
+        // window): column 0 (255, 255, 255, 255, 0) -> 1020/5 = 204;
+        // column 1 (255, 255, 255, 0, 0) -> 765/5 = 153; column 2 (255,
+        // 255, 0, 0, 0) -> 510/5 = 102; column 3 (255, 0, 0, 0, 0) ->
+        // 255/5 = 51 -- every one an exact integer division, confirming
+        // softness genuinely widens the radius rather than being ignored.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.palette_knife(id, 10, 1, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [204, 204, 204, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [153, 153, 153, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [102, 102, 102, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [51, 51, 51, 255]);
+    }
+
+    #[test]
+    fn palette_knife_is_confined_to_the_selection() {
+        // The whole of column 1 (all four rows), so the fixture stays
+        // vertically uniform and the by-hand blur reasoning from the
+        // first test still applies unchanged -- the same reasoning
+        // poster_edges's own selection test already uses for the same
+        // fixture. This also confirms the selection nuance the doc
+        // comment describes: posterize itself already skips unselected
+        // pixels (via adjust_layer_pixels), so column 0's and columns
+        // 2-3's pixels are left at their raw, unposterized, unblurred
+        // original values rather than partially processed.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.palette_knife(id, 10, 1, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [168, 168, 168, 255]);
+            // Unselected columns are untouched.
+            assert_eq!(
+                &after[idx(0, y)..idx(0, y) + 4],
+                &before[idx(0, y)..idx(0, y) + 4]
+            );
+            assert_eq!(
+                &after[idx(2, y)..idx(2, y) + 4],
+                &before[idx(2, y)..idx(2, y) + 4]
+            );
+            assert_eq!(
+                &after[idx(3, y)..idx(3, y) + 4],
+                &before[idx(3, y)..idx(3, y) + 4]
+            );
+        }
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn palette_knife_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.palette_knife(id, 0, 1, 0).is_err());
+        assert!(doc.palette_knife(id, 51, 1, 0).is_err());
+        assert!(doc.palette_knife(id, 10, 0, 0).is_err());
+        assert!(doc.palette_knife(id, 10, 4, 0).is_err());
+        assert!(doc.palette_knife(id, 10, 1, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.palette_knife(id, 10, 1, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.palette_knife(999, 10, 1, 0).is_err());
     }
 
     #[test]

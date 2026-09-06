@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 129.**
+**618 distinct capabilities tracked. Currently shipped: 130.**
 
 ## PART I — EVERY TOOL
 
@@ -550,7 +550,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] FrescoCreates a painted appearance resembling pigment applied to a textured fresco surface.
 - [x] Neon Glow (Filter Gallery → Artistic; each pixel pulled toward a chosen glow colour in proportion to a dilated Sobel edge strength, leaving flat areas untouched — a documented, hand-verifiable approximation of Photoshop's own whole-image tonal rework — see README Phase 57)
 - [x] Paint Daubs (Filter Gallery → Artistic; a `box_blur_at` soften blended back toward the original by Sharpness, the same blend-back shape `dry_brush` already uses — Photoshop's six-way Brush Type dropdown is a documented scope cut, always daubing the way "Simple" does — see README Phase 70)
-- [ ] Palette KnifeSimplifies imagery into broad strokes resembling paint applied with a palette knife.
+- [x] Palette Knife (Filter Gallery → Artistic; composes `posterize` with a `box_blur_at` pass rounding off the band boundaries, the same composition pattern `poster_edges` already established — see README Phase 71)
 - [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
 - [x] Poster Edges (Filter Gallery → Artistic; composes the existing `posterize` with a dark outline drawn from a dilated Sobel edge map measured on the posterized result itself — see README Phase 58)
 - [ ] Rough PastelsSimulates pastel artwork on a textured surface.

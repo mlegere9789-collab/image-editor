@@ -4902,6 +4902,72 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **563 Rust tests total** (559 → 563, 556 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 71 — Filter Gallery > Artistic > Palette Knife
+
+Composes two operations this project already has, the same way
+`poster_edges` does — `posterize` flattens colour into broad, flat
+bands first, then a `box_blur_at` pass rounds off the hard band
+boundaries into the soft-edged, broad-stroke look of paint applied
+with a palette knife. A documented approximation, not a port of
+Photoshop's own segmentation-based renderer.
+`Document::palette_knife(id, stroke_size, stroke_detail, softness)`:
+`stroke_detail` (Photoshop's own `1..=3` range) maps directly onto
+`posterize`'s own `levels` parameter as `stroke_detail + 2` (`3..=5`),
+fewer levels reading as broader, simpler strokes; `stroke_size`
+(Photoshop's own `1..=50` range) scales down into a blur radius,
+`(stroke_size / 10).max(1)`, the same way `ink_outlines` scales its
+own stroke length down; `softness` (Photoshop's own `0..=10` range)
+adds `softness / 2` more to that same radius rather than being a
+separate pass. Because `posterize` is itself built on
+`adjust_layer_pixels`, it already respects the selection on its own —
+the same selection nuance `poster_edges`'s own doc comment already
+notes — so an unselected pixel is left at its raw, unposterized,
+unblurred original value, never partially processed. A new **Palette
+Knife…** dialog exposes Stroke Size, Stroke Detail, and Softness
+sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs` all already
+share (4×4, columns 0-1 solid `200`, columns 2-3 solid `50`). At
+stroke detail `1` (3 posterize levels, step `127.5`): `200` quantizes
+to `round(1.5686) * 127.5 = 2 * 127.5 = 255`, and `50` quantizes to
+`round(0.3922) * 127.5 = 0 * 127.5 = 0`, giving a posterized row of
+`[255, 255, 0, 0]` — cross-checked against an independent Python
+script emulating `f32` arithmetic via `struct.pack`/`unpack`
+round-tripping. At stroke size `10` (blur radius `1`) and softness `0`,
+that row blurs (vertically uniform, reducing to a horizontal 3-tap
+average) to `255`, `510 / 3 = 170`, `255 / 3 = 85`, `0` — every one an
+exact integer division. A second test raises stroke detail to `3` (5
+levels, step `63.75`): `200` and `50` quantize to `191` and `64`, and
+the resulting blurred row (`446 / 3 = 148`, `319 / 3 = 106`, truncated
+this time rather than exact) matches `box_blur_at`'s own documented
+integer-truncating division. A third raises softness to `2`, adding
+`1` to stroke size `10`'s own radius for a combined radius of `2`: the
+row becomes `1020 / 5 = 204`, `765 / 5 = 153`, `510 / 5 = 102`, `255 /
+5 = 51`, confirming softness genuinely widens the radius. A fourth
+confines the fixture to the whole of column `1` (all four rows, the
+same reasoning `poster_edges`'s own selection test already uses to
+keep the fixture vertically uniform), confirming the other three
+columns are left completely untouched. A fifth confirms out-of-range
+stroke size, stroke detail, and softness, plus a locked/unknown layer,
+all error. All five passed on the first run, matching the Python
+reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**568 Rust tests total** (563 → 568, 561 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

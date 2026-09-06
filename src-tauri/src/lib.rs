@@ -1637,6 +1637,20 @@ fn paint_daubs(
     })
 }
 
+/// Filter Gallery > Artistic > Palette Knife on layer `id`.
+#[tauri::command]
+fn palette_knife(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_size: u32,
+    stroke_detail: u32,
+    softness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.palette_knife(id, stroke_size, stroke_detail, softness)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -1947,6 +1961,7 @@ pub fn run() {
             sumi_e,
             smudge_stick,
             paint_daubs,
+            palette_knife,
             hue_saturation,
             black_and_white,
             vibrance,
