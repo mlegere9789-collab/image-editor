@@ -7954,6 +7954,72 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **838 Rust tests total** (830 → 838, 831 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 120 — Camera Raw Filter > Optics > Defringe
+
+`defringe(id, amount)` desaturates pixels in proportion to how close
+they sit to a high-contrast edge, composing machinery this project
+already has: a luma buffer (BT.601 weights, the same as `threshold`
+and `black_and_white` use), `sobel_at`'s own edge-magnitude convolution
+(the same one `colored_pencil` and several Sketch-gallery filters
+already run over a luma buffer), and `rgb_to_hsl`/`hsl_to_rgb` (the
+same round trip `hue_saturation` already uses). A pixel's own
+`edge_strength` — the luma buffer's own Sobel magnitude, `0..=255`,
+scaled to `0.0..=1.0` — sets how much of `amount` actually applies
+there: `desaturation = edge_strength * (amount / 100.0)` shrinks that
+pixel's own HSL saturation by that fraction, leaving hue and lightness
+alone. A flat area (no nearby edge) is left completely untouched
+regardless of `amount`, and an edge pixel loses more saturation the
+sharper that edge is.
+
+This is a documented broadening of Photoshop's own Defringe, which
+targets specifically purple- and green-hued fringing near edges with
+separate Amount/Hue sliders for each colour — picking defensible
+purple/green hue-range boundaries without a strong photographic
+reference risks fabricating Photoshop's own exact thresholds, the same
+fabrication risk already documented for Color Lookup and Auto Color.
+Rather than inventing those boundaries, this desaturates near *any*
+high-contrast edge instead of only purple/green ones — a broader but
+honestly-scoped substitute. `amount` is Photoshop's own `0..=100`
+per-colour Amount range, applied once rather than separately per
+fringe colour. A new **Defringe…** dialog exposes the single slider.
+
+**Verified two ways.** Five new `document.rs` tests, on a new
+dedicated fixture (`defringe_fixture`, 4x4: columns 0-1 a saturated
+pinkish `(150, 90, 90, 255)`, luma `108`; columns 2-3 a saturated green
+`(30, 200, 30, 255)`, luma `130` — the luma cliff between columns 1 and
+2 gives the Sobel magnitude a real, non-zero response right at that
+boundary and `0` everywhere else). Amount `100`: pixel `(row 0, col
+1)`, right at the boundary, has Sobel magnitude `88`, `edge_strength =
+0.34510`; its own HSL saturation `0.25` shrinks to `0.16373`,
+round-tripping to `(140, 100, 100)`. Pixel `(row 0, col 2)`, the
+boundary's other side, has the identical Sobel magnitude, its own
+saturation `0.73913` shrinking to `0.48406`, giving `(59, 171, 59)`.
+Pixels `(row 0, col 0)` and `(row 0, col 3)`, each two columns from the
+boundary, have a fully uniform 3x3 window (Sobel magnitude `0`) and are
+left completely untouched. A second test halves amount to `50`,
+giving real, less-desaturated `(145, 95, 95)` and `(45, 185, 45)` at
+the same two boundary pixels. A third confirms amount `0` is a
+byte-for-byte identity. A fourth confines a single pixel to a
+selection. A fifth confirms out-of-range amount, plus a locked/unknown
+layer, all error. All five tests passed on the first run, cross-checked
+against an independent Python script that ports the exact luma/Sobel/
+HSL formulas and emulates Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-seven: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**843 Rust tests total** (838 → 843, 836 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

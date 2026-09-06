@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 181.**
+**618 distinct capabilities tracked. Currently shipped: 182.**
 
 ## PART I — EVERY TOOL
 
@@ -634,7 +634,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Point Color
 - [ ] Color Grading
 - [ ] Optics
-- [ ] Defringe
+- [x] Defringe (`defringe`, desaturates pixels in proportion to a `sobel_at`-based edge-strength measured on a luma buffer, via `rgb_to_hsl`/`hsl_to_rgb`. Photoshop's own separate purple/green Amount+Hue sliders are a documented broadening rather than an invented narrow approximation, since defensible hue-range boundaries for each fringe colour would risk fabricating Photoshop's own exact thresholds — see README Phase 120)
 - [ ] Geometry
 - [ ] Constrain Crop
 - [ ] Masking

@@ -240,6 +240,8 @@ export default function App() {
   const [shadowsValue, setShadowsValue] = useState(0);
   const [showClarityDialog, setShowClarityDialog] = useState(false);
   const [clarityAmount, setClarityAmount] = useState(20);
+  const [showDefringeDialog, setShowDefringeDialog] = useState(false);
+  const [defringeAmount, setDefringeAmount] = useState(50);
 
   const [showExposureDialog, setShowExposureDialog] = useState(false);
   const [exposureStops, setExposureStops] = useState(0);
@@ -869,6 +871,12 @@ export default function App() {
     await runCommand("clarity", { id: selectedId, amount: clarityAmount });
     setShowClarityDialog(false);
   }, [runCommand, selectedId, clarityAmount]);
+
+  const applyDefringe = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("defringe", { id: selectedId, amount: defringeAmount });
+    setShowDefringeDialog(false);
+  }, [runCommand, selectedId, defringeAmount]);
 
   const applyExposure = useCallback(async () => {
     if (selectedId === null) return;
@@ -3008,6 +3016,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowDefringeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Optics > Defringe"
+          >
+            Defringe…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowExposureDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Exposure"
@@ -4695,6 +4711,49 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyClarity} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDefringeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDefringeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Defringe"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Optics &gt; Defringe
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{defringeAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={defringeAmount}
+                onChange={(event) => setDefringeAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDefringeDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDefringe} disabled={busy}>
                 Apply
               </button>
             </div>

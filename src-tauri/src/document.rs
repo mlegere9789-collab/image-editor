@@ -9409,6 +9409,70 @@ impl Document {
         }
         Ok(Some(bounds))
     }
+
+    /// Camera Raw Filter > Optics > Defringe: desaturates pixels in
+    /// proportion to how close they sit to a high-contrast edge, the
+    /// same [`sobel_at`] edge-magnitude machinery [`Self::colored_pencil`]
+    /// and several Sketch-gallery filters already run over a luma buffer
+    /// (BT.601 weights, the same as [`Self::threshold`] and
+    /// [`Self::black_and_white`] use). A pixel's own `edge_strength`
+    /// (the luma buffer's own Sobel magnitude, `0..=255`, scaled to
+    /// `0.0..=1.0`) sets how much of `amount` actually applies there:
+    /// `desaturation = edge_strength * (amount / 100.0)` shrinks that
+    /// pixel's own HSL saturation by that fraction (via
+    /// [`rgb_to_hsl`]/[`hsl_to_rgb`], the same round trip
+    /// [`Self::hue_saturation`] already uses), leaving hue and lightness
+    /// alone. A flat area (no nearby edge) is left completely untouched
+    /// regardless of `amount`, and an edge pixel loses more saturation
+    /// the sharper that edge is. This is a documented broadening of
+    /// Photoshop's own Defringe, which targets specifically purple- and
+    /// green-hued fringing near edges with separate Amount/Hue sliders
+    /// for each colour — picking defensible purple/green hue-range
+    /// boundaries without a strong photographic reference risks
+    /// fabricating Photoshop's own exact thresholds, the same fabrication
+    /// risk already documented for Color Lookup and Auto Color, so this
+    /// desaturates near *any* high-contrast edge instead of only
+    /// purple/green ones, a broader but honestly-scoped substitute
+    /// rather than an invented narrow one. `amount` is Photoshop's own
+    /// `0..=100` per-colour Amount range, applied once rather than
+    /// separately per fringe colour.
+    pub fn defringe(&mut self, id: LayerId, amount: u32) -> Result<Option<Rect>, String> {
+        if amount > 100 {
+            return Err("Defringe amount must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let frac = amount as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+            let edge_strength = edge[0] as f32 / 255.0;
+            let (r, g, b, a) = (src[base], src[base + 1], src[base + 2], src[base + 3]);
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let desaturation = edge_strength * frac;
+            let new_s = (s * (1.0 - desaturation)).clamp(0.0, 1.0);
+            let (nr, ng, nb) = hsl_to_rgb(h, new_s, l);
+            [nr, ng, nb, a]
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -21821,6 +21885,107 @@ mod tests {
     fn clarity_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.clarity(999, 20).is_err());
+    }
+
+    fn defringe_fixture() -> (Document, LayerId) {
+        // 4x4, columns 0-1 a saturated pinkish (150, 90, 90, 255), luma
+        // 108; columns 2-3 a saturated green (30, 200, 30, 255), luma
+        // 130. The luma cliff between columns 1 and 2 gives the Sobel
+        // magnitude on the luma buffer a real, non-zero response right
+        // at that boundary and 0 everywhere else (each column's own 3x3
+        // window elsewhere is uniform).
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[150, 90, 90, 255]);
+                } else {
+                    pixels.extend_from_slice(&[30, 200, 30, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("fringe", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn defringe_desaturates_in_proportion_to_edge_strength() {
+        // Amount 100 (frac 1.0). Pixel (1, 0), right at the boundary,
+        // has Sobel magnitude 88 on the luma buffer, edge_strength =
+        // 88/255 = 0.34510. Its own HSL is (0, 0.25, 0.47059);
+        // desaturation = 0.34510*1.0, new_s = 0.25*(1-0.34510) =
+        // 0.16373, round-tripping back through HSL to RGB gives (140,
+        // 100, 100). Pixel (2, 0), the boundary's other side, has the
+        // identical Sobel magnitude 88, its own HSL saturation
+        // 0.73913 shrinks to 0.48406, giving (59, 171, 59). Pixel (0, 0)
+        // and (3, 0), each two columns from the boundary, have a fully
+        // uniform 3x3 window (Sobel magnitude 0) and are left completely
+        // untouched at their own original colours.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = defringe_fixture();
+        doc.defringe(id, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [140, 100, 100, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [59, 171, 59, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [150, 90, 90, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [30, 200, 30, 255]);
+    }
+
+    #[test]
+    fn defringe_amount_scales_the_desaturation() {
+        // Same boundary pixels, amount 50 halves the desaturation
+        // fraction: pixel (1, 0) becomes (145, 95, 95), pixel (2, 0)
+        // becomes (45, 185, 45) -- real, hand-computed, less-desaturated
+        // results than the amount-100 test's own (140, 100, 100) and
+        // (59, 171, 59), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = defringe_fixture();
+        doc.defringe(id, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [145, 95, 95, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [45, 185, 45, 255]);
+    }
+
+    #[test]
+    fn defringe_amount_zero_is_the_identity() {
+        let (mut doc, id) = defringe_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.defringe(id, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn defringe_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = defringe_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.defringe(id, 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [140, 100, 100, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn defringe_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.defringe(id, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.defringe(id, 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.defringe(999, 100).is_err());
     }
 
     #[test]
