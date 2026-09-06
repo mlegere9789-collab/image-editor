@@ -5827,6 +5827,76 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **637 Rust tests total** (632 → 637, 630 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 86 — Filter Gallery > Sketch > Halftone Pattern
+
+Recolours the layer as pure black ink on white paper, patterned by how
+dark each `size`-pixel cell's own standard-weighted luma average is
+(the same luma weights `bas_relief` and `torn_edges` already use).
+`Document::halftone_pattern(id, size, contrast, pattern_type)` offers
+two of Photoshop's own four pattern types, each reusing existing
+machinery rather than inventing new pixel math: `pattern_type` `0`
+(Line) divides the layer into vertical bands `size` pixels wide and
+inks each one from its own left edge inward by a thickness proportional
+to that band's own darkness (`cell * measure / 255`, rounded and
+clamped to the band's own width); `pattern_type` `1` (Dot) reuses
+`color_halftone`'s own exact `(dx² + dy²) · 255 ≤ r² · measure`
+circular-area test, applied here to one grayscale measure instead of
+three RGB channels, with a single un-offset screen rather than three
+angled ones. Photoshop's own 45°-diagonal line screen and its Circle
+pattern type (a variant too close to Dot to be worth a second, only
+subtly different area formula) are both documented scope cuts.
+`contrast` (Photoshop's own `0..=50` range) linearly amplifies each
+cell's own darkness measure away from its own neutral midpoint `128`:
+`128 + (measure_raw - 128) * (1.0 + contrast / 50.0)`, a scale of `1.0`
+at `contrast=0` up to `2.0` at `contrast=50` — a documented
+simplification standing in for Photoshop's own non-linear tone curve,
+the same kind of scope cut `bas_relief`'s own linear `detail` scaling
+already makes. `size` is Photoshop's own `1..=12` range. Alpha
+untouched. A new **Halftone Pattern…** dialog exposes Size, Contrast,
+and a Pattern Type dropdown (Line, Dot).
+
+**Verified two ways.** Five new `document.rs` tests. The first reuses
+the shared bright/dark cliff fixture (4x4, columns 0-1 solid 200,
+columns 2-3 solid 50): at size `2` with Line type, band 0 (columns 0-1,
+average luma `200`) works out to a measure of `55` and a thickness of
+`round(2 * 55/255) = 0` — no ink, both columns white — while band 1
+(columns 2-3, average luma `50`) works out to a measure of `205` and a
+thickness of `round(2 * 205/255) = 2`, the full band width, both
+columns ink. A second test uses a dedicated solid 4x1 fixture at luma
+`145`, chosen so contrast `0` and contrast `50` land on opposite sides
+of a rounding boundary at size `4` (a single whole-row band): contrast
+`0` gives measure `110`, thickness `round(4 * 110/255) = 2`; contrast
+`50` gives measure `92`, thickness `round(4 * 92/255) = 1` — a real,
+hand-computed change, not a coincidental match. A third switches the
+cliff fixture to Dot type at size `4`, making the whole 4x4 image one
+cell: overall average luma `100` gives measure `155`, and with radius
+`r = 2` centred at `(2, 2)`, the `(dx² + dy²) * 255 <= r² * 155 = 620`
+test is satisfied everywhere except the four corners (row `0`'s every
+column, and column `0` of rows `1`-`3`), producing a hand-traceable
+white/ink pattern. A fourth confirms selection confinement: since every
+band/cell average always reads the whole, unmodified source regardless
+of selection (the same approach `plaster` and `bas_relief` already
+establish), selecting only column `2` still produces the same ink
+result the unselected run's own band 1 already gives. A fifth confirms
+out-of-range size, contrast, and pattern type, plus a locked/unknown
+layer, all error. All five tests passed on the first run, cross-checked
+against an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-three: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**642 Rust tests total** (637 → 642, 635 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

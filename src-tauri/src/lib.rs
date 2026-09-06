@@ -1850,6 +1850,20 @@ fn bas_relief(
     })
 }
 
+/// Filter Gallery > Sketch > Halftone Pattern on layer `id`.
+#[tauri::command]
+fn halftone_pattern(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    contrast: u32,
+    pattern_type: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.halftone_pattern(id, size, contrast, pattern_type)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2175,6 +2189,7 @@ pub fn run() {
             water_paper,
             torn_edges,
             bas_relief,
+            halftone_pattern,
             hue_saturation,
             black_and_white,
             vibrance,

@@ -6651,6 +6651,125 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Halftone Pattern: recolours the layer as
+    /// pure black ink on white paper, patterned by how dark each `size`-
+    /// pixel cell's own standard-weighted luma average is (the same luma
+    /// weights [`Self::bas_relief`] and [`Self::torn_edges`] already use).
+    /// `pattern_type` `0` is Line: the layer is divided into vertical
+    /// bands `size` pixels wide, and each band is inked from its own left
+    /// edge inward by a thickness proportional to that band's own
+    /// darkness (`cell * measure / 255`, rounded and clamped to the
+    /// band's own width) — Photoshop's own 45°-diagonal line screen is a
+    /// documented scope cut in favour of these hand-checkable vertical
+    /// bands. `pattern_type` `1` is Dot: a grid of `size`-pixel cells,
+    /// each with a circular dot centred on the cell whose area is
+    /// proportional to that cell's own darkness — the exact `(dx² + dy²)
+    /// · 255 ≤ r² · measure` area test [`Self::color_halftone`] already
+    /// uses per colour channel, applied here to one grayscale measure
+    /// instead of three RGB channels, with a single un-offset screen
+    /// rather than three angled ones. Photoshop's own Circle pattern type
+    /// is a documented scope cut, as a variant too close to Dot to be
+    /// worth a second, only subtly different area formula. `contrast`
+    /// (Photoshop's own `0..=50` range) linearly amplifies each cell's
+    /// own darkness measure away from its own neutral midpoint `128`,
+    /// `128 + (measure_raw - 128) * (1.0 + contrast / 50.0)` — scale
+    /// `1.0` at `contrast=0` (unchanged) up to `2.0` at `contrast=50` — a
+    /// documented simplification standing in for Photoshop's own
+    /// non-linear tone curve, the same kind of scope cut
+    /// [`Self::bas_relief`]'s own linear `detail` scaling already makes.
+    /// `size` is Photoshop's own `1..=12` range. Alpha untouched, and
+    /// confined to the selection the same way [`Self::plaster`] and
+    /// [`Self::bas_relief`] already are: every band/cell average is
+    /// computed from the whole, unmodified source regardless of
+    /// selection, and only the selected pixels' own ink/paper output is
+    /// written back.
+    pub fn halftone_pattern(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        contrast: u32,
+        pattern_type: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=12).contains(&size) {
+            return Err("Halftone Pattern size must be between 1 and 12.".to_string());
+        }
+        if contrast > 50 {
+            return Err("Halftone Pattern contrast must be between 0 and 50.".to_string());
+        }
+        if pattern_type > 1 {
+            return Err("Halftone Pattern type must be 0 (Line) or 1 (Dot).".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let cell = size as i64;
+        let scale = 1.0 + contrast as f32 / 50.0;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let measure_over = |x0: i64, y0: i64, x1: i64, y1: i64| -> f32 {
+            let mut sum = 0.0f32;
+            let mut count = 0.0f32;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let base = (y as usize * doc_width + x as usize) * CHANNELS;
+                    sum += 0.299 * source[base] as f32
+                        + 0.587 * source[base + 1] as f32
+                        + 0.114 * source[base + 2] as f32;
+                    count += 1.0;
+                }
+            }
+            let avg = sum / count;
+            (128.0 + (255.0 - avg - 128.0) * scale).clamp(0.0, 255.0)
+        };
+        let mut ink_buf = vec![false; doc_width * self.height as usize];
+        if pattern_type == 0 {
+            for band_x0 in (0..width).step_by(size as usize) {
+                let band_x1 = (band_x0 + cell).min(width);
+                let measure = measure_over(band_x0, 0, band_x1, height);
+                let thickness = (cell as f32 * measure / 255.0)
+                    .round()
+                    .clamp(0.0, cell as f32) as i64;
+                for y in 0..height {
+                    for x in band_x0..band_x1 {
+                        ink_buf[y as usize * doc_width + x as usize] = (x - band_x0) < thickness;
+                    }
+                }
+            }
+        } else {
+            let r = cell / 2;
+            for cell_y0 in (0..height).step_by(size as usize) {
+                let cell_y1 = (cell_y0 + cell).min(height);
+                for cell_x0 in (0..width).step_by(size as usize) {
+                    let cell_x1 = (cell_x0 + cell).min(width);
+                    let measure = measure_over(cell_x0, cell_y0, cell_x1, cell_y1);
+                    let center_x = cell_x0 + r;
+                    let center_y = cell_y0 + r;
+                    for y in cell_y0..cell_y1 {
+                        for x in cell_x0..cell_x1 {
+                            let (dx, dy) = (x - center_x, y - center_y);
+                            let inside =
+                                (dx * dx + dy * dy) as f32 * 255.0 <= (r * r) as f32 * measure;
+                            ink_buf[y as usize * doc_width + x as usize] = inside;
+                        }
+                    }
+                }
+            }
+        }
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let v = if ink_buf[row as usize * doc_width + col as usize] {
+                0
+            } else {
+                255
+            };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14957,6 +15076,136 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.bas_relief(999, 15, 10, 2).is_err());
+    }
+
+    #[test]
+    fn halftone_pattern_lines_thicken_with_cell_darkness() {
+        // Same cliff fixture as every other Sketch filter: 4x4, columns
+        // 0-1 solid 200, columns 2-3 solid 50 (grayscale, so luma equals
+        // the channel value exactly). Size 2 with Line type (pattern_type
+        // 0) splits the image into two 2-column-wide vertical bands:
+        //   band 0 (cols 0-1): avg luma 200, measure_raw = 255-200 = 55,
+        //     contrast 0 leaves scale at 1.0 so measure = 55,
+        //     thickness = round(2 * 55/255) = round(0.431) = 0 -- no ink,
+        //     both columns render white (255).
+        //   band 1 (cols 2-3): avg luma 50, measure_raw = 255-50 = 205,
+        //     measure = 205, thickness = round(2 * 205/255) =
+        //     round(1.608) = 2 -- the full band width, both columns ink
+        //     (0).
+        // Cross-checked against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.halftone_pattern(id, 2, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn halftone_pattern_contrast_scales_the_line_thickness() {
+        // A dedicated solid 4x1 fixture at luma 145 (255-145=110), chosen
+        // so contrast 0 and contrast 50 land on opposite sides of a
+        // rounding boundary. Size 4 makes the whole row one band:
+        //   contrast 0 (scale 1.0): measure = 110 exactly,
+        //     thickness = round(4 * 110/255) = round(1.7255) = 2 -- the
+        //     leftmost two columns ink, the rightmost two white.
+        //   contrast 50 (scale 2.0): measure = 128 + (110-128)*2 = 92,
+        //     thickness = round(4 * 92/255) = round(1.4431) = 1 -- only
+        //     the leftmost column ink now, a real, hand-computed change
+        //     from the contrast-0 result, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer("grey145", &solid(4, 1, [145, 145, 145, 255]), 4, 1)
+            .unwrap();
+        doc.halftone_pattern(id, 4, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [255, 255, 255, 255]);
+
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer("grey145", &solid(4, 1, [145, 145, 145, 255]), 4, 1)
+            .unwrap();
+        doc.halftone_pattern(id, 4, 50, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn halftone_pattern_dots_are_centred_on_each_cell() {
+        // Same cliff fixture, but size 4 with Dot type (pattern_type 1)
+        // makes the whole 4x4 image a single cell: overall average luma
+        // is (200*8 + 50*8)/16 = 100, measure_raw = 155, contrast 0 keeps
+        // measure at 155. r = 4/2 = 2, centre at (2, 2). The area test
+        // (dx^2+dy^2)*255 <= r^2*measure = 4*155 = 620 is satisfied for
+        // every pixel except the four corners (distance^2 >= 4, giving
+        // 1020 or more), so row 0 (dy=-2, dist^2 >= 4 everywhere) is all
+        // white, while rows 1-3 (dy in {-1,0,1}) are white only at column
+        // 0 (dx=-2, dist^2 >= 4) and ink everywhere else.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.halftone_pattern(id, 4, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 255, 255, 255]);
+        }
+        for y in 1..4 {
+            assert_eq!(&p[idx(0, y)..idx(0, y) + 4], [255, 255, 255, 255]);
+            assert_eq!(&p[idx(1, y)..idx(1, y) + 4], [0, 0, 0, 255]);
+            assert_eq!(&p[idx(2, y)..idx(2, y) + 4], [0, 0, 0, 255]);
+            assert_eq!(&p[idx(3, y)..idx(3, y) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn halftone_pattern_is_confined_to_the_selection() {
+        // Every band/cell average always reads the whole, unmodified
+        // source regardless of selection (the same approach plaster and
+        // bas_relief already establish), so selecting only column 2 still
+        // produces the same ink result ([0, 0, 0, 255], from band 1 of
+        // the first test above) as an unselected run would.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 4.0).unwrap();
+        let dirty = doc.halftone_pattern(id, 2, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(2, y)..idx(2, y) + 4], [0, 0, 0, 255]);
+        }
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]); // unselected, untouched
+        assert_eq!(after[idx(2, 3) + 4..], before[idx(2, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 0,
+                x1: 3,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn halftone_pattern_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.halftone_pattern(id, 0, 0, 0).is_err());
+        assert!(doc.halftone_pattern(id, 13, 0, 0).is_err());
+        assert!(doc.halftone_pattern(id, 2, 51, 0).is_err());
+        assert!(doc.halftone_pattern(id, 2, 0, 2).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.halftone_pattern(id, 2, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.halftone_pattern(999, 2, 0, 0).is_err());
     }
 
     #[test]

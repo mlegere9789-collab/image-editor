@@ -439,6 +439,10 @@ export default function App() {
   const [basReliefDetail, setBasReliefDetail] = useState(8);
   const [basReliefSmoothness, setBasReliefSmoothness] = useState(5);
   const [basReliefLightDirection, setBasReliefLightDirection] = useState(2);
+  const [showHalftonePatternDialog, setShowHalftonePatternDialog] = useState(false);
+  const [halftonePatternSize, setHalftonePatternSize] = useState(4);
+  const [halftonePatternContrast, setHalftonePatternContrast] = useState(0);
+  const [halftonePatternType, setHalftonePatternType] = useState(0);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1385,6 +1389,17 @@ export default function App() {
     });
     setShowBasReliefDialog(false);
   }, [runCommand, selectedId, basReliefDetail, basReliefSmoothness, basReliefLightDirection]);
+
+  const applyHalftonePattern = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("halftone_pattern", {
+      id: selectedId,
+      size: halftonePatternSize,
+      contrast: halftonePatternContrast,
+      patternType: halftonePatternType,
+    });
+    setShowHalftonePatternDialog(false);
+  }, [runCommand, selectedId, halftonePatternSize, halftonePatternContrast, halftonePatternType]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2840,6 +2855,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Bas Relief"
           >
             Bas Relief…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowHalftonePatternDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Halftone Pattern"
+          >
+            Halftone Pattern…
           </button>
           <button
             className="button button--quiet"
@@ -6342,6 +6365,70 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyBasRelief} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHalftonePatternDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowHalftonePatternDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Halftone Pattern"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Halftone Pattern</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{halftonePatternSize}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={12}
+                value={halftonePatternSize}
+                onChange={(event) => setHalftonePatternSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{halftonePatternContrast}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={halftonePatternContrast}
+                onChange={(event) => setHalftonePatternContrast(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Pattern Type</span>
+              <select
+                value={halftonePatternType}
+                onChange={(event) => setHalftonePatternType(Number(event.target.value))}
+              >
+                <option value={0}>Line</option>
+                <option value={1}>Dot</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowHalftonePatternDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyHalftonePattern} disabled={busy}>
                 Apply
               </button>
             </div>
