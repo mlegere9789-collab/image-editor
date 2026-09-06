@@ -1231,6 +1231,20 @@ fn crosshatch(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Accented Edges on layer `id`.
+#[tauri::command]
+fn accented_edges(
+    state: State<'_, AppState>,
+    id: LayerId,
+    edge_width: u32,
+    edge_brightness: u32,
+    smoothness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.accented_edges(id, edge_width, edge_brightness, smoothness)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1833,6 +1847,7 @@ pub fn run() {
             ink_outlines,
             spatter,
             crosshatch,
+            accented_edges,
             crystallize,
             facet,
             pointillize,

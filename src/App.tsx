@@ -360,6 +360,10 @@ export default function App() {
   const [crosshatchStrokeLength, setCrosshatchStrokeLength] = useState(10);
   const [crosshatchSharpness, setCrosshatchSharpness] = useState(5);
   const [crosshatchStrength, setCrosshatchStrength] = useState(1);
+  const [showAccentedEdgesDialog, setShowAccentedEdgesDialog] = useState(false);
+  const [accentedEdgesWidth, setAccentedEdgesWidth] = useState(2);
+  const [accentedEdgesBrightness, setAccentedEdgesBrightness] = useState(20);
+  const [accentedEdgesSmoothness, setAccentedEdgesSmoothness] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1071,6 +1075,17 @@ export default function App() {
     });
     setShowCrosshatchDialog(false);
   }, [runCommand, selectedId, crosshatchStrokeLength, crosshatchSharpness, crosshatchStrength]);
+
+  const applyAccentedEdges = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("accented_edges", {
+      id: selectedId,
+      edgeWidth: accentedEdgesWidth,
+      edgeBrightness: accentedEdgesBrightness,
+      smoothness: accentedEdgesSmoothness,
+    });
+    setShowAccentedEdgesDialog(false);
+  }, [runCommand, selectedId, accentedEdgesWidth, accentedEdgesBrightness, accentedEdgesSmoothness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2422,6 +2437,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Crosshatch"
           >
             Crosshatch…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowAccentedEdgesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Accented Edges"
+          >
+            Accented Edges…
           </button>
           <button
             className="button button--quiet"
@@ -5141,6 +5164,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCrosshatch} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAccentedEdgesDialog && (
+        <div className="modal-overlay" onClick={() => setShowAccentedEdgesDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Accented Edges"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Accented Edges</h2>
+            <label className="control">
+              <span className="control__label">
+                Edge Width
+                <span className="control__value">{accentedEdgesWidth}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={14}
+                value={accentedEdgesWidth}
+                onChange={(event) => setAccentedEdgesWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Edge Brightness
+                <span className="control__value">{accentedEdgesBrightness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={accentedEdgesBrightness}
+                onChange={(event) => setAccentedEdgesBrightness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{accentedEdgesSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={accentedEdgesSmoothness}
+                onChange={(event) => setAccentedEdgesSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowAccentedEdgesDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyAccentedEdges} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -4520,6 +4520,78 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **534 Rust tests total** (529 → 534, 527 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 65 — Filter Gallery > Brush Strokes > Accented Edges
+
+Highlights edges with a colour that can run from black ink to a bright,
+light-struck white, reusing the same luma/Sobel/dilation pipeline
+`ink_outlines` and `poster_edges` already share, plus an extra
+`box_blur_at` smoothing pass over the edge map itself — the same
+box-blur helper this project's other smoothing filters already use. A
+documented approximation of Photoshop's real brush-accented edge
+renderer, not a port. `Document::accented_edges(id, edge_width,
+edge_brightness, smoothness)`: `edge_width` (Photoshop's own `1..=14`
+range) dilates the measured Sobel edge map by `edge_width - 1`, so `1`
+leaves it exactly as measured; `smoothness` (Photoshop's own `0..=15`
+range) then box-blurs that (possibly dilated) edge map by the same
+radius, softening the hard boundary between edge and non-edge before
+it is used; `edge_brightness` (Photoshop's own `0..=50` range) picks
+the colour edges are painted, linearly from black at `0` to white at
+`50` (`255 * edge_brightness / 50`), and every pixel blends toward
+that colour in proportion to its own (dilated, smoothed) edge
+strength: `orig * (1 - e) + edge_colour * e`. Alpha is carried over
+unchanged. Only the final blend respects the selection; the
+edge-detection, dilation, and smoothing passes always see the whole
+layer, the same scope cut `ink_outlines` and `poster_edges` already
+make. A new **Accented Edges…** dialog exposes Edge Width, Edge
+Brightness, and Smoothness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `colored_pencil`/`neon_glow`/`poster_edges`/
+`ink_outlines` all already share (4×4, columns 0-1 solid `200`,
+columns 2-3 solid `50`, Sobel magnitude `[0, 255, 255, 0]` across every
+row), cross-checked against an independent Python script emulating
+`f32` arithmetic exactly via `struct.pack`/`unpack` round-tripping. At
+edge width `1` (no dilation) and smoothness `0` (no blur), brightness
+`0` leaves the flat columns untouched (`200`, `50`) and drives the
+full-magnitude edge columns fully to black (`0`); brightness `50`
+leaves the flat columns untouched and drives the edge columns fully to
+white (`255`); brightness `25` (edge colour `127.5`) blends the edge
+columns fully to `127.5`, which both Rust's round-half-away-from-zero
+and Python's round-half-to-even agree rounds to `128` (the nearer even
+integer either way, so the two rounding rules happen to coincide here
+rather than disagree). A second test raises edge width to `2`
+(dilation radius `1`), spreading full edge strength across every
+column of the 4-wide fixture, so at brightness `0` every pixel goes
+fully black regardless of its own shade — the same dilation reasoning
+`ink_outlines`'s own stroke-length test already established. A third
+raises smoothness to `1` (box-blur radius `1`) with no dilation: since
+the fixture is vertically uniform, the 3×3 blur window reduces to a
+horizontal average of three columns each counted three times out of
+nine samples, giving smoothed edge values of exactly `85`, `170`,
+`170`, `85` (`765/9` and `1530/9`, both dividing evenly, so
+`box_blur_at`'s integer truncating division introduces no rounding
+ambiguity) — blending toward black at brightness `0` then gives
+`133`, `67`, `17`, `33`, each hand-computed as a clean one-third or
+two-thirds fraction of the original shade. A fourth confines the
+fixture to a one-pixel selection and confirms only that pixel changes.
+A fifth confirms out-of-range edge width, brightness, and smoothness,
+plus a locked/unknown layer, all error. All five passed on the first
+run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twelve: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**539 Rust tests total** (534 → 539, 532 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

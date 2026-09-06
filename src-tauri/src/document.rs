@@ -4406,6 +4406,118 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Accented Edges: highlights edges
+    /// with a colour that can run from black ink to a bright, light-struck
+    /// white, reusing the same luma/[`sobel_at`]/[`extreme_at`] dilation
+    /// pipeline [`Self::ink_outlines`] and [`Self::poster_edges`] already
+    /// share, plus an extra [`box_blur_at`] smoothing pass over the edge
+    /// map itself — the same box-blur helper this file's other smoothing
+    /// filters already use. A documented approximation of Photoshop's real
+    /// brush-accented edge renderer, not a port. `edge_width` (Photoshop's
+    /// own `1..=14` range) dilates the measured edge map by
+    /// `(edge_width - 1)`, so `1` leaves it exactly as measured;
+    /// `smoothness` (Photoshop's own `0..=15` range) then box-blurs that
+    /// (possibly dilated) edge map by the same radius, softening hard
+    /// boundaries between edge and non-edge before it is used;
+    /// `edge_brightness` (Photoshop's own `0..=50` range) picks the colour
+    /// edges are painted, linearly from black at `0` to white at `50`
+    /// (`255 · edge_brightness / 50`), and every pixel is blended toward
+    /// that colour in proportion to its own (dilated, smoothed) edge
+    /// strength: `orig · (1 − e) + edge_colour · e`. Alpha is carried over
+    /// unchanged. Confined to the selection (only the final blend respects
+    /// it; the edge-detection, dilation, and smoothing passes always see
+    /// the whole layer, the same scope cut `ink_outlines` and
+    /// `poster_edges` already make). Errors on an out-of-range parameter
+    /// or a locked/unknown layer.
+    pub fn accented_edges(
+        &mut self,
+        id: LayerId,
+        edge_width: u32,
+        edge_brightness: u32,
+        smoothness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=14).contains(&edge_width) {
+            return Err("Accented Edges edge width must be between 1 and 14.".to_string());
+        }
+        if edge_brightness > 50 {
+            return Err("Accented Edges edge brightness must be between 0 and 50.".to_string());
+        }
+        if smoothness > 15 {
+            return Err("Accented Edges smoothness must be between 0 and 15.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        let dilate_radius = (edge_width - 1) as i64;
+        if dilate_radius > 0 {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened = extreme_at(
+                        &edges,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        dilate_radius,
+                        true,
+                    );
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let smooth_radius = smoothness as i64;
+        if smooth_radius > 0 {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let smoothed =
+                        box_blur_at(&edges, doc_width, width, height, row, col, smooth_radius);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&smoothed);
+                }
+            }
+        }
+        let edge_color = 255.0 * edge_brightness as f32 / 50.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let e = mag_buf[base] as f32 / 255.0;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let val = orig * (1.0 - e) + edge_color * e;
+                out[c] = val.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter Gallery > Brush Strokes > Crosshatch: two crossing diagonal
     /// [`motion_blur_at`] passes — the same directional line-sampling
     /// [`Self::motion_blur`] already uses, one running "\" (top-left to
@@ -10384,6 +10496,131 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.crosshatch(999, 3, 0, 1).is_err());
+    }
+
+    #[test]
+    fn accented_edges_blends_toward_black_or_white_by_brightness() {
+        // Same cliff fixture ink_outlines/poster_edges/neon_glow/
+        // colored_pencil all already share: 4x4, columns 0-1 solid
+        // (200,200,200,255), columns 2-3 solid (50,50,50,255), Sobel
+        // magnitude [0, 255, 255, 0] across every row. Edge width 1 maps
+        // to dilation radius 0 (measured exactly), smoothness 0 means no
+        // blur, so the edge fraction is exactly 0 or 1 per column.
+        //
+        // At brightness 0 (edge colour black, 0): columns 0 and 3 have
+        // edge 0 and are untouched (200, 50); columns 1 and 2 have edge 1
+        // and go fully to the edge colour, 0 regardless of their own
+        // shade. At brightness 50 (edge colour white, 255): columns 0/3
+        // stay untouched and columns 1/2 go fully to 255. At brightness
+        // 25 (edge colour 127.5): columns 1/2 blend fully to 127.5,
+        // which both Rust's round-half-away-from-zero and Python's
+        // round-half-to-even agree rounds to 128 (128 is the nearer even
+        // integer to 127.5 either way). Cross-checked with an independent
+        // Python script emulating f32 arithmetic via struct pack/unpack.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.accented_edges(id, 1, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.accented_edges(id, 1, 50, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.accented_edges(id, 1, 25, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [128, 128, 128, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn accented_edges_width_dilates_the_edge_map() {
+        // Edge width 2 maps to dilation radius 1, spreading the
+        // 255-magnitude boundary across every column of this 4-wide
+        // fixture (the same reasoning as ink_outlines's own
+        // stroke-length dilation test), so at brightness 0 every pixel
+        // goes fully black regardless of its own shade.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.accented_edges(id, 2, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn accented_edges_smoothness_blurs_the_edge_map() {
+        // Edge width 1 (no dilation), smoothness 1 (box-blur radius 1)
+        // over the measured edge row [0, 255, 255, 0]: since the fixture
+        // is vertically uniform, the 3x3 blur window's three rows are
+        // identical, so it reduces to a horizontal average of columns
+        // (col-1, col, col+1), each counted 3 times out of 9 samples,
+        // with clamp-to-edge at the boundary. Column 0: (0, 0, 255) *3 =
+        // 765/9 = 85 exactly. Column 1: (0, 255, 255) *3 = 1530/9 = 170.
+        // Column 2: (255, 255, 0) *3 = 1530/9 = 170. Column 3: (255, 0,
+        // 0) *3 = 765/9 = 85. All four divide evenly, so `box_blur_at`'s
+        // integer truncating division introduces no ambiguity. At
+        // brightness 0 (edge colour 0), each pixel blends toward black
+        // by its own smoothed fraction: column 0, edge 85/255 = 1/3,
+        // 200 * (2/3) = 133.33 -> 133; column 1, edge 170/255 = 2/3, 200
+        // * (1/3) = 66.67 -> 67; column 2, edge 2/3, 50 * (1/3) = 16.67
+        // -> 17; column 3, edge 1/3, 50 * (2/3) = 33.33 -> 33. Cross-
+        // checked with an independent Python script emulating f32
+        // arithmetic exactly.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.accented_edges(id, 1, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [133, 133, 133, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [67, 67, 67, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [17, 17, 17, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [33, 33, 33, 255]);
+    }
+
+    #[test]
+    fn accented_edges_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.accented_edges(id, 1, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn accented_edges_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.accented_edges(id, 0, 0, 0).is_err());
+        assert!(doc.accented_edges(id, 15, 0, 0).is_err());
+        assert!(doc.accented_edges(id, 1, 51, 0).is_err());
+        assert!(doc.accented_edges(id, 1, 0, 16).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.accented_edges(id, 1, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.accented_edges(999, 1, 0, 0).is_err());
     }
 
     #[test]
