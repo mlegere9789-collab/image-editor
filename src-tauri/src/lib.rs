@@ -2458,6 +2458,12 @@ fn highlights_shadows(
     })
 }
 
+/// Camera Raw Filter > Clarity on layer `id`.
+#[tauri::command]
+fn clarity(state: State<'_, AppState>, id: LayerId, amount: i32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.clarity(id, amount))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2698,6 +2704,7 @@ pub fn run() {
             curves,
             color_balance,
             highlights_shadows,
+            clarity,
             select_rectangle,
             select_ellipse,
             select_all,

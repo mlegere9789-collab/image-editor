@@ -7901,6 +7901,59 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **830 Rust tests total** (821 → 830, 823 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 119 — Camera Raw Filter > Clarity
+
+`clarity(id, amount)` reuses `unsharp_mask`'s own "subtract a blurred
+copy, add the difference back in, amplified" shape and its very same
+`box_blur_at` low-pass, but fixes the radius at a large `40` instead of
+a user-adjustable one — Photoshop's own Clarity slider works this way
+internally too, at a fixed large radius the dialog never exposes,
+boosting *local* (midtone) contrast rather than fine edge detail the
+way a small-radius sharpen does. Unlike `unsharp_mask`, `amount` here
+is signed (Photoshop's own `-100..=100` Clarity range, clamped rather
+than erroring): positive values boost local contrast exactly like a
+sharpen; negative values soften it instead, blending a pixel toward
+its own broad neighbourhood average — a "reverse sharpen"
+`unsharp_mask`'s own positive-only `amount` can't express. `out =
+original + (original - blurred) * (amount / 100.0)`, clamped, per RGB
+channel; alpha untouched. A new **Clarity…** dialog exposes the single
+signed slider.
+
+**Verified two ways.** Eight new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture. Radius `40` vastly exceeds
+the 3x3 canvas, so every pixel's own box-blur average clamps heavily
+toward the grid's own edges: pixel `(row 0, col 0)`'s own radius-40
+average comes out to `49`, pixel `(row 2, col 2)`'s own to `50`.
+Amount `20` (frac `0.2`): pixel `(0, 0)`, `diff = 10-49 = -39`, `out =
+10 + (-39*0.2) = 2.2 -> 2` — local contrast pulls this corner pixel
+further from its own neighbourhood average; pixel `(2, 2)`, `diff =
+90-50 = 40`, `out = 90 + 40*0.2 = 98` — the opposite direction, both
+real and hand-computed. A second test halves amount to `10` for a real
+`6` at the same pixel. A third flips to amount `-50`, pulling the
+pixel toward its own neighbourhood average instead of away from it:
+`10 + (-39*-0.5) = 29.5 -> 30` (rounding away from zero) — the reverse-
+sharpen direction confirmed for real. A fourth confirms amount clamps
+at `±100` rather than erroring. A fifth confirms alpha stays
+untouched. A sixth confines a single pixel to a selection. A seventh
+and eighth confirm a locked or unknown layer both error. All eight
+tests passed on the first run, cross-checked against an independent
+Python script emulating Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**838 Rust tests total** (830 → 838, 831 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

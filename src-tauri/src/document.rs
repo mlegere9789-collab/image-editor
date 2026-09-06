@@ -9362,6 +9362,53 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Camera Raw Filter > Clarity: [`Self::unsharp_mask`]'s own
+    /// "subtract a blurred copy, add the difference back in, amplified"
+    /// shape, reusing the very same [`box_blur_at`] low-pass, but fixed
+    /// at a large radius (`40`) instead of a user-adjustable one —
+    /// Photoshop's own Clarity slider works this way internally too, at
+    /// a fixed large radius the dialog never exposes, boosting *local*
+    /// (midtone) contrast rather than fine edge detail the way a small-
+    /// radius sharpen does. Unlike [`Self::unsharp_mask`], `amount` here
+    /// is signed (Photoshop's own `-100..=100` Clarity range, clamped
+    /// rather than erroring): positive values boost local contrast
+    /// exactly like a sharpen; negative values soften it instead,
+    /// blending a pixel toward its own broad neighbourhood average — a
+    /// "reverse sharpen" [`Self::unsharp_mask`]'s own positive-only
+    /// `amount` can't express. `out = original + (original - blurred) *
+    /// (amount / 100.0)`, clamped, per RGB channel; alpha untouched.
+    pub fn clarity(&mut self, id: LayerId, amount: i32) -> Result<Option<Rect>, String> {
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let frac = amount.clamp(-100, 100) as f32 / 100.0;
+        const RADIUS: i64 = 40;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, RADIUS);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as f32;
+                    let diff = original - blurred[c] as f32;
+                    layer.pixels[dst + c] =
+                        (original + diff * frac).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -21674,6 +21721,106 @@ mod tests {
     fn highlights_shadows_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.highlights_shadows(999, 0, 50).is_err());
+    }
+
+    #[test]
+    fn clarity_boosts_local_contrast_at_a_fixed_large_radius() {
+        // ramped_3x3's own R-only ramp. Radius 40 vastly exceeds the
+        // 3x3 canvas, so every pixel's own box-blur average clamps
+        // heavily toward the grid's own edges; pixel (0, 0)'s own
+        // radius-40 average comes out to 49, pixel (2, 2)'s own to 50.
+        // Amount 20 (frac 0.2): pixel (0, 0), diff = 10-49 = -39, out =
+        // 10 + (-39*0.2) = 2.2, rounds to 2 -- local contrast pulls this
+        // corner pixel further from its own neighbourhood average, the
+        // "reverse" direction from pixel (2, 2), diff = 90-50 = 40, out
+        // = 90 + 40*0.2 = 98 -- both real, hand-computed, cross-checked
+        // in Python.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.clarity(id, 20).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 2);
+        assert_eq!(p[idx(2, 2)], 98);
+    }
+
+    #[test]
+    fn clarity_amount_scales_the_boost() {
+        // Same pixel (0, 0), amount 10 (frac 0.1) halves the shift:
+        // 10 + (-39*0.1) = 6.1, rounds to 6 -- a real, hand-computed
+        // change from the amount-20 test's own 2, not a coincidental
+        // match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.clarity(id, 10).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 6);
+    }
+
+    #[test]
+    fn clarity_negative_amount_softens_instead() {
+        // Same pixel (0, 0), amount -50 (frac -0.5) pulls the pixel
+        // toward its own neighbourhood average instead of away from it:
+        // 10 + (-39*-0.5) = 29.5, rounds away from zero to 30 -- the
+        // "reverse sharpen" direction unsharp_mask's own positive-only
+        // amount can't express.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.clarity(id, -50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 30);
+    }
+
+    #[test]
+    fn clarity_amount_is_clamped_to_plus_minus_100() {
+        let (mut a, ida) = ramped_3x3();
+        let (mut b, idb) = ramped_3x3();
+        a.clarity(ida, 500).unwrap();
+        b.clarity(idb, 100).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+    }
+
+    #[test]
+    fn clarity_leaves_alpha_untouched() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.clarity(id, 20).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0) + 3], 255);
+    }
+
+    #[test]
+    fn clarity_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.clarity(id, 20).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 2);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn clarity_on_a_locked_layer_is_an_error() {
+        let (mut doc, id) = transparent_doc_wh(2, 1);
+        doc.set_locked(id, true).unwrap();
+        let err = doc.clarity(id, 20).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+    }
+
+    #[test]
+    fn clarity_on_an_unknown_layer_is_an_error() {
+        let mut doc = Document::new(2, 1).unwrap();
+        assert!(doc.clarity(999, 20).is_err());
     }
 
     #[test]

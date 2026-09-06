@@ -238,6 +238,8 @@ export default function App() {
   const [showHighlightsShadowsDialog, setShowHighlightsShadowsDialog] = useState(false);
   const [highlightsValue, setHighlightsValue] = useState(0);
   const [shadowsValue, setShadowsValue] = useState(0);
+  const [showClarityDialog, setShowClarityDialog] = useState(false);
+  const [clarityAmount, setClarityAmount] = useState(20);
 
   const [showExposureDialog, setShowExposureDialog] = useState(false);
   const [exposureStops, setExposureStops] = useState(0);
@@ -861,6 +863,12 @@ export default function App() {
     });
     setShowHighlightsShadowsDialog(false);
   }, [runCommand, selectedId, highlightsValue, shadowsValue]);
+
+  const applyClarity = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("clarity", { id: selectedId, amount: clarityAmount });
+    setShowClarityDialog(false);
+  }, [runCommand, selectedId, clarityAmount]);
 
   const applyExposure = useCallback(async () => {
     if (selectedId === null) return;
@@ -2992,6 +3000,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowClarityDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Clarity"
+          >
+            Clarity…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowExposureDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Exposure"
@@ -4641,6 +4657,44 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyHighlightsShadows} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClarityDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowClarityDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Clarity"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Clarity</h2>
+            <label className="control">
+              <span className="control__label">
+                Clarity
+                <span className="control__value">{clarityAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={clarityAmount}
+                onChange={(event) => setClarityAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowClarityDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyClarity} disabled={busy}>
                 Apply
               </button>
             </div>
