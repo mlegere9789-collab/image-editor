@@ -6380,6 +6380,60 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **682 Rust tests total** (677 → 682, 675 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 95 — Filter Gallery > Texture > Patchwork
+
+`mosaic_tiles`'s own per-cell flat-average grid, given a closed-form
+diagonal bevel shade reused verbatim from `extrude`'s own non-random
+mode — each square's own luma stands in for its own bevel steepness,
+the same way `extrude`'s own `random: false` factor does, and the same
+`t = ((cell-1-lx) + (cell-1-ly)) / max_offset - 0.5` diagonal ramp
+brightens the square's own top-left corner and darkens its own
+bottom-right, mimicking a raised, lit square of fabric. `square_size`
+(Photoshop's own dialog is a coarse `0..=10` steps control; this
+project substitutes a direct `2..=100` pixel size, the same parameter
+substitution `mosaic_tiles`'s own `tile_size` already makes) sets the
+cell side length; `relief` (Photoshop's own `0..=25` range) scales the
+bevel's own strength exactly as `extrude`'s own `depth` does. Alpha is
+each cell's own averaged alpha, untouched by the bevel shade (matching
+`extrude`'s own alpha handling). Confined to the selection: cell
+averages and the bevel shade are always computed from the whole,
+unmodified source regardless of selection, and only the selected
+pixels' output is written back. A new **Patchwork…** dialog exposes
+Square Size and Relief sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`). Square size `4` makes the whole 4x4
+image one square, mean `(10+20+30+40)/4 = 25` exactly, factor
+`25/255 = 0.098039`, max offset `(4-1)*2 = 6.0`. At relief `25`: corner
+`(0, 0)` gives `t = 0.5`, shade `1.225`, `v = 26.225` → `26` (the
+brightened top-left corner); corner `(3, 3)` gives `t = -0.5`, shade
+`-1.225`, `v = 23.775` → `24` (the darkened bottom-right corner). A
+second test confirms relief `0` collapses to `mosaic_tiles`'s own flat
+average (`25`) everywhere. A third narrows square size to `2` (four
+`2x2` squares instead of one): square `(0, 0)`'s own mean drops to
+`15`, giving corner `(0, 0)` a real, hand-computed `16` at relief
+`25` — a genuine difference from the square-size-`4` test's own `26`,
+not a coincidental match. A fourth confines the fixture to a
+single-pixel selection at `(3, 3)`. A fifth confirms out-of-range
+square size and relief, plus a locked/unknown layer, all error. All
+five tests passed on the first run, cross-checked against an
+independent Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**687 Rust tests total** (682 → 687, 680 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

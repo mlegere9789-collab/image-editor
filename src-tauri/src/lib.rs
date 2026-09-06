@@ -1976,6 +1976,19 @@ fn mosaic_tiles(
     })
 }
 
+/// Filter Gallery > Texture > Patchwork on layer `id`.
+#[tauri::command]
+fn patchwork(
+    state: State<'_, AppState>,
+    id: LayerId,
+    square_size: u32,
+    relief: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.patchwork(id, square_size, relief)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2310,6 +2323,7 @@ pub fn run() {
             grain,
             tiles,
             mosaic_tiles,
+            patchwork,
             hue_saturation,
             black_and_white,
             vibrance,

@@ -469,6 +469,9 @@ export default function App() {
   const [mosaicTilesTileSize, setMosaicTilesTileSize] = useState(10);
   const [mosaicTilesGroutWidth, setMosaicTilesGroutWidth] = useState(2);
   const [mosaicTilesLightenGrout, setMosaicTilesLightenGrout] = useState(0);
+  const [showPatchworkDialog, setShowPatchworkDialog] = useState(false);
+  const [patchworkSquareSize, setPatchworkSquareSize] = useState(10);
+  const [patchworkRelief, setPatchworkRelief] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1530,6 +1533,16 @@ export default function App() {
     mosaicTilesGroutWidth,
     mosaicTilesLightenGrout,
   ]);
+
+  const applyPatchwork = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("patchwork", {
+      id: selectedId,
+      squareSize: patchworkSquareSize,
+      relief: patchworkRelief,
+    });
+    setShowPatchworkDialog(false);
+  }, [runCommand, selectedId, patchworkSquareSize, patchworkRelief]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2817,6 +2830,14 @@ export default function App() {
             title="Filter Gallery > Texture > Mosaic Tiles"
           >
             Mosaic Tiles…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPatchworkDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Patchwork"
+          >
+            Patchwork…
           </button>
           <button
             className="button button--quiet"
@@ -5360,6 +5381,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyMosaicTiles} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPatchworkDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPatchworkDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Patchwork"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Patchwork</h2>
+            <label className="control">
+              <span className="control__label">
+                Square Size
+                <span className="control__value">{patchworkSquareSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={100}
+                value={patchworkSquareSize}
+                onChange={(event) => setPatchworkSquareSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Relief
+                <span className="control__value">{patchworkRelief}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={patchworkRelief}
+                onChange={(event) => setPatchworkRelief(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPatchworkDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPatchwork} disabled={busy}>
                 Apply
               </button>
             </div>

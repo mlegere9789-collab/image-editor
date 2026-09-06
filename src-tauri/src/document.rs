@@ -7271,6 +7271,91 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Patchwork: [`Self::mosaic_tiles`]'s own
+    /// per-cell flat-average grid, given a closed-form diagonal bevel
+    /// shade reused verbatim from [`Self::extrude`]'s own non-random
+    /// mode — each square's own luma stands in for its own bevel
+    /// steepness, the same way `extrude`'s own `random: false` factor
+    /// does, and the same `t = ((cell-1-lx) + (cell-1-ly)) / max_offset -
+    /// 0.5` diagonal ramp brightens the square's own top-left corner and
+    /// darkens its own bottom-right, mimicking a raised, lit square of
+    /// fabric. `square_size` (Photoshop's own dialog is a coarse `0..=10`
+    /// steps control; this project substitutes a direct `2..=100` pixel
+    /// size, the same parameter substitution [`Self::mosaic_tiles`]'s own
+    /// `tile_size` already makes) sets the cell side length; `relief`
+    /// (Photoshop's own `0..=25` range) scales the bevel's own strength
+    /// exactly as `extrude`'s own `depth` does. Alpha is each cell's own
+    /// averaged alpha, untouched by the bevel shade (matching `extrude`'s
+    /// own alpha handling). Confined to the selection: cell averages and
+    /// the bevel shade are always computed from the whole, unmodified
+    /// source regardless of selection, and only the selected pixels'
+    /// output is written back.
+    pub fn patchwork(
+        &mut self,
+        id: LayerId,
+        square_size: u32,
+        relief: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=100).contains(&square_size) {
+            return Err("Patchwork square size must be between 2 and 100.".to_string());
+        }
+        if relief > 25 {
+            return Err("Patchwork relief must be between 0 and 25.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = square_size as usize;
+        let relief = relief as f32;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let cells_x = width.div_ceil(cell);
+        let cells_y = height.div_ceil(cell);
+        let mut sums = vec![[0u64; CHANNELS]; cells_x * cells_y];
+        let mut counts = vec![0u64; cells_x * cells_y];
+        for y in 0..height {
+            for x in 0..width {
+                let ci = (y / cell) * cells_x + x / cell;
+                let base = (y * width + x) * CHANNELS;
+                for c in 0..CHANNELS {
+                    sums[ci][c] += source[base + c] as u64;
+                }
+                counts[ci] += 1;
+            }
+        }
+        let averages: Vec<[u8; CHANNELS]> = sums
+            .iter()
+            .zip(&counts)
+            .map(|(sum, &count)| std::array::from_fn(|c| (sum[c] / count) as u8))
+            .collect();
+        let factors: Vec<f32> = averages
+            .iter()
+            .map(|&[r, g, b, _]| (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0)
+            .collect();
+        let max_offset = (cell - 1) as f32 * 2.0;
+        self.filter_pixels(id, move |_, row, col| {
+            let (cx, cy) = (col as usize / cell, row as usize / cell);
+            let ci = cy * cells_x + cx;
+            let (lx, ly) = (col as usize % cell, row as usize % cell);
+            let t = if max_offset > 0.0 {
+                ((cell - 1 - lx) + (cell - 1 - ly)) as f32 / max_offset - 0.5
+            } else {
+                0.0
+            };
+            let shade = t * factors[ci] * relief;
+            let avg = averages[ci];
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (avg[c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = avg[3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16540,6 +16625,92 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.mosaic_tiles(999, 4, 1, 0).is_err());
+    }
+
+    #[test]
+    fn patchwork_bevels_each_squares_relief_from_its_own_average() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40).
+        // Square size 4 makes the whole 4x4 image one square, mean
+        // (10+20+30+40)/4 = 25 exactly, factor 25/255 = 0.098039. Max
+        // offset is (4-1)*2 = 6.0. At relief 25:
+        //   corner (0, 0): t = ((3-0)+(3-0))/6 - 0.5 = 0.5,
+        //     shade = 0.5*0.098039*25 = 1.225, v = 25+1.225 = 26.225 ->
+        //     26 -- the brightened top-left corner.
+        //   corner (3, 3): t = ((3-3)+(3-3))/6 - 0.5 = -0.5,
+        //     shade = -1.225, v = 23.775 -> 24 -- the darkened
+        //     bottom-right corner.
+        // Cross-checked against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.patchwork(id, 4, 25).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [26, 26, 26, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [24, 24, 24, 255]);
+    }
+
+    #[test]
+    fn patchwork_zero_relief_is_a_flat_mosaic() {
+        // Relief 0 zeroes the bevel shade entirely, so every pixel in
+        // the single square reads the same mean of 25, matching
+        // mosaic_tiles's own already-tested flat-average behaviour.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.patchwork(id, 4, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [25, 25, 25, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [25, 25, 25, 255]);
+    }
+
+    #[test]
+    fn patchwork_square_size_changes_the_cell_grouping() {
+        // Square size 2 splits the image into four 2x2 squares instead
+        // of one, so square (0, 0) (columns 0-1, mean (10+20)/2 = 15)
+        // gives corner (0, 0) a real, hand-computed 16 at relief 25 --
+        // a genuine difference from the square-size-4 test's own (0, 0)
+        // result of 26, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.patchwork(id, 2, 25).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [16, 16, 16, 255]);
+    }
+
+    #[test]
+    fn patchwork_is_confined_to_the_selection() {
+        // Cell averages and the bevel shade are always computed from the
+        // whole, unmodified source regardless of selection, so selecting
+        // only (3, 3) still produces the same 24 the unselected first
+        // test's own (3, 3) computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(3.0, 3.0, 4.0, 4.0).unwrap();
+        let dirty = doc.patchwork(id, 4, 25).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(3, 3)..idx(3, 3) + 4], [24, 24, 24, 255]);
+        assert_eq!(after[..idx(3, 3)], before[..idx(3, 3)]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 3,
+                y0: 3,
+                x1: 4,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn patchwork_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.patchwork(id, 1, 25).is_err());
+        assert!(doc.patchwork(id, 101, 25).is_err());
+        assert!(doc.patchwork(id, 4, 26).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.patchwork(id, 4, 25).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.patchwork(999, 4, 25).is_err());
     }
 
     #[test]
