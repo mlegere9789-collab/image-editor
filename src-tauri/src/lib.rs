@@ -1173,6 +1173,20 @@ fn watercolor(
     })
 }
 
+/// Filter Gallery > Brush Strokes > Dark Strokes on layer `id`.
+#[tauri::command]
+fn dark_strokes(
+    state: State<'_, AppState>,
+    id: LayerId,
+    balance: u32,
+    black_intensity: u32,
+    white_intensity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.dark_strokes(id, balance, black_intensity, white_intensity)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1771,6 +1785,7 @@ pub fn run() {
             poster_edges,
             sponge,
             watercolor,
+            dark_strokes,
             crystallize,
             facet,
             pointillize,

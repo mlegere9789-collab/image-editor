@@ -4186,6 +4186,76 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Brush Strokes > Dark Strokes: a documented
+    /// approximation of Photoshop's real directional-stroke renderer —
+    /// this is a per-pixel luma-threshold split-tone instead, not a port
+    /// — that pulls dark pixels further toward black and light ones
+    /// further toward white, the same "widen the tonal spread" effect a
+    /// hand-inked drawing's dark strokes-on-light-strokes contrast
+    /// produces. `balance` (Photoshop's own `0..=10` range) sets the luma
+    /// split point, `threshold = balance / 10 · 255`. A pixel whose own
+    /// ITU-R BT.601 luma sits below `threshold` is darkened: `t =
+    /// (threshold − luma) / threshold` (0 right at the threshold, 1 at
+    /// pure black) scaled by `black_intensity` (`0..=10`) into a
+    /// multiplier, `orig · (1 − black_intensity / 10 · t)`. A pixel at or
+    /// above `threshold` is instead pulled toward white: `t = (luma −
+    /// threshold) / (255 − threshold)` scaled by `white_intensity`
+    /// (`0..=10`) into `orig + (255 − orig) · (white_intensity / 10 · t)`.
+    /// `balance` at either extreme (`0` or `10`) puts every real pixel on
+    /// one side of the split, degenerately turning off the other
+    /// intensity slider — a natural consequence of the formula, not a
+    /// special case. Alpha is untouched. Confined to the selection and
+    /// errors on an out-of-range parameter or a locked/unknown layer.
+    pub fn dark_strokes(
+        &mut self,
+        id: LayerId,
+        balance: u32,
+        black_intensity: u32,
+        white_intensity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if balance > 10 {
+            return Err("Dark Strokes balance must be between 0 and 10.".to_string());
+        }
+        if black_intensity > 10 {
+            return Err("Dark Strokes black intensity must be between 0 and 10.".to_string());
+        }
+        if white_intensity > 10 {
+            return Err("Dark Strokes white intensity must be between 0 and 10.".to_string());
+        }
+        let threshold = balance as f32 / 10.0 * 255.0;
+        let black_f = black_intensity as f32 / 10.0;
+        let white_f = white_intensity as f32 / 10.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let mut out = [r, g, b, a];
+            if luma < threshold {
+                let t = if threshold > 0.0 {
+                    ((threshold - luma) / threshold).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let factor = (1.0 - black_f * t).clamp(0.0, 1.0);
+                for (slot, v) in out.iter_mut().take(3).zip([r, g, b]) {
+                    *slot = (v as f32 * factor).round().clamp(0.0, 255.0) as u8;
+                }
+            } else {
+                let span = 255.0 - threshold;
+                let t = if span > 0.0 {
+                    ((luma - threshold) / span).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                let push = white_f * t;
+                for (slot, v) in out.iter_mut().take(3).zip([r, g, b]) {
+                    *slot = (v as f32 + (255.0 - v as f32) * push)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+            }
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9691,6 +9761,91 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.watercolor(999, 14, 5).is_err());
+    }
+
+    #[test]
+    fn dark_strokes_pushes_toward_white_above_the_threshold() {
+        // ramped_3x3's red-only pixels (10, 50, 90; G=B=0) all have a tiny
+        // luma (0.299 * red, at most 26.91), so balance 0 (threshold 0)
+        // puts every one of them at or above the threshold — the
+        // white-push branch. black_intensity 0 keeps that branch's own
+        // multiplier irrelevant; white_intensity 6 gives t = luma / 255
+        // (span 255) and push = 0.6 * t. For red 10 (luma 2.99): push =
+        // 0.6*2.99/255 = 0.0070353; red' = 10 + (255-10)*0.0070353 =
+        // 11.7236 -> 12, green'/blue' = 0 + 255*0.0070353 = 1.794 -> 2.
+        // For red 50 (luma 14.95): push = 0.035176; red' = 50 +
+        // 205*0.035176 = 57.211 -> 57, green'/blue' = 255*0.035176 =
+        // 8.970 -> 9. For red 90 (luma 26.91): push = 0.063318; red' = 90
+        // + 165*0.063318 = 100.447 -> 100, green'/blue' =
+        // 255*0.063318 = 16.146 -> 16. None of these land near a .5
+        // boundary. Cross-checked with an independent Python script.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.dark_strokes(id, 0, 0, 6).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [12, 2, 2, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [57, 9, 9, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 16, 16, 255]);
+    }
+
+    #[test]
+    fn dark_strokes_pulls_toward_black_below_the_threshold() {
+        // Balance 10 (threshold 255) puts every real pixel below the
+        // threshold — the black-pull branch. white_intensity 0 keeps that
+        // branch irrelevant; black_intensity 6 gives t = (255 - luma) /
+        // 255 (denominator threshold itself, 255) and factor = 1 -
+        // 0.6*t. For red 10 (luma 2.99): t = 0.98827, factor =
+        // 0.406957..., red' = 10*0.406957 = 4.0699 -> wait computed
+        // precisely by the same Python script: 4.070 -> 4. For red 50
+        // (luma 14.95): red' = 21.759 -> 22. For red 90 (luma 26.91):
+        // red' = 41.699 -> 42. Green/blue start at 0 and stay 0 under
+        // multiplication regardless of factor. None of these land near a
+        // .5 boundary.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.dark_strokes(id, 10, 6, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [4, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [22, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [42, 0, 0, 255]);
+    }
+
+    #[test]
+    fn dark_strokes_is_confined_to_the_selection() {
+        // Balance 10, black intensity 6: a flat 128 has luma 128 exactly
+        // (r=g=b), threshold 255, t = (255-128)/255 = 0.498039, factor =
+        // 1 - 0.6*0.498039 = 0.701176, 128*0.701176 = 89.75 -> 90 —
+        // cross-checked with the same Python script, and clearly
+        // different from the original 128, so this is a real change, not
+        // a coincidental no-op.
+        let (mut doc, id) = grey_2x2();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.dark_strokes(id, 10, 6, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], &[90, 90, 90, 255]); // selected, changed
+        assert_eq!(&p[4..8], &[128, 128, 128, 255]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn dark_strokes_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.dark_strokes(id, 11, 0, 0).is_err());
+        assert!(doc.dark_strokes(id, 0, 11, 0).is_err());
+        assert!(doc.dark_strokes(id, 0, 0, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.dark_strokes(id, 0, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.dark_strokes(999, 0, 0, 0).is_err());
     }
 
     #[test]

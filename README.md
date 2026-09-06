@@ -4289,6 +4289,61 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **516 Rust tests total** (513 → 516, 509 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 61 — Filter Gallery > Brush Strokes > Dark Strokes
+
+The first Brush Strokes gallery filter, and a documented approximation
+of Photoshop's real directional-stroke renderer — this is a per-pixel
+luma-threshold split-tone instead, not a port — that pulls dark pixels
+further toward black and light ones further toward white, the same
+"widen the tonal spread" effect a hand-inked drawing's dark
+strokes-on-light-strokes contrast produces. `Document::dark_strokes(id,
+balance, black_intensity, white_intensity)`: `balance` (Photoshop's own
+`0..=10` range) sets the luma split point, `threshold = balance / 10 ·
+255`. A pixel whose own ITU-R BT.601 luma sits below `threshold` is
+darkened: `t = (threshold − luma) / threshold` scaled by
+`black_intensity` (`0..=10`) into a multiplier, `orig · (1 −
+black_intensity / 10 · t)`. A pixel at or above `threshold` is instead
+pulled toward white: `t = (luma − threshold) / (255 − threshold)` scaled
+by `white_intensity` (`0..=10`) into `orig + (255 − orig) ·
+(white_intensity / 10 · t)`. `balance` at either extreme (`0` or `10`)
+puts every real pixel on one side of the split, degenerately turning off
+the other intensity slider — a natural consequence of the formula, not
+a special case. Alpha is untouched. A new **Dark Strokes…** dialog
+exposes Balance, Black Intensity, and White Intensity sliders.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python script. On the `ramped_3x3` fixture (red
+values `10`-`90`, green/blue flat `0`, so luma is `0.299 ×` red and
+always tiny — at most `26.91`): balance `0` (threshold `0`) puts every
+pixel at or above the threshold, so at white intensity `6` red `10`
+(luma `2.99`) becomes `(12, 2, 2)`, red `50` (luma `14.95`) becomes
+`(57, 9, 9)`, and red `90` (luma `26.91`) becomes `(100, 16, 16)`;
+balance `10` (threshold `255`) puts every pixel below the threshold, so
+at black intensity `6` the same three reds become `4`, `22`, and `42`
+(green/blue stay `0` under multiplication regardless of the factor) —
+none of these land near a `.5` boundary. A third test confines a flat
+`128` grey to a one-pixel selection at balance `10`/black intensity `6`:
+its luma is exactly `128`, giving `t = 0.498039`, factor `0.701176`, and
+`128 × 0.701176 = 89.75 → 90` — a real, hand-verified change, not a
+coincidental no-op, with the rest of the layer confirmed untouched. A
+fourth confirms an out-of-range balance/black-intensity/white-intensity
+and a locked/unknown layer all error. All four passed on the first run,
+matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous eight: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**520 Rust tests total** (516 → 520, 513 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

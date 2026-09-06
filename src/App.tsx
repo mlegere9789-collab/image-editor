@@ -345,6 +345,10 @@ export default function App() {
   const [showWatercolorDialog, setShowWatercolorDialog] = useState(false);
   const [watercolorBrushDetail, setWatercolorBrushDetail] = useState(10);
   const [watercolorShadowIntensity, setWatercolorShadowIntensity] = useState(3);
+  const [showDarkStrokesDialog, setShowDarkStrokesDialog] = useState(false);
+  const [darkStrokesBalance, setDarkStrokesBalance] = useState(4);
+  const [darkStrokesBlackIntensity, setDarkStrokesBlackIntensity] = useState(6);
+  const [darkStrokesWhiteIntensity, setDarkStrokesWhiteIntensity] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -998,6 +1002,23 @@ export default function App() {
     });
     setShowWatercolorDialog(false);
   }, [runCommand, selectedId, watercolorBrushDetail, watercolorShadowIntensity]);
+
+  const applyDarkStrokes = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("dark_strokes", {
+      id: selectedId,
+      balance: darkStrokesBalance,
+      blackIntensity: darkStrokesBlackIntensity,
+      whiteIntensity: darkStrokesWhiteIntensity,
+    });
+    setShowDarkStrokesDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    darkStrokesBalance,
+    darkStrokesBlackIntensity,
+    darkStrokesWhiteIntensity,
+  ]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2317,6 +2338,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Watercolor"
           >
             Watercolor…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowDarkStrokesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Dark Strokes"
+          >
+            Dark Strokes…
           </button>
           <button
             className="button button--quiet"
@@ -4795,6 +4824,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWatercolor} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDarkStrokesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDarkStrokesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Dark Strokes"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Dark Strokes</h2>
+            <label className="control">
+              <span className="control__label">
+                Balance
+                <span className="control__value">{darkStrokesBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={darkStrokesBalance}
+                onChange={(event) => setDarkStrokesBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Black Intensity
+                <span className="control__value">{darkStrokesBlackIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={darkStrokesBlackIntensity}
+                onChange={(event) => setDarkStrokesBlackIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                White Intensity
+                <span className="control__value">{darkStrokesWhiteIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={darkStrokesWhiteIntensity}
+                onChange={(event) => setDarkStrokesWhiteIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDarkStrokesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDarkStrokes} disabled={busy}>
                 Apply
               </button>
             </div>
