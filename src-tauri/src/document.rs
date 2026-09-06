@@ -7430,6 +7430,74 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Craquelure: unlike
+    /// [`Self::stained_glass`], which flattens every cell to a single
+    /// average colour, this leaves the source image untouched except
+    /// along the cracks themselves — reusing the exact same jittered-site
+    /// membership check (`jittered_sites`/`nearest_site`, fixed at a
+    /// 1-pixel-thick crack rather than a tunable border width) to find
+    /// them. A crack pixel is darkened by `crack_depth` and lightened by
+    /// `crack_brightness`, `v = orig - crack_depth / 10.0 * 128.0 +
+    /// crack_brightness / 10.0 * 64.0`, clamped — a documented
+    /// simplification standing in for Photoshop's own embossed crack
+    /// relief with a directional highlight. `crack_spacing` (Photoshop's
+    /// own dialog is a coarse control; this project substitutes a direct
+    /// `2..=100` pixel cell size, the same parameter substitution
+    /// [`Self::mosaic_tiles`]'s own `tile_size` already makes) sets the
+    /// jittered-site grid; `crack_depth` and `crack_brightness` are both
+    /// Photoshop's own `0..=10` ranges. Alpha untouched. Confined to the
+    /// selection: sites and crack membership are always computed from
+    /// the whole, unmodified source regardless of selection, the same
+    /// convention [`Self::stained_glass`] and [`Self::crystallize`]
+    /// already establish.
+    pub fn craquelure(
+        &mut self,
+        id: LayerId,
+        crack_spacing: u32,
+        crack_depth: u32,
+        crack_brightness: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=100).contains(&crack_spacing) {
+            return Err("Craquelure crack spacing must be between 2 and 100.".to_string());
+        }
+        if crack_depth > 10 {
+            return Err("Craquelure crack depth must be between 0 and 10.".to_string());
+        }
+        if crack_brightness > 10 {
+            return Err("Craquelure crack brightness must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = crack_spacing as i64;
+        let depth_amt = crack_depth as f32 / 10.0 * 128.0;
+        let bright_amt = crack_brightness as f32 / 10.0 * 64.0;
+        let (sites, grid) = jittered_sites(width, height, crack_spacing, seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * width + col as usize) * CHANNELS;
+            let (x, y) = (col as i64, row as i64);
+            let (idx, _) = nearest_site(&sites, cell, grid, (x, y));
+            let is_crack = [(1i64, 0i64), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dy)| {
+                    let nx = (x + dx).clamp(0, width as i64 - 1);
+                    let ny = (y + dy).clamp(0, height as i64 - 1);
+                    nearest_site(&sites, cell, grid, (nx, ny)).0 != idx
+                });
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = if is_crack {
+                    (src[base + c] as f32 - depth_amt + bright_amt)
+                        .round()
+                        .clamp(0.0, 255.0) as u8
+                } else {
+                    src[base + c]
+                };
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16883,6 +16951,94 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.stained_glass(999, 2, 1, 0, 1).is_err());
+    }
+
+    #[test]
+    fn craquelure_preserves_the_image_and_darkens_the_cracks() {
+        // Same column-stripes fixture, cell (crack) spacing 2, and seed
+        // 1 as stained_glass's own tests, giving the identical jittered
+        // sites and the identical crack membership at a fixed 1-pixel
+        // check (crack_depth/crack_brightness don't affect which pixels
+        // are cracks, only how they're recoloured). Unlike stained_glass,
+        // non-crack pixels keep the source untouched: (0, 0) and (1, 0)
+        // stay their own original 10 and 20. Crack pixels (2, 0) and
+        // (3, 0), at crack depth 10 (darken amount 128.0) and crack
+        // brightness 0: v = orig - 128.0, clamped to 0 for both (30-128
+        // and 40-128 are both deeply negative).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.craquelure(id, 2, 10, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn craquelure_crack_brightness_lightens_the_cracks() {
+        // Same crack pixels (2, 0) and (3, 0), but crack depth 0 (no
+        // darkening) and crack brightness 10 (lighten amount 64.0):
+        // v = orig + 64.0, giving 94 and 104 -- real, hand-computed
+        // changes from the depth-10 test's own 0 and 0, not a
+        // coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.craquelure(id, 2, 0, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [94, 94, 94, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [104, 104, 104, 255]);
+    }
+
+    #[test]
+    fn craquelure_zero_depth_and_brightness_is_a_no_op() {
+        // Crack depth 0 and crack brightness 0 leave even crack pixels
+        // at orig - 0.0 + 0.0 = orig, a true no-op regardless of which
+        // pixels are cracks.
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.craquelure(id, 2, 0, 0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn craquelure_is_confined_to_the_selection() {
+        // Sites and crack membership are always computed from the whole,
+        // unmodified source regardless of selection, so selecting only
+        // (2, 0) still produces the same 0 the unselected first test's
+        // own (2, 0) computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        let dirty = doc.craquelure(id, 2, 10, 0, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]); // unselected, untouched
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 0,
+                x1: 3,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn craquelure_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.craquelure(id, 1, 0, 0, 1).is_err());
+        assert!(doc.craquelure(id, 101, 0, 0, 1).is_err());
+        assert!(doc.craquelure(id, 2, 11, 0, 1).is_err());
+        assert!(doc.craquelure(id, 2, 0, 11, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.craquelure(id, 2, 0, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.craquelure(999, 2, 0, 0, 1).is_err());
     }
 
     #[test]

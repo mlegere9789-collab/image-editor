@@ -6499,6 +6499,59 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **692 Rust tests total** (687 → 692, 685 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 97 — Filter Gallery > Texture > Craquelure
+
+Unlike `stained_glass`, which flattens every cell to a single average
+colour, this leaves the source image untouched except along the cracks
+themselves — reusing the exact same jittered-site membership check
+(`jittered_sites`/`nearest_site`, fixed at a 1-pixel-thick crack rather
+than a tunable border width) to find them. A crack pixel is darkened
+by `crack_depth` and lightened by `crack_brightness`, `v = orig -
+crack_depth / 10.0 * 128.0 + crack_brightness / 10.0 * 64.0`, clamped
+— a documented simplification standing in for Photoshop's own embossed
+crack relief with a directional highlight. `crack_spacing`
+(Photoshop's own dialog is a coarse control; this project substitutes
+a direct `2..=100` pixel cell size, the same parameter substitution
+`mosaic_tiles`'s own `tile_size` already makes) sets the jittered-site
+grid; `crack_depth` and `crack_brightness` are both Photoshop's own
+`0..=10` ranges. Alpha untouched. Confined to the selection: sites and
+crack membership are always computed from the whole, unmodified source
+regardless of selection, the same convention `stained_glass` and
+`crystallize` already establish. A new **Craquelure…** dialog exposes
+Crack Spacing, Crack Depth, and Crack Brightness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+`column_stripes_fixture`, cell spacing `2`, and seed `1` as
+`stained_glass`'s own tests, giving the identical jittered sites and
+crack membership. Unlike `stained_glass`, non-crack pixels keep the
+source untouched: `(0, 0)` and `(1, 0)` stay their own original `10`
+and `20`. Crack pixels `(2, 0)` and `(3, 0)`, at crack depth `10`
+(darken amount `128.0`) and crack brightness `0`, both clamp to `0`.
+A second test raises crack brightness to `10` (lighten amount `64.0`)
+with crack depth `0`, giving `94` and `104` instead — real,
+hand-computed changes, not a coincidental match. A third confirms
+crack depth `0` and crack brightness `0` together are a true no-op. A
+fourth confines the fixture to a single-pixel selection at `(2, 0)`. A
+fifth confirms out-of-range crack spacing, crack depth, and crack
+brightness, plus a locked/unknown layer, all error. All five tests
+passed on the first run, cross-checked against an independent Python
+script that reproduces `jittered_sites`, `nearest_site`, and the crack
+check exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**697 Rust tests total** (692 → 697, 690 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

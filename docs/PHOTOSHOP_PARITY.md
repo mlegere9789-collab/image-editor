@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 155.**
+**618 distinct capabilities tracked. Currently shipped: 156.**
 
 ## PART I — EVERY TOOL
 
@@ -591,7 +591,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Tiles (Filter → Stylize; slides each `tile_size`-pixel-square cell's own content by a seeded per-cell offset, showing through only where the shift still originates from within that same cell's own footprint, falling back to the layer's own unaltered original elsewhere — the "Unaltered Image" fill, Photoshop's other three fill options are a documented scope cut — see README Phase 93)
 - [x] Trace Contour (per-channel contour where the channel crosses the level, Lower/Upper edge — see README Phase 31)
 - [x] Wind (Filter → Stylize; streaks each pixel toward one horizontal neighbour by blending it with a one-directional average of the pixels in that direction, reusing `average_samples` — the same shared primitive `box_blur_at`/`motion_blur_at` already build on — with a one-sided range instead of either's own symmetric window; Method (Wind/Blast/Stagger) picks a length/blend pair, Stagger's own literal staggered offset pattern is a documented scope cut — see README Phase 91)
-- [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
+- [x] Craquelure (Filter Gallery → Texture; reuses `stained_glass`'s own jittered-site membership check fixed at a 1-pixel-thick crack, but leaves the source image untouched except along the cracks themselves, darkened by Crack Depth and lightened by Crack Brightness — unlike `stained_glass`, which flattens every cell to a single average colour — see README Phase 97)
 - [x] Grain (Filter Gallery → Texture; adds a seeded `XorShift32` draw to each pixel's own RGB channels identically, then reapplies `brightness_contrast`'s own tone-curve formula (reimplemented inline, as `fresco`/`rough_pastels` already do) — supports Photoshop's own "Regular" grain type only, the other nine (Soft, Sprinkles, Clumped, Contrasty, Enlarged, Stippled, Horizontal, Vertical, Speckle) are a documented scope cut — see README Phase 92)
 - [x] Mosaic Tiles (Filter Gallery → Texture; reuses `mosaic`'s own per-cell flat-average grid, overlaid with a solid grayscale grout border along every cell's own edges — Lighten Grout sets the border's grayscale value rather than a genuine tint, a documented simplification — see README Phase 94)
 - [x] Patchwork (Filter Gallery → Texture; `mosaic_tiles`'s own per-cell flat-average grid given a closed-form diagonal bevel shade reused verbatim from `extrude`'s own non-random mode, each square's own luma standing in for its own bevel steepness — see README Phase 95)

@@ -476,6 +476,10 @@ export default function App() {
   const [stainedGlassCellSize, setStainedGlassCellSize] = useState(10);
   const [stainedGlassBorderThickness, setStainedGlassBorderThickness] = useState(2);
   const [stainedGlassLightIntensity, setStainedGlassLightIntensity] = useState(3);
+  const [showCraquelureDialog, setShowCraquelureDialog] = useState(false);
+  const [craquelureCrackSpacing, setCraquelureCrackSpacing] = useState(10);
+  const [craquelureCrackDepth, setCraquelureCrackDepth] = useState(4);
+  const [craquelureCrackBrightness, setCraquelureCrackBrightness] = useState(4);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1565,6 +1569,25 @@ export default function App() {
     stainedGlassCellSize,
     stainedGlassBorderThickness,
     stainedGlassLightIntensity,
+  ]);
+
+  const applyCraquelure = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("craquelure", {
+      id: selectedId,
+      crackSpacing: craquelureCrackSpacing,
+      crackDepth: craquelureCrackDepth,
+      crackBrightness: craquelureCrackBrightness,
+      seed,
+    });
+    setShowCraquelureDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    craquelureCrackSpacing,
+    craquelureCrackDepth,
+    craquelureCrackBrightness,
   ]);
 
   const applyCrystallize = useCallback(async () => {
@@ -2869,6 +2892,14 @@ export default function App() {
             title="Filter Gallery > Texture > Stained Glass"
           >
             Stained Glass…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCraquelureDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Craquelure"
+          >
+            Craquelure…
           </button>
           <button
             className="button button--quiet"
@@ -5533,6 +5564,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyStainedGlass} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCraquelureDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCraquelureDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Craquelure"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Craquelure</h2>
+            <label className="control">
+              <span className="control__label">
+                Crack Spacing
+                <span className="control__value">{craquelureCrackSpacing}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={100}
+                value={craquelureCrackSpacing}
+                onChange={(event) => setCraquelureCrackSpacing(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Crack Depth
+                <span className="control__value">{craquelureCrackDepth}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={craquelureCrackDepth}
+                onChange={(event) => setCraquelureCrackDepth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Crack Brightness
+                <span className="control__value">{craquelureCrackBrightness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={craquelureCrackBrightness}
+                onChange={(event) => setCraquelureCrackBrightness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCraquelureDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCraquelure} disabled={busy}>
                 Apply
               </button>
             </div>

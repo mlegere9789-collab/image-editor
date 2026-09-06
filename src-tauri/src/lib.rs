@@ -2005,6 +2005,22 @@ fn stained_glass(
     })
 }
 
+/// Filter Gallery > Texture > Craquelure on layer `id`. The frontend
+/// sends a fresh `seed` on every apply, as with Stained Glass.
+#[tauri::command]
+fn craquelure(
+    state: State<'_, AppState>,
+    id: LayerId,
+    crack_spacing: u32,
+    crack_depth: u32,
+    crack_brightness: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.craquelure(id, crack_spacing, crack_depth, crack_brightness, seed)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2341,6 +2357,7 @@ pub fn run() {
             mosaic_tiles,
             patchwork,
             stained_glass,
+            craquelure,
             hue_saturation,
             black_and_white,
             vibrance,
