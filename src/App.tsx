@@ -363,6 +363,10 @@ export default function App() {
   const [radialBlurAmount, setRadialBlurAmount] = useState(50);
   const [radialBlurCenterX, setRadialBlurCenterX] = useState(0);
   const [radialBlurCenterY, setRadialBlurCenterY] = useState(0);
+  const [showTiltShiftDialog, setShowTiltShiftDialog] = useState(false);
+  const [tiltShiftFocusRow, setTiltShiftFocusRow] = useState(0);
+  const [tiltShiftHalfHeight, setTiltShiftHalfHeight] = useState(20);
+  const [tiltShiftBlurRadius, setTiltShiftBlurRadius] = useState(15);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -2064,6 +2068,22 @@ export default function App() {
     });
     setShowRadialBlurDialog(false);
   }, [runCommand, selectedId, radialBlurAmount, radialBlurCenterX, radialBlurCenterY]);
+
+  const openTiltShiftDialog = useCallback(() => {
+    setTiltShiftFocusRow(Math.round((document?.height ?? 2) / 2));
+    setShowTiltShiftDialog(true);
+  }, [document]);
+
+  const applyTiltShift = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("tilt_shift", {
+      id: selectedId,
+      focusRow: tiltShiftFocusRow,
+      halfHeight: tiltShiftHalfHeight,
+      blurRadius: tiltShiftBlurRadius,
+    });
+    setShowTiltShiftDialog(false);
+  }, [runCommand, selectedId, tiltShiftFocusRow, tiltShiftHalfHeight, tiltShiftBlurRadius]);
 
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
@@ -3813,6 +3833,14 @@ export default function App() {
             title="Filter > Blur > Radial Blur"
           >
             Radial Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openTiltShiftDialog}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Blur Gallery > Tilt-Shift"
+          >
+            Tilt-Shift…
           </button>
           <button
             className="button button--quiet"
@@ -10841,6 +10869,75 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyRadialBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTiltShiftDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTiltShiftDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Tilt-Shift"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Blur Gallery &gt; Tilt-Shift
+            </h2>
+            <label className="control">
+              <span className="control__label">
+                Focus Row
+                <span className="control__value">{tiltShiftFocusRow}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={tiltShiftFocusRow}
+                onChange={(event) => setTiltShiftFocusRow(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharp Band Half-Height
+                <span className="control__value">{tiltShiftHalfHeight}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={tiltShiftHalfHeight}
+                onChange={(event) => setTiltShiftHalfHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Blur Radius
+                <span className="control__value">{tiltShiftBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={tiltShiftBlurRadius}
+                onChange={(event) => setTiltShiftBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTiltShiftDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTiltShift} disabled={busy}>
                 Apply
               </button>
             </div>

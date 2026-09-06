@@ -2470,6 +2470,20 @@ fn defringe(state: State<'_, AppState>, id: LayerId, amount: u32) -> Result<Snap
     edit_checkpointed(&state, |document| document.defringe(id, amount))
 }
 
+/// Filter Gallery > Blur Gallery > Tilt-Shift on layer `id`.
+#[tauri::command]
+fn tilt_shift(
+    state: State<'_, AppState>,
+    id: LayerId,
+    focus_row: u32,
+    half_height: u32,
+    blur_radius: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.tilt_shift(id, focus_row, half_height, blur_radius)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2712,6 +2726,7 @@ pub fn run() {
             highlights_shadows,
             clarity,
             defringe,
+            tilt_shift,
             select_rectangle,
             select_ellipse,
             select_all,

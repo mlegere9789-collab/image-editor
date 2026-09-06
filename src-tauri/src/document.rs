@@ -9473,6 +9473,68 @@ impl Document {
             [nr, ng, nb, a]
         })
     }
+
+    /// Filter Gallery > Blur Gallery > Tilt-Shift (horizontal band only):
+    /// a gradient blur that keeps a horizontal band around `focus_row`
+    /// perfectly sharp and blurs everything else by [`box_blur_at`] at up
+    /// to `blur_radius`, ramping smoothly in between — the classic
+    /// "miniature diorama" look. A pixel's own vertical `distance` from
+    /// `focus_row` is compared against `half_height` (rows within that
+    /// distance stay fully sharp, `blend = 0`) and a `blur_radius`-row
+    /// transition beyond it (`blend = (distance − half_height) /
+    /// blur_radius`, clamped to `0.0..=1.0`, reaching a full blur at
+    /// `blur_radius` rows past the sharp band); the final colour is
+    /// `original * (1 − blend) + blurred * blend` per RGB channel, alpha
+    /// untouched. Photoshop's own version lets the sharp band run at any
+    /// angle and gives each of its two feather rings an independently
+    /// draggable width, plus a separate Distortion slider; here the band
+    /// is always horizontal and the feather width is tied directly to
+    /// `blur_radius` — both documented scope cuts, along with Field Blur
+    /// and Iris Blur (Blur Gallery siblings with their own arbitrary-
+    /// point or elliptical falloff shapes, not this one's single
+    /// horizontal band).
+    pub fn tilt_shift(
+        &mut self,
+        id: LayerId,
+        focus_row: u32,
+        half_height: u32,
+        blur_radius: u32,
+    ) -> Result<Option<Rect>, String> {
+        if blur_radius == 0 {
+            return Err("Tilt-Shift blur radius must be at least 1 pixel.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let r = blur_radius as i64;
+        let focus_row = focus_row as i64;
+        let half_height = half_height as i64;
+        for row in bounds.y0..bounds.y1 {
+            let distance = (row as i64 - focus_row).abs();
+            let blend = ((distance - half_height) as f32 / blur_radius as f32).clamp(0.0, 1.0);
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as f32;
+                    let final_value = original * (1.0 - blend) + blurred[c] as f32 * blend;
+                    layer.pixels[dst + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -21986,6 +22048,80 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.defringe(999, 100).is_err());
+    }
+
+    #[test]
+    fn tilt_shift_keeps_the_focus_row_sharp_and_blurs_the_rest() {
+        // ramped_3x3's own R-only ramp. Focus row 1, half-height 0
+        // (only row 1 itself is fully sharp), blur radius 2. Row 1's
+        // own distance from the focus row is 0, so blend = 0 and every
+        // pixel in that row is left byte-for-byte at its own original
+        // value: (40, 50, 60) across columns 0-2. Row 0 and row 2 each
+        // sit a distance of 1 from the focus row, giving blend =
+        // (1-0)/2 = 0.5, blending each pixel halfway with its own
+        // radius-2 box-blur average -- row 0's own blurred row is (34,
+        // 38, 42), halfway to its own original (10, 20, 30) giving (22,
+        // 29, 36); row 2's own blurred row is (58, 62, 66), halfway to
+        // its own original (70, 80, 90) giving (64, 71, 78). All six
+        // values hand-computed and cross-checked in Python.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.tilt_shift(id, 1, 0, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 1)], 40);
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(2, 1)], 60);
+        assert_eq!(p[idx(0, 0)], 22);
+        assert_eq!(p[idx(1, 0)], 29);
+        assert_eq!(p[idx(2, 0)], 36);
+        assert_eq!(p[idx(0, 2)], 64);
+        assert_eq!(p[idx(1, 2)], 71);
+        assert_eq!(p[idx(2, 2)], 78);
+    }
+
+    #[test]
+    fn tilt_shift_half_height_widens_the_sharp_band() {
+        // Same focus row 1 and blur radius 2, but half-height 1 now
+        // covers row 0 and row 2 as well (their own distance, 1, no
+        // longer exceeds half-height), leaving the entire image
+        // untouched -- a real, hand-computed difference from the
+        // half-height-0 test's own blended rows.
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.tilt_shift(id, 1, 1, 2).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn tilt_shift_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.tilt_shift(id, 1, 0, 2).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 22);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn tilt_shift_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.tilt_shift(id, 1, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.tilt_shift(id, 1, 0, 2).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.tilt_shift(999, 1, 0, 2).is_err());
     }
 
     #[test]

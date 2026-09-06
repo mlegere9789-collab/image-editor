@@ -8020,6 +8020,63 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **843 Rust tests total** (838 → 843, 836 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 121 — Filter Gallery > Blur Gallery > Tilt-Shift
+
+`tilt_shift(id, focus_row, half_height, blur_radius)` (horizontal band
+only) is a gradient blur that keeps a horizontal band around
+`focus_row` perfectly sharp and blurs everything else by `box_blur_at`
+at up to `blur_radius`, ramping smoothly in between — the classic
+"miniature diorama" look. A pixel's own vertical `distance` from
+`focus_row` is compared against `half_height` (rows within that
+distance stay fully sharp, `blend = 0`) and a `blur_radius`-row
+transition beyond it (`blend = (distance - half_height) / blur_radius`,
+clamped to `0.0..=1.0`, reaching a full blur at `blur_radius` rows past
+the sharp band); the final colour is `original * (1 - blend) + blurred
+* blend` per RGB channel, alpha untouched. Photoshop's own version lets
+the sharp band run at any angle and gives each of its two feather
+rings an independently draggable width, plus a separate Distortion
+slider; here the band is always horizontal and the feather width is
+tied directly to `blur_radius` — both documented scope cuts, along
+with Field Blur and Iris Blur (Blur Gallery siblings with their own
+arbitrary-point or elliptical falloff shapes, not this one's single
+horizontal band). A new **Tilt-Shift…** dialog exposes Focus Row,
+Sharp Band Half-Height, and Blur Radius, defaulting the focus row to
+the canvas's own vertical centre when the dialog opens.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture. Focus row `1`, half-height
+`0` (only row `1` itself is fully sharp), blur radius `2`: row `1`'s
+own distance from the focus row is `0`, so `blend = 0` and every pixel
+in that row is left byte-for-byte at its own original value, `(40, 50,
+60)`. Row `0` and row `2` each sit a distance of `1` from the focus
+row, giving `blend = (1-0)/2 = 0.5`, blending each pixel halfway with
+its own radius-2 box-blur average — row `0`'s own blurred row is `(34,
+38, 42)`, halfway to its own original `(10, 20, 30)` giving `(22, 29,
+36)`; row `2`'s own blurred row is `(58, 62, 66)`, halfway to its own
+original `(70, 80, 90)` giving `(64, 71, 78)`. All six values
+hand-computed and cross-checked in Python. A second test widens
+half-height to `1`, now covering rows `0` and `2` as well, leaving the
+entire image untouched — a real, hand-computed difference from the
+half-height-`0` test's own blended rows. A third confines a single
+pixel to a selection. A fourth confirms a zero blur radius, plus a
+locked/unknown layer, all error. All four tests passed on the first
+run, cross-checked against an independent Python script emulating
+Rust's own `f32` rounding via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-eight: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**847 Rust tests total** (843 → 847, 840 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
