@@ -4655,6 +4655,68 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **544 Rust tests total** (539 → 544, 537 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 67 — Filter Gallery > Brush Strokes > Sprayed Strokes
+
+A separable approximation of a directional, rectangular brush stroke,
+built from two `motion_blur_at` passes at right angles to each other —
+the same directional line-sampling helper `motion_blur` and
+`crosshatch` already use. The first pass streaks the whole layer along
+the chosen direction's own axis; the second re-blurs that streaked
+result along the *perpendicular* axis, thickening each streak into a
+stroke with some width rather than a single-pixel-wide line. Two 1-D
+passes at right angles approximate, rather than exactly reproduce, a
+true 2-D rectangular average — a documented simplification, not a port
+of Photoshop's own spray-brush renderer.
+`Document::sprayed_strokes(id, stroke_length, spray_radius,
+direction)`: `direction` (Photoshop's own four-way dropdown) selects
+the stroke axis — `0` Right Diagonal, `1` Horizontal, `2` Left
+Diagonal, `3` Vertical; `stroke_length` (Photoshop's own `0..=20`
+range) becomes the first pass's half-length, `stroke_length / 2`;
+`spray_radius` (Photoshop's own `0..=25` range) becomes the second
+pass's half-length, `spray_radius / 5` — scaled down the same way
+`ink_outlines` and `crosshatch` both scale their own length
+parameters. A new **Sprayed Strokes…** dialog exposes Stroke Length
+and Spray Radius sliders plus a Stroke Direction dropdown.
+
+**Verified two ways.** Five new `document.rs` tests on the `ramped_3x3`
+fixture this file's `motion_blur` tests already established (a 3×3 red
+ramp, 10 through 90), reusing that fixture's own already-verified
+motion-blur arithmetic directly rather than deriving fresh numbers. At
+direction `1` (Horizontal), stroke length `2` (first-pass half-length
+`1`): the first pass is exactly `motion_blur`'s own zero-degree,
+radius-1 pass, so each row streaks to the same values that test already
+established (row 0 to `[13, 20, 26]`, row 1 to `[43, 50, 56]`, row 2 to
+`[73, 80, 86]`, every one an integer-truncating division like `(10 + 10
++ 20) / 3 = 13`); at spray radius `0` the second pass is a no-op, so
+that streaked grid is the final output. A second test raises spray
+radius to `5` (second-pass half-length `1`), blurring that same
+streaked grid vertically: column `0` (`13, 43, 73`) averages
+top-to-bottom to `(23, 43, 63)`, column `1` (`20, 50, 80`) to `(30, 50,
+70)`, column `2` (`26, 56, 86`) to `(36, 56, 76)` — all nine divisions
+come out exactly even, no rounding ambiguity. A third confirms
+direction `3` (Vertical) selects the vertical axis instead, reusing
+`motion_blur`'s own already-verified ninety-degree column values
+(`20, 40, 60`) directly. A fourth confines the fixture to a one-pixel
+selection at `(0, 0)`, whose combined two-pass value (`23`) differs
+from its own untouched original (`10`), a real, hand-verified change.
+A fifth confirms out-of-range stroke length, spray radius, and an
+unrecognised direction, plus a locked/unknown layer, all error. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fourteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**549 Rust tests total** (544 → 549, 542 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

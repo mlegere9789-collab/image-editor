@@ -368,6 +368,10 @@ export default function App() {
   const [angledStrokesDirectionBalance, setAngledStrokesDirectionBalance] = useState(50);
   const [angledStrokesStrokeLength, setAngledStrokesStrokeLength] = useState(10);
   const [angledStrokesSharpness, setAngledStrokesSharpness] = useState(3);
+  const [showSprayedStrokesDialog, setShowSprayedStrokesDialog] = useState(false);
+  const [sprayedStrokesLength, setSprayedStrokesLength] = useState(10);
+  const [sprayedStrokesRadius, setSprayedStrokesRadius] = useState(10);
+  const [sprayedStrokesDirection, setSprayedStrokesDirection] = useState(1);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1101,6 +1105,17 @@ export default function App() {
     });
     setShowAngledStrokesDialog(false);
   }, [runCommand, selectedId, angledStrokesDirectionBalance, angledStrokesStrokeLength, angledStrokesSharpness]);
+
+  const applySprayedStrokes = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("sprayed_strokes", {
+      id: selectedId,
+      strokeLength: sprayedStrokesLength,
+      sprayRadius: sprayedStrokesRadius,
+      direction: sprayedStrokesDirection,
+    });
+    setShowSprayedStrokesDialog(false);
+  }, [runCommand, selectedId, sprayedStrokesLength, sprayedStrokesRadius, sprayedStrokesDirection]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2468,6 +2483,14 @@ export default function App() {
             title="Filter Gallery > Brush Strokes > Angled Strokes"
           >
             Angled Strokes…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSprayedStrokesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Brush Strokes > Sprayed Strokes"
+          >
+            Sprayed Strokes…
           </button>
           <button
             className="button button--quiet"
@@ -5307,6 +5330,65 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyAngledStrokes} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSprayedStrokesDialog && (
+        <div className="modal-overlay" onClick={() => setShowSprayedStrokesDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Sprayed Strokes"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Sprayed Strokes</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{sprayedStrokesLength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={sprayedStrokesLength}
+                onChange={(event) => setSprayedStrokesLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Spray Radius
+                <span className="control__value">{sprayedStrokesRadius}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={sprayedStrokesRadius}
+                onChange={(event) => setSprayedStrokesRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Stroke Direction</span>
+              <select
+                value={sprayedStrokesDirection}
+                onChange={(event) => setSprayedStrokesDirection(Number(event.target.value))}
+              >
+                <option value={0}>Right Diagonal</option>
+                <option value={1}>Horizontal</option>
+                <option value={2}>Left Diagonal</option>
+                <option value={3}>Vertical</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSprayedStrokesDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySprayedStrokes} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -4749,6 +4749,97 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Filter Gallery > Brush Strokes > Sprayed Strokes: a separable
+    /// approximation of a directional, rectangular brush stroke, built
+    /// from two [`motion_blur_at`] passes at right angles to each other —
+    /// the same directional line-sampling helper [`Self::motion_blur`]
+    /// and [`Self::crosshatch`] already use. The first pass streaks the
+    /// whole layer along `direction`'s own axis by `stroke_length`; the
+    /// second re-blurs that streaked result along the *perpendicular*
+    /// axis by `spray_radius`, thickening each streak into a stroke with
+    /// some width rather than a single-pixel-wide line. Two 1-D passes at
+    /// right angles approximate, rather than exactly reproduce, a true 2-D
+    /// rectangular average — a documented simplification, not a port of
+    /// Photoshop's own spray-brush renderer. `direction` (Photoshop's own
+    /// four-way dropdown) selects the stroke axis: `0` Right Diagonal
+    /// (`/`), `1` Horizontal, `2` Left Diagonal (`\`), `3` Vertical.
+    /// `stroke_length` (Photoshop's own `0..=20` range) becomes the first
+    /// pass's half-length, `stroke_length / 2`. `spray_radius`
+    /// (Photoshop's own `0..=25` range) becomes the second pass's
+    /// half-length, `spray_radius / 5` — scaled down the same way
+    /// `ink_outlines` and `crosshatch` both scale their own length
+    /// parameters, since a literal 1:1 mapping would be needlessly slow
+    /// and Photoshop's own two ranges aren't on the same visual scale to
+    /// begin with. Confined to the selection (only the final, second pass
+    /// respects it; the first pass, like `crosshatch`'s own hatching pass,
+    /// always streaks the whole layer). Errors on an out-of-range
+    /// parameter, an unrecognised direction, or a locked/unknown layer.
+    pub fn sprayed_strokes(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        spray_radius: u32,
+        direction: u32,
+    ) -> Result<Option<Rect>, String> {
+        if stroke_length > 20 {
+            return Err("Sprayed Strokes stroke length must be between 0 and 20.".to_string());
+        }
+        if spray_radius > 25 {
+            return Err("Sprayed Strokes spray radius must be between 0 and 25.".to_string());
+        }
+        if direction > 3 {
+            return Err(
+                "Sprayed Strokes direction must be 0 (Right Diagonal), 1 (Horizontal), 2 (Left Diagonal), or 3 (Vertical)."
+                    .to_string(),
+            );
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let (dx, dy): (f32, f32) = match direction {
+            0 => (inv_sqrt2, -inv_sqrt2),
+            1 => (1.0, 0.0),
+            2 => (inv_sqrt2, inv_sqrt2),
+            _ => (0.0, 1.0),
+        };
+        let (perp_dx, perp_dy) = (-dy, dx);
+        let half_length = (stroke_length / 2) as i64;
+        let half_spread = (spray_radius / 5) as i64;
+        let streaked = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            let source = layer.pixels.clone();
+            let mut out = vec![0u8; source.len()];
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let streaked_px = motion_blur_at(
+                        &source,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        (dx, dy),
+                        half_length,
+                    );
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    out[dst..dst + CHANNELS].copy_from_slice(&streaked_px);
+                }
+            }
+            out
+        };
+        self.filter_pixels(id, move |_source, row, col| {
+            motion_blur_at(
+                &streaked,
+                doc_width,
+                (width, height),
+                (row, col),
+                (perp_dx, perp_dy),
+                half_spread,
+            )
+        })
+    }
+
     /// Values outside `0.0..=1.0` are clamped rather than rejected, so a slider
     /// that overshoots by a rounding step is not an error.
     pub fn set_opacity(&mut self, id: LayerId, opacity: f32) -> Result<(), String> {
@@ -6862,6 +6953,115 @@ mod tests {
     fn motion_blur_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 2).unwrap();
         assert!(doc.motion_blur(999, 0.0, 1).is_err());
+    }
+
+    #[test]
+    fn sprayed_strokes_streaks_then_thickens_at_right_angles() {
+        // Direction 1 (Horizontal) on ramped_3x3, stroke length 2 (first-
+        // pass half-length 1): this first pass is exactly motion_blur's
+        // own zero-degree, radius-1 pass, so its per-row output reuses
+        // that already-verified arithmetic on every row: row 0 (10, 20,
+        // 30) streaks to (13, 20, 26); row 1 (40, 50, 60) to (43, 50,
+        // 56); row 2 (70, 80, 90) to (73, 80, 86) (all integer-truncating
+        // divisions, e.g. (10+10+20)/3 = 13, (40+40+50)/3 = 43). Spray
+        // radius 0 (second-pass half-length 0) is a no-op single-sample
+        // "average", so with spray radius 0 the final output is exactly
+        // that streaked grid, unchanged by the second pass.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.sprayed_strokes(id, 2, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [13, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [20, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [26, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [43, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [50, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 1)..idx(2, 1) + 4], [56, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [73, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [80, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [86, 0, 0, 255]);
+    }
+
+    #[test]
+    fn sprayed_strokes_spray_radius_thickens_perpendicular_to_the_stroke() {
+        // Same first pass as above (streaked grid [[13,20,26],[43,50,56],
+        // [73,80,86]]), but spray radius 5 gives a second-pass
+        // half-length of 1, blurring that streaked grid *vertically*
+        // (perpendicular to the horizontal first pass) with the same
+        // edge-clamping arithmetic: column 0 (13, 43, 73) averages to
+        // (23, 43, 63) top-to-bottom ((13+13+43)/3 = 23, (13+43+73)/3 =
+        // 43, (43+73+73)/3 = 63); column 1 (20, 50, 80) to (30, 50, 70);
+        // column 2 (26, 56, 86) to (36, 56, 76). Every one of these nine
+        // divisions comes out exactly even, so there is no rounding
+        // ambiguity to resolve. Cross-checked by hand against the same
+        // two-pass arithmetic the doc comment describes.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.sprayed_strokes(id, 2, 5, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [23, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [30, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [36, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [43, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [50, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 1)..idx(2, 1) + 4], [56, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [63, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [70, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [76, 0, 0, 255]);
+    }
+
+    #[test]
+    fn sprayed_strokes_direction_selects_the_stroke_axis() {
+        // Direction 3 (Vertical) with stroke length 2 (half-length 1) and
+        // spray radius 0 (second-pass no-op): the first pass is exactly
+        // motion_blur's own ninety-degree, radius-1 pass down each
+        // column, reusing that test's own already-verified column-0
+        // values (20, 40, 60) top-to-bottom.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.sprayed_strokes(id, 2, 0, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [20, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [40, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [60, 0, 0, 255]);
+    }
+
+    #[test]
+    fn sprayed_strokes_is_confined_to_the_selection() {
+        // Same as the spray-radius test above, but confined to a
+        // one-pixel selection at (0, 0), whose combined two-pass value
+        // (23) differs from its own untouched original (10) -- a real,
+        // hand-verified change rather than a coincidental no-op.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.sprayed_strokes(id, 2, 5, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [23, 0, 0, 255]);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn sprayed_strokes_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.sprayed_strokes(id, 21, 0, 1).is_err());
+        assert!(doc.sprayed_strokes(id, 2, 26, 1).is_err());
+        assert!(doc.sprayed_strokes(id, 2, 0, 4).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.sprayed_strokes(id, 2, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.sprayed_strokes(999, 2, 0, 1).is_err());
     }
 
     // The five one-click presets are thin wrappers, so each test pins the

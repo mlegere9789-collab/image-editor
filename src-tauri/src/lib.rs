@@ -1400,6 +1400,21 @@ fn motion_blur(
     edit_checkpointed(&state, |document| document.motion_blur(id, angle, distance))
 }
 
+/// Filter Gallery > Brush Strokes > Sprayed Strokes on layer `id`.
+/// `direction`: 0 Right Diagonal, 1 Horizontal, 2 Left Diagonal, 3 Vertical.
+#[tauri::command]
+fn sprayed_strokes(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    spray_radius: u32,
+    direction: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.sprayed_strokes(id, stroke_length, spray_radius, direction)
+    })
+}
+
 /// Not checkpointed: dragging the slider fires this once per pointer move,
 /// and the whole drag should undo as one step. The frontend checkpoints once
 /// itself, when the drag starts.
@@ -1811,6 +1826,7 @@ pub fn run() {
             box_blur,
             unsharp_mask,
             motion_blur,
+            sprayed_strokes,
             blur,
             blur_more,
             sharpen,
