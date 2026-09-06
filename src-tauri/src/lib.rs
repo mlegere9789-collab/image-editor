@@ -1706,6 +1706,19 @@ fn underpainting(
     })
 }
 
+/// Filter Gallery > Sketch > Stamp on layer `id`.
+#[tauri::command]
+fn stamp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    light_dark_balance: u32,
+    smoothness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.stamp(id, light_dark_balance, smoothness)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2021,6 +2034,7 @@ pub fn run() {
             fresco,
             rough_pastels,
             underpainting,
+            stamp,
             hue_saturation,
             black_and_white,
             vibrance,

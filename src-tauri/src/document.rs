@@ -6011,6 +6011,49 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Stamp: smooths the layer with
+    /// [`box_blur_at`] — the same neighbourhood-average helper `box_blur`
+    /// and this project's other smoothing filters already use — then
+    /// hard-thresholds the smoothed luma against `light_dark_balance`,
+    /// producing the flat black-or-white, simplified-stamp look of a
+    /// rubber-stamp graphic. A documented approximation, not a port of
+    /// Photoshop's own renderer. `smoothness` (Photoshop's own `1..=25`
+    /// range) scales down into the blur radius, `(smoothness / 5)
+    /// .max(1)`, the same shape `plastic_wrap`'s own smoothness uses;
+    /// `light_dark_balance` (Photoshop's own `0..=25` range) sets the
+    /// luma threshold, `light_dark_balance / 25 * 255`: a smoothed pixel
+    /// at or above the threshold becomes pure white, one below becomes
+    /// pure black — so `0` renders the whole layer white and `25`
+    /// renders it black, with the balance point sliding between them.
+    /// Alpha untouched. Confined to the selection, like every other
+    /// filter here built on [`Self::filter_pixels`]. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn stamp(
+        &mut self,
+        id: LayerId,
+        light_dark_balance: u32,
+        smoothness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if light_dark_balance > 25 {
+            return Err("Stamp light/dark balance must be between 0 and 25.".to_string());
+        }
+        if !(1..=25).contains(&smoothness) {
+            return Err("Stamp smoothness must be between 1 and 25.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (smoothness / 5).max(1) as i64;
+        let threshold = light_dark_balance as f32 / 25.0 * 255.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = box_blur_at(src, doc_width, width, height, row, col, radius);
+            let luma =
+                0.299 * blurred[0] as f32 + 0.587 * blurred[1] as f32 + 0.114 * blurred[2] as f32;
+            let v = if luma >= threshold { 255 } else { 0 };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13343,6 +13386,106 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.underpainting(999, 8, 0).is_err());
+    }
+
+    #[test]
+    fn stamp_thresholds_the_smoothed_luma_to_black_or_white() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting all already share: 4x4, columns
+        // 0-1 solid 200, columns 2-3 solid 50. Smoothness 5 gives blur
+        // radius 1, reusing paint_daubs's own already-verified radius-1
+        // row ([200, 150, 100, 50], grey so luma equals the channel
+        // value exactly). Light/dark balance 10 sets the threshold to
+        // 10/25*255 = 102: columns 0 and 1 (200, 150) clear it and
+        // become white; columns 2 and 3 (100, 50) fall short and become
+        // black.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.stamp(id, 10, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stamp_balance_extremes_render_the_whole_fixture_one_colour() {
+        // Balance 0 sets the threshold to 0, which every non-negative
+        // luma clears, so the whole fixture renders white regardless of
+        // smoothness. Balance 25 sets the threshold to 255, which no
+        // pixel in this fixture (maximum blurred luma 200) reaches, so
+        // the whole fixture renders black.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.stamp(id, 0, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 255, 255, 255]);
+        }
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.stamp(id, 25, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn stamp_smoothness_widens_the_blur_radius() {
+        // Smoothness 10 gives blur radius 2, reusing paint_daubs's own
+        // already-verified radius-2 row ([170, 140, 110, 80]). At the
+        // same balance-10 threshold of 102: columns 0, 1, and 2 (170,
+        // 140, 110) all clear it and become white, while column 3 (80)
+        // falls short and stays black -- a different pattern from the
+        // radius-1 test, confirming smoothness genuinely widens the
+        // blur before thresholding.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.stamp(id, 10, 10).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stamp_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.stamp(id, 10, 5).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn stamp_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.stamp(id, 26, 5).is_err());
+        assert!(doc.stamp(id, 10, 0).is_err());
+        assert!(doc.stamp(id, 10, 26).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stamp(id, 10, 5).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.stamp(999, 10, 5).is_err());
     }
 
     #[test]

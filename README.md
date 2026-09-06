@@ -5211,6 +5211,63 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **590 Rust tests total** (585 → 590, 583 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 76 — Filter Gallery > Sketch > Stamp
+
+Starts the Filter Gallery's Sketch category. Smooths the layer with
+`box_blur_at` — the same neighbourhood-average helper `box_blur` and
+this project's other smoothing filters already use — then
+hard-thresholds the smoothed luma against `light_dark_balance`,
+producing the flat black-or-white, simplified-stamp look of a
+rubber-stamp graphic. A documented approximation, not a port of
+Photoshop's own renderer. `Document::stamp(id, light_dark_balance,
+smoothness)`: `smoothness` (Photoshop's own `1..=25` range) scales
+down into the blur radius, `(smoothness / 5).max(1)`, the same shape
+`plastic_wrap`'s own smoothness uses; `light_dark_balance` (Photoshop's
+own `0..=25` range) sets the luma threshold, `light_dark_balance / 25 *
+255`: a smoothed pixel at or above the threshold becomes pure white,
+one below becomes pure black — so `0` renders the whole layer white
+and `25` renders it black, with the balance point sliding between
+them. Alpha untouched. A new **Stamp…** dialog exposes Light/Dark
+Balance and Smoothness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting` all already share, and
+reusing `paint_daubs`'s own already-verified box-blur radius-1 and
+radius-2 rows (`[200, 150, 100, 50]` and `[170, 140, 110, 80]`, grey so
+luma equals the channel value exactly) directly. At smoothness `5`
+(radius `1`) and light/dark balance `10` (threshold `10 / 25 * 255 =
+102`): columns `0` and `1` (`200`, `150`) clear the threshold and
+become white, columns `2` and `3` (`100`, `50`) fall short and become
+black. A second test confirms both balance extremes: `0` (threshold
+`0`) renders the whole fixture white, and `25` (threshold `255`, which
+no pixel in this fixture reaches) renders it black. A third raises
+smoothness to `10` (radius `2`), reusing the radius-2 row: at the same
+threshold, columns `0`, `1`, and `2` (`170`, `140`, `110`) all clear it
+this time, while column `3` (`80`) stays black — a different pattern
+from the radius-1 test, confirming smoothness genuinely widens the
+blur before thresholding. A fourth confines the fixture to a one-pixel
+selection. A fifth confirms out-of-range light/dark balance and
+smoothness, plus a locked/unknown layer, all error. All five passed on
+the first run — no independent Python script was needed since every
+value here reuses `box_blur_at`'s own already-verified output directly,
+and the threshold compare is simple enough to verify by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**595 Rust tests total** (590 → 595, 588 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -402,6 +402,9 @@ export default function App() {
   const [showUnderpaintingDialog, setShowUnderpaintingDialog] = useState(false);
   const [underpaintingBrushSize, setUnderpaintingBrushSize] = useState(8);
   const [underpaintingTextureCoverage, setUnderpaintingTextureCoverage] = useState(20);
+  const [showStampDialog, setShowStampDialog] = useState(false);
+  const [stampLightDarkBalance, setStampLightDarkBalance] = useState(12);
+  const [stampSmoothness, setStampSmoothness] = useState(5);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1232,6 +1235,16 @@ export default function App() {
     });
     setShowUnderpaintingDialog(false);
   }, [runCommand, selectedId, underpaintingBrushSize, underpaintingTextureCoverage]);
+
+  const applyStamp = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("stamp", {
+      id: selectedId,
+      lightDarkBalance: stampLightDarkBalance,
+      smoothness: stampSmoothness,
+    });
+    setShowStampDialog(false);
+  }, [runCommand, selectedId, stampLightDarkBalance, stampSmoothness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2607,6 +2620,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Underpainting"
           >
             Underpainting…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowStampDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Stamp"
+          >
+            Stamp…
           </button>
           <button
             className="button button--quiet"
@@ -5543,6 +5564,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyUnderpainting} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showStampDialog && (
+        <div className="modal-overlay" onClick={() => setShowStampDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Stamp"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Stamp</h2>
+            <label className="control">
+              <span className="control__label">
+                Light/Dark Balance
+                <span className="control__value">{stampLightDarkBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={stampLightDarkBalance}
+                onChange={(event) => setStampLightDarkBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{stampSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={25}
+                value={stampSmoothness}
+                onChange={(event) => setStampSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowStampDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyStamp} disabled={busy}>
                 Apply
               </button>
             </div>
