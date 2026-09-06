@@ -5688,6 +5688,72 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **628 Rust tests total** (623 → 628, 621 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 84 — Filter Gallery > Sketch > Torn Edges
+
+`box_blur_at`-smooths the layer, then adds a seeded `XorShift32` draw
+to the smoothed luma before hard-thresholding to pure black or white —
+combining `stamp`'s own blur-then-threshold shape with `note_paper`'s
+own grain-before-threshold shape, applied to the blurred signal rather
+than the raw one, so the grain breaks the boundary between black and
+white into the ragged, torn-paper edge the filter is named for. A
+documented approximation, not a port of Photoshop's own renderer.
+`Document::torn_edges(id, image_balance, smoothness, contrast, seed)`:
+`smoothness` (Photoshop's own `1..=15` range) scales down into the
+blur radius, `(smoothness / 5).max(1)`, the same shape `plastic_wrap`'s
+own smoothness uses; `contrast` (Photoshop's own `1..=25` range)
+scales the draw's spread, `draw * (contrast / 25) * 128`, added to the
+smoothed luma; `image_balance` (Photoshop's own `0..=25` range) sets
+the threshold, `image_balance / 25 * 255`. Alpha untouched. The
+frontend sends a fresh `seed` on every apply, as with Film Grain. A
+new **Torn Edges…** dialog exposes Image Balance, Smoothness, and
+Contrast sliders.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy`/
+`graphic_pen`/`chalk_and_charcoal`/`plaster`/`water_paper` all already
+share, reusing `paint_daubs`'s own already-verified box-blur radius-1
+row (`[200, 150, 100, 50]`) and seed `1`'s own first four `XorShift32`
+draws (`270369`, `67634689`, `2647435461`, `307599695` out of
+`u32::MAX`, mapping to `next_unit` values of roughly `-0.999874`,
+`-0.968505`, `0.232808`, and `-0.856787`) directly. At smoothness `5`
+(radius `1`), contrast `25` (factor `1.0`, spread `128`), and image
+balance `10` (threshold `102`): columns `0`, `1`, and `3` all fall
+short of the threshold after their own grain offset and render black,
+while column `2` (`100 + 29.80 = 129.80`) clears it and renders white
+— cross-checked against an independent Python script emulating `f32`
+arithmetic via `struct.pack`/`unpack` round-tripping. A second test
+drops contrast to `1` (factor `0.04`, spread `5.12`): the shrunken
+offsets flip columns `0` and `1` to white and column `2` to black,
+confirming contrast genuinely scales the grain rather than being
+ignored. A third confines the fixture to a one-pixel selection at
+column `2` — a genuine test correction was needed here mid-design: an
+initial draft assumed the selected pixel would still receive the
+*third* draw (the one column `2` gets in an unselected run), when
+`filter_pixels` actually skips the seeded draw entirely for unselected
+pixels, making the selected pixel the *first* to consume the
+generator's own draws instead, landing on black rather than white — the
+same architectural fact `spatter`'s own selection test already
+documents, caught this time before the phase landed rather than after.
+A fourth confirms out-of-range image balance, smoothness, and
+contrast, plus a locked/unknown layer, all error. All four passed
+after that correction, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**632 Rust tests total** (628 → 632, 625 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

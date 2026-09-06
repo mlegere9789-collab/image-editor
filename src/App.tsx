@@ -431,6 +431,10 @@ export default function App() {
   const [waterPaperFiberLength, setWaterPaperFiberLength] = useState(10);
   const [waterPaperBrightness, setWaterPaperBrightness] = useState(50);
   const [waterPaperContrast, setWaterPaperContrast] = useState(50);
+  const [showTornEdgesDialog, setShowTornEdgesDialog] = useState(false);
+  const [tornEdgesImageBalance, setTornEdgesImageBalance] = useState(10);
+  const [tornEdgesSmoothness, setTornEdgesSmoothness] = useState(5);
+  const [tornEdgesContrast, setTornEdgesContrast] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1352,6 +1356,20 @@ export default function App() {
     });
     setShowWaterPaperDialog(false);
   }, [runCommand, selectedId, waterPaperFiberLength, waterPaperBrightness, waterPaperContrast]);
+
+  const applyTornEdges = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Film Grain.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("torn_edges", {
+      id: selectedId,
+      imageBalance: tornEdgesImageBalance,
+      smoothness: tornEdgesSmoothness,
+      contrast: tornEdgesContrast,
+      seed,
+    });
+    setShowTornEdgesDialog(false);
+  }, [runCommand, selectedId, tornEdgesImageBalance, tornEdgesSmoothness, tornEdgesContrast]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2791,6 +2809,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Water Paper"
           >
             Water Paper…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowTornEdgesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Torn Edges"
+          >
+            Torn Edges…
           </button>
           <button
             className="button button--quiet"
@@ -6170,6 +6196,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWaterPaper} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTornEdgesDialog && (
+        <div className="modal-overlay" onClick={() => setShowTornEdgesDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Torn Edges"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Torn Edges</h2>
+            <label className="control">
+              <span className="control__label">
+                Image Balance
+                <span className="control__value">{tornEdgesImageBalance}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={tornEdgesImageBalance}
+                onChange={(event) => setTornEdgesImageBalance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{tornEdgesSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={tornEdgesSmoothness}
+                onChange={(event) => setTornEdgesSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{tornEdgesContrast}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={25}
+                value={tornEdgesContrast}
+                onChange={(event) => setTornEdgesContrast(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowTornEdgesDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyTornEdges} disabled={busy}>
                 Apply
               </button>
             </div>

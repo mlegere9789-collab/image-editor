@@ -1820,6 +1820,22 @@ fn water_paper(
     })
 }
 
+/// Filter Gallery > Sketch > Torn Edges on layer `id`. The frontend sends
+/// a fresh `seed` on every apply, as with Film Grain.
+#[tauri::command]
+fn torn_edges(
+    state: State<'_, AppState>,
+    id: LayerId,
+    image_balance: u32,
+    smoothness: u32,
+    contrast: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.torn_edges(id, image_balance, smoothness, contrast, seed)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2143,6 +2159,7 @@ pub fn run() {
             chalk_and_charcoal,
             plaster,
             water_paper,
+            torn_edges,
             hue_saturation,
             black_and_white,
             vibrance,

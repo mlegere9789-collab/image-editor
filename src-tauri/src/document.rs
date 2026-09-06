@@ -6502,6 +6502,62 @@ impl Document {
         self.brightness_contrast(id, mapped_brightness, mapped_contrast)
     }
 
+    /// Filter Gallery > Sketch > Torn Edges: [`box_blur_at`]-smooths the
+    /// layer, then adds a seeded [`XorShift32`] draw to the smoothed luma
+    /// before hard-thresholding to pure black or white — combining
+    /// [`Self::stamp`]'s own blur-then-threshold shape with
+    /// [`Self::note_paper`]'s own grain-before-threshold shape, applied
+    /// to the blurred signal rather than the raw one, so the grain
+    /// breaks the boundary between black and white into the ragged,
+    /// torn-paper edge the filter is named for. A documented
+    /// approximation, not a port of Photoshop's own renderer.
+    /// `smoothness` (Photoshop's own `1..=15` range) scales down into
+    /// the blur radius, `(smoothness / 5).max(1)`, the same shape
+    /// `plastic_wrap`'s own smoothness uses; `contrast` (Photoshop's own
+    /// `1..=25` range) scales the draw's spread, `draw * (contrast /
+    /// 25) * 128`, added to the smoothed luma; `image_balance`
+    /// (Photoshop's own `0..=25` range) sets the threshold,
+    /// `image_balance / 25 * 255`. Alpha untouched. The frontend sends a
+    /// fresh `seed` on every apply, as with Film Grain. Confined to the
+    /// selection — since [`Self::filter_pixels`] skips the seeded draw
+    /// entirely for unselected pixels, the same architectural fact
+    /// `spatter`'s own selection test already documents. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn torn_edges(
+        &mut self,
+        id: LayerId,
+        image_balance: u32,
+        smoothness: u32,
+        contrast: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if image_balance > 25 {
+            return Err("Torn Edges image balance must be between 0 and 25.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Torn Edges smoothness must be between 1 and 15.".to_string());
+        }
+        if !(1..=25).contains(&contrast) {
+            return Err("Torn Edges contrast must be between 1 and 25.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (smoothness / 5).max(1) as i64;
+        let threshold = image_balance as f32 / 25.0 * 255.0;
+        let factor = contrast as f32 / 25.0;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = box_blur_at(src, doc_width, width, height, row, col, radius);
+            let luma =
+                0.299 * blurred[0] as f32 + 0.587 * blurred[1] as f32 + 0.114 * blurred[2] as f32;
+            let offset = rng.next_unit() * factor * 128.0;
+            let adjusted = (luma + offset).clamp(0.0, 255.0);
+            let v = if adjusted >= threshold { 255 } else { 0 };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14585,6 +14641,104 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.water_paper(999, 10, 50, 50).is_err());
+    }
+
+    #[test]
+    fn torn_edges_grains_the_blurred_luma_before_thresholding() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp/photocopy/graphic_pen/
+        // chalk_and_charcoal/plaster/water_paper all already share: 4x4,
+        // columns 0-1 solid 200, columns 2-3 solid 50. Smoothness 5
+        // gives blur radius 1, reusing paint_daubs's own already-
+        // verified radius-1 row ([200, 150, 100, 50]). Seed 1's first
+        // four XorShift32 draws (270369, 67634689, 2647435461,
+        // 307599695 out of u32::MAX) map to next_unit values of roughly
+        // -0.999874, -0.968505, 0.232808, and -0.856787. Contrast 25
+        // (factor 1.0, spread 128) adds offsets of roughly -127.98,
+        // -123.97, +29.80, and -109.67 to the blurred row: column 0
+        // (200 - 127.98 = 72.02), column 1 (150 - 123.97 = 26.03), and
+        // column 3 (50 - 109.67, clamped to 0) all fall short of image
+        // balance 10's threshold (10/25*255 = 102) and render black;
+        // column 2 (100 + 29.80 = 129.80) clears it and renders white.
+        // Cross-checked against an independent Python script emulating
+        // f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.torn_edges(id, 10, 5, 25, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn torn_edges_contrast_scales_the_grain_spread() {
+        // Same blurred row and draws as the first test, but contrast 1
+        // (factor 0.04, spread 5.12) shrinks the offsets to roughly
+        // -5.12, -4.96, +1.19, and -4.39: column 0 (200 - 5.12 =
+        // 194.88) and column 1 (150 - 4.96 = 145.04) now clear image
+        // balance 10's threshold of 102 and render white -- the
+        // opposite of their own contrast-25 result -- while column 2
+        // (100 + 1.19 = 101.19) now falls just short and renders black,
+        // also the opposite of its own contrast-25 result. Column 3 (50
+        // - 4.39 = 45.61) stays black either way. This confirms
+        // contrast genuinely scales the grain rather than being ignored.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.torn_edges(id, 10, 5, 1, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn torn_edges_is_confined_to_the_selection() {
+        // Selecting only column 2 makes it, rather than column 0, the
+        // first pixel to consume the generator's own draws (the same
+        // architectural fact spatter's own selection test already
+        // documents): it gets draw 1 (270369, unit -0.999874) instead
+        // of draw 3, applied to its own blurred value of 100, giving
+        // 100 - 127.98 = -27.98, clamped to 0 -- well below image
+        // balance 10's threshold of 102, rendering black. This is a
+        // real, hand-verified change from column 2's own original value
+        // of 50, not a coincidental no-op.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        let dirty = doc.torn_edges(id, 10, 5, 25, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]); // unselected, untouched
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 0,
+                x1: 3,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn torn_edges_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.torn_edges(id, 26, 5, 10, 1).is_err());
+        assert!(doc.torn_edges(id, 10, 0, 10, 1).is_err());
+        assert!(doc.torn_edges(id, 10, 16, 10, 1).is_err());
+        assert!(doc.torn_edges(id, 10, 5, 0, 1).is_err());
+        assert!(doc.torn_edges(id, 10, 5, 26, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.torn_edges(id, 10, 5, 10, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.torn_edges(999, 10, 5, 10, 1).is_err());
     }
 
     #[test]
