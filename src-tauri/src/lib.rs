@@ -1160,6 +1160,19 @@ fn sponge(
     })
 }
 
+/// Filter Gallery > Artistic > Watercolor on layer `id`.
+#[tauri::command]
+fn watercolor(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_detail: u32,
+    shadow_intensity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.watercolor(id, brush_detail, shadow_intensity)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1757,6 +1770,7 @@ pub fn run() {
             neon_glow,
             poster_edges,
             sponge,
+            watercolor,
             crystallize,
             facet,
             pointillize,

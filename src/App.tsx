@@ -342,6 +342,9 @@ export default function App() {
   const [showSpongeDialog, setShowSpongeDialog] = useState(false);
   const [spongeBrushSize, setSpongeBrushSize] = useState(3);
   const [spongeDefinition, setSpongeDefinition] = useState(12);
+  const [showWatercolorDialog, setShowWatercolorDialog] = useState(false);
+  const [watercolorBrushDetail, setWatercolorBrushDetail] = useState(10);
+  const [watercolorShadowIntensity, setWatercolorShadowIntensity] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -985,6 +988,16 @@ export default function App() {
     });
     setShowSpongeDialog(false);
   }, [runCommand, selectedId, spongeBrushSize, spongeDefinition]);
+
+  const applyWatercolor = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("watercolor", {
+      id: selectedId,
+      brushDetail: watercolorBrushDetail,
+      shadowIntensity: watercolorShadowIntensity,
+    });
+    setShowWatercolorDialog(false);
+  }, [runCommand, selectedId, watercolorBrushDetail, watercolorShadowIntensity]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2296,6 +2309,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Sponge"
           >
             Sponge…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowWatercolorDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Watercolor"
+          >
+            Watercolor…
           </button>
           <button
             className="button button--quiet"
@@ -4720,6 +4741,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySponge} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWatercolorDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowWatercolorDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Watercolor"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Watercolor</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Detail
+                <span className="control__value">{watercolorBrushDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={14}
+                value={watercolorBrushDetail}
+                onChange={(event) => setWatercolorBrushDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Shadow Intensity
+                <span className="control__value">{watercolorShadowIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={watercolorShadowIntensity}
+                onChange={(event) => setWatercolorShadowIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowWatercolorDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyWatercolor} disabled={busy}>
                 Apply
               </button>
             </div>

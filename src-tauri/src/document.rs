@@ -4135,6 +4135,57 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Watercolor: simplifies detail with the
+    /// same edge-preserving [`median_at`] smoothing [`Self::dry_brush`]
+    /// already uses, then darkens each pixel in proportion to how dark it
+    /// already is — the pooled-pigment look of watercolour paint, which
+    /// settles darkest in the shadows and stays washed-out and pale in the
+    /// highlights. A documented approximation, not a port of Photoshop's
+    /// own algorithm (which also lays down a canvas texture this project
+    /// doesn't model, a documented scope cut). `brush_detail`
+    /// (Photoshop's own `1..=14` range) is inverted into a median radius,
+    /// `15 − brush_detail`, so a high Brush Detail (more of the original
+    /// preserved) gives a small radius and a low one gives heavy
+    /// smoothing. `shadow_intensity` (Photoshop's own `0..=10` range)
+    /// scales a self-referential darkening term: `factor = 1 −
+    /// (shadow_intensity / 10) · (1 − luma / 255)`, using the *smoothed*
+    /// pixel's own ITU-R BT.601 luma, so a bright pixel (`luma` near
+    /// `255`) keeps nearly all its value while a dark one is pulled
+    /// further toward black. Alpha is untouched. Confined to the
+    /// selection and errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn watercolor(
+        &mut self,
+        id: LayerId,
+        brush_detail: u32,
+        shadow_intensity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=14).contains(&brush_detail) {
+            return Err("Watercolor brush detail must be between 1 and 14.".to_string());
+        }
+        if shadow_intensity > 10 {
+            return Err("Watercolor shadow intensity must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (15 - brush_detail) as i64;
+        let shadow_f = shadow_intensity as f32 / 10.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let smoothed = median_at(src, doc_width, width, height, row, col, radius);
+            let luma = 0.299 * smoothed[0] as f32
+                + 0.587 * smoothed[1] as f32
+                + 0.114 * smoothed[2] as f32;
+            let factor = (1.0 - shadow_f * (1.0 - luma / 255.0)).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (smoothed[c] as f32 * factor).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9572,6 +9623,74 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.sponge(999, 0, 0, 1).is_err());
+    }
+
+    #[test]
+    fn watercolor_darkens_by_the_smoothed_pixels_own_luma() {
+        // brush_detail 14 gives radius 15-14 = 1, the same radius
+        // dry_brush's own corner test already used on this fixture: the
+        // clamped 3x3 neighbourhood at (0,0) has median red 20 (G=B=0
+        // throughout), at (1,1) the whole grid is in range with no clamp
+        // duplication so the median is the plain middle value 50, and at
+        // (2,2) the clamped neighbourhood's median is 80 (worked out by
+        // hand and cross-checked with a small Python script). At shadow
+        // intensity 0 (factor 1.0 everywhere) the output is exactly the
+        // median, unchanged: 20, 50, 80. At shadow intensity 5 (factor =
+        // 1 - 0.5*(1 - luma/255)), using each pixel's own smoothed luma
+        // (0.299 * the median, since green/blue are flat 0): the corner's
+        // luma 5.98 gives factor 0.5117 -> 20*0.5117 = 10.235 -> 10; the
+        // centre's luma 14.95 gives factor 0.5293 -> 50*0.5293 = 26.466 ->
+        // 26; the bottom-right's luma 23.92 gives factor 0.5469 ->
+        // 80*0.5469 = 43.752 -> 44 — none of these land near a .5
+        // boundary.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.watercolor(id, 14, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 20);
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(2, 2)], 80);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.watercolor(id, 14, 5).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(1, 1)], 26);
+        assert_eq!(p[idx(2, 2)], 44);
+    }
+
+    #[test]
+    fn watercolor_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.watercolor(id, 14, 5).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [10, 0, 0, 255]);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn watercolor_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.watercolor(id, 0, 5).is_err());
+        assert!(doc.watercolor(id, 15, 5).is_err());
+        assert!(doc.watercolor(id, 14, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.watercolor(id, 14, 5).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.watercolor(999, 14, 5).is_err());
     }
 
     #[test]

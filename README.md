@@ -4236,6 +4236,59 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **513 Rust tests total** (509 → 513, 506 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 60 — Filter Gallery > Artistic > Watercolor
+
+Simplifies detail with the same edge-preserving [`median_at`] smoothing
+`dry_brush` already uses, then darkens each pixel in proportion to how
+dark it already is — the pooled-pigment look of watercolour paint, which
+settles darkest in the shadows and stays washed-out and pale in the
+highlights. A documented approximation, not a port of Photoshop's own
+algorithm (which also lays down a canvas texture this project doesn't
+model, a documented scope cut). `Document::watercolor(id, brush_detail,
+shadow_intensity)`: `brush_detail` (Photoshop's own `1..=14` range) is
+inverted into a median radius, `15 − brush_detail`, so a high Brush
+Detail (more of the original preserved) gives a small radius and a low
+one gives heavy smoothing. `shadow_intensity` (Photoshop's own `0..=10`
+range) scales a self-referential darkening term: `factor = 1 −
+(shadow_intensity / 10) · (1 − luma / 255)`, using the *smoothed*
+pixel's own ITU-R BT.601 luma, so a bright pixel keeps nearly all its
+value while a dark one is pulled further toward black. Alpha is
+untouched. A new **Watercolor…** dialog exposes Brush Detail and Shadow
+Intensity sliders.
+
+**Verified two ways.** Three new `document.rs` tests, cross-checked
+against an independent Python script. Brush detail `14` gives radius `1`
+— the same radius `dry_brush`'s own corner test already used on the
+`ramped_3x3` fixture — so its three already-relevant points are
+hand-computable: the clamped corner `(0, 0)` has median `20`, the centre
+`(1, 1)` (whose whole 3×3 neighbourhood is in range, no clamp
+duplication) has median `50`, and the bottom-right `(2, 2)` has median
+`80`. At shadow intensity `0` (factor `1.0` everywhere) the output is
+exactly the median, unchanged. At shadow intensity `5`, using each
+point's own smoothed luma (`0.299 ×` the median, since green/blue are
+flat `0` throughout this fixture): the corner's luma `5.98` gives factor
+`0.5117 → 20 × 0.5117 = 10.235 → 10`; the centre's luma `14.95` gives
+factor `0.5293 → 50 × 0.5293 = 26.466 → 26`; the bottom-right's luma
+`23.92` gives factor `0.5469 → 80 × 0.5469 = 43.752 → 44` — none of
+these land near a `.5` boundary. A second test confines the fixture to a
+one-pixel selection. A third confirms an out-of-range brush detail or
+shadow intensity and a locked/unknown layer all error. All three passed
+on the first run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous seven: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**516 Rust tests total** (513 → 516, 509 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
