@@ -6266,6 +6266,66 @@ run build`) is fully green.
 **672 Rust tests total** (667 → 672, 665 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 93 — Filter > Stylize > Tiles
+
+Divides the layer into a grid of `tile_size`-pixel-square cells (the
+same "cell = size" convention `halftone_pattern`'s own `size`
+parameter and `glass`'s own `smoothness` already use) and slides each
+cell's own content by a seeded `(dx, dy)` offset, two `XorShift32`
+draws per cell (drawn in the same row-major cell order the pixels
+themselves are later visited in) scaled by `max_offset` (Photoshop's
+own `0..=99` percent range, of the cell's own side length) and rounded
+to a whole pixel. Unlike `glass`, which always resamples via
+`sample_nearest`'s own edge-clamping, a shifted tile only shows through
+where its slid content still originates from *within that same cell's
+own original footprint*; anywhere the shift would pull from outside
+it, the pixel falls back to the layer's own unaltered original —
+Photoshop's own "Unaltered Image" fill option, the only one of its
+four fill choices (Background Color, Foreground Color, Inverse Image,
+Unaltered Image) this project implements, a documented scope cut since
+the other three need colour pickers or an inversion pass this dialog
+doesn't otherwise call for. Alpha moves with its own pixel, matching
+every other whole-pixel Distort/Stylize filter in this project.
+Confined to the selection: cell offsets are always drawn for the
+whole, unmodified source regardless of selection (the same approach
+`plaster` and `bas_relief` already establish for their own precomputed
+buffers), and only the selected pixels' output is written back. A new
+**Tiles…** dialog exposes Tile Size and Maximum Offset sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`). At tile size `2` and maximum offset
+`50` (offset max `1.0` pixel for this cell size), seed `1`'s own first
+two `XorShift32` draws round to a shared cell-`(0, 0)` offset of
+`(-1, -1)`: pixel `(0, 0)`'s source position `(1, 1)` is still inside
+the cell's own `[0, 2) x [0, 2)` footprint, revealing column `1`'s own
+value, `20` — a real change from `(0, 0)`'s own original `10` — while
+`(1, 0)`, `(0, 1)`, and `(1, 1)` all fall outside their own cell's
+footprint and fall back to their own unaltered originals. A second
+test confirms maximum offset `0` is a true no-op. A third raises tile
+size to `4` (the whole 4x4 image one cell), scaling offset max to
+`2.0` pixels and landing pixel `(0, 0)` at `30` instead of `20` — a
+real, hand-computed difference from the tile-size-`2` test's own
+result, not a coincidental match. A fourth confines the fixture to a
+single-pixel selection at `(0, 0)`. A fifth confirms out-of-range tile
+size and maximum offset, plus a locked/unknown layer, all error. All
+five tests passed on the first run, cross-checked against an
+independent Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty: this session's Xvfb
+instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**677 Rust tests total** (672 → 677, 670 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

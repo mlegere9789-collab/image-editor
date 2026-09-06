@@ -7112,6 +7112,77 @@ impl Document {
         })
     }
 
+    /// Filter > Stylize > Tiles: divides the layer into a grid of
+    /// `tile_size`-pixel-square cells (the same "cell = size" convention
+    /// [`Self::halftone_pattern`]'s own `size` parameter and
+    /// [`Self::glass`]'s own `smoothness` already use) and slides each
+    /// cell's own content by a seeded `(dx, dy)` offset, two
+    /// [`XorShift32`] draws per cell (drawn in the same row-major cell
+    /// order the pixels themselves are later visited in) scaled by
+    /// `max_offset` (Photoshop's own `0..=99` percent range, of the
+    /// cell's own side length) and rounded to a whole pixel. Unlike
+    /// [`Self::glass`], which always resamples via [`sample_nearest`]'s
+    /// own edge-clamping, a shifted tile only shows through where its
+    /// slid content still originates from *within that same cell's own
+    /// original footprint*; anywhere the shift would pull from outside
+    /// it, the pixel falls back to the layer's own unaltered original —
+    /// Photoshop's own "Unaltered Image" fill option, the only one of
+    /// its four fill choices (Background Color, Foreground Color,
+    /// Inverse Image, Unaltered Image) this project implements, a
+    /// documented scope cut since the other three need colour pickers or
+    /// an inversion pass this dialog doesn't otherwise call for. Alpha
+    /// moves with its own pixel, matching every other whole-pixel
+    /// Distort/Stylize filter in this project. Confined to the
+    /// selection: cell offsets are always drawn for the whole,
+    /// unmodified source regardless of selection (the same approach
+    /// [`Self::plaster`] and [`Self::bas_relief`] already establish for
+    /// their own precomputed buffers), and only the selected pixels'
+    /// output is written back.
+    pub fn tiles(
+        &mut self,
+        id: LayerId,
+        tile_size: u32,
+        max_offset: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=15).contains(&tile_size) {
+            return Err("Tiles tile size must be between 1 and 15.".to_string());
+        }
+        if max_offset > 99 {
+            return Err("Tiles maximum offset must be between 0 and 99.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let cell = tile_size as i64;
+        let offset_max = max_offset as f32 / 100.0 * tile_size as f32;
+        let cells_x = ((width + cell - 1) / cell) as usize;
+        let cells_y = ((height + cell - 1) / cell) as usize;
+        let mut rng = XorShift32::new(seed);
+        let mut offsets = vec![(0i64, 0i64); cells_x * cells_y];
+        for offset in offsets.iter_mut() {
+            let dx = (offset_max * rng.next_unit()).round() as i64;
+            let dy = (offset_max * rng.next_unit()).round() as i64;
+            *offset = (dx, dy);
+        }
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let icx = col as i64 / cell;
+            let icy = row as i64 / cell;
+            let (dx, dy) = offsets[icy as usize * cells_x + icx as usize];
+            let (sx, sy) = (col as i64 - dx, row as i64 - dy);
+            let (hx0, hx1) = (icx * cell, ((icx * cell + cell).min(width)));
+            let (hy0, hy1) = (icy * cell, ((icy * cell + cell).min(height)));
+            let source_base = if sx >= hx0 && sx < hx1 && sy >= hy0 && sy < hy1 {
+                (sy as usize * doc_width + sx as usize) * CHANNELS
+            } else {
+                base
+            };
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&src[source_base..source_base + CHANNELS]);
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16191,6 +16262,108 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.grain(999, 0, 0, 1).is_err());
+    }
+
+    #[test]
+    fn tiles_reveals_shifted_content_within_the_tiles_own_bounds() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40)
+        // again avoids the coincidental-no-op trap a two-value fixture
+        // would set. Tile size 2 (four 2x2 cells) and max offset 50
+        // (offset_max = 1.0 pixel for this cell size) give cell (0, 0)
+        // seed 1's own first two XorShift32 draws (270369, 67634689,
+        // next_unit roughly -0.999874, -0.968505), rounding to a shared
+        // offset of (dx, dy) = (-1, -1):
+        //   pixel (0, 0): source position (0-(-1), 0-(-1)) = (1, 1),
+        //     which is still inside cell (0, 0)'s own [0, 2) x [0, 2)
+        //     footprint, so the tile's slid content shows through --
+        //     the value at (1, 1), column 1's own 20, a real change
+        //     from (0, 0)'s own original 10.
+        //   pixel (1, 0): source position (2, 1) falls outside the
+        //     cell's own column range [0, 2), so it falls back to its
+        //     own unaltered original, 20 (a genuine edge-clamp
+        //     coincidence, not a sign the mechanism didn't run).
+        //   pixel (0, 1): source position (1, 2) falls outside the
+        //     cell's own row range, falling back to its own original,
+        //     10.
+        //   pixel (1, 1): source position (2, 2) falls outside both
+        //     ranges, falling back to its own original, 20.
+        // Cross-checked against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.tiles(id, 2, 50, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn tiles_zero_offset_is_a_no_op() {
+        // Maximum offset 0 always keeps every cell's own (dx, dy) at
+        // (0, 0), so every pixel's source position is itself -- always
+        // inside its own cell's footprint -- a true no-op regardless of
+        // the seed.
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.tiles(id, 2, 0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn tiles_size_changes_the_cell_grouping() {
+        // Tile size 4 makes the whole 4x4 image one cell, so it draws
+        // its own offset from the same first two XorShift32 draws but
+        // scales offset_max to 2.0 pixels (50% of the larger cell size),
+        // rounding to (dx, dy) = (-2, -2): pixel (0, 0)'s source position
+        // becomes (2, 2), still inside the single cell's own full-image
+        // footprint, revealing column 2's own value, 30 -- a real,
+        // hand-computed difference from the tile-size-2 test's own
+        // pixel (0, 0) result of 20, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.tiles(id, 4, 50, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [30, 30, 30, 255]);
+    }
+
+    #[test]
+    fn tiles_is_confined_to_the_selection() {
+        // Cell offsets are always drawn for the whole, unmodified source
+        // regardless of selection (the same approach plaster and
+        // bas_relief already establish), so selecting only (0, 0) still
+        // produces the same 20 the unselected first test's own (0, 0)
+        // computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.tiles(id, 2, 50, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [20, 20, 20, 255]);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn tiles_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.tiles(id, 0, 50, 1).is_err());
+        assert!(doc.tiles(id, 16, 50, 1).is_err());
+        assert!(doc.tiles(id, 2, 100, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.tiles(id, 2, 50, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.tiles(999, 2, 50, 1).is_err());
     }
 
     #[test]

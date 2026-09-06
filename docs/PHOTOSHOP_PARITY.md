@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 151.**
+**618 distinct capabilities tracked. Currently shipped: 152.**
 
 ## PART I — EVERY TOOL
 
@@ -588,7 +588,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Find Edges (inverted Sobel |Gx|+|Gy| per channel, white where flat — see README Phase 31)
 - [x] Glowing Edges (Sobel magnitude dilated by Edge Width, scaled by Edge Brightness, box-smoothed by Smoothness, on black — see README Phase 35)
 - [x] Solarize (min(v, 255 − v) per channel, the tent curve — see README Phase 31)
-- [ ] TilesBreaks an image into displaced tile-like sections.
+- [x] Tiles (Filter → Stylize; slides each `tile_size`-pixel-square cell's own content by a seeded per-cell offset, showing through only where the shift still originates from within that same cell's own footprint, falling back to the layer's own unaltered original elsewhere — the "Unaltered Image" fill, Photoshop's other three fill options are a documented scope cut — see README Phase 93)
 - [x] Trace Contour (per-channel contour where the channel crosses the level, Lower/Upper edge — see README Phase 31)
 - [x] Wind (Filter → Stylize; streaks each pixel toward one horizontal neighbour by blending it with a one-directional average of the pixels in that direction, reusing `average_samples` — the same shared primitive `box_blur_at`/`motion_blur_at` already build on — with a one-sided range instead of either's own symmetric window; Method (Wind/Blast/Stagger) picks a length/blend pair, Stagger's own literal staggered offset pattern is a documented scope cut — see README Phase 91)
 - [ ] CraquelureCreates a cracked, aged surface resembling cracked plaster or paint.
