@@ -6083,6 +6083,72 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **657 Rust tests total** (652 → 657, 650 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 90 — Filter Gallery > Distort > Ocean Ripple
+
+Layers a seeded per-pixel jitter on top of `ripple`'s own two-axis
+sine-wave displacement (`sx = x + amplitude · sin(k·y)`, `sy = y +
+amplitude · sin(k·x)`, `k = 2π / wavelength`), resampled the same way
+with `sample_nearest` — the jitter is what turns Ripple's own perfectly
+periodic waves into Ocean Ripple's own more irregular, non-uniform
+look, a documented approximation rather than a port of Photoshop's own
+noise-based renderer. `Document::ocean_ripple(id, ripple_size,
+ripple_magnitude, seed)`: `ripple_size` (Photoshop's own `1..=15`
+range) scales into the wavelength, `wavelength = ripple_size * 4`;
+`ripple_magnitude` (Photoshop's own `0..=20` range) linearly scales
+both the sine wave's own amplitude (`ripple_magnitude * 0.5`) and the
+jitter's own spread (`ripple_magnitude * 0.25`), so `0` is a true
+no-op. Two `XorShift32` draws per pixel (`(dx, dy)`, in the same scan
+order `filter_pixels` visits pixels in) are scaled by the jitter spread
+and added to `sx`/`sy` independently. Alpha is resampled along with
+colour, matching every other `sample_nearest`-based Distort filter.
+Confined to the selection the same way every other seeded filter in
+this project is. A new **Ocean Ripple…** dialog exposes Ripple Size and
+Ripple Magnitude sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`) since a two-value fixture can't tell a
+genuine pixel displacement apart from a coincidental no-op. At row `0`,
+`k*y` is `0` for any wavelength, isolating the seeded jitter's own
+effect: with ripple size `1` and magnitude `10` (amplitude `5.0`,
+jitter `2.5`), seed `1`'s own first eight `XorShift32` draws (two per
+pixel, in scan order) land row `0` at `[10, 30, 30, 20]` — two of the
+four a genuine change from their own original `20` and `40`. A second
+test confirms magnitude `0` is a true no-op. A third test raises the
+sine term's own contribution at row `1` (magnitude `4`): ripple size
+`1` gives wavelength `4` and lands column `0` at `30`, while doubling
+to ripple size `2` (wavelength `8`) lands the same column at `20`
+instead — a real, hand-computed difference caused only by the
+wavelength change, since both runs share the identical ninth draw
+(`next_unit` roughly `-0.066179`). A fourth confines the fixture to a
+single-pixel selection at column `1`, confirming the same architectural
+fact `spatter`'s own selection test already documents: the sole
+selected pixel consumes the *first* two draws rather than the *third
+and fourth* it would get unselected, landing on a genuinely different
+result (`10`) than the unselected first test's own column `1` (`30`).
+A fifth confirms out-of-range ripple size and magnitude, plus a
+locked/unknown layer, all error. All five tests passed after one
+mid-design correction: an initial draft of the wavelength-comparison
+test mistakenly reused the very first `XorShift32` draw for row `1`'s
+own jitter, forgetting that eight draws are already consumed by row
+`0`'s own four pixels before row `1` begins — caught by recomputing the
+draw sequence in an independent Python script rather than by a test
+failure, and fixed before the test was finalized.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**662 Rust tests total** (657 → 662, 655 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

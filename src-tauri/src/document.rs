@@ -6942,6 +6942,61 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Distort > Ocean Ripple: layers a seeded per-pixel
+    /// jitter on top of [`Self::ripple`]'s own two-axis sine-wave
+    /// displacement (`sx = x + amplitude · sin(k·y)`, `sy = y + amplitude
+    /// · sin(k·x)`, `k = 2π / wavelength`), resampled the same way with
+    /// [`sample_nearest`] — the jitter is what turns Ripple's own
+    /// perfectly periodic waves into Ocean Ripple's own more irregular,
+    /// non-uniform look, a documented approximation rather than a port
+    /// of Photoshop's own noise-based renderer. `Document::ocean_ripple(
+    /// id, ripple_size, ripple_magnitude, seed)`: `ripple_size`
+    /// (Photoshop's own `1..=15` range) scales into the wavelength,
+    /// `wavelength = ripple_size * 4`; `ripple_magnitude` (Photoshop's
+    /// own `0..=20` range) linearly scales both the sine wave's own
+    /// amplitude (`ripple_magnitude * 0.5`) and the jitter's own spread
+    /// (`ripple_magnitude * 0.25`), so `0` is a true no-op. Two
+    /// [`XorShift32`] draws per pixel (`(dx, dy)`, in the same scan
+    /// order [`Self::filter_pixels`] visits pixels in) are scaled by the
+    /// jitter spread and added to `sx`/`sy` independently. Alpha is
+    /// resampled along with colour, matching every other
+    /// [`sample_nearest`]-based Distort filter. Confined to the
+    /// selection the same way every other seeded filter in this project
+    /// is: `filter_pixels` skips the draws entirely for unselected
+    /// pixels, so a selected pixel partway through the image can
+    /// consume earlier draws than it would in an unselected scan — the
+    /// same architectural fact `spatter`'s own selection test already
+    /// documents.
+    pub fn ocean_ripple(
+        &mut self,
+        id: LayerId,
+        ripple_size: u32,
+        ripple_magnitude: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=15).contains(&ripple_size) {
+            return Err("Ocean Ripple size must be between 1 and 15.".to_string());
+        }
+        if ripple_magnitude > 20 {
+            return Err("Ocean Ripple magnitude must be between 0 and 20.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let wavelength = 4.0 * ripple_size as f32;
+        let k = std::f32::consts::TAU / wavelength;
+        let amplitude = ripple_magnitude as f32 * 0.5;
+        let jitter = ripple_magnitude as f32 * 0.25;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let dx = rng.next_unit();
+            let dy = rng.next_unit();
+            let sx = x + amplitude * (k * y).sin() + jitter * dx;
+            let sy = y + amplitude * (k * x).sin() + jitter * dy;
+            sample_nearest(src, doc_width, (width, height), (sx, sy))
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -15706,6 +15761,126 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.glass(999, 2, 4, 1).is_err());
+    }
+
+    #[test]
+    fn ocean_ripple_jitters_and_ripples_the_sample_position() {
+        // The dedicated column-stripes fixture (4x4, columns 10/20/30/40)
+        // again avoids the coincidental-no-op trap a two-value fixture
+        // would set. At row 0, k*y is 0 for any wavelength, so the sine
+        // term contributes nothing there regardless of ripple size,
+        // isolating the seeded jitter's own effect: ripple size 1 gives
+        // wavelength 4, ripple magnitude 10 gives amplitude 5.0 and
+        // jitter 2.5. Two XorShift32 draws are consumed per pixel in
+        // scan order; seed 1's own first four (270369, 67634689,
+        // 2647435461, 307599695 out of u32::MAX, next_unit roughly
+        // -0.999874, -0.968505, 0.232808, -0.856787) become column 0's
+        // own (dx, dy) and column 1's own (dx, dy):
+        //   col 0: sx = 0 + 0 + 2.5*-0.999874 = -2.4997 -> rounds to -2,
+        //     clamped to 0 -> value 10 (unchanged, a genuine edge-clamp
+        //     coincidence).
+        //   col 1: sx = 1 + 0 + 2.5*0.232808 = 1.582 -> rounds to 2 ->
+        //     value 30, a real change from column 1's own original 20.
+        // Columns 2 and 3 consume the next four draws (cross-checked
+        // against an independent Python script that reproduces both the
+        // XorShift32 draws and sample_nearest's own half-away-from-zero
+        // rounding): column 2 resamples to 30 (its own original value,
+        // another edge-clamp coincidence) and column 3 resamples to 20,
+        // a real change from its own original 40.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.ocean_ripple(id, 1, 10, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [30, 30, 30, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [30, 30, 30, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn ocean_ripple_zero_magnitude_is_a_no_op() {
+        // Magnitude 0 zeroes both the sine amplitude and the jitter
+        // spread, always resampling exactly at (col, row) regardless of
+        // the drawn offsets -- a true no-op confirmed against the
+        // fixture's own original values.
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.ocean_ripple(id, 1, 0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn ocean_ripple_size_widens_the_wavelength() {
+        // At magnitude 4 (amplitude 2.0, jitter 1.0), row 1 puts a
+        // meaningfully large sine term into play. Row 1's own column 0
+        // is the ninth pixel [`Self::filter_pixels`] visits (row 0's own
+        // four pixels each consume two draws first), so it draws the
+        // ninth XorShift32 value out of u32::MAX, whose next_unit is
+        // roughly -0.066179 regardless of ripple size (both runs share
+        // the same seed and the same per-pixel draw count). Ripple size
+        // 1 gives wavelength 4 (k*y = pi/2, sin = 1.0, amp*sin = 2.0),
+        // landing column 0's sample at sx = 0 + 2.0 + 1.0*-0.066179 =
+        // 1.934 -> rounds to 2 -> value 30, a real change from column
+        // 0's own original 10. Ripple size 2 doubles the wavelength to 8
+        // (k*y = pi/4, sin = 0.7071, amp*sin = 1.4142), landing the same
+        // column 0 at sx = 0 + 1.4142 - 0.066179 = 1.348 -> rounds to 1
+        // -> value 20 -- a real, hand-computed difference from ripple
+        // size 1's own result of 30, not a coincidental match.
+        // Cross-checked against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.ocean_ripple(id, 1, 4, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [30, 30, 30, 255]);
+
+        let (mut doc, id) = column_stripes_fixture();
+        doc.ocean_ripple(id, 2, 4, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn ocean_ripple_is_confined_to_the_selection() {
+        // Selecting only (1, 0) makes it, rather than (0, 0), the first
+        // pixel to consume the generator's own draws (the same
+        // architectural fact spatter's own selection test already
+        // documents): it gets draws 1-2 (270369, 67634689, unit
+        // -0.999874 and -0.968505) instead of draws 3-4, landing sx =
+        // 1 + 0 + 2.5*-0.999874 = -1.4997 -> rounds to -1, clamped to 0
+        // -> value 10 -- a real, hand-verified change from its own
+        // original value of 20, and a genuinely different result from
+        // the unselected first test's own column 1 result of 30.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.ocean_ripple(id, 1, 10, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [10, 10, 10, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn ocean_ripple_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.ocean_ripple(id, 0, 10, 1).is_err());
+        assert!(doc.ocean_ripple(id, 16, 10, 1).is_err());
+        assert!(doc.ocean_ripple(id, 1, 21, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.ocean_ripple(id, 1, 10, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.ocean_ripple(999, 1, 10, 1).is_err());
     }
 
     #[test]

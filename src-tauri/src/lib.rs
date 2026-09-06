@@ -1906,6 +1906,21 @@ fn glass(
     })
 }
 
+/// Filter Gallery > Distort > Ocean Ripple on layer `id`. The frontend
+/// sends a fresh `seed` on every apply, as with Glass.
+#[tauri::command]
+fn ocean_ripple(
+    state: State<'_, AppState>,
+    id: LayerId,
+    ripple_size: u32,
+    ripple_magnitude: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.ocean_ripple(id, ripple_size, ripple_magnitude, seed)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2235,6 +2250,7 @@ pub fn run() {
             chrome,
             diffuse_glow,
             glass,
+            ocean_ripple,
             hue_saturation,
             black_and_white,
             vibrance,

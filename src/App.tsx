@@ -453,6 +453,9 @@ export default function App() {
   const [showGlassDialog, setShowGlassDialog] = useState(false);
   const [glassDistortion, setGlassDistortion] = useState(5);
   const [glassSmoothness, setGlassSmoothness] = useState(4);
+  const [showOceanRippleDialog, setShowOceanRippleDialog] = useState(false);
+  const [oceanRippleSize, setOceanRippleSize] = useState(7);
+  const [oceanRippleMagnitude, setOceanRippleMagnitude] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1451,6 +1454,18 @@ export default function App() {
     });
     setShowGlassDialog(false);
   }, [runCommand, selectedId, glassDistortion, glassSmoothness]);
+
+  const applyOceanRipple = useCallback(async () => {
+    if (selectedId === null) return;
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("ocean_ripple", {
+      id: selectedId,
+      rippleSize: oceanRippleSize,
+      rippleMagnitude: oceanRippleMagnitude,
+      seed,
+    });
+    setShowOceanRippleDialog(false);
+  }, [runCommand, selectedId, oceanRippleSize, oceanRippleMagnitude]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -3090,6 +3105,14 @@ export default function App() {
             title="Filter Gallery > Distort > Glass"
           >
             Glass…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowOceanRippleDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Distort > Ocean Ripple"
+          >
+            Ocean Ripple…
           </button>
           <button
             className="button button--quiet"
@@ -7707,6 +7730,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGlass} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOceanRippleDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowOceanRippleDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Ocean Ripple"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Ocean Ripple</h2>
+            <label className="control">
+              <span className="control__label">
+                Ripple Size
+                <span className="control__value">{oceanRippleSize}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={oceanRippleSize}
+                onChange={(event) => setOceanRippleSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Ripple Magnitude
+                <span className="control__value">{oceanRippleMagnitude}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={oceanRippleMagnitude}
+                onChange={(event) => setOceanRippleMagnitude(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowOceanRippleDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyOceanRipple} disabled={busy}>
                 Apply
               </button>
             </div>
