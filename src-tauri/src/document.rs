@@ -6770,6 +6770,53 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Chrome: maps each pixel's own standard-
+    /// weighted luma (the same weights [`Self::bas_relief`] and
+    /// [`Self::halftone_pattern`] already use) through a mirrored
+    /// triangular curve that peaks bright at the neutral midtone `128`
+    /// and falls off toward black at either extreme — a documented
+    /// simplification standing in for Photoshop's own gradient-map-based
+    /// metallic sheen renderer, chosen because it's exactly hand-
+    /// checkable: `v = 255 - 2 · amount · |luma − 128|`. `smoothness`
+    /// (Photoshop's own `0..=10` range) scales down into a
+    /// [`box_blur_at`] pre-smoothing radius, `smoothness / 3` (allowed to
+    /// be `0`, unlike every earlier Sketch filter's own `.max(1)` floor,
+    /// since Photoshop's own Chrome smoothness starts at `0` rather than
+    /// `1` and a `0` radius is already a safe no-op single-pixel sample);
+    /// `detail` (Photoshop's own `0..=10` range) linearly steepens the
+    /// curve's slope, `amount = 1.0 + detail / 10.0` (`1.0` at `detail=0`
+    /// up to `2.0` at `detail=10`), the same kind of linear-scale scope
+    /// cut [`Self::bas_relief`]'s own `detail` parameter already makes.
+    /// Alpha untouched, and confined to the selection the same way every
+    /// other [`Self::filter_pixels`]-based filter already is.
+    pub fn chrome(
+        &mut self,
+        id: LayerId,
+        detail: u32,
+        smoothness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if detail > 10 {
+            return Err("Chrome detail must be between 0 and 10.".to_string());
+        }
+        if smoothness > 10 {
+            return Err("Chrome smoothness must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (smoothness / 3) as i64;
+        let amount = 1.0 + detail as f32 / 10.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = box_blur_at(src, doc_width, width, height, row, col, radius);
+            let luma =
+                0.299 * blurred[0] as f32 + 0.587 * blurred[1] as f32 + 0.114 * blurred[2] as f32;
+            let v = (255.0 - 2.0 * amount * (luma - 128.0).abs())
+                .round()
+                .clamp(0.0, 255.0) as u8;
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -15206,6 +15253,102 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.halftone_pattern(999, 2, 0, 0).is_err());
+    }
+
+    #[test]
+    fn chrome_maps_luma_through_a_mirrored_curve() {
+        // Same cliff fixture: 4x4, columns 0-1 solid 200, columns 2-3
+        // solid 50 (grayscale, so luma equals the channel value exactly).
+        // Smoothness 0 gives blur radius 0 (a same-pixel no-op sample),
+        // detail 0 gives amount 1.0: v = 255 - 2*1.0*|luma-128|.
+        //   luma 200: |200-128| = 72, v = 255 - 144 = 111.
+        //   luma 50:  |50-128| = 78,  v = 255 - 156 = 99.
+        // Both exact integers, no rounding ambiguity. Cross-checked
+        // against an independent Python script.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chrome(id, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [111, 111, 111, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [111, 111, 111, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [99, 99, 99, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [99, 99, 99, 255]);
+    }
+
+    #[test]
+    fn chrome_detail_scales_the_curves_slope() {
+        // Same fixture and smoothness 0, but detail 5 gives amount
+        // 1.0 + 5/10 = 1.5 instead of 1.0:
+        //   luma 200: v = 255 - 2*1.5*72 = 255 - 216 = 39.
+        //   luma 50:  v = 255 - 2*1.5*78 = 255 - 234 = 21.
+        // Real, hand-computed changes from the detail-0 test's own 111
+        // and 99, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chrome(id, 5, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [39, 39, 39, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [21, 21, 21, 255]);
+    }
+
+    #[test]
+    fn chrome_smoothness_widens_the_blur_radius() {
+        // Smoothness 3 gives blur radius 1, reusing paint_daubs's own
+        // already-verified radius-1 row ([200, 150, 100, 50]) directly.
+        // At detail 0 (amount 1.0): column 0 (blurred luma 200) and
+        // column 3 (blurred luma 50) match the unblurred test's own 111
+        // and 99 exactly (both are edge columns whose radius-1 blur
+        // still lands on their own original value), but column 1
+        // (blurred luma 150, not raw 200) gives a genuinely new value,
+        // v = 255 - 2*1.0*|150-128| = 255 - 44 = 211, and column 2
+        // (blurred luma 100, not raw 50) gives v = 255 - 2*1.0*|100-128|
+        // = 255 - 56 = 199 -- both real changes only the blur could have
+        // produced, since without it columns 0-1 and 2-3 share identical
+        // raw luma within their own pair.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.chrome(id, 0, 3).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [111, 111, 111, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [211, 211, 211, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [199, 199, 199, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [99, 99, 99, 255]);
+    }
+
+    #[test]
+    fn chrome_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 4.0).unwrap();
+        let dirty = doc.chrome(id, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(2, y)..idx(2, y) + 4], [99, 99, 99, 255]);
+        }
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]); // unselected, untouched
+        assert_eq!(after[idx(2, 3) + 4..], before[idx(2, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 0,
+                x1: 3,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn chrome_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.chrome(id, 11, 0).is_err());
+        assert!(doc.chrome(id, 0, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.chrome(id, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.chrome(999, 0, 0).is_err());
     }
 
     #[test]

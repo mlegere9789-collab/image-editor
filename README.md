@@ -5897,6 +5897,63 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **642 Rust tests total** (637 → 642, 635 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 87 — Filter Gallery > Sketch > Chrome
+
+Maps each pixel's own standard-weighted luma (the same weights
+`bas_relief` and `halftone_pattern` already use) through a mirrored
+triangular curve that peaks bright at the neutral midtone `128` and
+falls off toward black at either extreme: `v = 255 - 2 * amount *
+|luma - 128|`. A documented simplification standing in for Photoshop's
+own gradient-map-based metallic sheen renderer, chosen specifically
+because it's exactly hand-checkable rather than requiring a reflection
+map. `Document::chrome(id, detail, smoothness)`: `smoothness`
+(Photoshop's own `0..=10` range) scales down into a `box_blur_at`
+pre-smoothing radius, `smoothness / 3` — allowed to be `0`, unlike
+every earlier Sketch filter's own `.max(1)` floor, since Photoshop's
+own Chrome smoothness starts at `0` rather than `1` and a `0` radius is
+already a safe same-pixel sample; `detail` (Photoshop's own `0..=10`
+range) linearly steepens the curve's slope, `amount = 1.0 + detail /
+10.0` (`1.0` at `detail=0` up to `2.0` at `detail=10`), the same kind
+of linear-scale scope cut `bas_relief`'s own `detail` parameter already
+makes. Alpha untouched. A new **Chrome…** dialog exposes Detail and
+Smoothness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture every other Sketch filter shares (4x4,
+columns 0-1 solid 200, columns 2-3 solid 50). At smoothness `0`
+(radius `0`, a same-pixel no-op) and detail `0` (amount `1.0`): luma
+`200` gives `v = 255 - 2*1.0*72 = 111`, luma `50` gives `v = 255 -
+2*1.0*78 = 99`, both exact integers. A second test raises detail to
+`5` (amount `1.5`), giving `39` and `21` instead — a real, hand-
+computed change, not a coincidental match. A third raises smoothness
+to `3` (radius `1`), reusing `paint_daubs`'s own already-verified
+radius-1 row (`[200, 150, 100, 50]`) directly: columns `0` and `3`
+(edge columns whose blur still lands on their own original value)
+match the unblurred test's own `111` and `99` exactly, while columns
+`1` and `2` (blurred luma `150` and `100`, not their raw `200`/`50`)
+give genuinely new values `211` and `199` — changes only the blur
+could have produced, since without it columns `0`-`1` and `2`-`3`
+share identical raw luma within their own pair. A fourth confines the
+fixture to a full-column selection at column `2`. A fifth confirms
+out-of-range detail and smoothness, plus a locked/unknown layer, all
+error. All five tests passed on the first run, cross-checked against
+an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**647 Rust tests total** (642 → 647, 640 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

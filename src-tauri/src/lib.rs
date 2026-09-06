@@ -1864,6 +1864,17 @@ fn halftone_pattern(
     })
 }
 
+/// Filter Gallery > Sketch > Chrome on layer `id`.
+#[tauri::command]
+fn chrome(
+    state: State<'_, AppState>,
+    id: LayerId,
+    detail: u32,
+    smoothness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.chrome(id, detail, smoothness))
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2190,6 +2201,7 @@ pub fn run() {
             torn_edges,
             bas_relief,
             halftone_pattern,
+            chrome,
             hue_saturation,
             black_and_white,
             vibrance,

@@ -443,6 +443,9 @@ export default function App() {
   const [halftonePatternSize, setHalftonePatternSize] = useState(4);
   const [halftonePatternContrast, setHalftonePatternContrast] = useState(0);
   const [halftonePatternType, setHalftonePatternType] = useState(0);
+  const [showChromeDialog, setShowChromeDialog] = useState(false);
+  const [chromeDetail, setChromeDetail] = useState(4);
+  const [chromeSmoothness, setChromeSmoothness] = useState(7);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1400,6 +1403,16 @@ export default function App() {
     });
     setShowHalftonePatternDialog(false);
   }, [runCommand, selectedId, halftonePatternSize, halftonePatternContrast, halftonePatternType]);
+
+  const applyChrome = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("chrome", {
+      id: selectedId,
+      detail: chromeDetail,
+      smoothness: chromeSmoothness,
+    });
+    setShowChromeDialog(false);
+  }, [runCommand, selectedId, chromeDetail, chromeSmoothness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2863,6 +2876,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Halftone Pattern"
           >
             Halftone Pattern…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowChromeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Chrome"
+          >
+            Chrome…
           </button>
           <button
             className="button button--quiet"
@@ -6429,6 +6450,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyHalftonePattern} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showChromeDialog && (
+        <div className="modal-overlay" onClick={() => setShowChromeDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Chrome"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Chrome</h2>
+            <label className="control">
+              <span className="control__label">
+                Detail
+                <span className="control__value">{chromeDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={chromeDetail}
+                onChange={(event) => setChromeDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{chromeSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={chromeSmoothness}
+                onChange={(event) => setChromeSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowChromeDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyChrome} disabled={busy}>
                 Apply
               </button>
             </div>
