@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 143.**
+**618 distinct capabilities tracked. Currently shipped: 144.**
 
 ## PART I — EVERY TOOL
 
@@ -569,7 +569,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Diffuse GlowCreates a glowing, photographic diffusion effect by spreading highlights and reducing sharpness.
 - [ ] GlassMakes the image appear as though viewed through textured or distorted glass.
 - [ ] Ocean RippleCreates wave-like distortions resembling an image viewed through rippling water.
-- [ ] Bas ReliefCreates a raised-relief appearance, emphasizing tonal transitions as though carved or embossed.
+- [x] Bas Relief (Filter Gallery → Sketch; box-blurs the source, computes standard-weighted luma of the blur, then reuses `emboss`'s own `away - toward` relief shape at a fixed 1-pixel sample distance and `plaster`'s own 8-direction angle table, scaled by `detail` — grayscale output, not per-channel colour, is what distinguishes it from `plaster` — see README Phase 85)
 - [x] Chalk & Charcoal (Filter Gallery → Sketch; a three-way threshold on `box_blur_at`-smoothed luma — pure black below a dark threshold, pure white above a light threshold, mid-grey between — rather than the two-way splits `stamp`/`photocopy`/`graphic_pen` already use — Photoshop's own foreground/background colouring is a documented scope cut — see README Phase 81)
 - [ ] ChromeCreates a polished metallic/chrome-like tonal effect.
 - [ ] Conté CrayonSimulates drawing with Conté crayon on textured paper.

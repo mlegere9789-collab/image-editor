@@ -435,6 +435,10 @@ export default function App() {
   const [tornEdgesImageBalance, setTornEdgesImageBalance] = useState(10);
   const [tornEdgesSmoothness, setTornEdgesSmoothness] = useState(5);
   const [tornEdgesContrast, setTornEdgesContrast] = useState(10);
+  const [showBasReliefDialog, setShowBasReliefDialog] = useState(false);
+  const [basReliefDetail, setBasReliefDetail] = useState(8);
+  const [basReliefSmoothness, setBasReliefSmoothness] = useState(5);
+  const [basReliefLightDirection, setBasReliefLightDirection] = useState(2);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1370,6 +1374,17 @@ export default function App() {
     });
     setShowTornEdgesDialog(false);
   }, [runCommand, selectedId, tornEdgesImageBalance, tornEdgesSmoothness, tornEdgesContrast]);
+
+  const applyBasRelief = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("bas_relief", {
+      id: selectedId,
+      detail: basReliefDetail,
+      smoothness: basReliefSmoothness,
+      lightDirection: basReliefLightDirection,
+    });
+    setShowBasReliefDialog(false);
+  }, [runCommand, selectedId, basReliefDetail, basReliefSmoothness, basReliefLightDirection]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2817,6 +2832,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Torn Edges"
           >
             Torn Edges…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowBasReliefDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Bas Relief"
+          >
+            Bas Relief…
           </button>
           <button
             className="button button--quiet"
@@ -6256,6 +6279,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyTornEdges} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBasReliefDialog && (
+        <div className="modal-overlay" onClick={() => setShowBasReliefDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Bas Relief"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Bas Relief</h2>
+            <label className="control">
+              <span className="control__label">
+                Detail
+                <span className="control__value">{basReliefDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={basReliefDetail}
+                onChange={(event) => setBasReliefDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{basReliefSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={basReliefSmoothness}
+                onChange={(event) => setBasReliefSmoothness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={basReliefLightDirection}
+                onChange={(event) => setBasReliefLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowBasReliefDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyBasRelief} disabled={busy}>
                 Apply
               </button>
             </div>

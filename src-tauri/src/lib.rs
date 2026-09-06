@@ -1836,6 +1836,20 @@ fn torn_edges(
     })
 }
 
+/// Filter Gallery > Sketch > Bas Relief on layer `id`.
+#[tauri::command]
+fn bas_relief(
+    state: State<'_, AppState>,
+    id: LayerId,
+    detail: u32,
+    smoothness: u32,
+    light_direction: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.bas_relief(id, detail, smoothness, light_direction)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2160,6 +2174,7 @@ pub fn run() {
             plaster,
             water_paper,
             torn_edges,
+            bas_relief,
             hue_saturation,
             black_and_white,
             vibrance,

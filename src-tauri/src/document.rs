@@ -6558,6 +6558,99 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Bas Relief: carves the layer into a
+    /// stone-relief grayscale image, the same standard-weighted luma
+    /// [`Self::torn_edges`] and [`Self::threshold`] already use, lit from
+    /// one of 8 compass directions. Reuses three already-tested pieces
+    /// rather than introducing new pixel math: [`box_blur_at`] pre-smooths
+    /// the source at a radius derived from `smoothness`
+    /// (`(smoothness/5).max(1)`, the same slider-to-radius mapping
+    /// [`Self::plaster`] and [`Self::chalk_and_charcoal`] already use), the
+    /// 8-direction angle table is copied verbatim from [`Self::plaster`]
+    /// (`0`=90° Top, `1`=45° Top Right, `2`=0° Right, `3`=315° Bottom
+    /// Right, `4`=270° Bottom, `5`=225° Bottom Left, `6`=180° Left,
+    /// `7`=135° Top Left), and the relief itself is
+    /// [`Self::emboss`]'s own `away - toward` shape at a fixed sample
+    /// distance of 1 pixel — but computed on a single luma channel instead
+    /// of per-channel colour, which is what makes the output grayscale the
+    /// way Photoshop's own Bas Relief is, rather than the tinted relief
+    /// [`Self::plaster`] produces. `detail` (Photoshop's own `0..=15`
+    /// range) scales the relief's contribution linearly from none at `0`
+    /// (a flat mid-grey plate) to double strength at `15`
+    /// (`detail as f32 / 15.0 * 2.0`) — a documented simplification of
+    /// Photoshop's own detail control, which also sharpens fine edges
+    /// rather than only scaling contrast. `smoothness` is Photoshop's own
+    /// `1..=15` range; `light_direction` is `0..=7`. Alpha untouched, and
+    /// confined to the selection the same way every other
+    /// [`Self::filter_pixels`]-based filter already is: the box-blur
+    /// pre-pass reads the whole (unmodified) source regardless of
+    /// selection, matching [`Self::plaster`]'s identical precomputed-buffer
+    /// approach, and only the selected pixels' output is written back.
+    pub fn bas_relief(
+        &mut self,
+        id: LayerId,
+        detail: u32,
+        smoothness: u32,
+        light_direction: u32,
+    ) -> Result<Option<Rect>, String> {
+        if detail > 15 {
+            return Err("Bas Relief detail must be between 0 and 15.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Bas Relief smoothness must be between 1 and 15.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Bas Relief light direction must be between 0 and 7.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (smoothness / 5).max(1) as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let amount = detail as f32 / 15.0 * 2.0;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0f32; doc_width * self.height as usize];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let blurred = box_blur_at(&source, doc_width, width, height, row, col, radius);
+                let luma = 0.299 * blurred[0] as f32
+                    + 0.587 * blurred[1] as f32
+                    + 0.114 * blurred[2] as f32;
+                luma_buf[row as usize * doc_width + col as usize] = luma;
+            }
+        }
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let at = |sx: i64, sy: i64| {
+                let x = sx.clamp(0, width - 1) as usize;
+                let y = sy.clamp(0, height - 1) as usize;
+                y * doc_width + x
+            };
+            let toward = luma_buf[at(col as i64 + dx, row as i64 + dy)];
+            let away = luma_buf[at(col as i64 - dx, row as i64 - dy)];
+            let relief = (away - toward) * amount;
+            let v = (128.0 + relief).round().clamp(0.0, 255.0) as u8;
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14739,6 +14832,131 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.torn_edges(999, 10, 5, 10, 1).is_err());
+    }
+
+    #[test]
+    fn bas_relief_reads_relief_from_the_blurred_luma() {
+        // Same cliff fixture as every other Sketch/Artistic filter this
+        // project has: 4x4, columns 0-1 solid 200, columns 2-3 solid 50
+        // (grayscale, so luma equals the channel value exactly). Smoothness
+        // 10 gives blur radius 2, reusing paint_daubs's own already-
+        // verified radius-2 row ([170, 140, 110, 80]). Light direction 2
+        // (0 degrees, Right) gives dx=1, dy=0, so each pixel's "toward"
+        // sample is one column to its right and "away" is one column to
+        // its left (both clamped at the edges). Detail 15 gives the
+        // maximum amount, 15/15*2 = 2.0 exactly:
+        //   col 0: away=at(-1)->clamp 0=170, toward=at(1)=140,
+        //           relief=(170-140)*2=60,  v=128+60=188
+        //   col 1: away=at(0)=170,  toward=at(2)=110,
+        //           relief=(170-110)*2=120, v=128+120=248
+        //   col 2: away=at(1)=140,  toward=at(3)=80,
+        //           relief=(140-80)*2=120,  v=128+120=248
+        //   col 3: away=at(2)=110,  toward=at(4)->clamp 3=80,
+        //           relief=(110-80)*2=60,   v=128+60=188
+        // All four are exact integers, no rounding ambiguity.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.bas_relief(id, 15, 10, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [188, 188, 188, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [248, 248, 248, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [248, 248, 248, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [188, 188, 188, 255]);
+    }
+
+    #[test]
+    fn bas_relief_detail_scales_the_relief_amount() {
+        // Same radius-2 blurred row and light direction as the test
+        // above, but detail 6 gives amount = 6/15*2 = 0.8 instead of 2.0:
+        // column 1's relief (170-110)*0.8 = 48.0, v=128+48=176 -- a real,
+        // hand-computed change from that test's own value of 248, not a
+        // coincidental match. Detail 0 gives amount 0.0, flattening every
+        // column to the same neutral 128 mid-grey plate regardless of the
+        // underlying blurred luma, confirming detail truly gates the
+        // relief rather than being ignored.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.bas_relief(id, 6, 10, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [176, 176, 176, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.bas_relief(id, 0, 10, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [128, 128, 128, 255]);
+        }
+    }
+
+    #[test]
+    fn bas_relief_light_direction_flips_the_relief() {
+        // Light direction 6 (180 degrees, Left) negates dx to -1, which
+        // swaps which neighbour is "toward" and which is "away" relative
+        // to direction 2's own test above, flipping the sign of every
+        // relief term:
+        //   col 0: toward=at(-1)->clamp 0=170, away=at(1)=140,
+        //           relief=(140-170)*2=-60,  v=128-60=68
+        //   col 1: toward=at(0)=170, away=at(2)=110,
+        //           relief=(110-170)*2=-120, v=128-120=8
+        //   col 2: toward=at(1)=140, away=at(3)=80,
+        //           relief=(80-140)*2=-120,  v=8
+        //   col 3: toward=at(2)=110, away=at(4)->clamp 3=80,
+        //           relief=(80-110)*2=-60,   v=68
+        // A distinct pattern ([68, 8, 8, 68]) from direction 2's own
+        // ([188, 248, 248, 188]), confirming light_direction genuinely
+        // changes which neighbour the relief is measured against.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.bas_relief(id, 15, 10, 6).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [68, 68, 68, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [8, 8, 8, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [8, 8, 8, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [68, 68, 68, 255]);
+    }
+
+    #[test]
+    fn bas_relief_is_confined_to_the_selection() {
+        // Unlike torn_edges, bas_relief draws no random numbers, so
+        // selection has no generator-ordering subtlety: the box-blur
+        // pre-pass always reads the whole, unmodified source (matching
+        // plaster's own identical precomputed-buffer approach), and only
+        // the selected column's own output (248, from the direction-2 test
+        // above) is written back.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.bas_relief(id, 15, 10, 2).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [248, 248, 248, 255]);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn bas_relief_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.bas_relief(id, 16, 10, 2).is_err());
+        assert!(doc.bas_relief(id, 15, 0, 2).is_err());
+        assert!(doc.bas_relief(id, 15, 16, 2).is_err());
+        assert!(doc.bas_relief(id, 15, 10, 8).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.bas_relief(id, 15, 10, 2).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.bas_relief(999, 15, 10, 2).is_err());
     }
 
     #[test]

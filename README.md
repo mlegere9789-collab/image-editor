@@ -5754,6 +5754,79 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **632 Rust tests total** (628 → 632, 625 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 85 — Filter Gallery > Sketch > Bas Relief
+
+`box_blur_at`-smooths the layer, computes standard-weighted luma of the
+smoothed sample (the same weights `torn_edges` and `threshold` already
+use), then reuses `emboss`'s own `away - toward` relief shape at a
+fixed 1-pixel sample distance and `plaster`'s own 8-direction angle
+table — but on a single grayscale channel instead of per-channel
+colour, which is what makes the output a true grayscale relief the way
+Photoshop's own Bas Relief is, rather than the tinted relief `plaster`
+produces. A documented approximation, not a port of Photoshop's own
+stone-carving renderer. `Document::bas_relief(id, detail, smoothness,
+light_direction)`: `smoothness` (Photoshop's own `1..=15` range) scales
+down into the blur radius, `(smoothness / 5).max(1)`, the same shape
+`plaster` and `chalk_and_charcoal` already use; `light_direction`
+(Photoshop's own `0..=7` range) selects one of 8 compass angles via the
+identical table `plaster` already has (`0`=90° Top, `1`=45° Top Right,
+`2`=0° Right, `3`=315° Bottom Right, `4`=270° Bottom, `5`=225° Bottom
+Left, `6`=180° Left, `7`=135° Top Left); `detail` (Photoshop's own
+`0..=15` range) linearly scales the relief's contribution from none at
+`0` (a flat mid-grey plate) to double strength at `15` (`detail / 15.0
+* 2.0`) — a documented simplification of Photoshop's own detail
+control, which also sharpens fine edges rather than only scaling
+contrast. Alpha untouched. A new **Bas Relief…** dialog exposes Detail,
+Smoothness, and Light Direction controls, the last a `<select>` of the
+same 8 compass options `plaster`'s own dialog already offers.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy`/
+`graphic_pen`/`chalk_and_charcoal`/`plaster`/`water_paper`/`torn_edges`
+all already share, reusing `paint_daubs`'s own already-verified
+box-blur radius-2 row (`[170, 140, 110, 80]`) directly — since the
+fixture is already grayscale (equal R, G, B in every pixel), its luma
+equals the channel value exactly, so no separate luma arithmetic needed
+verifying. At smoothness `10` (radius `2`), light direction `2` (Right,
+`dx=1, dy=0`), and detail `15` (amount `2.0`): column `0`
+(`128 + (170-140)*2 = 188`), column `1` (`128 + (170-110)*2 = 248`),
+column `2` (`128 + (140-80)*2 = 248`), and column `3`
+(`128 + (110-80)*2 = 188`) are all exact integers, no rounding
+ambiguity. A second test drops detail to `6` (amount `0.8`), giving
+column `1` a real, hand-computed `176` rather than `248`, and detail
+`0` (amount `0.0`), flattening every column to the same neutral `128`
+regardless of the underlying blur, confirming `detail` truly gates the
+relief. A third flips light direction to `6` (Left, `dx=-1`), which
+swaps which neighbour counts as "toward" and which as "away" relative
+to direction `2`'s own test, producing the distinct pattern `[68, 8, 8,
+68]` rather than `[188, 248, 248, 188]`. A fourth confines the fixture
+to a full-column selection at column `1`, confirming (unlike
+`torn_edges`) there is no generator-ordering subtlety to correct for
+here — `bas_relief` draws no random numbers, so the precomputed
+box-blur buffer always reads the whole, unmodified source regardless of
+selection, the same approach `plaster` already established, and only
+the selected column's own output (`248`) is written back. A fifth
+confirms out-of-range detail, smoothness, and light direction, plus a
+locked/unknown layer, all error. All five passed on the first run,
+cross-checked against an independent Python script emulating `f32`
+arithmetic via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**637 Rust tests total** (632 → 637, 630 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
