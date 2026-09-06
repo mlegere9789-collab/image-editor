@@ -2175,6 +2175,20 @@ fn bevel_emboss(
     })
 }
 
+/// Layer > Layer Style > Contour on layer `id`, baked in destructively.
+#[tauri::command]
+fn contour(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    light_direction: u32,
+    strength: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.contour(id, size, light_direction, strength)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2522,6 +2536,7 @@ pub fn run() {
             inner_shadow,
             pattern_overlay,
             bevel_emboss,
+            contour,
             hue_saturation,
             black_and_white,
             vibrance,

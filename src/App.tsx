@@ -282,6 +282,10 @@ export default function App() {
   const [bevelEmbossSize, setBevelEmbossSize] = useState(5);
   const [bevelEmbossLightDirection, setBevelEmbossLightDirection] = useState(7);
   const [bevelEmbossStrength, setBevelEmbossStrength] = useState(50);
+  const [showContourDialog, setShowContourDialog] = useState(false);
+  const [contourSize, setContourSize] = useState(5);
+  const [contourLightDirection, setContourLightDirection] = useState(7);
+  const [contourStrength, setContourStrength] = useState(50);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -975,6 +979,17 @@ export default function App() {
     });
     setShowBevelEmbossDialog(false);
   }, [runCommand, selectedId, bevelEmbossSize, bevelEmbossLightDirection, bevelEmbossStrength]);
+
+  const applyContour = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("contour", {
+      id: selectedId,
+      size: contourSize,
+      lightDirection: contourLightDirection,
+      strength: contourStrength,
+    });
+    setShowContourDialog(false);
+  }, [runCommand, selectedId, contourSize, contourLightDirection, contourStrength]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2871,6 +2886,14 @@ export default function App() {
             title="Layer > Layer Style > Bevel & Emboss"
           >
             Bevel &amp; Emboss…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowContourDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Contour"
+          >
+            Contour…
           </button>
           <button
             className="button button--quiet"
@@ -4970,6 +4993,76 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyBevelEmboss} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContourDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowContourDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Contour"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Contour</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{contourSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={contourSize}
+                onChange={(event) => setContourSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={contourLightDirection}
+                onChange={(event) => setContourLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{contourStrength}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={contourStrength}
+                onChange={(event) => setContourStrength(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowContourDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyContour} disabled={busy}>
                 Apply
               </button>
             </div>

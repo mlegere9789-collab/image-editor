@@ -7147,6 +7147,77 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **757 Rust tests total** (750 → 757, 750 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 108 — Layer > Layer Style > Contour
+
+`contour(id, size, light_direction, strength)` reuses `bevel_emboss`'s
+own machinery almost entirely — the same per-pixel "height" field (now
+factored into a shared private free function, `bevel_height_at`, so
+both filters call the identical implementation rather than keeping two
+copies of the same brute-force Chebyshev-distance search), the same
+`plaster`-angle-table offset sampling, the same additive shading. The
+one change is what Photoshop's own Contour panel actually does: it
+remaps a bevel's shading ramp through a curve instead of using it
+linearly. This project has no general curve editor for layer styles,
+so it substitutes one specific, well-known preset — "Ring" — the same
+kind of single-preset substitution `grain`'s "Regular" grain type and
+`pattern_overlay`'s procedural checkerboard already make in place of
+Photoshop's own fuller controls. Before differencing, each sampled
+height is passed through `ring(h) = size - |2h - size|`: a triangular
+curve that's `0` at the shape's own edge (`h = 0`), rises to a peak of
+`size` at exactly half-depth (`h = size / 2`), and falls back to `0`
+at the flat interior plateau (`h = size`) — the bright/dark ring right
+at the bevel's own midline that gives the Ring preset its name.
+`shade = (ring(away) - ring(toward)) * (strength / 100.0)` is added to
+each colour channel exactly as `bevel_emboss` already does. `size`
+(`1..=250`), `light_direction` (`0..=7`), and `strength` (`0..=100`)
+share `bevel_emboss`'s own parameter ranges and meanings exactly. A
+new **Contour…** dialog mirrors Bevel & Emboss's own dialog layout:
+Size, the same eight-direction Light Direction dropdown, and Strength.
+
+**Verified two ways.** Seven new `document.rs` tests, reusing Inner
+Glow's own fixture (6x6, a solid opaque 4x4 block `(100, 150, 200,
+255)` at rows 1-4, columns 1-4). Direction `2` (0°, `dx=1, dy=0`),
+size `2`, strength `100`: pixel `(row 2, col 2)` has `toward =
+height(2, 3) = 2` (the size-2 plateau, `ring(2) = 2-|4-2| = 0`) and
+`away = height(2, 1) = 1` (exactly half of size `2`, the ring's own
+peak, `ring(1) = 2-|2-2| = 2`), giving `relief = ring(away) -
+ring(toward) = 2 - 0 = 2`, `shade = 2.0`, and a real `(102, 152, 202)`
+— genuinely different from plain `bevel_emboss`'s own `(99, 149, 199)`
+at these very same parameters, confirming Contour remaps the field
+through the ring curve rather than differencing it directly. Pixel
+`(row 2, col 4)` has both `toward` and `away` land on the ring's own
+two zero-crossings (heights `0` and `2`), giving `relief = 0` and no
+change — a real consequence of the ring's own non-monotonic shape, not
+an oversight. A second test halves strength to `50`, halving the shade
+to `1.0` for a real `(101, 151, 201)`. A third flips direction to `6`
+(180°), swapping toward and away at the very same pixel for the mirror
+`(98, 148, 198)`. A fourth narrows size to `1`, where both samples
+land on the very same size-1 plateau height and so ring to the very
+same value, cancelling to `0` change — a real, hand-computed
+difference from the size-`2` test's own `(102, 152, 202)`, showing the
+ring's own peak lands somewhere else entirely once size changes which
+depths are reachable. A fifth confirms a fully-transparent pixel is
+left completely alone. A sixth confines the fixture to a single-pixel
+selection. A seventh confirms out-of-range size, light direction, and
+strength, plus a locked/unknown layer, all error. All seven tests
+passed on the first run, cross-checked against an independent Python
+script that emulates Rust's own `f32` rounding via
+`struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**764 Rust tests total** (757 → 764, 757 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

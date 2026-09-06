@@ -701,6 +701,49 @@ fn normalize_selection_bounds(
     })
 }
 
+/// The per-pixel "height" field [`Document::bevel_emboss`] and
+/// [`Document::contour`] both share: `0` for an already-transparent pixel,
+/// otherwise its own Chebyshev distance to the nearest transparent pixel
+/// within a `radius`-pixel search window, capped at `radius` — a
+/// deep-interior pixel with no transparent neighbour anywhere within that
+/// radius sits at the flat "plateau" height of `radius` itself rather than
+/// its own true (larger) distance. `(row, col)` is pre-clamped to the
+/// layer's own bounds, so callers may pass an off-canvas sample point (one
+/// pixel past an edge) without checking first.
+fn bevel_height_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (i64, i64),
+    radius: i64,
+) -> i64 {
+    let row = row.clamp(0, height - 1);
+    let col = col.clamp(0, width - 1);
+    let base = (row as usize * doc_width + col as usize) * CHANNELS;
+    if source[base + 3] == 0 {
+        return 0;
+    }
+    let mut nearest: Option<i64> = None;
+    for dy in -radius..=radius {
+        let ny = row + dy;
+        if ny < 0 || ny >= height {
+            continue;
+        }
+        for dx in -radius..=radius {
+            let nx = col + dx;
+            if nx < 0 || nx >= width {
+                continue;
+            }
+            let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
+            if source[nbase + 3] == 0 {
+                let d = dx.abs().max(dy.abs());
+                nearest = Some(nearest.map_or(d, |best| best.min(d)));
+            }
+        }
+    }
+    nearest.unwrap_or(radius).min(radius)
+}
+
 /// Where a layer should move in the stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -8149,42 +8192,114 @@ impl Document {
         let dx = cos.round() as i64;
         let dy = -(sin.round() as i64);
         let amount = strength as f32 / 100.0;
-        let height_at = move |src: &[u8], row: i64, col: i64| -> i64 {
-            let row = row.clamp(0, height - 1);
-            let col = col.clamp(0, width - 1);
-            let base = (row as usize * doc_width + col as usize) * CHANNELS;
-            if src[base + 3] == 0 {
-                return 0;
-            }
-            let mut nearest: Option<i64> = None;
-            for ddy in -radius..=radius {
-                let ny = row + ddy;
-                if ny < 0 || ny >= height {
-                    continue;
-                }
-                for ddx in -radius..=radius {
-                    let nx = col + ddx;
-                    if nx < 0 || nx >= width {
-                        continue;
-                    }
-                    let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
-                    if src[nbase + 3] == 0 {
-                        let d = ddx.abs().max(ddy.abs());
-                        nearest = Some(nearest.map_or(d, |best| best.min(d)));
-                    }
-                }
-            }
-            nearest.unwrap_or(radius).min(radius)
-        };
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             if src[base + 3] == 0 {
                 return [src[base], src[base + 1], src[base + 2], src[base + 3]];
             }
             let (row, col) = (row as i64, col as i64);
-            let toward = height_at(src, row + dy, col + dx);
-            let away = height_at(src, row - dy, col - dx);
+            let toward = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row + dy, col + dx),
+                radius,
+            );
+            let away = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row - dy, col - dx),
+                radius,
+            );
             let shade = (away - toward) as f32 * amount;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
+    /// Layer > Layer Style > Contour, baked in destructively: a "Ring"
+    /// contour applied to [`Self::bevel_emboss`]'s own height field —
+    /// Photoshop's Contour panel remaps a bevel's linear shading ramp
+    /// through a curve, and this project doesn't have a general curve
+    /// editor for layer styles, so it stands in with one specific,
+    /// well-known preset (the same kind of single-preset substitution
+    /// [`Self::grain`]'s "Regular" grain type and [`Self::pattern_overlay`]'s
+    /// checkerboard already make) rather than exposing Photoshop's own
+    /// dozen-plus presets or arbitrary user-drawn curves. Reuses
+    /// [`bevel_height_at`] exactly as [`Self::bevel_emboss`] does — same
+    /// `size`-capped Chebyshev-distance-to-transparent field, same
+    /// `plaster`-angle-table offset sampling — but before taking the
+    /// `away − toward` difference, each sampled height is passed through
+    /// `ring(h) = size − |2h − size|`: a triangular remap that is `0` at
+    /// the shape's own edge (`h = 0`), rises to a peak of `size` at
+    /// exactly half-depth (`h = size / 2`), and falls back to `0` at the
+    /// flat interior plateau (`h = size`), producing the bright/dark
+    /// ring artifact right at the bevel's own midline that gives the
+    /// Ring contour preset its name. `shade = (ring(away) − ring(toward))
+    /// * (strength / 100.0)` is added to each colour channel exactly as
+    /// [`Self::bevel_emboss`] already does. `size` (`1..=250`),
+    /// `light_direction` (`0..=7`), and `strength` (`0..=100`) share
+    /// [`Self::bevel_emboss`]'s own parameter ranges and meanings.
+    pub fn contour(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Contour size must be between 1 and 250.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Contour light direction must be between 0 and 7.".to_string());
+        }
+        if strength > 100 {
+            return Err("Contour strength must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let amount = strength as f32 / 100.0;
+        let ring = move |h: i64| radius - (2 * h - radius).abs();
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            let toward = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row + dy, col + dx),
+                radius,
+            );
+            let away = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row - dy, col - dx),
+                radius,
+            );
+            let shade = (ring(away) - ring(toward)) as f32 * amount;
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
@@ -18802,6 +18917,123 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.bevel_emboss(999, 2, 0, 100).is_err());
+    }
+
+    #[test]
+    fn contour_rings_the_bevel_at_half_depth() {
+        // Inner Glow's own fixture (6x6, opaque 4x4 block at rows 1-4,
+        // columns 1-4). Direction 2 (0 degrees, dx=1, dy=0), size 2,
+        // strength 100. Pixel (2, 2): toward = height(2, 3) = 2 (the
+        // interior side, at the size-2 plateau, ring(2) = 2-|4-2| = 0);
+        // away = height(2, 1) = 1 (exactly half of size 2, the ring's
+        // own peak, ring(1) = 2-|2-2| = 2). relief = ring(away) -
+        // ring(toward) = 2 - 0 = 2, shade = 2.0, giving a real
+        // (102, 152, 202) -- a genuinely different result from plain
+        // bevel_emboss's own (99, 149, 199) at these very same
+        // parameters, since Contour remaps the height field through the
+        // ring curve before differencing rather than differencing it
+        // directly. Pixel (2, 4): toward = height(2, 5) = 0 (ring(0) =
+        // 0), away = height(2, 3) = 2 (ring(2) = 0) -- both sides land
+        // on the ring's own two zero-crossings, so relief is 0 and the
+        // pixel is left unchanged, a real consequence of the ring's own
+        // non-monotonic shape.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour(id, 2, 2, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [102, 152, 202, 255]);
+        assert_eq!(&p[idx(4, 2)..idx(4, 2) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn contour_strength_scales_the_shade() {
+        // Same size 2, direction 2, pixel (2, 2), but strength 50 halves
+        // the shade to 2 * 0.5 = 1.0, giving (101, 151, 201) -- a real,
+        // hand-computed change from the strength-100 test's own
+        // (102, 152, 202), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour(id, 2, 2, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn contour_light_direction_flips_the_ring() {
+        // Same pixel (2, 2), size 2, strength 100, but light direction 6
+        // (180 degrees, dx=-1, dy=0) swaps toward and away relative to
+        // direction 2: toward = height(2, 1) = 1 (ring 2), away =
+        // height(2, 3) = 2 (ring 0), relief = 0 - 2 = -2, shade = -2.0
+        // -> (98, 148, 198) -- the mirror image of the direction-2
+        // test's own (102, 152, 202) at the very same pixel.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour(id, 2, 6, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [98, 148, 198, 255]);
+    }
+
+    #[test]
+    fn contour_size_changes_where_the_ring_falls() {
+        // Same pixel (2, 2), direction 2, strength 100, but size 1: both
+        // toward = height(2, 3) and away = height(2, 1) sit at the
+        // size-1 plateau height of 1 (no transparent pixel found within
+        // either sample's own radius-1 search window), so both ring to
+        // the very same peak value, ring(1) = 1-|2-1| = 1, giving
+        // relief 0 and no change: (100, 150, 200) -- a real,
+        // hand-computed difference from the size-2 test's own
+        // (102, 152, 202), showing the ring's own peak lands somewhere
+        // else entirely once size changes which depths are reachable.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour(id, 1, 2, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn contour_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.contour(id, 2, 0, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn contour_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        let dirty = doc.contour(id, 2, 2, 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(2, 2)..idx(2, 2) + 4], [102, 152, 202, 255]);
+        assert_eq!(after[..idx(2, 2)], before[..idx(2, 2)]); // unselected, untouched
+        assert_eq!(after[idx(2, 2) + 4..], before[idx(2, 2) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 2,
+                x1: 3,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn contour_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.contour(id, 0, 0, 100).is_err());
+        assert!(doc.contour(id, 251, 0, 100).is_err());
+        assert!(doc.contour(id, 2, 8, 100).is_err());
+        assert!(doc.contour(id, 2, 0, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.contour(id, 2, 0, 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.contour(999, 2, 0, 100).is_err());
     }
 
     #[test]
