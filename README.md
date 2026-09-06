@@ -4180,6 +4180,62 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **509 Rust tests total** (505 → 509, 502 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 59 — Filter Gallery > Artistic > Sponge
+
+Reuses `crystallize`'s own jittered-Voronoi machinery — each pixel takes
+its nearest jittered site's averaged colour, the same mottled-blotch
+shape `crystallize`'s crystals already have — and pushes each blotch's
+colour away from its own luma, boosting saturation the way a sponge's
+uneven paint coverage reads as patches of richer colour. A documented
+approximation, not a port of Photoshop's own algorithm, which
+additionally reshapes the blotches' edges by a Smoothness slider this
+project doesn't model (a documented scope cut).
+`Document::sponge(id, brush_size, definition, seed)`: `brush_size`
+(Photoshop's own `0..=10` range) maps to a Voronoi cell size of
+`brush_size + 1` pixels; `definition` (Photoshop's own `0..=25` range)
+sets the saturation multiplier, `1 + definition / 25`, so `0` reproduces
+`crystallize`'s own output exactly (the multiplier is `1`, an algebraic
+identity) and `25` doubles each channel's distance from the blotch's
+luma. Alpha, like `crystallize`, is the blotch's own averaged alpha, not
+the per-pixel original. The frontend sends a fresh `seed` on every
+apply, as with Crystallize. A new **Sponge…** dialog exposes Brush Size
+and Definition sliders.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python script. The first reuses `crystallize`'s
+own already-verified fixture exactly — a 6×6 `ramp_square` (red = `10x +
+y`), cell size `3` (`brush_size` `2`), seed `1` — and confirms `sponge`
+at definition `0` reproduces `crystallize`'s own four region averages
+(`7`, `35`, `19`, `49`) byte-for-byte, since the saturation step is a
+no-op at that setting. A second, dedicated test isolates the saturation
+math on a flat `2×2` swatch `(180, 90, 30, 255)` (one cell covers the
+whole canvas, so its average is the colour itself): at definition `10`
+(multiplier `1.4`) and luma `110.07`, red becomes `110.07 + (180 −
+110.07) × 1.4 = 207.972 → 208`, green becomes `110.07 + (90 − 110.07) ×
+1.4 = 81.972 → 82`, and blue becomes `110.07 + (30 − 110.07) × 1.4 =
+−2.028`, clamping to `0` — none of these land near a `.5` boundary. A
+third test confines the ramp fixture to a one-pixel selection, reusing
+`crystallize`'s own selection test's reasoning (the site-averaging pass
+always sees the whole layer, so the touched pixel gets the same average
+it would without a selection; only it is written). A fourth confirms an
+out-of-range brush size or definition and a locked/unknown layer all
+error. All four passed on the first run, matching the Python reference
+exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous six: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**513 Rust tests total** (509 → 513, 506 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

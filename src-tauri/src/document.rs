@@ -4071,6 +4071,70 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Sponge: reuses [`Self::crystallize`]'s
+    /// own jittered-Voronoi machinery (each pixel takes its nearest
+    /// jittered site's averaged colour, giving the same mottled-blotch
+    /// shape crystallize's crystals already have) and pushes each blotch's
+    /// colour away from its own luma, boosting saturation the way a
+    /// sponge's uneven paint coverage reads as patches of richer colour —
+    /// a documented approximation, not a port of Photoshop's own
+    /// algorithm, which additionally reshapes the blotches' edges by a
+    /// Smoothness slider this project doesn't model (a documented scope
+    /// cut). `brush_size` (Photoshop's own `0..=10` range) maps to a
+    /// Voronoi cell size of `brush_size + 1` pixels. `definition`
+    /// (Photoshop's own `0..=25` range) sets the saturation multiplier,
+    /// `1 + definition / 25`, so `0` reproduces `crystallize`'s own output
+    /// exactly (the multiplier is `1`, an identity) and `25` doubles each
+    /// channel's distance from the blotch's luma. Alpha, like
+    /// `crystallize`, is the blotch's own averaged alpha, not the
+    /// per-pixel original. The frontend sends a fresh `seed` on every
+    /// apply, as with Crystallize. Errors on a locked/unknown layer.
+    pub fn sponge(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        definition: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if brush_size > 10 {
+            return Err("Sponge brush size must be between 0 and 10.".to_string());
+        }
+        if definition > 25 {
+            return Err("Sponge definition must be between 0 and 25.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell_size = brush_size + 1;
+        let cell = cell_size as i64;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let (sites, grid) = jittered_sites(width, height, cell_size, seed);
+        let averages = voronoi_site_averages(&source, width, &sites, cell, grid);
+        let sat_factor = 1.0 + definition as f32 / 25.0;
+        let blotches: Vec<[u8; CHANNELS]> = averages
+            .iter()
+            .map(|&avg| {
+                let luma = 0.299 * avg[0] as f32 + 0.587 * avg[1] as f32 + 0.114 * avg[2] as f32;
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    out[c] = (luma + (avg[c] as f32 - luma) * sat_factor)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                out[3] = avg[3];
+                out
+            })
+            .collect();
+        self.filter_pixels(id, |_, row, col| {
+            let (idx, _) = nearest_site(&sites, cell, grid, (col as i64, row as i64));
+            blotches[idx]
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9433,6 +9497,81 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.poster_edges(999, 0, 10, 6).is_err());
+    }
+
+    #[test]
+    fn sponge_at_zero_definition_matches_crystallize_exactly() {
+        // Definition 0 gives a saturation multiplier of exactly 1.0, an
+        // algebraic identity (luma + (v - luma) * 1.0 == v), so brush_size
+        // 2 (cell size 3, matching crystallize's own cell_size argument)
+        // must reproduce crystallize's own already-verified output
+        // exactly: the same 6x6 ramp_square, seed 1, giving region
+        // averages 7, 35, 19 and 49.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = ramp_square(6);
+        doc.sponge(id, 2, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let red = |x: usize, y: usize| p[idx(x, y)];
+        assert_eq!(red(0, 0), 7);
+        assert_eq!(red(3, 0), 35);
+        assert_eq!(red(0, 5), 19);
+        assert_eq!(red(5, 5), 49);
+        assert_eq!(p[idx(0, 0) + 1], 0); // flat green channel, still flat
+        assert_eq!(p[idx(0, 0) + 3], 255); // alpha untouched by a no-op boost
+    }
+
+    #[test]
+    fn sponge_definition_boosts_saturation_away_from_the_blotchs_luma() {
+        // A flat 2x2 (180, 90, 30, 255) with brush_size 1 (cell size 2)
+        // covers the whole canvas in one Voronoi cell, so its average is
+        // the colour itself regardless of the seeded jitter. Its luma is
+        // 0.299*180 + 0.587*90 + 0.114*30 = 110.07. At definition 10
+        // (multiplier 1.4): red = 110.07 + (180-110.07)*1.4 = 207.972 ->
+        // 208; green = 110.07 + (90-110.07)*1.4 = 81.972 -> 82; blue =
+        // 110.07 + (30-110.07)*1.4 = -2.028 -> clamps to 0. None of these
+        // land near a .5 boundary.
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("swatch", &solid(2, 2, [180, 90, 30, 255]), 2, 2)
+            .unwrap();
+        doc.sponge(id, 1, 10, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [208, 82, 0, 255]));
+    }
+
+    #[test]
+    fn sponge_is_confined_to_the_selection() {
+        // Same fixture, seed, and cell size as the zero-definition test
+        // above: pass one (building the site averages) always sees the
+        // whole layer, so the touched pixel gets the same average (7) it
+        // would without a selection; only it is written.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = ramp_square(6);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.sponge(id, 2, 0, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 7);
+        assert_eq!(p[idx(1, 0)], 10); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn sponge_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.sponge(id, 11, 0, 1).is_err());
+        assert!(doc.sponge(id, 0, 26, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.sponge(id, 0, 0, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.sponge(999, 0, 0, 1).is_err());
     }
 
     #[test]

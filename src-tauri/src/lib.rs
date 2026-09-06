@@ -1145,6 +1145,21 @@ fn poster_edges(
     })
 }
 
+/// Filter Gallery > Artistic > Sponge on layer `id`. The frontend sends
+/// a fresh `seed` on every apply, as with Crystallize.
+#[tauri::command]
+fn sponge(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    definition: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.sponge(id, brush_size, definition, seed)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1741,6 +1756,7 @@ pub fn run() {
             film_grain,
             neon_glow,
             poster_edges,
+            sponge,
             crystallize,
             facet,
             pointillize,

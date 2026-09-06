@@ -339,6 +339,9 @@ export default function App() {
   const [posterEdgesThickness, setPosterEdgesThickness] = useState(2);
   const [posterEdgesIntensity, setPosterEdgesIntensity] = useState(4);
   const [posterEdgesLevels, setPosterEdgesLevels] = useState(4);
+  const [showSpongeDialog, setShowSpongeDialog] = useState(false);
+  const [spongeBrushSize, setSpongeBrushSize] = useState(3);
+  const [spongeDefinition, setSpongeDefinition] = useState(12);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -969,6 +972,19 @@ export default function App() {
     });
     setShowPosterEdgesDialog(false);
   }, [runCommand, selectedId, posterEdgesThickness, posterEdgesIntensity, posterEdgesLevels]);
+
+  const applySponge = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Crystallize.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("sponge", {
+      id: selectedId,
+      brushSize: spongeBrushSize,
+      definition: spongeDefinition,
+      seed,
+    });
+    setShowSpongeDialog(false);
+  }, [runCommand, selectedId, spongeBrushSize, spongeDefinition]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2272,6 +2288,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Poster Edges"
           >
             Poster Edges…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSpongeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Sponge"
+          >
+            Sponge…
           </button>
           <button
             className="button button--quiet"
@@ -4649,6 +4673,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPosterEdges} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSpongeDialog && (
+        <div className="modal-overlay" onClick={() => setShowSpongeDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Sponge"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Sponge</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Size
+                <span className="control__value">{spongeBrushSize}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={spongeBrushSize}
+                onChange={(event) => setSpongeBrushSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Definition
+                <span className="control__value">{spongeDefinition}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={spongeDefinition}
+                onChange={(event) => setSpongeDefinition(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSpongeDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySponge} disabled={busy}>
                 Apply
               </button>
             </div>
