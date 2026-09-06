@@ -1806,6 +1806,20 @@ fn plaster(
     })
 }
 
+/// Filter Gallery > Sketch > Water Paper on layer `id`.
+#[tauri::command]
+fn water_paper(
+    state: State<'_, AppState>,
+    id: LayerId,
+    fiber_length: u32,
+    brightness: u32,
+    contrast: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.water_paper(id, fiber_length, brightness, contrast)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2128,6 +2142,7 @@ pub fn run() {
             graphic_pen,
             chalk_and_charcoal,
             plaster,
+            water_paper,
             hue_saturation,
             black_and_white,
             vibrance,

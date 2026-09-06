@@ -6460,6 +6460,48 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Water Paper: a pure composition of two
+    /// operations this project already has, delegating rather than
+    /// reimplementing — [`Self::box_blur`] simulates colour bleeding into
+    /// damp paper fibres, then [`Self::brightness_contrast`] applies its
+    /// own already-verified tone-curve formula for the Brightness and
+    /// Contrast sliders. A documented approximation, not a port of
+    /// Photoshop's own fibre-bleed renderer. `Document::water_paper(id,
+    /// fiber_length, brightness, contrast)`: `fiber_length` (Photoshop's
+    /// own `3..=50` range) scales down into the blur radius,
+    /// `(fiber_length / 10).max(1)`, the same shape `ink_outlines` scales
+    /// its own stroke length down; `brightness` and `contrast` (this
+    /// project's own `0..=100` range, centred on a neutral `50`, a
+    /// documented simplification of Photoshop's own dialog) are each
+    /// rescaled onto `brightness_contrast`'s own `-255..=255` domain as
+    /// `(value - 50) / 50 * 255` before being passed straight through to
+    /// it. Alpha untouched (both delegated operations already leave it
+    /// alone). Confined to the selection, since both
+    /// [`Self::box_blur`] and [`Self::brightness_contrast`] already are.
+    /// Errors on an out-of-range parameter or a locked/unknown layer.
+    pub fn water_paper(
+        &mut self,
+        id: LayerId,
+        fiber_length: u32,
+        brightness: u32,
+        contrast: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(3..=50).contains(&fiber_length) {
+            return Err("Water Paper fiber length must be between 3 and 50.".to_string());
+        }
+        if brightness > 100 {
+            return Err("Water Paper brightness must be between 0 and 100.".to_string());
+        }
+        if contrast > 100 {
+            return Err("Water Paper contrast must be between 0 and 100.".to_string());
+        }
+        let radius = (fiber_length / 10).max(1);
+        let mapped_brightness = ((brightness as f32 - 50.0) / 50.0 * 255.0).round() as i32;
+        let mapped_contrast = ((contrast as f32 - 50.0) / 50.0 * 255.0).round() as i32;
+        self.box_blur(id, radius)?;
+        self.brightness_contrast(id, mapped_brightness, mapped_contrast)
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -14448,6 +14490,101 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.plaster(999, 20, 5, 2).is_err());
+    }
+
+    #[test]
+    fn water_paper_blurs_then_leaves_neutral_brightness_contrast_unchanged() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp/photocopy/graphic_pen/
+        // chalk_and_charcoal/plaster all already share: 4x4, columns 0-1
+        // solid 200, columns 2-3 solid 50. Fiber length 10 gives blur
+        // radius 1, reusing paint_daubs's own already-verified radius-1
+        // row ([200, 150, 100, 50]). Brightness 50 and contrast 50 are
+        // both this filter's own neutral midpoint, mapping to
+        // brightness_contrast's own (0, 0) -- already proven a no-op by
+        // brightness_contrast_of_zero_and_zero_is_a_no_op -- so the
+        // final output is exactly the blurred row, unchanged by the
+        // delegated brightness/contrast step.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.water_paper(id, 10, 50, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn water_paper_brightness_delegates_to_brightness_contrast() {
+        // Same blurred row as above ([200, 150, 100, 50]). Brightness 60
+        // maps to (60-50)/50*255 = 51 on brightness_contrast's own
+        // domain; contrast 50 stays neutral (mapped 0, factor exactly
+        // 1.0). brightness_contrast's own formula, factor*(v-128)+128+
+        // brightness, reduces to v+51 at factor 1.0: 200+51=251,
+        // 150+51=201, 100+51=151, 50+51=101 -- all four exact integers,
+        // confirming the delegation actually reaches brightness_contrast
+        // rather than being silently skipped.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.water_paper(id, 10, 60, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [251, 251, 251, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [201, 201, 201, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [151, 151, 151, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [101, 101, 101, 255]);
+    }
+
+    #[test]
+    fn water_paper_fiber_length_widens_the_blur_radius() {
+        // Fiber length 20 gives blur radius 2, reusing paint_daubs's own
+        // already-verified radius-2 row ([170, 140, 110, 80]), left
+        // unchanged by neutral brightness/contrast (50, 50).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.water_paper(id, 20, 50, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [170, 170, 170, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [140, 140, 140, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [110, 110, 110, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [80, 80, 80, 255]);
+    }
+
+    #[test]
+    fn water_paper_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.water_paper(id, 10, 50, 50).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn water_paper_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.water_paper(id, 2, 50, 50).is_err());
+        assert!(doc.water_paper(id, 51, 50, 50).is_err());
+        assert!(doc.water_paper(id, 10, 101, 50).is_err());
+        assert!(doc.water_paper(id, 10, 50, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.water_paper(id, 10, 50, 50).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.water_paper(999, 10, 50, 50).is_err());
     }
 
     #[test]

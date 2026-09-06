@@ -5629,6 +5629,65 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **623 Rust tests total** (618 → 623, 616 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 83 — Filter Gallery > Sketch > Water Paper
+
+A pure composition of two operations this project already has,
+delegating rather than reimplementing — `box_blur` simulates colour
+bleeding into damp paper fibres, then `brightness_contrast` applies its
+own already-verified tone-curve formula for the Brightness and
+Contrast sliders. A documented approximation, not a port of
+Photoshop's own fibre-bleed renderer. `Document::water_paper(id,
+fiber_length, brightness, contrast)`: `fiber_length` (Photoshop's own
+`3..=50` range) scales down into the blur radius, `(fiber_length /
+10).max(1)`, the same shape `ink_outlines` scales its own stroke
+length down; `brightness` and `contrast` (this project's own `0..=100`
+range, centred on a neutral `50`, a documented simplification of
+Photoshop's own dialog) are each rescaled onto `brightness_contrast`'s
+own `-255..=255` domain as `(value - 50) / 50 * 255` before being
+passed straight through to it. Alpha untouched (both delegated
+operations already leave it alone). A new **Water Paper…** dialog
+exposes Fiber Length, Brightness, and Contrast sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp`/`photocopy`/
+`graphic_pen`/`chalk_and_charcoal`/`plaster` all already share, and
+reusing `paint_daubs`'s own already-verified box-blur radius-1 and
+radius-2 rows directly. At fiber length `10` (radius `1`) and both
+brightness and contrast at `50` (this filter's own neutral midpoint,
+mapping to `brightness_contrast`'s own `(0, 0)` — already proven a
+no-op by that filter's own `brightness_contrast_of_zero_and_zero_is_a_no_op`
+test): the output is exactly the blurred row `[200, 150, 100, 50]`,
+unchanged by the delegated step. A second test raises brightness to
+`60` (mapping to `51` on `brightness_contrast`'s own domain, contrast
+staying neutral at factor `1.0`): `brightness_contrast`'s own formula
+reduces to `v + 51`, giving `251`, `201`, `151`, `101` — all four exact
+integers, confirming the delegation actually reaches
+`brightness_contrast` rather than being silently skipped. A third
+raises fiber length to `20` (radius `2`), reusing the radius-2 row
+`[170, 140, 110, 80]` unchanged by neutral brightness/contrast. A
+fourth confines the fixture to a one-pixel selection. A fifth confirms
+out-of-range fiber length, brightness, and contrast, plus a
+locked/unknown layer, all error. All five passed on the first run — no
+independent Python script was needed since every value here reuses
+`paint_daubs`'s and `brightness_contrast`'s own already-verified output
+directly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous thirty: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**628 Rust tests total** (623 → 628, 621 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -427,6 +427,10 @@ export default function App() {
   const [plasterImageBalance, setPlasterImageBalance] = useState(20);
   const [plasterSmoothness, setPlasterSmoothness] = useState(5);
   const [plasterLightDirection, setPlasterLightDirection] = useState(7);
+  const [showWaterPaperDialog, setShowWaterPaperDialog] = useState(false);
+  const [waterPaperFiberLength, setWaterPaperFiberLength] = useState(10);
+  const [waterPaperBrightness, setWaterPaperBrightness] = useState(50);
+  const [waterPaperContrast, setWaterPaperContrast] = useState(50);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1337,6 +1341,17 @@ export default function App() {
     });
     setShowPlasterDialog(false);
   }, [runCommand, selectedId, plasterImageBalance, plasterSmoothness, plasterLightDirection]);
+
+  const applyWaterPaper = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("water_paper", {
+      id: selectedId,
+      fiberLength: waterPaperFiberLength,
+      brightness: waterPaperBrightness,
+      contrast: waterPaperContrast,
+    });
+    setShowWaterPaperDialog(false);
+  }, [runCommand, selectedId, waterPaperFiberLength, waterPaperBrightness, waterPaperContrast]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2768,6 +2783,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Plaster"
           >
             Plaster…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowWaterPaperDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Water Paper"
+          >
+            Water Paper…
           </button>
           <button
             className="button button--quiet"
@@ -6087,6 +6110,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPlaster} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWaterPaperDialog && (
+        <div className="modal-overlay" onClick={() => setShowWaterPaperDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Water Paper"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Water Paper</h2>
+            <label className="control">
+              <span className="control__label">
+                Fiber Length
+                <span className="control__value">{waterPaperFiberLength}</span>
+              </span>
+              <input
+                type="range"
+                min={3}
+                max={50}
+                value={waterPaperFiberLength}
+                onChange={(event) => setWaterPaperFiberLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Brightness
+                <span className="control__value">{waterPaperBrightness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waterPaperBrightness}
+                onChange={(event) => setWaterPaperBrightness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Contrast
+                <span className="control__value">{waterPaperContrast}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={waterPaperContrast}
+                onChange={(event) => setWaterPaperContrast(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowWaterPaperDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyWaterPaper} disabled={busy}>
                 Apply
               </button>
             </div>

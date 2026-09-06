@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 141.**
+**618 distinct capabilities tracked. Currently shipped: 142.**
 
 ## PART I — EVERY TOOL
 
@@ -581,7 +581,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Reticulation (Filter Gallery → Sketch; one seeded `XorShift32` draw per pixel thresholded by Density into a two-tone stipple, the same per-pixel draw `film_grain` already uses — Photoshop's own cracked spatial grain structure is a documented scope cut — see README Phase 78)
 - [x] Stamp (Filter Gallery → Sketch; `box_blur_at` smoothing then a hard luma threshold to pure black or white driven by Light/Dark Balance — starts the Sketch gallery — see README Phase 76)
 - [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
-- [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.
+- [x] Water Paper (Filter Gallery → Sketch; a pure composition delegating to `box_blur` (Fiber Length) then `brightness_contrast`'s own already-verified formula (Brightness, Contrast rescaled onto its `-255..=255` domain) — see README Phase 83)
 - [x] Diffuse (seeded neighbour shuffle with Normal / Darken Only / Lighten Only, plus deterministic closest-neighbour Anisotropic — see README Phase 33)
 - [x] Emboss (relief lit from an angle: 128 + (away − toward) · amount%, nearest-neighbour sampling at the given height — see README Phase 31)
 - [x] Extrude (Blocks type only, Solid Front Faces only: flat per-block average colour with a closed-form diagonal bevel shade, Level-based or Random depth; Pyramids and stretched front faces are a documented scope cut — see README Phase 51)
