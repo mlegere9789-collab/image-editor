@@ -6819,6 +6819,62 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **726 Rust tests total** (720 → 726, 719 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 103 — Layer > Layer Style > Inner Glow
+
+The mirror image of `outer_glow` — instead of fading a glow outward
+from the edge into transparent space, this blends an already-opaque
+pixel toward `color` in proportion to how close it sits to the
+*nearest transparent pixel* (the same Chebyshev-distance search
+`outer_glow` and `stroke_outline` already share, just looking for the
+opposite alpha). A pixel whose own nearest transparent neighbour is
+`d` pixels away (`d < size`) blends toward `color` by `(1.0 - d /
+size) * opacity / 100.0`, reusing `color_overlay`'s own linear blend
+shape with a distance-scaled fraction instead of a constant one;
+deep-interior opaque pixels with no transparent neighbour within
+`size` are left completely alone, and so is every already-transparent
+pixel. `size` is Photoshop's own `1..=250` range; `opacity` is its own
+`0..=100` range. Photoshop's own Blend Mode, Technique, Source (Center
+vs. Edge), Choke, and Contour controls are all a documented scope cut,
+the same kind of narrowing `stroke_outline`'s own Blend-Mode cut
+already makes. A new **Inner Glow…** dialog exposes Size, a colour
+picker, and Opacity.
+
+**Verified two ways.** Six new `document.rs` tests, introducing a
+dedicated `inner_glow_fixture` (6x6, a solid opaque 4x4 block at rows
+1-4, columns 1-4, everywhere else fully transparent) — large enough
+that its own centre pixels sit farther than a small `size` from the
+nearest transparent pixel, giving these tests a genuine untouched-
+interior case to contrast against near-edge blending. Size `2`,
+opacity `100`, colour black: pixel `(1, 1)` (the block's own corner)
+has a transparent neighbour `1` pixel away, `d=1 < 2`, blending its
+own `(100, 150, 200)` halfway to black at `(50, 75, 100)`; pixel
+`(2, 2)`, two pixels deep into the block, has no transparent neighbour
+within radius `2`, so it's left completely untouched. A second test
+drops opacity to `50`, halving the blend fraction at `(1, 1)` to give
+`(75, 113, 150)` — real, hand-computed, not a coincidental match. A
+third widens size to `3`, now reaching `(2, 2)` at `(67, 100, 133)` —
+a real difference from the size-`2` test's own untouched result. A
+fourth confirms a transparent pixel is left completely alone. A fifth
+confines the fixture to a single-pixel selection at `(1, 1)`. A sixth
+confirms out-of-range size and opacity, plus a locked/unknown layer,
+all error. All six tests passed on the first run, hand-derived
+directly from the Chebyshev-distance definition and independently
+verified via a supplementary Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty: this session's Xvfb
+instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**732 Rust tests total** (726 → 732, 725 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

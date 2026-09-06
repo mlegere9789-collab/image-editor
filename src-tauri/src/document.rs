@@ -7788,6 +7788,84 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Inner Glow, baked in destructively: the
+    /// mirror image of [`Self::outer_glow`] — instead of fading a glow
+    /// outward from the edge into transparent space, this blends an
+    /// already-opaque pixel toward `color` in proportion to how close it
+    /// sits to the *nearest transparent pixel* (the same Chebyshev-
+    /// distance search [`Self::outer_glow`] and [`Self::stroke_outline`]
+    /// already share, just looking for the opposite alpha). A pixel
+    /// whose own nearest transparent neighbour is `d` pixels away
+    /// (`d < size`) blends toward `color` by `(1.0 - d / size) *
+    /// opacity / 100.0`, reusing [`Self::color_overlay`]'s own linear
+    /// blend shape with a distance-scaled fraction instead of a
+    /// constant one; deep-interior opaque pixels with no transparent
+    /// neighbour within `size` are left completely alone, and so is
+    /// every already-transparent pixel. `size` is Photoshop's own
+    /// `1..=250` range; `opacity` is its own `0..=100` range.
+    /// Photoshop's own Blend Mode, Technique, Source (Center vs. Edge),
+    /// Choke, and Contour controls are all a documented scope cut, the
+    /// same kind of narrowing `stroke_outline`'s own Blend-Mode cut
+    /// already makes.
+    pub fn inner_glow(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Inner Glow size must be between 1 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Inner Glow opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let opacity_frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            let mut nearest: Option<i64> = None;
+            for dy in -radius..=radius {
+                let ny = row + dy;
+                if ny < 0 || ny >= height {
+                    continue;
+                }
+                for dx in -radius..=radius {
+                    let nx = col + dx;
+                    if nx < 0 || nx >= width {
+                        continue;
+                    }
+                    let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
+                    if src[nbase + 3] == 0 {
+                        let d = dx.abs().max(dy.abs());
+                        nearest = Some(nearest.map_or(d, |best| best.min(d)));
+                    }
+                }
+            }
+            match nearest {
+                Some(d) if d < radius => {
+                    let frac = (1.0 - d as f32 / radius as f32) * opacity_frac;
+                    let mut out = [0u8; CHANNELS];
+                    for c in 0..3 {
+                        let v = src[base + c] as f32;
+                        out[c] = (v * (1.0 - frac) + color[c] as f32 * frac)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                    }
+                    out[3] = src[base + 3];
+                    out
+                }
+                _ => [src[base], src[base + 1], src[base + 2], src[base + 3]],
+            }
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17836,6 +17914,117 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.outer_glow(999, 2, [0, 255, 0], 100).is_err());
+    }
+
+    fn inner_glow_fixture() -> (Document, LayerId) {
+        // 6x6, a solid opaque 4x4 block (100,150,200,255) at rows 1-4,
+        // columns 1-4, everywhere else fully transparent. Large enough
+        // that its own centre pixels sit farther than a small size from
+        // the nearest transparent pixel, giving inner_glow's tests a
+        // genuine untouched-interior case to contrast against its own
+        // near-edge blending.
+        let mut pixels = Vec::with_capacity(6 * 6 * 4);
+        for row in 0..6u32 {
+            for col in 0..6u32 {
+                if (1..=4).contains(&row) && (1..=4).contains(&col) {
+                    pixels.extend_from_slice(&[100, 150, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        let mut doc = Document::new(6, 6).unwrap();
+        let id = doc.add_layer("block", &pixels, 6, 6).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn inner_glow_darkens_pixels_near_the_edge() {
+        // Size 2, opacity 100, colour black. Pixel (1, 1) (the block's
+        // own corner) has a transparent neighbour 1 pixel away (e.g.
+        // (0, 1) or (1, 0)), so d=1 < 2: frac = (1-1/2)*1.0 = 0.5,
+        // blending its own (100, 150, 200) halfway to black ->
+        // (50, 75, 100). Pixel (2, 2), two pixels deep into the block,
+        // has no transparent neighbour within radius 2 (its own nearest
+        // is 2 pixels away, not < 2), so it's left completely
+        // untouched at its own original (100, 150, 200, 255).
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.inner_glow(id, 2, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [50, 75, 100, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn inner_glow_opacity_scales_the_blend() {
+        // Same size 2, but opacity 50 halves the blend fraction at
+        // (1, 1): frac = 0.5*0.5 = 0.25, giving (75, 113, 150) -- a
+        // real, hand-computed change from the opacity-100 test's own
+        // (50, 75, 100), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.inner_glow(id, 2, [0, 0, 0], 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [75, 113, 150, 255]);
+    }
+
+    #[test]
+    fn inner_glow_size_widens_the_reach() {
+        // Size 3 now reaches (2, 2), whose own distance to the nearest
+        // transparent pixel is still 2, but 2 < 3 this time: frac =
+        // (1-2/3)*1.0 = 0.3333, blending (100, 150, 200) toward black to
+        // (67, 100, 133) -- a real, hand-computed change from the
+        // size-2 test's own untouched result, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.inner_glow(id, 3, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [67, 100, 133, 255]);
+    }
+
+    #[test]
+    fn inner_glow_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.inner_glow(id, 2, [0, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn inner_glow_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.inner_glow(id, 2, [0, 0, 0], 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 1)..idx(1, 1) + 4], [50, 75, 100, 255]);
+        assert_eq!(after[..idx(1, 1)], before[..idx(1, 1)]); // unselected, untouched
+        assert_eq!(after[idx(1, 1) + 4..], before[idx(1, 1) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn inner_glow_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.inner_glow(id, 0, [0, 0, 0], 100).is_err());
+        assert!(doc.inner_glow(id, 251, [0, 0, 0], 100).is_err());
+        assert!(doc.inner_glow(id, 2, [0, 0, 0], 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.inner_glow(id, 2, [0, 0, 0], 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.inner_glow(999, 2, [0, 0, 0], 100).is_err());
     }
 
     #[test]
