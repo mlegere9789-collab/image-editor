@@ -245,6 +245,9 @@ export default function App() {
   const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
   const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
   const [strokeOutlineOpacity, setStrokeOutlineOpacity] = useState(100);
+  const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
+  const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
+  const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -806,6 +809,17 @@ export default function App() {
     });
     setShowStrokeOutlineDialog(false);
   }, [runCommand, selectedId, strokeOutlineSize, strokeOutlineColor, strokeOutlineOpacity]);
+
+  const applyColorOverlay = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(colorOverlayColor);
+    await runCommand("color_overlay", {
+      id: selectedId,
+      color: [r, g, b],
+      opacity: colorOverlayOpacity,
+    });
+    setShowColorOverlayDialog(false);
+  }, [runCommand, selectedId, colorOverlayColor, colorOverlayOpacity]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2641,6 +2655,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowColorOverlayDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Color Overlay"
+          >
+            Color Overlay…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4181,6 +4203,55 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyStrokeOutline} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorOverlayDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorOverlayDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Overlay"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Color Overlay</h2>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={colorOverlayColor}
+                onChange={(event) => setColorOverlayColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{colorOverlayOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={colorOverlayOpacity}
+                onChange={(event) => setColorOverlayOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorOverlayDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorOverlay} disabled={busy}>
                 Apply
               </button>
             </div>

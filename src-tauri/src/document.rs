@@ -7626,6 +7626,45 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Color Overlay, baked in destructively:
+    /// blends every already-opaque pixel's own RGB toward a solid
+    /// `color` by `opacity`, `v * (1.0 - frac) + target * frac` where
+    /// `frac = opacity / 100.0` — Photoshop's own Normal blend mode, the
+    /// only one of its several blend-mode choices this project
+    /// implements (a documented scope cut, the same kind of narrowing
+    /// [`Self::stroke_outline`]'s own Blend-Mode cut already makes).
+    /// `opacity` is Photoshop's own `0..=100` range. A fully-transparent
+    /// pixel (alpha `0`) has nothing to overlay onto and is left
+    /// completely alone, matching [`Self::stroke_outline`]'s own
+    /// treatment of the opposite case. Alpha itself is always untouched.
+    pub fn color_overlay(
+        &mut self,
+        id: LayerId,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if opacity > 100 {
+            return Err("Color Overlay opacity must be between 0 and 100.".to_string());
+        }
+        let frac = opacity as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            if a == 0 {
+                return [r, g, b, a];
+            }
+            let blend = |v: u8, target: u8| -> u8 {
+                (v as f32 * (1.0 - frac) + target as f32 * frac)
+                    .round()
+                    .clamp(0.0, 255.0) as u8
+            };
+            [
+                blend(r, color[0]),
+                blend(g, color[1]),
+                blend(b, color[2]),
+                a,
+            ]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17375,6 +17414,100 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.stroke_outline(999, 1, [255, 0, 0], 100).is_err());
+    }
+
+    #[test]
+    fn color_overlay_blends_toward_the_solid_colour() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40),
+        // fully opaque. Opacity 60 (frac 0.6) toward red (255, 0, 0):
+        //   R: v*0.4 + 255*0.6 = v*0.4 + 153.
+        //     col 0: 4 + 153 = 157. col 1: 8 + 153 = 161.
+        //     col 2: 12 + 153 = 165. col 3: 16 + 153 = 169.
+        //   G and B: v*0.4 + 0*0.6 = v*0.4.
+        //     col 0: 4. col 1: 8. col 2: 12. col 3: 16.
+        // All exact integers, no rounding ambiguity.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.color_overlay(id, [255, 0, 0], 60).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [157, 4, 4, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [161, 8, 8, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [165, 12, 12, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [169, 16, 16, 255]);
+    }
+
+    #[test]
+    fn color_overlay_full_opacity_replaces_the_colour_entirely() {
+        // Opacity 100 collapses every pixel to exactly the overlay
+        // colour, regardless of its own original value -- a real,
+        // hand-computed boundary case, not a coincidental match with
+        // the opacity-60 test's own varied row.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.color_overlay(id, [255, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [255, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn color_overlay_zero_opacity_is_a_no_op() {
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.color_overlay(id, [255, 0, 0], 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn color_overlay_leaves_transparent_pixels_untouched() {
+        // Stroke Outline's own fixture (6x6, opaque 2x2 block at rows
+        // 2-3, columns 2-3, everywhere else fully transparent). At
+        // opacity 100, the transparent pixel (0, 0) has nothing to
+        // overlay onto and stays exactly [0, 0, 0, 0], while the opaque
+        // block pixel (2, 2) collapses fully to the overlay colour
+        // [255, 0, 0, 255] -- its own alpha (255) untouched.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.color_overlay(id, [255, 0, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_overlay_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.color_overlay(id, [255, 0, 0], 60).unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [161, 8, 8, 255]);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn color_overlay_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.color_overlay(id, [255, 0, 0], 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.color_overlay(id, [255, 0, 0], 50).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.color_overlay(999, [255, 0, 0], 50).is_err());
     }
 
     #[test]

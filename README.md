@@ -6667,6 +6667,53 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **708 Rust tests total** (703 → 708, 701 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 100 — Layer > Layer Style > Color Overlay
+
+The hundredth phase of this project's Photoshop-parity build. Blends
+every already-opaque pixel's own RGB toward a solid `color` by
+`opacity`, `v * (1.0 - frac) + target * frac` where `frac = opacity /
+100.0` — Photoshop's own Normal blend mode, the only one of its
+several blend-mode choices this project implements (a documented
+scope cut, the same kind of narrowing `stroke_outline`'s own
+Blend-Mode cut already makes). `opacity` is Photoshop's own `0..=100`
+range. A fully-transparent pixel (alpha `0`) has nothing to overlay
+onto and is left completely alone, matching `stroke_outline`'s own
+treatment of the opposite case. Alpha itself is always untouched. A
+new **Color Overlay…** dialog exposes a colour picker and an Opacity
+slider.
+
+**Verified two ways.** Six new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`), fully opaque. Opacity `60` toward red
+(`255, 0, 0`) gives `R = v*0.4 + 153` (`157`, `161`, `165`, `169`) and
+`G`/`B = v*0.4` (`4`, `8`, `12`, `16`), all exact integers. A second
+test confirms opacity `100` collapses every pixel to exactly the
+overlay colour regardless of its own original value. A third confirms
+opacity `0` is a true no-op. A fourth reuses Stroke Outline's own
+fixture (6x6, an opaque `2x2` block on an otherwise fully-transparent
+canvas) to confirm a transparent pixel has nothing to overlay onto and
+stays untouched, while the opaque block collapses fully to the overlay
+colour at opacity `100`. A fifth confines the fixture to a full-column
+selection at column `1`. A sixth confirms out-of-range opacity, plus a
+locked/unknown layer, all error. All six tests passed on the first
+run, with no separate Python cross-check needed this phase since the
+formula is a plain linear blend with no seeded randomness or
+trigonometry to emulate.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-seven: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**714 Rust tests total** (708 → 714, 707 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

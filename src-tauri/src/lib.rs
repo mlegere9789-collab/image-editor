@@ -2050,6 +2050,20 @@ fn stroke_outline(
     })
 }
 
+/// Layer > Layer Style > Color Overlay on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn color_overlay(
+    state: State<'_, AppState>,
+    id: LayerId,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.color_overlay(id, color, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2389,6 +2403,7 @@ pub fn run() {
             craquelure,
             selective_color,
             stroke_outline,
+            color_overlay,
             hue_saturation,
             black_and_white,
             vibrance,

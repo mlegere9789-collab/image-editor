@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 158.**
+**618 distinct capabilities tracked. Currently shipped: 159.**
 
 ## PART I — EVERY TOOL
 
@@ -121,7 +121,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] INNER SHADOW
 - [ ] INNER GLOW
 - [ ] SATIN
-- [ ] COLOR OVERLAY
+- [x] COLOR OVERLAY (`color_overlay`, baked in destructively: blends every already-opaque pixel's own RGB toward a solid colour by Opacity, Photoshop's own Normal blend mode only — a fully-transparent pixel has nothing to overlay onto and is left alone — see README Phase 100)
 - [ ] GRADIENT OVERLAY
 - [ ] PATTERN OVERLAY
 - [ ] OUTER GLOW
