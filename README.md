@@ -5085,6 +5085,70 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **579 Rust tests total** (573 → 579, 572 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 74 — Filter Gallery > Artistic > Rough Pastels
+
+A third composition of operations this project already has, distinct
+from both `paint_daubs` (box blur blended back, no contrast) and
+`fresco` (median blended back, with contrast) — `box_blur_at` softens
+the layer, `dry_brush`'s own blend-back shape mixes that with the
+original by `stroke_detail`, and `brightness_contrast`'s own formula,
+at a fixed positive contrast driven by `relief`, raises the contrast
+the way pastel pigment catches the light on a textured, raised-relief
+surface. Photoshop's own Texture (Brick/Canvas/Burlap/Sandstone),
+Scaling, and Light Direction controls, which bump-map an actual
+texture image, are a documented scope cut this project doesn't model —
+the same kind of simplification `dry_brush` already makes for its own
+canvas-grain Texture slider. `Document::rough_pastels(id,
+stroke_length, stroke_detail, relief)`: `stroke_length` (Photoshop's
+own `0..=40` range) scales down into the blur radius, `stroke_length /
+10`, the same scaling shape `ink_outlines` uses for its own stroke
+length; `stroke_detail` (Photoshop's own `1..=20` range) blends the
+blurred result back with the original; `relief` (Photoshop's own
+`0..=40` range) is rescaled onto `brightness_contrast`'s own
+`-255..=255` domain as `relief * 2` and fed through its exact same
+formula. Alpha untouched. A new **Rough Pastels…** dialog exposes
+Stroke Length, Stroke Detail, and Relief sliders.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap` all already share (4×4, columns 0-1 solid `200`,
+columns 2-3 solid `50`), and reusing `paint_daubs`'s own already-
+verified box-blur radius-1 and radius-2 rows (`[200, 150, 100, 50]`
+and `[170, 140, 110, 80]`) directly. At stroke detail `20` (maximum,
+blend factor `1.0`) and relief `0` (contrast factor `1.0`, an
+identity), the whole fixture round-trips unchanged regardless of
+stroke length. A second test drops stroke detail to `1` (blend factor
+`0.05`, mostly blurred) at stroke length `10` (radius `1`): column `1`
+blends `150 * 0.95 + 200 * 0.05 = 152.5 -> 153`; column `2` blends
+`100 * 0.95 + 50 * 0.05 = 97.5 -> 98` — cross-checked against an
+independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping. A third keeps that same blend
+but raises relief to `20` (contrast `40`, factor `259 * 295 / (255 *
+219) = 1.368162`), pushing the four already-blended values (`200`,
+`152.5`, `97.5`, `50`) to `227`, `162`, `86`, and `21`. A fourth raises
+stroke length to `20` (radius `2`), reusing `paint_daubs`'s own
+radius-2 row and blending it the same way to `172`, `143`, `107`, `79`
+(two of which, `143.0` and `107.0`, divide out exactly with no
+rounding at all). A fifth confines the fixture to a one-pixel
+selection. A sixth confirms out-of-range stroke length, stroke
+detail, and relief, plus a locked/unknown layer, all error. All six
+passed on the first run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**585 Rust tests total** (579 → 585, 578 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

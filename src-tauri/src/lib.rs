@@ -1679,6 +1679,20 @@ fn fresco(
     })
 }
 
+/// Filter Gallery > Artistic > Rough Pastels on layer `id`.
+#[tauri::command]
+fn rough_pastels(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    stroke_detail: u32,
+    relief: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rough_pastels(id, stroke_length, stroke_detail, relief)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -1992,6 +2006,7 @@ pub fn run() {
             palette_knife,
             plastic_wrap,
             fresco,
+            rough_pastels,
             hue_saturation,
             black_and_white,
             vibrance,

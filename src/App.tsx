@@ -395,6 +395,10 @@ export default function App() {
   const [frescoBrushSize, setFrescoBrushSize] = useState(2);
   const [frescoBrushDetail, setFrescoBrushDetail] = useState(5);
   const [frescoTexture, setFrescoTexture] = useState(1);
+  const [showRoughPastelsDialog, setShowRoughPastelsDialog] = useState(false);
+  const [roughPastelsStrokeLength, setRoughPastelsStrokeLength] = useState(10);
+  const [roughPastelsStrokeDetail, setRoughPastelsStrokeDetail] = useState(10);
+  const [roughPastelsRelief, setRoughPastelsRelief] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1204,6 +1208,17 @@ export default function App() {
     });
     setShowFrescoDialog(false);
   }, [runCommand, selectedId, frescoBrushSize, frescoBrushDetail, frescoTexture]);
+
+  const applyRoughPastels = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("rough_pastels", {
+      id: selectedId,
+      strokeLength: roughPastelsStrokeLength,
+      strokeDetail: roughPastelsStrokeDetail,
+      relief: roughPastelsRelief,
+    });
+    setShowRoughPastelsDialog(false);
+  }, [runCommand, selectedId, roughPastelsStrokeLength, roughPastelsStrokeDetail, roughPastelsRelief]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2563,6 +2578,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Fresco"
           >
             Fresco…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowRoughPastelsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Rough Pastels"
+          >
+            Rough Pastels…
           </button>
           <button
             className="button button--quiet"
@@ -5392,6 +5415,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFresco} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRoughPastelsDialog && (
+        <div className="modal-overlay" onClick={() => setShowRoughPastelsDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Rough Pastels"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Rough Pastels</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{roughPastelsStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={roughPastelsStrokeLength}
+                onChange={(event) => setRoughPastelsStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Stroke Detail
+                <span className="control__value">{roughPastelsStrokeDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={roughPastelsStrokeDetail}
+                onChange={(event) => setRoughPastelsStrokeDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Relief
+                <span className="control__value">{roughPastelsRelief}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={roughPastelsRelief}
+                onChange={(event) => setRoughPastelsRelief(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowRoughPastelsDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyRoughPastels} disabled={busy}>
                 Apply
               </button>
             </div>

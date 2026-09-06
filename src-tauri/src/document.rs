@@ -5880,6 +5880,74 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Rough Pastels: a third composition of
+    /// operations this project already has, distinct from both
+    /// [`Self::paint_daubs`] (box blur blended back, no contrast) and
+    /// [`Self::fresco`] (median blended back, with contrast) —
+    /// [`box_blur_at`] softens the layer, [`Self::dry_brush`]'s own
+    /// blend-back shape mixes that with the original by `stroke_detail`,
+    /// and [`Self::brightness_contrast`]'s own formula, at a fixed
+    /// positive contrast driven by `relief`, raises the contrast the way
+    /// pastel pigment catches the light on a textured, raised-relief
+    /// surface. Photoshop's own Texture (Brick/Canvas/Burlap/Sandstone),
+    /// Scaling, and Light Direction controls, which bump-map an actual
+    /// texture image, are a documented scope cut this project doesn't
+    /// model — the same kind of simplification `dry_brush` already makes
+    /// for its own canvas-grain Texture slider. `stroke_length`
+    /// (Photoshop's own `0..=40` range) scales down into the blur
+    /// radius, `stroke_length / 10`, the same scaling shape
+    /// `ink_outlines` uses for its own stroke length; `stroke_detail`
+    /// (Photoshop's own `1..=20` range) blends the blurred result back
+    /// with the original; `relief` (Photoshop's own `0..=40` range) is
+    /// rescaled onto `brightness_contrast`'s own `-255..=255` domain as
+    /// `relief * 2` (always positive) and fed through its exact same
+    /// formula. Alpha untouched. Confined to the selection, like every
+    /// other filter here built on [`Self::filter_pixels`]. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn rough_pastels(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        stroke_detail: u32,
+        relief: u32,
+    ) -> Result<Option<Rect>, String> {
+        if stroke_length > 40 {
+            return Err("Rough Pastels stroke length must be between 0 and 40.".to_string());
+        }
+        if !(1..=20).contains(&stroke_detail) {
+            return Err("Rough Pastels stroke detail must be between 1 and 20.".to_string());
+        }
+        if relief > 40 {
+            return Err("Rough Pastels relief must be between 0 and 40.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (stroke_length / 10) as i64;
+        let detail_f = stroke_detail as f32 / 20.0;
+        let mapped_contrast = relief as f32 * 2.0;
+        let factor = 259.0 * (mapped_contrast + 255.0) / (255.0 * (259.0 - mapped_contrast));
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = if radius > 0 {
+                box_blur_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let bl = blurred[c] as f32;
+                let blended = bl * (1.0 - detail_f) + orig * detail_f;
+                let contrasted = factor * (blended - 128.0) + 128.0;
+                out[c] = contrasted.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13003,6 +13071,124 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.fresco(999, 1, 0, 1).is_err());
+    }
+
+    #[test]
+    fn rough_pastels_at_full_detail_and_no_relief_is_the_identity() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap all
+        // already share: 4x4, columns 0-1 solid 200, columns 2-3 solid
+        // 50. Stroke detail 20 (maximum) makes the blend factor exactly
+        // 1.0, so the blurred pass is discarded entirely and the output
+        // is the original pixel; relief 0 makes the contrast factor
+        // exactly 1.0 too (259*255/(255*259) = 1.0), so the whole
+        // fixture round-trips unchanged regardless of stroke length.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.rough_pastels(id, 10, 20, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn rough_pastels_blends_the_blur_back_in_by_stroke_detail() {
+        // Stroke length 10 gives blur radius 1, reducing (vertically
+        // uniform fixture) to the same horizontal 3-tap average
+        // paint_daubs's own radius-1 test already established: [200,
+        // 150, 100, 50]. Stroke detail 1 (blend factor 0.05, mostly the
+        // blurred pass) and relief 0 (contrast factor 1.0, an identity):
+        // column 1 blends 150 * 0.95 + 200 * 0.05 = 152.5 -> 153; column
+        // 2 blends 100 * 0.95 + 50 * 0.05 = 97.5 -> 98 (both rounding
+        // half away from zero). Columns 0 and 3 are unchanged since
+        // their blurred and original values already agree. Cross-checked
+        // against an independent Python script emulating f32 arithmetic
+        // via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.rough_pastels(id, 10, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [153, 153, 153, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [98, 98, 98, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn rough_pastels_relief_raises_the_contrast() {
+        // Same blend as the previous test (stroke length 10, stroke
+        // detail 1), but relief 20 rescales to contrast 40, giving
+        // brightness_contrast's own formula a factor of 259*295/(255*219)
+        // = 1.368162. Applied to each column's already-blended value
+        // (200, 152.5, 97.5, 50): 1.368162*(200-128)+128 = 226.51 -> 227;
+        // 1.368162*(152.5-128)+128 = 161.52 -> 162; 1.368162*(97.5-128)+
+        // 128 = 86.27 -> 86; 1.368162*(50-128)+128 = 21.28 -> 21.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.rough_pastels(id, 10, 1, 20).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [227, 227, 227, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [162, 162, 162, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [86, 86, 86, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [21, 21, 21, 255]);
+    }
+
+    #[test]
+    fn rough_pastels_stroke_length_widens_the_blur_radius() {
+        // Stroke length 20 gives blur radius 2, reducing to the same
+        // horizontal 5-tap average paint_daubs's own radius-2 test
+        // already established: [170, 140, 110, 80]. Stroke detail 1
+        // (factor 0.05) and relief 0 (identity contrast): column 0
+        // blends 170*0.95+200*0.05 = 171.5 -> 172; column 1 blends
+        // 140*0.95+200*0.05 = 143.0 exactly; column 2 blends
+        // 110*0.95+50*0.05 = 107.0 exactly; column 3 blends
+        // 80*0.95+50*0.05 = 78.5 -> 79.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.rough_pastels(id, 20, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [172, 172, 172, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [143, 143, 143, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [107, 107, 107, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [79, 79, 79, 255]);
+    }
+
+    #[test]
+    fn rough_pastels_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.rough_pastels(id, 10, 1, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [153, 153, 153, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn rough_pastels_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.rough_pastels(id, 41, 1, 0).is_err());
+        assert!(doc.rough_pastels(id, 10, 0, 0).is_err());
+        assert!(doc.rough_pastels(id, 10, 21, 0).is_err());
+        assert!(doc.rough_pastels(id, 10, 1, 41).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.rough_pastels(id, 10, 1, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.rough_pastels(999, 10, 1, 0).is_err());
     }
 
     #[test]

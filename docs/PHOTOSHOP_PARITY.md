@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 132.**
+**618 distinct capabilities tracked. Currently shipped: 133.**
 
 ## PART I — EVERY TOOL
 
@@ -553,7 +553,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Palette Knife (Filter Gallery → Artistic; composes `posterize` with a `box_blur_at` pass rounding off the band boundaries, the same composition pattern `poster_edges` already established — see README Phase 71)
 - [x] Plastic Wrap (Filter Gallery → Artistic; pulls edges toward white in proportion to a dilated-then-smoothed Sobel edge strength, the same white push `neon_glow` uses and the same two-stage edge-map pipeline `accented_edges` already established — see README Phase 72)
 - [x] Poster Edges (Filter Gallery → Artistic; composes the existing `posterize` with a dark outline drawn from a dilated Sobel edge map measured on the posterized result itself — see README Phase 58)
-- [ ] Rough PastelsSimulates pastel artwork on a textured surface.
+- [x] Rough Pastels (Filter Gallery → Artistic; a third box-blur/median-style composition, distinct from `paint_daubs` and `fresco` — `box_blur_at` blended back by Stroke Detail, then `brightness_contrast`'s own formula at a fixed positive contrast driven by Relief — Photoshop's own Texture/Scaling/Light Direction bump-map controls are a documented scope cut — see README Phase 74)
 - [x] Smudge Stick (Filter Gallery → Artistic; a single-diagonal `motion_blur_at` smudge, then brightens whichever pixels land in the smudged result's own upper tonal range, the same white-pull shape `dark_strokes`'s highlight side uses — see README Phase 69)
 - [x] Sponge (Filter Gallery → Artistic; reuses crystallize's own jittered-Voronoi blotches, each pushed away from its own luma to boost saturation — Photoshop's Smoothness slider is a documented scope cut — see README Phase 59)
 - [ ] UnderpaintingCreates an effect resembling an image painted over an underlying textured surface.
