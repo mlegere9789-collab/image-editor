@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 136.**
+**618 distinct capabilities tracked. Currently shipped: 137.**
 
 ## PART I — EVERY TOOL
 
@@ -578,7 +578,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Note PaperCreates an image resembling artwork printed or embossed on paper.
 - [x] Photocopy (Filter Gallery → Sketch; a dilated Sobel edge map hard-thresholded to black or white, reusing `ink_outlines`/`poster_edges`'s own edge machinery and `stamp`'s own threshold idea — Photoshop's own factoring-in of original luminance is a documented scope cut — see README Phase 77)
 - [ ] PlasterCreates a raised plaster-like surface effect.
-- [ ] ReticulationSimulates photographic reticulation/grain-like surface structure.
+- [x] Reticulation (Filter Gallery → Sketch; one seeded `XorShift32` draw per pixel thresholded by Density into a two-tone stipple, the same per-pixel draw `film_grain` already uses — Photoshop's own cracked spatial grain structure is a documented scope cut — see README Phase 78)
 - [x] Stamp (Filter Gallery → Sketch; `box_blur_at` smoothing then a hard luma threshold to pure black or white driven by Light/Dark Balance — starts the Sketch gallery — see README Phase 76)
 - [ ] Torn EdgesCreates irregular, torn-paper-like edges around image forms.
 - [ ] Water PaperSimulates pigment or drawing material applied to wet/textured paper.

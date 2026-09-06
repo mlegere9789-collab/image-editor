@@ -6142,6 +6142,57 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Reticulation: draws one seeded
+    /// [`XorShift32`] value per pixel and thresholds it against
+    /// `density` to pick between two flat grey levels — the same
+    /// per-pixel seeded draw [`Self::film_grain`] already uses, just
+    /// thresholded into a stipple of two tones rather than added to the
+    /// original. A documented approximation of Photoshop's own film-
+    /// reticulation renderer, which additionally gives the grain a
+    /// cracked spatial structure this project doesn't model. `density`
+    /// (Photoshop's own `0..=50` range) sets the threshold, `density /
+    /// 50`, as a fraction of the `0.0..=1.0` draw: a pixel whose draw
+    /// falls below it renders at `foreground_level`, otherwise at
+    /// `background_level` (both Photoshop's own `0..=50` range,
+    /// rescaled to `0..=255` as `level / 50 * 255`), so higher density
+    /// means more of the layer renders in the foreground tone. Alpha
+    /// untouched. The frontend sends a fresh `seed` on every apply, as
+    /// with Film Grain. Confined to the selection — since
+    /// [`Self::filter_pixels`] skips the seeded draw entirely for
+    /// unselected pixels, the first *selected* pixel consumes the
+    /// generator's own first draws, the same architectural fact
+    /// `spatter`'s own selection test already documents. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn reticulation(
+        &mut self,
+        id: LayerId,
+        density: u32,
+        foreground_level: u32,
+        background_level: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if density > 50 {
+            return Err("Reticulation density must be between 0 and 50.".to_string());
+        }
+        if foreground_level > 50 {
+            return Err("Reticulation foreground level must be between 0 and 50.".to_string());
+        }
+        if background_level > 50 {
+            return Err("Reticulation background level must be between 0 and 50.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let threshold = density as f32 / 50.0;
+        let fg = (foreground_level as f32 / 50.0 * 255.0).round() as u8;
+        let bg = (background_level as f32 / 50.0 * 255.0).round() as u8;
+        let mut rng = XorShift32::new(seed);
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let draw = rng.next_u32() as f32 / u32::MAX as f32;
+            let v = if draw < threshold { fg } else { bg };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13659,6 +13710,96 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.photocopy(999, 0, 0).is_err());
+    }
+
+    fn grey_3x1(rgba: [u8; 4]) -> (Document, LayerId) {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("row", &solid(3, 1, rgba), 3, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn reticulation_thresholds_seeded_draws_into_two_tones() {
+        // Seed 1's first three XorShift32 draws are already documented
+        // exactly (270369, 67634689, 2647435461 out of u32::MAX), giving
+        // draw fractions of roughly 0.0000629, 0.015744, and 0.616355.
+        // Density 1 sets the threshold to 1/50 = 0.02: pixels 0 and 1
+        // (0.0000629 and 0.015744) fall below it and render at
+        // foreground level 10 (10/50*255 = 51.0 exactly); pixel 2
+        // (0.616355) clears it and renders at background level 40
+        // (40/50*255 = 204.0 exactly). The fixture's own alpha (200,
+        // deliberately not 255) is carried through unchanged.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 200]);
+        doc.reticulation(id, 1, 10, 40, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..4], [51, 51, 51, 200]);
+        assert_eq!(&p[4..8], [51, 51, 51, 200]);
+        assert_eq!(&p[8..12], [204, 204, 204, 200]);
+    }
+
+    #[test]
+    fn reticulation_density_extremes_render_uniformly() {
+        // Density 0 sets the threshold to exactly 0.0, which no draw
+        // (all strictly positive, since XorShift32 never emits 0 from a
+        // nonzero state) can fall below, so every pixel renders at the
+        // background level. Density 50 sets the threshold to exactly
+        // 1.0, which every one of these three draws clears (none is
+        // u32::MAX itself), so every pixel renders at the foreground
+        // level.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        doc.reticulation(id, 0, 10, 40, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for i in 0..3 {
+            assert_eq!(&p[i * 4..i * 4 + 4], [204, 204, 204, 255]);
+        }
+
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        doc.reticulation(id, 50, 10, 40, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for i in 0..3 {
+            assert_eq!(&p[i * 4..i * 4 + 4], [51, 51, 51, 255]);
+        }
+    }
+
+    #[test]
+    fn reticulation_is_confined_to_the_selection() {
+        // Selecting only the middle pixel confirms the same
+        // architectural fact spatter's own selection test already
+        // documents: filter_pixels skips the seeded draw entirely for
+        // unselected pixels, so the selected pixel becomes the first to
+        // consume the generator's own draws (0.0000629, below the
+        // density-1 threshold of 0.02), landing on the foreground level
+        // 51 rather than its own original value of 100.
+        let (mut doc, id) = grey_3x1([100, 100, 100, 255]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.reticulation(id, 1, 10, 40, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[4..8], [51, 51, 51, 255]);
+        assert_eq!(after[0..4], before[0..4]); // unselected, untouched
+        assert_eq!(after[8..12], before[8..12]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn reticulation_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.reticulation(id, 51, 10, 10, 1).is_err());
+        assert!(doc.reticulation(id, 10, 51, 10, 1).is_err());
+        assert!(doc.reticulation(id, 10, 10, 51, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.reticulation(id, 10, 10, 10, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.reticulation(999, 10, 10, 10, 1).is_err());
     }
 
     #[test]

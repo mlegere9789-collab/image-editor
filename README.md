@@ -5323,6 +5323,61 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **600 Rust tests total** (595 → 600, 593 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 78 — Filter Gallery > Sketch > Reticulation
+
+Draws one seeded `XorShift32` value per pixel and thresholds it against
+`density` to pick between two flat grey levels — the same per-pixel
+seeded draw `film_grain` already uses, just thresholded into a stipple
+of two tones rather than added to the original. A documented
+approximation of Photoshop's own film-reticulation renderer, which
+additionally gives the grain a cracked spatial structure this project
+doesn't model. `Document::reticulation(id, density, foreground_level,
+background_level, seed)`: `density` (Photoshop's own `0..=50` range)
+sets the threshold, `density / 50`, as a fraction of the `0.0..=1.0`
+draw: a pixel whose draw falls below it renders at `foreground_level`,
+otherwise at `background_level` (both Photoshop's own `0..=50` range,
+rescaled to `0..=255` as `level / 50 * 255`), so higher density means
+more of the layer renders in the foreground tone. Alpha untouched. The
+frontend sends a fresh `seed` on every apply, as with Film Grain. A
+new **Reticulation…** dialog exposes Density, Foreground Level, and
+Background Level sliders.
+
+**Verified two ways.** Four new `document.rs` tests on a fresh 3×1 grey
+fixture, reusing seed `1`'s own already-documented `XorShift32` sequence
+(`270369`, `67634689`, `2647435461` out of `u32::MAX`, giving draw
+fractions of roughly `0.0000629`, `0.015744`, and `0.616355`). At
+density `1` (threshold `0.02`): pixels `0` and `1` fall below it and
+render at foreground level `10` (`10/50*255 = 51.0` exactly); pixel `2`
+clears it and renders at background level `40` (`40/50*255 = 204.0`
+exactly) — the fixture's own non-`255` alpha is carried through
+unchanged. A second test confirms both density extremes: `0`
+(threshold `0.0`, which no strictly-positive draw can fall below)
+renders every pixel at the background level, and `50` (threshold
+`1.0`, which every one of these three draws clears) renders every
+pixel at the foreground level. A third confines the fixture to a
+one-pixel selection, confirming the same architectural fact `spatter`'s
+own selection test already documents: `filter_pixels` skips the seeded
+draw entirely for unselected pixels, so the selected pixel becomes the
+first to consume the generator's own draws. A fourth confirms
+out-of-range density, foreground level, and background level, plus a
+locked/unknown layer, all error. All four passed on the first run — no
+independent Python script was needed since every draw value here
+reuses `XorShift32`'s own already-documented sequence directly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**604 Rust tests total** (600 → 604, 597 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

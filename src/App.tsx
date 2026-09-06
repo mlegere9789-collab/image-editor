@@ -408,6 +408,10 @@ export default function App() {
   const [showPhotocopyDialog, setShowPhotocopyDialog] = useState(false);
   const [photocopyDetail, setPhotocopyDetail] = useState(3);
   const [photocopyDarkness, setPhotocopyDarkness] = useState(20);
+  const [showReticulationDialog, setShowReticulationDialog] = useState(false);
+  const [reticulationDensity, setReticulationDensity] = useState(15);
+  const [reticulationForegroundLevel, setReticulationForegroundLevel] = useState(10);
+  const [reticulationBackgroundLevel, setReticulationBackgroundLevel] = useState(40);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1258,6 +1262,20 @@ export default function App() {
     });
     setShowPhotocopyDialog(false);
   }, [runCommand, selectedId, photocopyDetail, photocopyDarkness]);
+
+  const applyReticulation = useCallback(async () => {
+    if (selectedId === null) return;
+    // A fresh seed per apply, as with Film Grain.
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
+    await runCommand("reticulation", {
+      id: selectedId,
+      density: reticulationDensity,
+      foregroundLevel: reticulationForegroundLevel,
+      backgroundLevel: reticulationBackgroundLevel,
+      seed,
+    });
+    setShowReticulationDialog(false);
+  }, [runCommand, selectedId, reticulationDensity, reticulationForegroundLevel, reticulationBackgroundLevel]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2649,6 +2667,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Photocopy"
           >
             Photocopy…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowReticulationDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Reticulation"
+          >
+            Reticulation…
           </button>
           <button
             className="button button--quiet"
@@ -5679,6 +5705,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPhotocopy} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReticulationDialog && (
+        <div className="modal-overlay" onClick={() => setShowReticulationDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Reticulation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Reticulation</h2>
+            <label className="control">
+              <span className="control__label">
+                Density
+                <span className="control__value">{reticulationDensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={reticulationDensity}
+                onChange={(event) => setReticulationDensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Foreground Level
+                <span className="control__value">{reticulationForegroundLevel}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={reticulationForegroundLevel}
+                onChange={(event) => setReticulationForegroundLevel(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Background Level
+                <span className="control__value">{reticulationBackgroundLevel}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={reticulationBackgroundLevel}
+                onChange={(event) => setReticulationBackgroundLevel(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowReticulationDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyReticulation} disabled={busy}>
                 Apply
               </button>
             </div>
