@@ -380,6 +380,9 @@ export default function App() {
   const [smudgeStickStrokeLength, setSmudgeStickStrokeLength] = useState(2);
   const [smudgeStickHighlightArea, setSmudgeStickHighlightArea] = useState(5);
   const [smudgeStickIntensity, setSmudgeStickIntensity] = useState(3);
+  const [showPaintDaubsDialog, setShowPaintDaubsDialog] = useState(false);
+  const [paintDaubsBrushSize, setPaintDaubsBrushSize] = useState(10);
+  const [paintDaubsSharpness, setPaintDaubsSharpness] = useState(10);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1146,6 +1149,16 @@ export default function App() {
     });
     setShowSmudgeStickDialog(false);
   }, [runCommand, selectedId, smudgeStickStrokeLength, smudgeStickHighlightArea, smudgeStickIntensity]);
+
+  const applyPaintDaubs = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("paint_daubs", {
+      id: selectedId,
+      brushSize: paintDaubsBrushSize,
+      sharpness: paintDaubsSharpness,
+    });
+    setShowPaintDaubsDialog(false);
+  }, [runCommand, selectedId, paintDaubsBrushSize, paintDaubsSharpness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2473,6 +2486,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Smudge Stick"
           >
             Smudge Stick…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPaintDaubsDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Paint Daubs"
+          >
+            Paint Daubs…
           </button>
           <button
             className="button button--quiet"
@@ -5075,6 +5096,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySmudgeStick} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPaintDaubsDialog && (
+        <div className="modal-overlay" onClick={() => setShowPaintDaubsDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Paint Daubs"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Paint Daubs</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Size
+                <span className="control__value">{paintDaubsBrushSize}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={paintDaubsBrushSize}
+                onChange={(event) => setPaintDaubsBrushSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharpness
+                <span className="control__value">{paintDaubsSharpness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={paintDaubsSharpness}
+                onChange={(event) => setPaintDaubsSharpness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPaintDaubsDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPaintDaubs} disabled={busy}>
                 Apply
               </button>
             </div>

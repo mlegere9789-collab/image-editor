@@ -4846,6 +4846,62 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **559 Rust tests total** (555 → 559, 552 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 70 — Filter Gallery > Artistic > Paint Daubs
+
+Softens the layer into round, soft-edged daubs with `box_blur_at` — the
+same neighbourhood-average helper `box_blur` and this project's other
+smoothing filters already use — then blends that softened result back
+toward the original by `sharpness`, the same blend-back shape
+`dry_brush` already uses for its own Brush Detail slider. A documented
+approximation, not a port of Photoshop's own six brush-type renderers
+(Simple, Light/Dark Rough, Wide Sharp/Blurry, Sparkle) — Photoshop's
+own Brush Type dropdown is a documented scope cut, this filter always
+daubs the way "Simple" does. `Document::paint_daubs(id, brush_size,
+sharpness)`: `brush_size` (Photoshop's own `1..=50` range) scales down
+into the blur radius, `(brush_size / 5).max(1)`, for the same reason
+`ink_outlines` scales its own stroke length down; `sharpness`
+(Photoshop's own `0..=40` range) blends the blurred daubs back with the
+original, so `0` is the softest daub and `40` restores the original
+untouched. Alpha untouched. A new **Paint Daubs…** dialog exposes Brush
+Size and Sharpness sliders.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick` all already share (4×4,
+columns 0-1 solid `200`, columns 2-3 solid `50`, vertically uniform so
+the 3×3 box-blur window at brush size `5` (radius `1`) reduces to a
+horizontal 3-tap average): column `0` `(200, 200, 200)` averages to
+`200`; column `1` `(200, 200, 50)` to `450 / 9 = 150` (9 samples, 3 per
+column since all 3 rows agree); column `2` `(200, 50, 50)` to `300 / 9
+= 100`; column `3` `(50, 50, 50)` to `150 / 9 = 50` — every one an
+exact integer division. At sharpness `0` the output is exactly that
+blurred row; at sharpness `40` the blur contributes nothing and the
+output is exactly the untouched original; at sharpness `20` each
+column blends its own blurred and original values exactly halfway
+(column `1`'s `150`/`200` to `175.0`, column `2`'s `100`/`50` to
+`75.0`), both exact with no rounding needed. A second test raises
+brush size to `10` (radius `2`, a 5×5 window reducing to a horizontal
+5-tap average): the row becomes `170`, `140`, `110`, `80`, again all
+exact integer divisions. A third confines the fixture to a one-pixel
+selection. A fourth confirms out-of-range brush size and sharpness,
+plus a locked/unknown layer, all error. All four passed on the first
+run — no independent Python script was needed since every division
+here comes out exactly even by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventeen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**563 Rust tests total** (559 → 563, 556 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

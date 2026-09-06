@@ -5608,6 +5608,58 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Paint Daubs: softens the layer into
+    /// round, soft-edged daubs with [`box_blur_at`] — the same
+    /// neighbourhood-average helper `box_blur` and this project's other
+    /// smoothing filters already use — then blends that softened result
+    /// back toward the original by `sharpness`, the same blend-back shape
+    /// [`Self::dry_brush`] already uses for its own Brush Detail slider.
+    /// A documented approximation, not a port of Photoshop's own six
+    /// brush-type renderers (Simple, Light/Dark Rough, Wide Sharp/Blurry,
+    /// Sparkle) — Photoshop's own Brush Type dropdown is a documented
+    /// scope cut, this filter always daubs the way "Simple" does.
+    /// `brush_size` (Photoshop's own `1..=50` range) scales down into the
+    /// blur radius, `(brush_size / 5).max(1)`, for the same reason
+    /// `ink_outlines` scales its own stroke length down; `sharpness`
+    /// (Photoshop's own `0..=40` range) blends the blurred daubs back
+    /// with the original, `blurred * (1 - sharpness / 40) + orig *
+    /// (sharpness / 40)`, so `0` is the softest daub and `40` restores
+    /// the original untouched. Alpha untouched. Confined to the
+    /// selection, like every other filter here built on
+    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn paint_daubs(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        sharpness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=50).contains(&brush_size) {
+            return Err("Paint Daubs brush size must be between 1 and 50.".to_string());
+        }
+        if sharpness > 40 {
+            return Err("Paint Daubs sharpness must be between 0 and 40.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (brush_size / 5).max(1) as i64;
+        let factor = sharpness as f32 / 40.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = box_blur_at(src, doc_width, width, height, row, col, radius);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let bl = blurred[c] as f32;
+                out[c] = (bl * (1.0 - factor) + orig * factor)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -12309,6 +12361,101 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.smudge_stick(999, 1, 0, 0).is_err());
+    }
+
+    #[test]
+    fn paint_daubs_blends_the_blurred_daub_back_by_sharpness() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick all already share: 4x4, columns 0-1 solid
+        // 200, columns 2-3 solid 50, vertically uniform so the 3x3
+        // box-blur window reduces to a horizontal 3-tap average at brush
+        // size 5 (radius 1): column 0 (200, 200, 200) -> 200; column 1
+        // (200, 200, 50) -> 450/9 = 150 (9 samples, 3 per column since 3
+        // rows agree); column 2 (200, 50, 50) -> 300/9 = 100; column 3
+        // (50, 50, 50) -> 150/9 = 50 -- every one an exact integer
+        // division. At sharpness 0 (factor 0) the output is exactly that
+        // blurred row. At sharpness 40 (factor 1.0) the blur contributes
+        // nothing, so the output is exactly the untouched original. At
+        // sharpness 20 (factor 0.5) each column blends its own blurred
+        // and original values exactly halfway: column 1 (150, 200) ->
+        // 175.0, column 2 (100, 50) -> 75.0, both exact with no rounding
+        // needed.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.paint_daubs(id, 5, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.paint_daubs(id, 5, 40).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.paint_daubs(id, 5, 20).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [175, 175, 175, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [75, 75, 75, 255]);
+    }
+
+    #[test]
+    fn paint_daubs_brush_size_widens_the_blur_radius() {
+        // Brush size 10 maps to blur radius 2 (a 5x5 window, again
+        // reducing to a horizontal 5-tap average by symmetry): column 0
+        // (200, 200, 200, 200, 50) -> 850/25 = 170; column 1 (200, 200,
+        // 200, 50, 50) -> 700/25 = 140; column 2 (200, 200, 50, 50, 50)
+        // -> 550/25 = 110; column 3 (200, 50, 50, 50, 50) -> 400/25 = 80
+        // -- all four exact integer divisions.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.paint_daubs(id, 10, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [170, 170, 170, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [140, 140, 140, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [110, 110, 110, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [80, 80, 80, 255]);
+    }
+
+    #[test]
+    fn paint_daubs_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.paint_daubs(id, 5, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn paint_daubs_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.paint_daubs(id, 0, 0).is_err());
+        assert!(doc.paint_daubs(id, 51, 0).is_err());
+        assert!(doc.paint_daubs(id, 5, 41).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.paint_daubs(id, 5, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.paint_daubs(999, 5, 0).is_err());
     }
 
     #[test]
