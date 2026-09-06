@@ -399,6 +399,9 @@ export default function App() {
   const [roughPastelsStrokeLength, setRoughPastelsStrokeLength] = useState(10);
   const [roughPastelsStrokeDetail, setRoughPastelsStrokeDetail] = useState(10);
   const [roughPastelsRelief, setRoughPastelsRelief] = useState(10);
+  const [showUnderpaintingDialog, setShowUnderpaintingDialog] = useState(false);
+  const [underpaintingBrushSize, setUnderpaintingBrushSize] = useState(8);
+  const [underpaintingTextureCoverage, setUnderpaintingTextureCoverage] = useState(20);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1219,6 +1222,16 @@ export default function App() {
     });
     setShowRoughPastelsDialog(false);
   }, [runCommand, selectedId, roughPastelsStrokeLength, roughPastelsStrokeDetail, roughPastelsRelief]);
+
+  const applyUnderpainting = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("underpainting", {
+      id: selectedId,
+      brushSize: underpaintingBrushSize,
+      textureCoverage: underpaintingTextureCoverage,
+    });
+    setShowUnderpaintingDialog(false);
+  }, [runCommand, selectedId, underpaintingBrushSize, underpaintingTextureCoverage]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2586,6 +2599,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Rough Pastels"
           >
             Rough Pastels…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowUnderpaintingDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Underpainting"
+          >
+            Underpainting…
           </button>
           <button
             className="button button--quiet"
@@ -5475,6 +5496,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyRoughPastels} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showUnderpaintingDialog && (
+        <div className="modal-overlay" onClick={() => setShowUnderpaintingDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Underpainting"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Underpainting</h2>
+            <label className="control">
+              <span className="control__label">
+                Brush Size
+                <span className="control__value">{underpaintingBrushSize}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={underpaintingBrushSize}
+                onChange={(event) => setUnderpaintingBrushSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Texture Coverage
+                <span className="control__value">{underpaintingTextureCoverage}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={40}
+                value={underpaintingTextureCoverage}
+                onChange={(event) => setUnderpaintingTextureCoverage(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowUnderpaintingDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyUnderpainting} disabled={busy}>
                 Apply
               </button>
             </div>

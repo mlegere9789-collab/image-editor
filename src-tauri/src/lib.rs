@@ -1693,6 +1693,19 @@ fn rough_pastels(
     })
 }
 
+/// Filter Gallery > Artistic > Underpainting on layer `id`.
+#[tauri::command]
+fn underpainting(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    texture_coverage: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.underpainting(id, brush_size, texture_coverage)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2007,6 +2020,7 @@ pub fn run() {
             plastic_wrap,
             fresco,
             rough_pastels,
+            underpainting,
             hue_saturation,
             black_and_white,
             vibrance,

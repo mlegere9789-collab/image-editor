@@ -5149,6 +5149,68 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **585 Rust tests total** (579 → 585, 578 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 75 — Filter Gallery > Artistic > Underpainting
+
+The fourth, and last, composition of `box_blur_at` and a blend-back
+this project builds for the Artistic gallery's paint-and-canvas
+filters, distinguished from `paint_daubs`, `fresco`, and
+`rough_pastels` by a final multiplicative dim rather than a contrast
+boost — the muted, duller-toned look of paint laid thinly over an
+underlying canvas rather than a bold, textured one. Photoshop's own
+Texture (Brick/Canvas/Burlap/Sandstone), Scaling, Light Direction, and
+Invert controls, which bump-map an actual texture image, are a
+documented scope cut this project doesn't model — the same
+simplification `rough_pastels` and `dry_brush` already make for their
+own canvas-grain controls. `Document::underpainting(id, brush_size,
+texture_coverage)`: `brush_size` (Photoshop's own `0..=40` range)
+scales down into the blur radius, `brush_size / 8`, and also sets the
+dim factor, `1 - (brush_size / 40) * 0.3`, so a larger brush both
+blurs more and mutes the result further, reading as thicker canvas
+showing through thinner paint; `texture_coverage` (Photoshop's own
+`0..=40` range) is repurposed, the same way `paint_daubs` and
+`rough_pastels` already repurpose their own sliders for a documented
+simplified formula, as the blend-back amount between the blurred pass
+and the original. Alpha untouched. This is the last capability in the
+Artistic gallery — all fifteen of its filters (Colored Pencil, Cutout,
+Dry Brush, Film Grain, Fresco, Neon Glow, Paint Daubs, Palette Knife,
+Plastic Wrap, Poster Edges, Rough Pastels, Smudge Stick, Sponge,
+Underpainting, and Watercolor) now ship. A new **Underpainting…**
+dialog exposes Brush Size and Texture Coverage sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels` all already share, and reusing
+`paint_daubs`'s own already-verified box-blur radius-1 and radius-2
+rows (`[200, 150, 100, 50]` and `[170, 140, 110, 80]`) directly. At
+brush size `8` (radius `1`, dim `1 - (8/40)*0.3 = 0.94`) and texture
+coverage `40` (blend factor `1.0`, discarding the blur entirely): `200
+* 0.94 = 188.0` exactly and `50 * 0.94 = 47.0` exactly, both clean
+with no rounding needed. A second test drops texture coverage to `0`
+(pure blur) at the same brush size, dimming the radius-1 row to `188`,
+`141`, `94`, `47` — all four exact. A third raises brush size to `16`
+(radius `2`, deeper dim `0.88`), dimming the radius-2 row to `150`,
+`123`, `97`, `70` (`170 * 0.88 = 149.6 -> 150`, etc.) — cross-checked
+against an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping. A fourth confines the fixture
+to a one-pixel selection. A fifth confirms out-of-range brush size and
+texture coverage, plus a locked/unknown layer, all error. All five
+passed on the first run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**590 Rust tests total** (585 → 590, 583 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -5948,6 +5948,69 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Underpainting: the fourth, and last,
+    /// composition of `box_blur_at` and a blend-back this project builds
+    /// for the Artistic gallery's paint-and-canvas filters, distinguished
+    /// from [`Self::paint_daubs`], [`Self::fresco`], and
+    /// [`Self::rough_pastels`] by a final multiplicative dim rather than
+    /// a contrast boost — the muted, duller-toned look of paint laid
+    /// thinly over an underlying canvas rather than a bold, textured
+    /// one. Photoshop's own Texture (Brick/Canvas/Burlap/Sandstone),
+    /// Scaling, Light Direction, and Invert controls, which bump-map an
+    /// actual texture image, are a documented scope cut this project
+    /// doesn't model — the same simplification `rough_pastels` and
+    /// `dry_brush` already make for their own canvas-grain controls.
+    /// `Document::underpainting(id, brush_size, texture_coverage)`:
+    /// `brush_size` (Photoshop's own `0..=40` range) scales down into
+    /// the blur radius, `brush_size / 8`, and also sets the dim factor,
+    /// `1 - (brush_size / 40) * 0.3`, so a larger brush both blurs more
+    /// and mutes the result further, reading as thicker canvas showing
+    /// through thinner paint; `texture_coverage` (Photoshop's own
+    /// `0..=40` range) is repurposed, the same way `paint_daubs` and
+    /// `rough_pastels` already repurpose their own sliders for a
+    /// documented simplified formula, as the blend-back amount between
+    /// the blurred pass and the original. Alpha untouched. Confined to
+    /// the selection, like every other filter here built on
+    /// [`Self::filter_pixels`]. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn underpainting(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        texture_coverage: u32,
+    ) -> Result<Option<Rect>, String> {
+        if brush_size > 40 {
+            return Err("Underpainting brush size must be between 0 and 40.".to_string());
+        }
+        if texture_coverage > 40 {
+            return Err("Underpainting texture coverage must be between 0 and 40.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = (brush_size / 8) as i64;
+        let factor = texture_coverage as f32 / 40.0;
+        let dim = 1.0 - (brush_size as f32 / 40.0) * 0.3;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let blurred = if radius > 0 {
+                box_blur_at(src, doc_width, width, height, row, col, radius)
+            } else {
+                let mut px = [0u8; CHANNELS];
+                px.copy_from_slice(&src[base..base + CHANNELS]);
+                px
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let orig = src[base + c] as f32;
+                let bl = blurred[c] as f32;
+                let blended = bl * (1.0 - factor) + orig * factor;
+                out[c] = (blended * dim).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13189,6 +13252,97 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.rough_pastels(999, 10, 1, 0).is_err());
+    }
+
+    #[test]
+    fn underpainting_blends_then_dims_toward_a_muted_canvas() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels all already share: 4x4, columns 0-1 solid 200,
+        // columns 2-3 solid 50. Brush size 8 gives blur radius 1,
+        // reusing paint_daubs's own already-verified radius-1 row
+        // ([200, 150, 100, 50]), and a dim factor of 1 - (8/40)*0.3 =
+        // 0.94. Texture coverage 40 (blend factor 1.0) discards the blur
+        // entirely, so the dim applies straight to the original: 200 *
+        // 0.94 = 188.0 exactly and 50 * 0.94 = 47.0 exactly, both clean
+        // with no rounding needed.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.underpainting(id, 8, 40).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [188, 188, 188, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [188, 188, 188, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [47, 47, 47, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [47, 47, 47, 255]);
+    }
+
+    #[test]
+    fn underpainting_texture_coverage_zero_uses_the_pure_blur() {
+        // Same brush size 8 (radius 1, dim 0.94), but texture coverage 0
+        // (blend factor 0.0) uses the blurred value untouched before
+        // dimming: 200 * 0.94 = 188.0, 150 * 0.94 = 141.0, 100 * 0.94 =
+        // 94.0, 50 * 0.94 = 47.0 -- all four exact.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.underpainting(id, 8, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [188, 188, 188, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [141, 141, 141, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [94, 94, 94, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [47, 47, 47, 255]);
+    }
+
+    #[test]
+    fn underpainting_brush_size_widens_the_radius_and_deepens_the_dim() {
+        // Brush size 16 gives blur radius 2, reusing paint_daubs's own
+        // already-verified radius-2 row ([170, 140, 110, 80]), and a
+        // deeper dim factor of 1 - (16/40)*0.3 = 0.88. At texture
+        // coverage 0 (pure blur): 170*0.88 = 149.6 -> 150, 140*0.88 =
+        // 123.2 -> 123, 110*0.88 = 96.8 -> 97, 80*0.88 = 70.4 -> 70.
+        // Cross-checked against an independent Python script emulating
+        // f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.underpainting(id, 16, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [123, 123, 123, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [97, 97, 97, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [70, 70, 70, 255]);
+    }
+
+    #[test]
+    fn underpainting_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.underpainting(id, 8, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [141, 141, 141, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn underpainting_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.underpainting(id, 41, 0).is_err());
+        assert!(doc.underpainting(id, 8, 41).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.underpainting(id, 8, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.underpainting(999, 8, 0).is_err());
     }
 
     #[test]
