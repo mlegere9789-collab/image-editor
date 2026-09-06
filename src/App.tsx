@@ -335,6 +335,10 @@ export default function App() {
   const [neonGlowSize, setNeonGlowSize] = useState(5);
   const [neonGlowBrightness, setNeonGlowBrightness] = useState(25);
   const [neonGlowColor, setNeonGlowColor] = useState("#00ffff");
+  const [showPosterEdgesDialog, setShowPosterEdgesDialog] = useState(false);
+  const [posterEdgesThickness, setPosterEdgesThickness] = useState(2);
+  const [posterEdgesIntensity, setPosterEdgesIntensity] = useState(4);
+  const [posterEdgesLevels, setPosterEdgesLevels] = useState(4);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -954,6 +958,17 @@ export default function App() {
     });
     setShowNeonGlowDialog(false);
   }, [runCommand, selectedId, neonGlowSize, neonGlowBrightness, neonGlowColor]);
+
+  const applyPosterEdges = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("poster_edges", {
+      id: selectedId,
+      edgeThickness: posterEdgesThickness,
+      edgeIntensity: posterEdgesIntensity,
+      levels: posterEdgesLevels,
+    });
+    setShowPosterEdgesDialog(false);
+  }, [runCommand, selectedId, posterEdgesThickness, posterEdgesIntensity, posterEdgesLevels]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2249,6 +2264,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Neon Glow"
           >
             Neon Glow…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPosterEdgesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Poster Edges"
+          >
+            Poster Edges…
           </button>
           <button
             className="button button--quiet"
@@ -4559,6 +4582,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyNeonGlow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPosterEdgesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPosterEdgesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Poster Edges"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Poster Edges</h2>
+            <label className="control">
+              <span className="control__label">
+                Edge Thickness
+                <span className="control__value">{posterEdgesThickness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={posterEdgesThickness}
+                onChange={(event) => setPosterEdgesThickness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Edge Intensity
+                <span className="control__value">{posterEdgesIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={posterEdgesIntensity}
+                onChange={(event) => setPosterEdgesIntensity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Posterization
+                <span className="control__value">{posterEdgesLevels}</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={6}
+                value={posterEdgesLevels}
+                onChange={(event) => setPosterEdgesLevels(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPosterEdgesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPosterEdges} disabled={busy}>
                 Apply
               </button>
             </div>

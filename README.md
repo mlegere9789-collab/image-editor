@@ -4113,6 +4113,73 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **505 Rust tests total** (500 → 505, 498 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 58 — Filter Gallery > Artistic > Poster Edges
+
+Composes two operations this project already has, rather than a new
+low-level algorithm: `Self::posterize` to flatten colour into `levels`
+(Photoshop's own `2..=6` range for this filter, narrower than standalone
+Posterize's own dialog) bands, then a dark outline drawn wherever the
+*posterized* result itself has a strong edge. `Document::poster_edges(id,
+edge_thickness, edge_intensity, levels)` measures that outline with the
+same [`sobel_at`] detector `find_edges` uses, widened by the same
+[`extreme_at`] neighbourhood-maximum `colored_pencil`'s own
+`pencil_width` already uses, at radius `edge_thickness` (Photoshop's own
+`0..=10` range). `edge_intensity` (`0..=10`) scales how dark the outline
+gets: every colour channel is multiplied by `1 − (widened_edge / 255) ·
+(edge_intensity / 10)`, so a flat, edge-free area is left exactly as
+posterize left it, and a fully-edged pixel at maximum intensity goes to
+black. Alpha is untouched. Both the `posterize` pre-pass and the
+darkening pass independently respect the selection, so a pixel outside
+it is left completely untouched by either step — but because the edge
+map is measured on the *mixed* result when only part of the layer is
+selected (some pixels posterized, some not), a partial-selection
+application can draw outline pixels along the selection's own boundary
+in addition to the image's real edges, a documented consequence of
+composing the two this way rather than a bug. A new **Poster Edges…**
+dialog exposes Edge Thickness, Edge Intensity, and Posterization
+sliders.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python script, reusing the same bright/dark split
+4×4 fixture `colored_pencil`/`neon_glow`'s own tests already established
+(columns 0-1 solid `(200, 200, 200, 255)`, columns 2-3 solid `(50, 50,
+50, 255)`). At 6 posterization levels (step `51`), `200` quantizes to
+`204` and `50` quantizes to `51`; the posterized values' own Sobel
+magnitude map is `[0, 255, 255, 0]` across every row, the same shape as
+before just measured on the new quantized colours. At thickness `0`,
+intensity `10` (darken factor `1.0`): the two flat columns are left
+exactly at posterize's own output (`204`, `51`), while the two
+full-magnitude edge columns go fully black. At intensity `6` (darken
+factor `0.6`) the same edge columns instead dim to `204 × 0.4 = 81.6 →
+82` and `51 × 0.4 = 20.4 → 20`, both comfortably clear of a `.5`
+boundary. A second test confirms thickness `1` (a radius-1 dilation)
+spreads both boundary columns across every column, so at full intensity
+every pixel goes black regardless of its own posterized shade. A third
+test — which needed a mid-design correction after an initial wrong
+assumption that `posterize` always applies to the whole layer regardless
+of selection (it doesn't; like the standalone Posterize adjustment, it's
+built on `adjust_layer_pixels`, which does respect the selection) —
+selects an entire column and confirms the unselected columns are left at
+their **raw, unposterized** original values (`200`/`50`, not `204`/`51`)
+while the selected column is posterized and then fully darkened by its
+own full-magnitude edge. A fourth test confirms an out-of-range
+thickness/intensity/posterization and a locked/unknown layer all error.
+All four passed on the first run, matching the Python reference exactly.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous five: this session's Xvfb instance
+was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's wiring was reviewed by hand instead. Every
+other layer of this project's quality bar (hand/script-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**509 Rust tests total** (505 → 509, 502 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

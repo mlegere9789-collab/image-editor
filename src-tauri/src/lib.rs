@@ -1131,6 +1131,20 @@ fn neon_glow(
     })
 }
 
+/// Filter Gallery > Artistic > Poster Edges on layer `id`.
+#[tauri::command]
+fn poster_edges(
+    state: State<'_, AppState>,
+    id: LayerId,
+    edge_thickness: u32,
+    edge_intensity: u32,
+    levels: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.poster_edges(id, edge_thickness, edge_intensity, levels)
+    })
+}
+
 /// Filter > Pixelate > Crystallize on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as with Add Noise.
 #[tauri::command]
@@ -1726,6 +1740,7 @@ pub fn run() {
             dry_brush,
             film_grain,
             neon_glow,
+            poster_edges,
             crystallize,
             facet,
             pointillize,

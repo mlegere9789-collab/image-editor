@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 116.**
+**618 distinct capabilities tracked. Currently shipped: 117.**
 
 ## PART I — EVERY TOOL
 
@@ -552,7 +552,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Paint DaubsConverts image detail into visible painted dabs.
 - [ ] Palette KnifeSimplifies imagery into broad strokes resembling paint applied with a palette knife.
 - [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
-- [ ] Poster EdgesCombines simplified color areas with strong edge definition to create a posterized graphic effect.
+- [x] Poster Edges (Filter Gallery → Artistic; composes the existing `posterize` with a dark outline drawn from a dilated Sobel edge map measured on the posterized result itself — see README Phase 58)
 - [ ] Rough PastelsSimulates pastel artwork on a textured surface.
 - [ ] Smudge StickSoftens and smears image detail to imitate a smudged drawing or painting.
 - [ ] SpongeCreates a mottled, sponge-painted appearance.

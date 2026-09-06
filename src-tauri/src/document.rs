@@ -3976,6 +3976,101 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Poster Edges: composes two operations
+    /// this project already has, rather than a new low-level algorithm —
+    /// [`Self::posterize`] to flatten colour into `levels` (Photoshop's
+    /// own 2..=6 range for this filter, narrower than standalone
+    /// Posterize's own dialog) bands, then a dark outline drawn wherever
+    /// the *posterized* result itself has a strong edge. The outline
+    /// reuses the same [`sobel_at`] detector [`Self::find_edges`] uses,
+    /// widened by the same [`extreme_at`] neighbourhood-maximum
+    /// [`Self::colored_pencil`]'s own `pencil_width` already uses, at
+    /// radius `edge_thickness` (Photoshop's own 0..=10 range).
+    /// `edge_intensity` (0..=10) scales how dark the outline gets: every
+    /// colour channel is multiplied by `1 − (widened_edge / 255) ·
+    /// (edge_intensity / 10)`, so a flat, edge-free area is left exactly
+    /// as posterize left it, and a fully-edged pixel at maximum intensity
+    /// goes to black. Alpha is untouched. Both the `posterize` pre-pass
+    /// and the darkening pass independently respect the selection, so a
+    /// pixel outside it is left completely untouched by either step — but
+    /// because the edge map is measured on the *mixed* result (some
+    /// pixels posterized, some not, if the selection is a partial
+    /// region), a partial-selection application can draw outline pixels
+    /// along the selection's own boundary in addition to the image's
+    /// real edges, a documented consequence of composing the two this way
+    /// rather than a bug. Errors on an out-of-range parameter or a
+    /// locked/unknown layer.
+    pub fn poster_edges(
+        &mut self,
+        id: LayerId,
+        edge_thickness: u32,
+        edge_intensity: u32,
+        levels: u32,
+    ) -> Result<Option<Rect>, String> {
+        if edge_thickness > 10 {
+            return Err("Poster Edges thickness must be between 0 and 10.".to_string());
+        }
+        if edge_intensity > 10 {
+            return Err("Poster Edges intensity must be between 0 and 10.".to_string());
+        }
+        if !(2..=6).contains(&levels) {
+            return Err("Poster Edges posterization must be between 2 and 6.".to_string());
+        }
+        self.posterize(id, levels as u8)?;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        if edge_thickness > 0 {
+            let radius = edge_thickness as i64;
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened =
+                        extreme_at(&edges, doc_width, (width, height), (row, col), radius, true);
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let darken_f = edge_intensity as f32 / 10.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge_strength = mag_buf[base] as f32 / 255.0;
+            let factor = (1.0 - edge_strength * darken_f).clamp(0.0, 1.0);
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 * factor).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Filter > Blur > Motion Blur: like [`Self::box_blur`], but instead
     /// of averaging a square neighbourhood, it averages a straight line of
     /// samples through each pixel, along `angle` degrees (0° is
@@ -9214,6 +9309,130 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.neon_glow(999, 0, 50, [0, 255, 0]).is_err());
+    }
+
+    #[test]
+    fn poster_edges_posterizes_then_darkens_by_edge_strength() {
+        // Same bright/dark split 4x4 fixture as colored_pencil/neon_glow's
+        // own tests: columns 0-1 solid (200,200,200,255), columns 2-3
+        // solid (50,50,50,255). At 6 posterization levels (step 51), 200
+        // quantizes to 204 and 50 quantizes to 51 — cross-checked with an
+        // independent Python script, along with everything below. The
+        // posterized values' own Sobel magnitude map is [0, 255, 255, 0]
+        // across every row, same shape as before just on the new
+        // quantized colours. At thickness 0, intensity 10 (darken factor
+        // 1.0): the flat columns (edge strength 0) are untouched by
+        // posterize's own output (204, 51), while the two full-magnitude
+        // edge columns go fully black. At intensity 6 (darken factor
+        // 0.6): the same edge columns instead dim to 204*0.4=81.6 -> 82
+        // and 51*0.4=20.4 -> 20, both comfortably clear of a .5 boundary.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        doc.poster_edges(id, 0, 10, 6).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [204, 204, 204, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [51, 51, 51, 255]);
+
+        let mut doc2 = Document::new(4, 4).unwrap();
+        let id2 = doc2.add_layer("cliff", &pixels, 4, 4).unwrap();
+        doc2.poster_edges(id2, 0, 6, 6).unwrap();
+        let p2 = &doc2.layers()[0].pixels;
+        assert_eq!(&p2[idx(1, 0)..idx(1, 0) + 4], [82, 82, 82, 255]);
+        assert_eq!(&p2[idx(2, 0)..idx(2, 0) + 4], [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn poster_edges_thickness_dilates_the_outline() {
+        // Thickness 1 (radius 1) spreads both 255-magnitude boundary
+        // columns across every column of this 4-wide fixture, so at
+        // intensity 10 (full darken) every pixel goes black regardless of
+        // its own posterized shade.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        doc.poster_edges(id, 1, 10, 6).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn poster_edges_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let mut pixels = Vec::with_capacity(4 * 4 * 4);
+        for _y in 0..4u32 {
+            for x in 0..4u32 {
+                if x < 2 {
+                    pixels.extend_from_slice(&[200, 200, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[50, 50, 50, 255]);
+                }
+            }
+        }
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("cliff", &pixels, 4, 4).unwrap();
+        // The whole of column 1 (all four rows), so the fixture stays
+        // vertically uniform and the by-hand Sobel reasoning above still
+        // applies unchanged.
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc.poster_edges(id, 0, 10, 6).unwrap();
+        let after = &doc.layers()[0].pixels;
+        // Both posterize and the darkening pass independently respect the
+        // selection, so column 1 (selected) is posterized to 204 and then
+        // fully darkened by its own full-magnitude edge (204 * 0 = 0),
+        // while columns 0, 2, and 3 (unselected) are left at their raw,
+        // unposterized original values — 200 for column 0, 50 for columns
+        // 2 and 3.
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&after[idx(2, 0)..idx(2, 0) + 4], [50, 50, 50, 255]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn poster_edges_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.poster_edges(id, 11, 10, 6).is_err());
+        assert!(doc.poster_edges(id, 0, 11, 6).is_err());
+        assert!(doc.poster_edges(id, 0, 10, 1).is_err());
+        assert!(doc.poster_edges(id, 0, 10, 7).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.poster_edges(id, 0, 10, 6).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.poster_edges(999, 0, 10, 6).is_err());
     }
 
     #[test]
