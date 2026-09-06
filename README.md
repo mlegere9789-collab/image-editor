@@ -8133,6 +8133,72 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **851 Rust tests total** (847 → 851, 844 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 123 — Filter Gallery > Blur Gallery > Field Blur
+
+`field_blur(id, x1, y1, radius1, x2, y2, radius2)` (two pins only)
+completes this project's own Blur Gallery trio alongside Tilt-Shift and
+Iris Blur, but with a genuinely different mechanism: rather than
+blending toward one *fixed* blur radius past a hard zone boundary, the
+blur radius itself varies continuously across the whole image. A pixel
+exactly at a pin's own position uses that pin's own `radius` outright;
+every other pixel's own blur radius is an inverse-distance-weighted
+average of both pins' radii — `weight = 1.0 / distance` to each pin,
+`radius = (weight1 * radius1 + weight2 * radius2) / (weight1 +
+weight2)`, rounded to the nearest whole pixel — and `box_blur_at` is
+run at that pixel's own interpolated radius, its RGB channels alone
+copied into the output (alpha untouched, the same convention
+`tilt_shift` and `iris_blur` already keep). Photoshop's own Field Blur
+accepts an arbitrary number of draggable pins with spline-smoothed
+falloff between them; this project's own two-pin, inverse-distance-
+weighted version is a documented scope cut trading Photoshop's own
+richer interpolation for a simple, well-known, and exactly hand-
+verifiable one. A new **Field Blur…** dialog exposes each pin's own
+X/Y position and blur radius, defaulting the two pins to opposite
+quarter-points of the canvas when the dialog opens.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture. Pin 1 at `(0.0, 0.0)` with
+radius `0` (no blur at all); pin 2 at `(2.0, 2.0)` with radius `4`.
+Pixel `(row 0, col 1)` sits distance `1.0` from pin 1 and `sqrt(5) =
+2.23607` from pin 2; `weight1 = 1.0`, `weight2 = 0.44721`, interpolated
+radius `= (1.0*0 + 0.44721*4) / 1.44721 = 1.23607`, rounding to `1`;
+its own radius-1 box-blur average is `30`. Pixel `(row 1, col 2)` sits
+distance `1.0` from pin 2 and `sqrt(5)` from pin 1; interpolated radius
+rounds to `3`, its own radius-3 average is `52`. Pixel `(0, 0)`, exactly
+at pin 1's own position, uses radius `0` outright (the short-circuit,
+not the IDW formula), leaving it byte-for-byte at its own original
+`10`. Pixel `(2, 2)`, exactly at pin 2's own position, uses radius `4`
+outright, giving `58`. All four hand-computed and cross-checked in
+Python. A second test swaps the two pins' own radii, changing the
+interpolated radius at both boundary pixels to real, distinct values
+(`41` and `56`) — confirming the interpolation genuinely depends on
+which pin holds which radius, not a coincidental match. A third
+confines a single pixel to a selection. A fourth confirms a non-finite
+pin coordinate, plus a locked/unknown layer, all error. All four tests
+passed on the first run, cross-checked against an independent Python
+script emulating Rust's own `f32` rounding via `struct.pack`/`unpack`
+round-tripping.
+
+While writing this filter, `cargo clippy`'s `manual_memcpy` lint caught
+a hand-written three-iteration copy loop (`for c in 0..3 { layer.pixels
+[dst+c] = blurred[c]; }`) that it could express as a single
+`copy_from_slice` call instead; rewritten as suggested, copying only
+the RGB slice and leaving alpha untouched.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**855 Rust tests total** (851 → 855, 848 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

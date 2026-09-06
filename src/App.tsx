@@ -372,6 +372,13 @@ export default function App() {
   const [irisBlurCenterY, setIrisBlurCenterY] = useState(0);
   const [irisBlurRadius, setIrisBlurRadius] = useState(50);
   const [irisBlurBlurRadius, setIrisBlurBlurRadius] = useState(15);
+  const [showFieldBlurDialog, setShowFieldBlurDialog] = useState(false);
+  const [fieldBlurX1, setFieldBlurX1] = useState(0);
+  const [fieldBlurY1, setFieldBlurY1] = useState(0);
+  const [fieldBlurRadius1, setFieldBlurRadius1] = useState(0);
+  const [fieldBlurX2, setFieldBlurX2] = useState(0);
+  const [fieldBlurY2, setFieldBlurY2] = useState(0);
+  const [fieldBlurRadius2, setFieldBlurRadius2] = useState(15);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -2113,6 +2120,37 @@ export default function App() {
     irisBlurCenterY,
     irisBlurRadius,
     irisBlurBlurRadius,
+  ]);
+
+  const openFieldBlurDialog = useCallback(() => {
+    setFieldBlurX1(Math.round((document?.width ?? 2) / 4));
+    setFieldBlurY1(Math.round((document?.height ?? 2) / 4));
+    setFieldBlurX2(Math.round(((document?.width ?? 2) * 3) / 4));
+    setFieldBlurY2(Math.round(((document?.height ?? 2) * 3) / 4));
+    setShowFieldBlurDialog(true);
+  }, [document]);
+
+  const applyFieldBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("field_blur", {
+      id: selectedId,
+      x1: fieldBlurX1,
+      y1: fieldBlurY1,
+      radius1: fieldBlurRadius1,
+      x2: fieldBlurX2,
+      y2: fieldBlurY2,
+      radius2: fieldBlurRadius2,
+    });
+    setShowFieldBlurDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    fieldBlurX1,
+    fieldBlurY1,
+    fieldBlurRadius1,
+    fieldBlurX2,
+    fieldBlurY2,
+    fieldBlurRadius2,
   ]);
 
   const applyLensFlare = useCallback(async () => {
@@ -3879,6 +3917,14 @@ export default function App() {
             title="Filter Gallery > Blur Gallery > Iris Blur"
           >
             Iris Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openFieldBlurDialog}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Blur Gallery > Field Blur"
+          >
+            Field Blur…
           </button>
           <button
             className="button button--quiet"
@@ -11058,6 +11104,96 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyIrisBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFieldBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFieldBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Field Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Blur Gallery &gt; Field Blur
+            </h2>
+            <label className="control control--row">
+              <span className="control__label">Pin 1 X / Y</span>
+              <input
+                type="number"
+                min={0}
+                max={document?.width ?? 1}
+                value={fieldBlurX1}
+                onChange={(event) => setFieldBlurX1(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={0}
+                max={document?.height ?? 1}
+                value={fieldBlurY1}
+                onChange={(event) => setFieldBlurY1(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Pin 1 Blur Radius
+                <span className="control__value">{fieldBlurRadius1}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={fieldBlurRadius1}
+                onChange={(event) => setFieldBlurRadius1(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Pin 2 X / Y</span>
+              <input
+                type="number"
+                min={0}
+                max={document?.width ?? 1}
+                value={fieldBlurX2}
+                onChange={(event) => setFieldBlurX2(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={0}
+                max={document?.height ?? 1}
+                value={fieldBlurY2}
+                onChange={(event) => setFieldBlurY2(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Pin 2 Blur Radius
+                <span className="control__value">{fieldBlurRadius2}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={fieldBlurRadius2}
+                onChange={(event) => setFieldBlurRadius2(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFieldBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyFieldBlur} disabled={busy}>
                 Apply
               </button>
             </div>

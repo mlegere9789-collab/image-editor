@@ -9598,6 +9598,77 @@ impl Document {
         }
         Ok(Some(bounds))
     }
+
+    /// Filter Gallery > Blur Gallery > Field Blur (two pins only): each
+    /// pin is a `(x, y, radius)` triple; a pixel exactly at a pin's own
+    /// position uses that pin's own `radius` outright, and every other
+    /// pixel's own blur radius is an inverse-distance-weighted average
+    /// of both pins' radii — `weight = 1.0 / distance` to each pin,
+    /// `radius = (weight1 · radius1 + weight2 · radius2) / (weight1 +
+    /// weight2)`, rounded to the nearest whole pixel — so the blur
+    /// radius itself varies smoothly and continuously across the whole
+    /// image, unlike [`Self::iris_blur`]/[`Self::tilt_shift`]'s own
+    /// fixed blur radius blended in only past a hard zone boundary.
+    /// [`box_blur_at`] is then run at that pixel's own interpolated
+    /// radius, its RGB channels alone copied into the output — alpha
+    /// untouched, the same convention [`Self::tilt_shift`] and
+    /// [`Self::iris_blur`] already keep. Photoshop's own Field Blur
+    /// accepts an arbitrary number of draggable pins with spline-
+    /// smoothed falloff between them; this project's own two-pin,
+    /// inverse-distance-weighted version is a documented scope cut
+    /// trading Photoshop's own richer interpolation for a simple,
+    /// well-known, and exactly hand-verifiable one.
+    #[allow(clippy::too_many_arguments)]
+    pub fn field_blur(
+        &mut self,
+        id: LayerId,
+        x1: f32,
+        y1: f32,
+        radius1: u32,
+        x2: f32,
+        y2: f32,
+        radius2: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !x1.is_finite() || !y1.is_finite() || !x2.is_finite() || !y2.is_finite() {
+            return Err("Field Blur pin coordinates must be finite numbers.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let (px, py) = (col as f32, row as f32);
+                let radius = if px == x1 && py == y1 {
+                    radius1
+                } else if px == x2 && py == y2 {
+                    radius2
+                } else {
+                    let d1 = ((px - x1).powi(2) + (py - y1).powi(2)).sqrt();
+                    let d2 = ((px - x2).powi(2) + (py - y2).powi(2)).sqrt();
+                    let (w1, w2) = (1.0 / d1, 1.0 / d2);
+                    ((w1 * radius1 as f32 + w2 * radius2 as f32) / (w1 + w2))
+                        .round()
+                        .max(0.0) as u32
+                };
+                let blurred =
+                    box_blur_at(&source, doc_width, width, height, row, col, radius as i64);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[dst..dst + 3].copy_from_slice(&blurred[..3]);
+            }
+        }
+        Ok(Some(bounds))
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22256,6 +22327,82 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.iris_blur(999, 1.0, 1.0, 0.0, 2).is_err());
+    }
+
+    #[test]
+    fn field_blur_interpolates_radius_by_inverse_distance() {
+        // ramped_3x3's own R-only ramp. Pin 1 at (0.0, 0.0) with radius
+        // 0 (no blur at all); pin 2 at (2.0, 2.0) with radius 4. Pixel
+        // (1, 0) sits distance 1.0 from pin 1 and sqrt(5) = 2.23607
+        // from pin 2; weight1 = 1.0, weight2 = 0.44721, interpolated
+        // radius = (1.0*0 + 0.44721*4) / 1.44721 = 1.23607, rounding to
+        // 1. Its own radius-1 box-blur average is 30. Pixel (2, 1)
+        // sits distance 1.0 from pin 2 and sqrt(5) from pin 1;
+        // interpolated radius rounds to 3, its own radius-3 average is
+        // 52. Pixel (0, 0), exactly at pin 1's own position, uses
+        // radius 0 outright (the short-circuit, not the IDW formula),
+        // leaving it byte-for-byte at its own original 10. Pixel (2, 2),
+        // exactly at pin 2's own position, uses radius 4 outright,
+        // giving 58. All four hand-computed and cross-checked in
+        // Python.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.field_blur(id, 0.0, 0.0, 0, 2.0, 2.0, 4).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 0)], 30);
+        assert_eq!(p[idx(2, 1)], 52);
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(2, 2)], 58);
+    }
+
+    #[test]
+    fn field_blur_swapping_pin_radii_changes_the_interpolation() {
+        // Same two pin positions, but their own radii swapped: pin 1
+        // now radius 4, pin 2 now radius 0. Pixel (1, 0), closer to pin
+        // 1, now interpolates to radius 3 (not 1), giving a real 41 --
+        // and pixel (2, 1), closer to pin 2, now interpolates to radius
+        // 1 (not 3), giving a real 56 -- both genuine, hand-computed
+        // changes from the first test's own 30 and 52, not a
+        // coincidental match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.field_blur(id, 0.0, 0.0, 4, 2.0, 2.0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 0)], 41);
+        assert_eq!(p[idx(2, 1)], 56);
+    }
+
+    #[test]
+    fn field_blur_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.field_blur(id, 0.0, 0.0, 0, 2.0, 2.0, 4).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(1, 0)], 30);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn field_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.field_blur(id, f32::NAN, 0.0, 0, 2.0, 2.0, 4).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.field_blur(id, 0.0, 0.0, 0, 2.0, 2.0, 4).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.field_blur(999, 0.0, 0.0, 0, 2.0, 2.0, 4).is_err());
     }
 
     #[test]
