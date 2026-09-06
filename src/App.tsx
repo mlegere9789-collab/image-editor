@@ -272,6 +272,10 @@ export default function App() {
   const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
   const [patternOverlayColor2, setPatternOverlayColor2] = useState("#ffffff");
   const [patternOverlayOpacity, setPatternOverlayOpacity] = useState(100);
+  const [showBevelEmbossDialog, setShowBevelEmbossDialog] = useState(false);
+  const [bevelEmbossSize, setBevelEmbossSize] = useState(5);
+  const [bevelEmbossLightDirection, setBevelEmbossLightDirection] = useState(7);
+  const [bevelEmbossStrength, setBevelEmbossStrength] = useState(50);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -932,6 +936,17 @@ export default function App() {
     patternOverlayColor2,
     patternOverlayOpacity,
   ]);
+
+  const applyBevelEmboss = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("bevel_emboss", {
+      id: selectedId,
+      size: bevelEmbossSize,
+      lightDirection: bevelEmbossLightDirection,
+      strength: bevelEmbossStrength,
+    });
+    setShowBevelEmbossDialog(false);
+  }, [runCommand, selectedId, bevelEmbossSize, bevelEmbossLightDirection, bevelEmbossStrength]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2812,6 +2827,14 @@ export default function App() {
             title="Layer > Layer Style > Pattern Overlay"
           >
             Pattern Overlay…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowBevelEmbossDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Bevel & Emboss"
+          >
+            Bevel &amp; Emboss…
           </button>
           <button
             className="button button--quiet"
@@ -4753,6 +4776,76 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPatternOverlay} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBevelEmbossDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBevelEmbossDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Bevel & Emboss"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Bevel &amp; Emboss</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{bevelEmbossSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={bevelEmbossSize}
+                onChange={(event) => setBevelEmbossSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={bevelEmbossLightDirection}
+                onChange={(event) => setBevelEmbossLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{bevelEmbossStrength}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={bevelEmbossStrength}
+                onChange={(event) => setBevelEmbossStrength(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBevelEmbossDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyBevelEmboss} disabled={busy}>
                 Apply
               </button>
             </div>

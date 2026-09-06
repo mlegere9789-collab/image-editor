@@ -6998,6 +6998,84 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **743 Rust tests total** (737 → 743, 736 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 106 — Layer > Layer Style > Bevel & Emboss
+
+`bevel_emboss(id, size, light_direction, strength)`, Photoshop's own
+"Inner Bevel" style only. Builds a per-pixel "height" field: `0` for an
+already-transparent pixel, otherwise its own Chebyshev distance to the
+nearest transparent pixel within a `size`-pixel search radius, capped
+at `size` — the same brute-force distance search `inner_glow` and
+`stroke_outline` already use, just returning a ramped distance instead
+of a fading blend, and a deep-interior pixel with no transparent
+neighbour anywhere within that radius sits at the flat "plateau"
+height of `size` itself rather than its own true (larger) distance.
+Each opaque pixel then samples this height field one pixel out in two
+opposite directions along `plaster`'s own 8-direction `light_direction`
+angle table (`0`=90°Top through `7`=135°TopLeft): `toward` on the
+light's own near side, `away` on its far side, reusing `emboss` /
+`plaster` / `bas_relief`'s own `away − toward` relief convention.
+`shade = (away_height − toward_height) * (strength / 100.0)` is
+*added* to each of the pixel's own RGB channels — not used to replace
+them the way `bas_relief`'s own flattened grey relief does, since
+Bevel & Emboss is meant to shade existing artwork, not flatten it —
+then clamped to `0..=255`; alpha and every already-transparent pixel
+pass through untouched. `size` is Photoshop's own `1..=250` Size
+range; `light_direction` is `0..=7`; `strength` is this project's own
+`0..=100` linear stand-in for Photoshop's own `1..=1000%` Depth
+control, the same kind of range substitution `extrude`'s own `level`
+parameter already makes. A new **Bevel & Emboss…** dialog exposes
+Size, a Light Direction dropdown (the same eight compass options
+`Plaster`/`Bas Relief` already use), and Strength. Photoshop's own
+Outer Bevel, Emboss, Pillow Emboss, and Stroke Emboss styles, its
+Technique (Smooth / Chisel Hard / Chisel Soft) and Direction (Up /
+Down) toggle, Soften, Angle/Altitude 3-D lighting, Gloss Contour, and
+Highlight/Shadow colour + blend-mode controls are all a documented
+scope cut — Contour, Texture, and Satin remain the last unshipped
+members of this project's own Layer Style category.
+
+**Verified two ways.** Seven new `document.rs` tests, reusing Inner
+Glow's own fixture (6x6, a solid opaque 4x4 block `(100, 150, 200,
+255)` at rows 1-4, columns 1-4, everywhere else fully transparent).
+Light direction `6` (180°, `dx=-1, dy=0`), size `2`, strength `100`:
+pixel `(row 2, col 1)`, on the block's own left edge, has `toward =
+height(2, 0) = 0` (a transparent pixel short-circuits to height `0`
+regardless of size) and `away = height(2, 2) = 2` (its own nearest
+transparent pixel sits a Chebyshev distance of `2` away, within the
+size-`2` search radius), giving `relief = 2`, `shade = 2.0`, and
+`(100, 150, 200) + 2 = (102, 152, 202)`; the mirror pixel `(row 2, col
+4)` on the block's own right edge gives the opposite sign, `(98, 148,
+198)`. A second test halves strength to `50`, halving the shade to
+`1.0` for a real `(101, 151, 201)` — a genuine change, not a
+coincidental match. A third flips light direction to `2` (0°, the
+opposite compass point), swapping which sample is `toward` and which
+is `away` at the very same pixel, size, and strength, landing on
+`(98, 148, 198)` — the mirror image of the direction-`6` result. A
+fourth narrows size to `1`, so the `away` sample's own true distance-2
+neighbour falls outside the smaller radius-1 search window and it
+plateaus at height `1` instead, giving a smaller `(101, 151, 201)` —
+demonstrating a larger size senses a taller, truer height and so a
+stronger shade. A fifth confirms a fully-transparent pixel is left
+completely alone. A sixth confines the fixture to a single-pixel
+selection at `(row 2, col 1)`. A seventh confirms out-of-range size,
+light direction, and strength, plus a locked/unknown layer, all
+error. All seven tests passed on the first run, cross-checked against
+an independent Python script that emulates Rust's own `f32` rounding
+via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**750 Rust tests total** (743 → 750, 743 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

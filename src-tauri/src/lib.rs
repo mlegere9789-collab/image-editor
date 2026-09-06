@@ -2143,6 +2143,21 @@ fn pattern_overlay(
     })
 }
 
+/// Layer > Layer Style > Bevel & Emboss on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn bevel_emboss(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    light_direction: u32,
+    strength: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.bevel_emboss(id, size, light_direction, strength)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2488,6 +2503,7 @@ pub fn run() {
             inner_glow,
             drop_shadow,
             pattern_overlay,
+            bevel_emboss,
             hue_saturation,
             black_and_white,
             vibrance,

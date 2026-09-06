@@ -7999,6 +7999,110 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Bevel & Emboss ("Inner Bevel" style only),
+    /// baked in destructively: builds a per-pixel "height" field — `0` for
+    /// a transparent pixel, otherwise its own Chebyshev distance to the
+    /// nearest transparent pixel within a `size`-pixel radius, capped at
+    /// `size` (a deep-interior pixel with no transparent neighbour within
+    /// that radius sits at the flat "plateau" height `size` itself, the
+    /// same brute-force search [`Self::inner_glow`] and
+    /// [`Self::stroke_outline`] already use, just returning a ramped
+    /// distance instead of a fading blend) — then reuses the exact
+    /// `away − toward` relief convention [`Self::emboss`],
+    /// [`Self::plaster`], and [`Self::bas_relief`] already share, sampling
+    /// the height field one pixel out along [`Self::plaster`]'s own
+    /// 8-direction `light_direction` angle table. `shade = (away_height −
+    /// toward_height) * (strength / 100.0)` is *added* to each of the
+    /// pixel's own colour channels (not used to replace them outright,
+    /// since this is meant to shade existing artwork rather than flatten
+    /// it into a grey relief the way [`Self::bas_relief`] does), then
+    /// clamped to `0..=255`. `size` is Photoshop's own `1..=250` Size
+    /// range; `light_direction` is `0..=7`; `strength` is this project's
+    /// own `0..=100` linear stand-in for Photoshop's `1..=1000%` Depth
+    /// control. Every already-transparent pixel is left completely
+    /// untouched. Photoshop's own Outer Bevel, Emboss, Pillow Emboss, and
+    /// Stroke Emboss styles, its Technique (Smooth/Chisel Hard/Chisel
+    /// Soft) and Direction (Up/Down) toggle, Soften, Angle/Altitude 3-D
+    /// lighting, Gloss Contour, and Highlight/Shadow colour + blend-mode
+    /// controls are all a documented scope cut.
+    pub fn bevel_emboss(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Bevel & Emboss size must be between 1 and 250.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Bevel & Emboss light direction must be between 0 and 7.".to_string());
+        }
+        if strength > 100 {
+            return Err("Bevel & Emboss strength must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let amount = strength as f32 / 100.0;
+        let height_at = move |src: &[u8], row: i64, col: i64| -> i64 {
+            let row = row.clamp(0, height - 1);
+            let col = col.clamp(0, width - 1);
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return 0;
+            }
+            let mut nearest: Option<i64> = None;
+            for ddy in -radius..=radius {
+                let ny = row + ddy;
+                if ny < 0 || ny >= height {
+                    continue;
+                }
+                for ddx in -radius..=radius {
+                    let nx = col + ddx;
+                    if nx < 0 || nx >= width {
+                        continue;
+                    }
+                    let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
+                    if src[nbase + 3] == 0 {
+                        let d = ddx.abs().max(ddy.abs());
+                        nearest = Some(nearest.map_or(d, |best| best.min(d)));
+                    }
+                }
+            }
+            nearest.unwrap_or(radius).min(radius)
+        };
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            let toward = height_at(src, row + dy, col + dx);
+            let away = height_at(src, row - dy, col - dx);
+            let shade = (away - toward) as f32 * amount;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -18367,6 +18471,124 @@ mod tests {
         assert!(empty
             .pattern_overlay(999, 2, [255, 0, 0], [0, 0, 255], 100)
             .is_err());
+    }
+
+    #[test]
+    fn bevel_emboss_shades_using_the_height_field() {
+        // inner_glow_fixture's own 4x4 opaque block. Light direction 6
+        // (180 degrees, dx=-1, dy=0): the "toward" sample sits one pixel
+        // to this pixel's own left, "away" one pixel to its right (the
+        // same away-toward convention emboss/plaster/bas_relief already
+        // share). Pixel (row 2, col 1), on the block's own left edge:
+        // toward = height(2, 0) = 0 (a transparent pixel short-circuits
+        // to height 0 regardless of size); away = height(2, 2) = 2 (its
+        // own nearest transparent pixel sits a Chebyshev distance of 2
+        // away, within the size-2 search radius). relief = away - toward
+        // = 2, shade = 2 * (100/100.0) = 2.0, added to the original
+        // (100, 150, 200) -> (102, 152, 202). Pixel (row 2, col 4), the
+        // mirror case on the block's own right edge: toward = height(2,
+        // 3) = 2 (interior, same distance-2 case), away = height(2, 5) =
+        // 0 (transparent), relief = 0 - 2 = -2, shade = -2.0 ->
+        // (98, 148, 198). Both hand-computed and cross-checked against
+        // an independent Python port emulating Rust's own f32 rounding.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss(id, 2, 6, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [102, 152, 202, 255]);
+        assert_eq!(&p[idx(4, 2)..idx(4, 2) + 4], [98, 148, 198, 255]);
+    }
+
+    #[test]
+    fn bevel_emboss_strength_scales_the_shade() {
+        // Same size 2, direction 6, pixel (2, 1) as above, but strength
+        // 50 halves the shade to 2 * 0.5 = 1.0, giving (101, 151, 201) --
+        // a real, hand-computed change from the strength-100 test's own
+        // (102, 152, 202), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss(id, 2, 6, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn bevel_emboss_light_direction_flips_which_side_is_toward() {
+        // Same pixel (2, 1), size 2, strength 100, but light direction 2
+        // (0 degrees, dx=1, dy=0) swaps which sample is "toward" and
+        // which is "away" relative to direction 6: toward = height(2, 2)
+        // = 2, away = height(2, 0) = 0, relief = 0 - 2 = -2, shade =
+        // -2.0 -> (98, 148, 198) -- the mirror image of the direction-6
+        // test's own (102, 152, 202) at the very same pixel, size, and
+        // strength.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss(id, 2, 2, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [98, 148, 198, 255]);
+    }
+
+    #[test]
+    fn bevel_emboss_size_widens_the_sensed_height() {
+        // Same pixel (2, 1), direction 6, strength 100, but size 1: the
+        // "toward" sample (2, 0) is still transparent (height 0,
+        // independent of size), but the "away" sample (2, 2) now has no
+        // transparent pixel within its own smaller radius-1 search
+        // window, so it sits at the flat "plateau" height of size itself
+        // (1) rather than its own true distance of 2. relief = 1 - 0 = 1,
+        // shade = 1.0 -> (101, 151, 201) -- a real, hand-computed change
+        // from the size-2 test's own (102, 152, 202), showing a larger
+        // size senses a taller (truer) height and so a stronger shade.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss(id, 1, 6, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn bevel_emboss_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss(id, 2, 0, 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn bevel_emboss_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 2.0, 2.0, 3.0).unwrap();
+        let dirty = doc.bevel_emboss(id, 2, 6, 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 2)..idx(1, 2) + 4], [102, 152, 202, 255]);
+        assert_eq!(after[..idx(1, 2)], before[..idx(1, 2)]); // unselected, untouched
+        assert_eq!(after[idx(1, 2) + 4..], before[idx(1, 2) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 2,
+                x1: 2,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn bevel_emboss_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.bevel_emboss(id, 0, 0, 100).is_err());
+        assert!(doc.bevel_emboss(id, 251, 0, 100).is_err());
+        assert!(doc.bevel_emboss(id, 2, 8, 100).is_err());
+        assert!(doc.bevel_emboss(id, 2, 0, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.bevel_emboss(id, 2, 0, 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.bevel_emboss(999, 2, 0, 100).is_err());
     }
 
     #[test]
