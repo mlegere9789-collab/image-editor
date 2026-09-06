@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 127.**
+**618 distinct capabilities tracked. Currently shipped: 128.**
 
 ## PART I — EVERY TOOL
 
@@ -554,7 +554,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Plastic WrapCreates a glossy, plastic-coated appearance by emphasizing highlights and edges.
 - [x] Poster Edges (Filter Gallery → Artistic; composes the existing `posterize` with a dark outline drawn from a dilated Sobel edge map measured on the posterized result itself — see README Phase 58)
 - [ ] Rough PastelsSimulates pastel artwork on a textured surface.
-- [ ] Smudge StickSoftens and smears image detail to imitate a smudged drawing or painting.
+- [x] Smudge Stick (Filter Gallery → Artistic; a single-diagonal `motion_blur_at` smudge, then brightens whichever pixels land in the smudged result's own upper tonal range, the same white-pull shape `dark_strokes`'s highlight side uses — see README Phase 69)
 - [x] Sponge (Filter Gallery → Artistic; reuses crystallize's own jittered-Voronoi blotches, each pushed away from its own luma to boost saturation — Photoshop's Smoothness slider is a documented scope cut — see README Phase 59)
 - [ ] UnderpaintingCreates an effect resembling an image painted over an underlying textured surface.
 - [x] Watercolor (Filter Gallery → Artistic; median smoothing darkened in proportion to each smoothed pixel's own luma, the pooled-pigment look of watercolour paint — Photoshop's canvas texture is a documented scope cut — see README Phase 60)

@@ -5535,6 +5535,79 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Artistic > Smudge Stick: smudges detail along a
+    /// single "\" diagonal using [`motion_blur_at`] — the same
+    /// directional line-sampling helper `motion_blur`, `crosshatch`, and
+    /// `sprayed_strokes` already use — then brightens whichever pixels
+    /// land in the smudged result's own upper tonal range, the way a
+    /// blended pastel stick both smears detail together and leaves a
+    /// lighter sheen where it passes over what were already light areas.
+    /// A documented approximation, not a port of Photoshop's own
+    /// pastel-stroke renderer. `stroke_length` (Photoshop's own `0..=10`
+    /// range) is used directly as the smudge's half-length, small enough
+    /// not to need the scaling-down this project's longer-range stroke
+    /// parameters use. `highlight_area` (Photoshop's own `0..=20` range)
+    /// sets the smudged pixel's own luma threshold above which brightening
+    /// applies, `255 * (1 - highlight_area / 20)`, so `0` disables
+    /// brightening entirely (an unreachable threshold of `255`) and `20`
+    /// makes every pixel eligible (a threshold of `0`); `intensity`
+    /// (Photoshop's own `0..=10` range) scales how far an eligible pixel
+    /// travels toward white in proportion to how far above the threshold
+    /// it already sits, `smudged + (255 - smudged) * (intensity / 10) *
+    /// t`, the same white-pull shape `dark_strokes`'s own highlight side
+    /// uses. Alpha is carried through the same motion-blur average as the
+    /// colour channels. Confined to the selection, like every other
+    /// filter here built on [`Self::filter_pixels`]. Errors on an
+    /// out-of-range parameter or a locked/unknown layer.
+    pub fn smudge_stick(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        highlight_area: u32,
+        intensity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if stroke_length > 10 {
+            return Err("Smudge Stick stroke length must be between 0 and 10.".to_string());
+        }
+        if highlight_area > 20 {
+            return Err("Smudge Stick highlight area must be between 0 and 20.".to_string());
+        }
+        if intensity > 10 {
+            return Err("Smudge Stick intensity must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let half = stroke_length as i64;
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
+        let threshold = 255.0 * (1.0 - highlight_area as f32 / 20.0);
+        let factor = intensity as f32 / 10.0;
+        self.filter_pixels(id, move |source, row, col| {
+            let smudged = motion_blur_at(
+                source,
+                doc_width,
+                (width, height),
+                (row, col),
+                (inv_sqrt2, inv_sqrt2),
+                half,
+            );
+            let luma =
+                0.299 * smudged[0] as f32 + 0.587 * smudged[1] as f32 + 0.114 * smudged[2] as f32;
+            let t = if threshold < 255.0 && luma >= threshold {
+                ((luma - threshold) / (255.0 - threshold)).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let v = smudged[c] as f32;
+                let pushed = v + (255.0 - v) * factor * t;
+                out[c] = pushed.round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = smudged[3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -12156,6 +12229,86 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.sumi_e(999, 5, 0, 0).is_err());
+    }
+
+    #[test]
+    fn smudge_stick_smudges_along_the_diagonal() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e all already share: 4x4, columns 0-1 solid 200, columns
+        // 2-3 solid 50, vertically uniform so a diagonal smudge lands on
+        // the same columns a horizontal one would. Stroke length 1 (half
+        // 1): column 0 averages (200, 200, 200) -> 200; column 1 (200,
+        // 200, 50) -> 450/3 = 150; column 2 (200, 50, 50) -> 300/3 = 100;
+        // column 3 (50, 50, 50) -> 50, every one an exact integer
+        // division. Highlight area 0 makes the threshold exactly 255, an
+        // unreachable value on this 0..=255 fixture, so no pixel
+        // qualifies for brightening regardless of intensity -- the
+        // smudged row passes through unchanged.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.smudge_stick(id, 1, 0, 10).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [200, 200, 200, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [150, 150, 150, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn smudge_stick_brightens_pixels_above_the_highlight_threshold() {
+        // Same smudged row as above ([200, 150, 100, 50]), but highlight
+        // area 10 sets the threshold to 255 * (1 - 10/20) = 127.5 and
+        // intensity 10 (factor 1.0). Column 0's luma 200 clears the
+        // threshold with t = (200 - 127.5) / 127.5 = 0.568627..., pushing
+        // it to 200 + 55 * 0.568627 = 231.27 -> 231. Column 1's luma 150
+        // clears it too, t = 0.176471..., pushing 150 + 105 * 0.176471 =
+        // 168.53 -> 169. Columns 2 and 3 (100 and 50) both fall below the
+        // threshold, so t is clamped to 0 and they pass through
+        // unchanged. Cross-checked against an independent Python script
+        // emulating f32 arithmetic via struct.pack/unpack round-tripping.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.smudge_stick(id, 1, 10, 10).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [231, 231, 231, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [169, 169, 169, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn smudge_stick_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.smudge_stick(id, 1, 10, 10).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [169, 169, 169, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn smudge_stick_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.smudge_stick(id, 11, 0, 0).is_err());
+        assert!(doc.smudge_stick(id, 1, 21, 0).is_err());
+        assert!(doc.smudge_stick(id, 1, 0, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.smudge_stick(id, 1, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.smudge_stick(999, 1, 0, 0).is_err());
     }
 
     #[test]

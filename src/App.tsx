@@ -376,6 +376,10 @@ export default function App() {
   const [sumiEStrokeWidth, setSumiEStrokeWidth] = useState(5);
   const [sumiEStrokePressure, setSumiEStrokePressure] = useState(8);
   const [sumiEContrast, setSumiEContrast] = useState(10);
+  const [showSmudgeStickDialog, setShowSmudgeStickDialog] = useState(false);
+  const [smudgeStickStrokeLength, setSmudgeStickStrokeLength] = useState(2);
+  const [smudgeStickHighlightArea, setSmudgeStickHighlightArea] = useState(5);
+  const [smudgeStickIntensity, setSmudgeStickIntensity] = useState(3);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1131,6 +1135,17 @@ export default function App() {
     });
     setShowSumiEDialog(false);
   }, [runCommand, selectedId, sumiEStrokeWidth, sumiEStrokePressure, sumiEContrast]);
+
+  const applySmudgeStick = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("smudge_stick", {
+      id: selectedId,
+      strokeLength: smudgeStickStrokeLength,
+      highlightArea: smudgeStickHighlightArea,
+      intensity: smudgeStickIntensity,
+    });
+    setShowSmudgeStickDialog(false);
+  }, [runCommand, selectedId, smudgeStickStrokeLength, smudgeStickHighlightArea, smudgeStickIntensity]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2450,6 +2465,14 @@ export default function App() {
             title="Filter Gallery > Artistic > Watercolor"
           >
             Watercolor…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSmudgeStickDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Artistic > Smudge Stick"
+          >
+            Smudge Stick…
           </button>
           <button
             className="button button--quiet"
@@ -4992,6 +5015,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWatercolor} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSmudgeStickDialog && (
+        <div className="modal-overlay" onClick={() => setShowSmudgeStickDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Smudge Stick"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Smudge Stick</h2>
+            <label className="control">
+              <span className="control__label">
+                Stroke Length
+                <span className="control__value">{smudgeStickStrokeLength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={smudgeStickStrokeLength}
+                onChange={(event) => setSmudgeStickStrokeLength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Highlight Area
+                <span className="control__value">{smudgeStickHighlightArea}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={20}
+                value={smudgeStickHighlightArea}
+                onChange={(event) => setSmudgeStickHighlightArea(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Intensity
+                <span className="control__value">{smudgeStickIntensity}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={smudgeStickIntensity}
+                onChange={(event) => setSmudgeStickIntensity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSmudgeStickDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySmudgeStick} disabled={busy}>
                 Apply
               </button>
             </div>

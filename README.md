@@ -4784,6 +4784,68 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **555 Rust tests total** (549 → 555, 548 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 69 — Filter Gallery > Artistic > Smudge Stick
+
+Smudges detail along a single "\" diagonal using `motion_blur_at` — the
+same directional line-sampling helper `motion_blur`, `crosshatch`, and
+`sprayed_strokes` already use — then brightens whichever pixels land in
+the smudged result's own upper tonal range, the way a blended pastel
+stick both smears detail together and leaves a lighter sheen where it
+passes over what were already light areas. A documented approximation,
+not a port of Photoshop's own pastel-stroke renderer.
+`Document::smudge_stick(id, stroke_length, highlight_area, intensity)`:
+`stroke_length` (Photoshop's own `0..=10` range) is used directly as
+the smudge's half-length, small enough not to need the scaling-down
+this project's longer-range stroke parameters use; `highlight_area`
+(Photoshop's own `0..=20` range) sets the smudged pixel's own luma
+threshold above which brightening applies, `255 * (1 - highlight_area
+/ 20)`, so `0` disables brightening entirely and `20` makes every pixel
+eligible; `intensity` (Photoshop's own `0..=10` range) scales how far
+an eligible pixel travels toward white in proportion to how far above
+the threshold it already sits, the same white-pull shape
+`dark_strokes`'s own highlight side already uses. Alpha is carried
+through the same motion-blur average as the colour channels. A new
+**Smudge Stick…** dialog exposes Stroke Length, Highlight Area, and
+Intensity sliders.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e` all already share (4×4, columns 0-1 solid
+`200`, columns 2-3 solid `50`, vertically uniform so a diagonal smudge
+lands on the same columns a horizontal one would). At stroke length `1`
+(half `1`): column `0` averages `(200, 200, 200)` to `200`; column `1`
+`(200, 200, 50)` to `450 / 3 = 150`; column `2` `(200, 50, 50)` to `300
+/ 3 = 100`; column `3` `(50, 50, 50)` to `50` — every one an exact
+integer division. Highlight area `0` makes the threshold exactly `255`,
+unreachable on this fixture, so the smudged row passes through
+unchanged regardless of intensity. A second test raises highlight area
+to `10` (threshold `127.5`) with intensity `10` (factor `1.0`): column
+`0`'s smudged luma `200` clears the threshold, `t = (200 - 127.5) /
+127.5 = 0.568627...`, pushing it to `200 + 55 * 0.568627 = 231.27 ->
+231`; column `1`'s `150` clears it too, `t = 0.176471...`, pushing `150
++ 105 * 0.176471 = 168.53 -> 169`; columns `2` and `3` (`100` and `50`)
+both fall below the threshold and pass through unchanged — cross-checked
+against an independent Python script emulating `f32` arithmetic via
+`struct.pack`/`unpack` round-tripping. A third confines the fixture to
+a one-pixel selection. A fourth confirms out-of-range stroke length,
+highlight area, and intensity, plus a locked/unknown layer, all error.
+All four passed on the first run, matching the Python reference
+exactly.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixteen: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**559 Rust tests total** (555 → 559, 552 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

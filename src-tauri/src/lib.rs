@@ -1610,6 +1610,20 @@ fn sumi_e(
     })
 }
 
+/// Filter Gallery > Artistic > Smudge Stick on layer `id`.
+#[tauri::command]
+fn smudge_stick(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    highlight_area: u32,
+    intensity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.smudge_stick(id, stroke_length, highlight_area, intensity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -1918,6 +1932,7 @@ pub fn run() {
             posterize,
             brightness_contrast,
             sumi_e,
+            smudge_stick,
             hue_saturation,
             black_and_white,
             vibrance,
