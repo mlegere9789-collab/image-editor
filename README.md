@@ -7218,6 +7218,86 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **764 Rust tests total** (757 → 764, 757 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 109 — Layer > Layer Style > Texture
+
+`texture(id, size, light_direction, strength, scale, depth)` completes
+this project's own Layer Style category (Stroke, Color Overlay,
+Gradient Overlay, Outer Glow, Inner Glow, Drop Shadow, Bevel & Emboss,
+Pattern Overlay, Inner Shadow, Contour, and now Texture are all
+shipped; only Satin remains unshipped, and stays a documented gap —
+its own classic implementation needs a second offset-and-invert pass
+whose exact blend this project doesn't yet have an authoritative
+reference for, the same kind of fabrication risk already documented
+for Color Lookup). Texture overlays a bump-map perturbation onto
+`bevel_emboss`'s own height field before differencing, composing two
+mechanisms this project already has rather than inventing a third:
+`bevel_height_at` (the same shared height-field search `bevel_emboss`
+and `contour` both already call) and `pattern_overlay`'s own `((row /
+scale) + (col / scale)) % 2` checkerboard-cell formula, standing in
+for Photoshop's own pattern-asset bump texture exactly the way
+`pattern_overlay` itself already substitutes that same checkerboard
+for a real pattern swatch. Each of the two sample points (`toward` and
+`away`, at the identical `light_direction`-offset positions
+`bevel_emboss` samples) adds `depth` on top of its own
+`bevel_height_at` value whenever it falls on an even checkerboard
+cell, `0` on an odd one, before `relief = away − toward` is taken — so
+the bump only has a visible effect where the two sample points land on
+*different* cells. Where a `light_direction`/`scale` combination puts
+both samples on the same cell — `scale = 1` under any of this
+project's eight compass directions, since the two samples sit a whole
+2-pixel span apart and a 1-pixel checkerboard always returns to the
+same parity two steps later — the bump cancels out of the difference
+entirely and the result matches plain `bevel_emboss` exactly, a real
+structural consequence of the design rather than a hidden bug. `shade
+= relief * (strength / 100.0)` is added to each colour channel exactly
+as `bevel_emboss` already does. `size` (`1..=250`), `light_direction`
+(`0..=7`), and `strength` (`0..=100`) share `bevel_emboss`'s own
+ranges; `scale` (`1..=250`) shares `pattern_overlay`'s own cell-size
+range; `depth` (`0..=100`) is a pixel-unit bump height, a documented
+linear stand-in for Photoshop's own `-100..=100%` Depth control — this
+project's own version is additive only, so Photoshop's own Invert
+toggle is a documented scope cut. A new **Texture…** dialog extends
+Bevel & Emboss's own dialog layout with two more sliders, Scale and
+Depth.
+
+**Verified two ways.** Seven new `document.rs` tests, reusing Inner
+Glow's own fixture. Direction `2` (`dx=1, dy=0`), size `2`, strength
+`100`, scale `2`, depth `1`: pixel `(row 2, col 3)` has `toward`
+sample `(2, 4)` at base height `1`, on checkerboard cell `((2/2) +
+(4/2)) % 2 = 1` (odd, no bump), staying `1`; `away` sample `(2, 2)` at
+base height `2`, on cell `((2/2) + (2/2)) % 2 = 0` (even, `+depth`),
+becoming `3`. `relief = 3 - 1 = 2`, `shade = 2.0`, giving a real `(102,
+152, 202)` — genuinely different from plain `bevel_emboss`'s own
+`(101, 151, 201)` at these very same size/direction/strength, since
+here the two sample points land on different cells. A second test
+doubles depth to `2`, doubling the away sample's own bump for a real
+`(103, 153, 203)`. A third narrows scale to `1`, putting both `(2, 4)`
+and `(2, 2)` on the very same even cell so the bump cancels entirely,
+landing exactly on plain `bevel_emboss`'s own `(101, 151, 201)` — a
+real, hand-computed consequence of scale changing which cells the
+samples fall on, not a coincidental match. A fourth halves strength to
+`50` for a real `(101, 151, 201)`. A fifth confirms a fully-transparent
+pixel is left completely alone. A sixth confines the fixture to a
+single-pixel selection. A seventh confirms out-of-range size, light
+direction, strength, scale, and depth, plus a locked/unknown layer,
+all error. All seven tests passed on the first run, cross-checked
+against an independent Python script that emulates Rust's own `f32`
+rounding via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**771 Rust tests total** (764 → 771, 764 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

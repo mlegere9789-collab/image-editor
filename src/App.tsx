@@ -286,6 +286,12 @@ export default function App() {
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
   const [contourStrength, setContourStrength] = useState(50);
+  const [showTextureDialog, setShowTextureDialog] = useState(false);
+  const [textureSize, setTextureSize] = useState(5);
+  const [textureLightDirection, setTextureLightDirection] = useState(7);
+  const [textureStrength, setTextureStrength] = useState(50);
+  const [textureScale, setTextureScale] = useState(10);
+  const [textureDepth, setTextureDepth] = useState(20);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -990,6 +996,27 @@ export default function App() {
     });
     setShowContourDialog(false);
   }, [runCommand, selectedId, contourSize, contourLightDirection, contourStrength]);
+
+  const applyTexture = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("texture", {
+      id: selectedId,
+      size: textureSize,
+      lightDirection: textureLightDirection,
+      strength: textureStrength,
+      scale: textureScale,
+      depth: textureDepth,
+    });
+    setShowTextureDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    textureSize,
+    textureLightDirection,
+    textureStrength,
+    textureScale,
+    textureDepth,
+  ]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2894,6 +2921,14 @@ export default function App() {
             title="Layer > Layer Style > Contour"
           >
             Contour…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowTextureDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Texture"
+          >
+            Texture…
           </button>
           <button
             className="button button--quiet"
@@ -5063,6 +5098,102 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyContour} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTextureDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTextureDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Texture"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Texture</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{textureSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={textureSize}
+                onChange={(event) => setTextureSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Direction</span>
+              <select
+                value={textureLightDirection}
+                onChange={(event) => setTextureLightDirection(Number(event.target.value))}
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{textureStrength}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={textureStrength}
+                onChange={(event) => setTextureStrength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Scale
+                <span className="control__value">{textureScale}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={textureScale}
+                onChange={(event) => setTextureScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Depth
+                <span className="control__value">{textureDepth}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={textureDepth}
+                onChange={(event) => setTextureDepth(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTextureDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTexture} disabled={busy}>
                 Apply
               </button>
             </div>

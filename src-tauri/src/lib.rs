@@ -2189,6 +2189,22 @@ fn contour(
     })
 }
 
+/// Layer > Layer Style > Texture on layer `id`, baked in destructively.
+#[tauri::command]
+fn texture(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    light_direction: u32,
+    strength: u32,
+    scale: u32,
+    depth: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.texture(id, size, light_direction, strength, scale, depth)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2537,6 +2553,7 @@ pub fn run() {
             pattern_overlay,
             bevel_emboss,
             contour,
+            texture,
             hue_saturation,
             black_and_white,
             vibrance,

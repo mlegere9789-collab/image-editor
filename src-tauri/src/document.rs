@@ -8309,6 +8309,117 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Texture, baked in destructively: overlays a
+    /// bump-map perturbation onto [`Self::bevel_emboss`]'s own height
+    /// field before differencing, reusing [`bevel_height_at`] exactly as
+    /// [`Self::bevel_emboss`] and [`Self::contour`] both already do, plus
+    /// [`Self::pattern_overlay`]'s own `((row / scale) + (col / scale)) %
+    /// 2` checkerboard-cell formula standing in for Photoshop's own
+    /// pattern-asset bump texture, the same substitution
+    /// [`Self::pattern_overlay`] itself already documents. Each of the
+    /// two sample points (`toward` and `away`, at the same
+    /// `light_direction`-offset positions [`Self::bevel_emboss`] samples)
+    /// adds `depth` on top of its own [`bevel_height_at`] value whenever
+    /// it falls on an even checkerboard cell, `0` on an odd one, before
+    /// `relief = away − toward` is taken — so the bump only has a visible
+    /// effect where the two sample points land on *different* cells;
+    /// where a `light_direction`/`scale` combination puts both samples on
+    /// the same cell (e.g. `scale = 1` under any compass direction here,
+    /// since the two samples sit a whole `2`-pixel span apart and a
+    /// 1-pixel checkerboard always returns to the same parity two steps
+    /// later), the bump cancels out of the difference entirely and the
+    /// result matches plain [`Self::bevel_emboss`] exactly. `shade =
+    /// relief * (strength / 100.0)` is added to each colour channel
+    /// exactly as [`Self::bevel_emboss`] already does. `size`
+    /// (`1..=250`), `light_direction` (`0..=7`), and `strength`
+    /// (`0..=100`) share [`Self::bevel_emboss`]'s own ranges; `scale`
+    /// (`1..=250`) shares [`Self::pattern_overlay`]'s own cell-size
+    /// range; `depth` (`0..=100`) is a pixel-unit bump height, a
+    /// documented linear stand-in for Photoshop's own `-100..=100%`
+    /// Depth control — this project's own version is additive only,
+    /// so Photoshop's own Invert toggle is a documented scope cut.
+    pub fn texture(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+        scale: u32,
+        depth: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Texture size must be between 1 and 250.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Texture light direction must be between 0 and 7.".to_string());
+        }
+        if strength > 100 {
+            return Err("Texture strength must be between 0 and 100.".to_string());
+        }
+        if !(1..=250).contains(&scale) {
+            return Err("Texture scale must be between 1 and 250.".to_string());
+        }
+        if depth > 100 {
+            return Err("Texture depth must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let scale = scale as i64;
+        let depth = depth as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let amount = strength as f32 / 100.0;
+        let bump = move |r: i64, c: i64| -> i64 {
+            let r = r.clamp(0, height - 1);
+            let c = c.clamp(0, width - 1);
+            if (r / scale + c / scale) % 2 == 0 {
+                depth
+            } else {
+                0
+            }
+        };
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] == 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            let toward = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row + dy, col + dx),
+                radius,
+            ) + bump(row + dy, col + dx);
+            let away = bevel_height_at(
+                src,
+                doc_width,
+                (width, height),
+                (row - dy, col - dx),
+                radius,
+            ) + bump(row - dy, col - dx);
+            let shade = (away - toward) as f32 * amount;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -19034,6 +19145,119 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.contour(999, 2, 0, 100).is_err());
+    }
+
+    #[test]
+    fn texture_bumps_the_height_field_by_checkerboard_cell() {
+        // Inner Glow's own fixture. Direction 2 (dx=1, dy=0), size 2,
+        // strength 100, scale 2, depth 1. Pixel (2, 3): toward samples
+        // (2, 4), base height 1, on checkerboard cell ((2/2)+(4/2))%2 =
+        // (1+2)%2 = 1 (odd, no bump), staying 1; away samples (2, 2),
+        // base height 2, on cell ((2/2)+(2/2))%2 = (1+1)%2 = 0 (even,
+        // +depth), becoming 3. relief = 3 - 1 = 2, shade = 2.0, giving a
+        // real (102, 152, 202) -- genuinely different from plain
+        // bevel_emboss's own (101, 151, 201) at these very same size/
+        // direction/strength, since here the two sample points land on
+        // different checkerboard cells and the bump doesn't cancel.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.texture(id, 2, 2, 100, 2, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [102, 152, 202, 255]);
+    }
+
+    #[test]
+    fn texture_depth_scales_the_bump() {
+        // Same pixel/parameters, but depth 2 doubles the bump added to
+        // the away sample's own even cell: away = 2 + 2 = 4, toward
+        // stays 1 (odd cell, no bump), relief = 4 - 1 = 3, shade = 3.0,
+        // giving a real (103, 153, 203) -- a genuine change from the
+        // depth-1 test's own (102, 152, 202), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.texture(id, 2, 2, 100, 2, 2).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [103, 153, 203, 255]);
+    }
+
+    #[test]
+    fn texture_scale_changes_which_cells_the_samples_land_on() {
+        // Same pixel/parameters, but scale 1 narrows the checkerboard so
+        // both (2, 4) and (2, 2) fall on the very same even cell
+        // (((2/1)+(4/1))%2 = 0, ((2/1)+(2/1))%2 = 0), so the bump adds
+        // to both toward and away equally and cancels out of the
+        // difference entirely: relief = (2+1) - (1+1) = 1, shade = 1.0,
+        // giving (101, 151, 201) -- exactly plain bevel_emboss's own
+        // result at these parameters, a real, hand-computed consequence
+        // of scale changing which cells the two sample points fall on,
+        // not a coincidental match with the scale-2 test's own
+        // (102, 152, 202).
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.texture(id, 2, 2, 100, 1, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn texture_strength_scales_the_shade() {
+        // Same pixel/parameters as the depth-1 test, but strength 50
+        // halves the shade to 2 * 0.5 = 1.0, giving (101, 151, 201) --
+        // a real, hand-computed change from the strength-100 test's own
+        // (102, 152, 202), not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.texture(id, 2, 2, 50, 2, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(3, 2)..idx(3, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn texture_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.texture(id, 2, 0, 100, 2, 1).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn texture_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(3.0, 2.0, 4.0, 3.0).unwrap();
+        let dirty = doc.texture(id, 2, 2, 100, 2, 1).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(3, 2)..idx(3, 2) + 4], [102, 152, 202, 255]);
+        assert_eq!(after[..idx(3, 2)], before[..idx(3, 2)]); // unselected, untouched
+        assert_eq!(after[idx(3, 2) + 4..], before[idx(3, 2) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 3,
+                y0: 2,
+                x1: 4,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn texture_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.texture(id, 0, 0, 100, 2, 1).is_err());
+        assert!(doc.texture(id, 251, 0, 100, 2, 1).is_err());
+        assert!(doc.texture(id, 2, 8, 100, 2, 1).is_err());
+        assert!(doc.texture(id, 2, 0, 101, 2, 1).is_err());
+        assert!(doc.texture(id, 2, 0, 100, 0, 1).is_err());
+        assert!(doc.texture(id, 2, 0, 100, 251, 1).is_err());
+        assert!(doc.texture(id, 2, 0, 100, 2, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.texture(id, 2, 0, 100, 2, 1).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.texture(999, 2, 0, 100, 2, 1).is_err());
     }
 
     #[test]

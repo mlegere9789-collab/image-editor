@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 167.**
+**618 distinct capabilities tracked. Currently shipped: 168.**
 
 ## PART I — EVERY TOOL
 
@@ -116,7 +116,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 
 - [x] BEVEL & EMBOSS (`bevel_emboss`, baked in destructively, "Inner Bevel" style only: builds a per-pixel "height" field — 0 for transparent, else Chebyshev distance to the nearest transparent pixel capped at `size` — then reuses `emboss`/`plaster`/`bas_relief`'s own `away − toward` relief convention and `plaster`'s own 8-direction angle table, sampled one pixel out on the height field and *added* to (not replacing) the original colour, scaled by Strength (a `0..=100` linear stand-in for Photoshop's own `1..=1000%` Depth). Outer Bevel, Emboss, Pillow Emboss, Stroke Emboss, Technique, Direction, Soften, Angle/Altitude, Gloss Contour, and Highlight/Shadow colour + blend mode are documented scope cuts — see README Phase 106)
 - [x] CONTOUR (`contour`, baked in destructively: a "Ring" contour preset applied to `bevel_emboss`'s own height field — each sampled height is remapped through a triangular `ring(h) = size - |2h - size|` curve, peaking at half-depth, before differencing, producing a bright/dark ring right at the bevel's own midline. Photoshop's own dozen-plus contour presets and its arbitrary user-drawn curve editor are a documented scope cut, standing in with this one preset — see README Phase 108)
-- [ ] TEXTURE
+- [x] TEXTURE (`texture`, baked in destructively: overlays `pattern_overlay`'s own checkerboard-cell formula as a bump-map perturbation onto `bevel_emboss`'s own height field before differencing — the bump only has a visible effect where the light-direction offset's two sample points land on different checkerboard cells. Photoshop's own pattern-asset texture and Invert toggle are a documented scope cut — see README Phase 109)
 - [x] STROKE (`stroke_outline`, baked in destructively: Photoshop's own "Outside" position only — a transparent pixel with an opaque neighbour within a Chebyshev-distance `size` becomes stroke, every opaque pixel untouched. Inside/Center positions, Blend Mode, and non-destructive editability are documented scope cuts — see README Phase 99)
 - [x] INNER SHADOW (`inner_shadow`, baked in destructively: the mirror image of `drop_shadow` — the exact same offset/box-average machinery, but sourced from each sampled pixel's own inverse alpha instead of its alpha, and blended onto already-opaque pixels instead of replacing already-transparent ones — see README Phase 107)
 - [x] INNER GLOW (`inner_glow`, baked in destructively: the mirror image of `outer_glow` — an opaque pixel `d < size` pixels from the nearest transparent neighbour blends toward the glow colour by `(1 - d/size) * opacity`, leaving deep-interior pixels with no transparent neighbour within `size` completely alone — see README Phase 103)
