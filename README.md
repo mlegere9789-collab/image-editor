@@ -6769,6 +6769,56 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **720 Rust tests total** (714 → 720, 713 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 102 — Layer > Layer Style > Outer Glow
+
+Extends `stroke_outline`'s own Chebyshev-distance-to-the-nearest-
+opaque-pixel idea from a hard-edged stroke into a fading halo — a
+transparent pixel whose own nearest opaque neighbour is `d` pixels
+away (Chebyshev distance, `d < size`) becomes `color` at alpha `(1.0 -
+d / size) * opacity / 100.0 * 255.0`, fading linearly from fully
+visible right at the edge to fully transparent at `size` pixels out —
+a documented simplification of Photoshop's own tunable Contour-curve
+falloff, which defaults to roughly this linear shape anyway. A
+transparent pixel with no opaque neighbour within `size`, and every
+already-opaque pixel, are both left completely alone. `size` is
+Photoshop's own `1..=250` range; `opacity` is its own `0..=100` range.
+Photoshop's own Blend Mode, Technique (Precise vs. Softer), Range, and
+Jitter controls are all a documented scope cut, the same kind of
+narrowing `stroke_outline`'s own Blend-Mode cut already makes. A new
+**Outer Glow…** dialog exposes Size, a colour picker, and Opacity.
+
+**Verified two ways.** Six new `document.rs` tests, reusing Stroke
+Outline's own fixture (6x6, an opaque 2x2 block at rows 2-3, columns
+2-3, everywhere else transparent). Size `2`, opacity `100`, colour
+green: pixel `(1, 1)`'s own nearest opaque neighbour is `1` pixel away
+(`< 2`, reachable), giving alpha `(1 - 1/2)*255 = 127.5` → `128` (half
+away from zero); pixel `(0, 0)`'s own nearest neighbour is `2` pixels
+away, not `< 2`, so it's left completely unchanged. A second test
+drops opacity to `50`, halving `(1, 1)`'s own alpha to `64` — a real,
+hand-computed change, not a coincidental match. A third widens size to
+`3`, now reaching `(0, 0)` at alpha `85` exactly — a real difference
+from the size-`2` test's own untouched result. A fourth confirms the
+opaque block's own pixel is left completely alone. A fifth confines
+the fixture to a single-pixel selection at `(1, 1)`. A sixth confirms
+out-of-range size and opacity, plus a locked/unknown layer, all error.
+All six tests passed on the first run, hand-derived directly from the
+Chebyshev-distance definition and independently verified via a
+supplementary Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**726 Rust tests total** (720 → 726, 719 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

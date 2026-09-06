@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 160.**
+**618 distinct capabilities tracked. Currently shipped: 161.**
 
 ## PART I — EVERY TOOL
 
@@ -124,7 +124,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] COLOR OVERLAY (`color_overlay`, baked in destructively: blends every already-opaque pixel's own RGB toward a solid colour by Opacity, Photoshop's own Normal blend mode only — a fully-transparent pixel has nothing to overlay onto and is left alone — see README Phase 100)
 - [x] GRADIENT OVERLAY (`gradient_overlay`, baked in destructively: `color_overlay`'s own blend-toward-a-target formula, but the target interpolates between two colours by the pixel's own horizontal or vertical position — Photoshop's own arbitrary angle, Scale, and non-linear Styles are a documented scope cut — see README Phase 101)
 - [ ] PATTERN OVERLAY
-- [ ] OUTER GLOW
+- [x] OUTER GLOW (`outer_glow`, baked in destructively: extends `stroke_outline`'s own Chebyshev-distance-to-edge idea into a linear fade — a transparent pixel `d < size` pixels from the nearest opaque neighbour becomes the glow colour at alpha `(1 - d/size) * opacity`, fading to transparent at `size` — see README Phase 102)
 - [ ] DROP SHADOW
 
 ## PART V — ADJUSTMENTS

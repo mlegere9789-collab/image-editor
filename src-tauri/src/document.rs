@@ -7720,6 +7720,74 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Outer Glow, baked in destructively: extends
+    /// [`Self::stroke_outline`]'s own Chebyshev-distance-to-the-nearest-
+    /// opaque-pixel idea from a hard-edged stroke into a fading halo — a
+    /// transparent pixel whose own nearest opaque neighbour is `d` pixels
+    /// away (Chebyshev distance, `d < size`) becomes `color` at alpha
+    /// `(1.0 - d / size) * opacity / 100.0 * 255.0`, fading linearly from
+    /// fully visible right at the edge to fully transparent at `size`
+    /// pixels out — a documented simplification of Photoshop's own
+    /// tunable Contour-curve falloff, which defaults to roughly this
+    /// linear shape anyway. A transparent pixel with no opaque neighbour
+    /// within `size`, and every already-opaque pixel, are both left
+    /// completely alone. `size` is Photoshop's own `1..=250` range;
+    /// `opacity` is its own `0..=100` range. Photoshop's own Blend Mode,
+    /// Technique (Precise vs. Softer), Range, and Jitter controls are
+    /// all a documented scope cut, the same kind of narrowing
+    /// [`Self::stroke_outline`]'s own Blend-Mode cut already makes.
+    pub fn outer_glow(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Outer Glow size must be between 1 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Outer Glow opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let radius = size as i64;
+        let opacity_frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            if src[base + 3] > 0 {
+                return [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            }
+            let (row, col) = (row as i64, col as i64);
+            let mut nearest: Option<i64> = None;
+            for dy in -radius..=radius {
+                let ny = row + dy;
+                if ny < 0 || ny >= height {
+                    continue;
+                }
+                for dx in -radius..=radius {
+                    let nx = col + dx;
+                    if nx < 0 || nx >= width {
+                        continue;
+                    }
+                    let nbase = (ny as usize * doc_width + nx as usize) * CHANNELS;
+                    if src[nbase + 3] > 0 {
+                        let d = dx.abs().max(dy.abs());
+                        nearest = Some(nearest.map_or(d, |best| best.min(d)));
+                    }
+                }
+            }
+            match nearest {
+                Some(d) if d < radius => {
+                    let frac = (1.0 - d as f32 / radius as f32) * opacity_frac;
+                    let alpha = (frac * 255.0).round().clamp(0.0, 255.0) as u8;
+                    [color[0], color[1], color[2], alpha]
+                }
+                _ => [src[base], src[base + 1], src[base + 2], src[base + 3]],
+            }
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17679,6 +17747,95 @@ mod tests {
         assert!(empty
             .gradient_overlay(999, [0, 0, 0], [255, 255, 255], 0, 100)
             .is_err());
+    }
+
+    #[test]
+    fn outer_glow_fades_with_distance_from_the_edge() {
+        // Stroke Outline's own fixture (6x6, opaque 2x2 block at rows
+        // 2-3, columns 2-3, everywhere else transparent). Size 2,
+        // opacity 100, color green (0, 255, 0). Pixel (1, 1)'s own
+        // nearest opaque neighbour is the block's own (2, 2), Chebyshev
+        // distance 1 (< size 2, so reachable): alpha = (1 - 1/2)*1.0*255
+        // = 127.5 -> 128 (half away from zero). Pixel (0, 0)'s own
+        // nearest opaque neighbour is also (2, 2), but at distance 2,
+        // which is not < size 2, so it's left completely unchanged at
+        // its own original [0, 0, 0, 0].
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.outer_glow(id, 2, [0, 255, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 255, 0, 128]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn outer_glow_opacity_scales_the_fade() {
+        // Same size 2, but opacity 50 halves the alpha at pixel (1, 1):
+        // (1 - 1/2)*0.5*255 = 63.75 -> 64 -- a real, hand-computed
+        // change from the opacity-100 test's own 128, not a coincidental
+        // match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.outer_glow(id, 2, [0, 255, 0], 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 255, 0, 64]);
+    }
+
+    #[test]
+    fn outer_glow_size_widens_the_reach() {
+        // Size 3 now reaches (0, 0), whose own distance to (2, 2) is
+        // still 2, but 2 < 3 this time: alpha = (1 - 2/3)*1.0*255 = 85.0
+        // exactly -- a real, hand-computed change from the size-2 test's
+        // own untouched [0, 0, 0, 0], not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.outer_glow(id, 3, [0, 255, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 255, 0, 85]);
+    }
+
+    #[test]
+    fn outer_glow_leaves_opaque_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.outer_glow(id, 2, [0, 255, 0], 100).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [100, 150, 200, 255]);
+    }
+
+    #[test]
+    fn outer_glow_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let dirty = doc.outer_glow(id, 2, [0, 255, 0], 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 1)..idx(1, 1) + 4], [0, 255, 0, 128]);
+        assert_eq!(after[..idx(1, 1)], before[..idx(1, 1)]); // unselected, untouched
+        assert_eq!(after[idx(1, 1) + 4..], before[idx(1, 1) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn outer_glow_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.outer_glow(id, 0, [0, 255, 0], 100).is_err());
+        assert!(doc.outer_glow(id, 251, [0, 255, 0], 100).is_err());
+        assert!(doc.outer_glow(id, 2, [0, 255, 0], 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.outer_glow(id, 2, [0, 255, 0], 100).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.outer_glow(999, 2, [0, 255, 0], 100).is_err());
     }
 
     #[test]

@@ -2080,6 +2080,21 @@ fn gradient_overlay(
     })
 }
 
+/// Layer > Layer Style > Outer Glow on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn outer_glow(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.outer_glow(id, size, color, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2421,6 +2436,7 @@ pub fn run() {
             stroke_outline,
             color_overlay,
             gradient_overlay,
+            outer_glow,
             hue_saturation,
             black_and_white,
             vibrance,

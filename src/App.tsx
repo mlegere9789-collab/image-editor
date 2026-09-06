@@ -253,6 +253,10 @@ export default function App() {
   const [gradientOverlayColor2, setGradientOverlayColor2] = useState("#ffffff");
   const [gradientOverlayDirection, setGradientOverlayDirection] = useState(0);
   const [gradientOverlayOpacity, setGradientOverlayOpacity] = useState(100);
+  const [showOuterGlowDialog, setShowOuterGlowDialog] = useState(false);
+  const [outerGlowSize, setOuterGlowSize] = useState(10);
+  const [outerGlowColor, setOuterGlowColor] = useState("#ffff00");
+  const [outerGlowOpacity, setOuterGlowOpacity] = useState(75);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -846,6 +850,18 @@ export default function App() {
     gradientOverlayDirection,
     gradientOverlayOpacity,
   ]);
+
+  const applyOuterGlow = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(outerGlowColor);
+    await runCommand("outer_glow", {
+      id: selectedId,
+      size: outerGlowSize,
+      color: [r, g, b],
+      opacity: outerGlowOpacity,
+    });
+    setShowOuterGlowDialog(false);
+  }, [runCommand, selectedId, outerGlowSize, outerGlowColor, outerGlowOpacity]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2697,6 +2713,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowOuterGlowDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Outer Glow"
+          >
+            Outer Glow…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4353,6 +4377,68 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGradientOverlay} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showOuterGlowDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowOuterGlowDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Outer Glow"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Outer Glow</h2>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{outerGlowSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={250}
+                value={outerGlowSize}
+                onChange={(event) => setOuterGlowSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={outerGlowColor}
+                onChange={(event) => setOuterGlowColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{outerGlowOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={outerGlowOpacity}
+                onChange={(event) => setOuterGlowOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowOuterGlowDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyOuterGlow} disabled={busy}>
                 Apply
               </button>
             </div>
