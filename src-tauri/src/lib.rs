@@ -685,6 +685,19 @@ fn smart_sharpen(
     })
 }
 
+/// Filter > Noise > Reduce Noise (Basic mode) on layer `id`.
+#[tauri::command]
+fn reduce_noise(
+    state: State<'_, AppState>,
+    id: LayerId,
+    strength: u32,
+    preserve_details: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.reduce_noise(id, strength, preserve_details)
+    })
+}
+
 /// Filter > Blur > Blur on layer `id`.
 #[tauri::command]
 fn blur(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -2520,6 +2533,7 @@ pub fn run() {
             box_blur,
             unsharp_mask,
             smart_sharpen,
+            reduce_noise,
             motion_blur,
             sprayed_strokes,
             blur,

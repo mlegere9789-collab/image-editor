@@ -594,6 +594,9 @@ export default function App() {
   const [smartSharpenRadius, setSmartSharpenRadius] = useState(2);
   const [smartSharpenAmount, setSmartSharpenAmount] = useState(100);
   const [smartSharpenReduceNoise, setSmartSharpenReduceNoise] = useState(10);
+  const [showReduceNoiseDialog, setShowReduceNoiseDialog] = useState(false);
+  const [reduceNoiseStrength, setReduceNoiseStrength] = useState(6);
+  const [reduceNoisePreserveDetails, setReduceNoisePreserveDetails] = useState(60);
 
   const [showMotionBlurDialog, setShowMotionBlurDialog] = useState(false);
   const [motionBlurAngle, setMotionBlurAngle] = useState(0);
@@ -2093,6 +2096,16 @@ export default function App() {
     setShowSmartSharpenDialog(false);
   }, [runCommand, selectedId, smartSharpenRadius, smartSharpenAmount, smartSharpenReduceNoise]);
 
+  const applyReduceNoise = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("reduce_noise", {
+      id: selectedId,
+      strength: reduceNoiseStrength,
+      preserveDetails: reduceNoisePreserveDetails,
+    });
+    setShowReduceNoiseDialog(false);
+  }, [runCommand, selectedId, reduceNoiseStrength, reduceNoisePreserveDetails]);
+
   const applyMotionBlur = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("motion_blur", {
@@ -3118,6 +3131,14 @@ export default function App() {
             title="Filter > Sharpen > Smart Sharpen"
           >
             Smart Sharpen…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowReduceNoiseDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Noise > Reduce Noise"
+          >
+            Reduce Noise…
           </button>
           <button
             className="button button--quiet"
@@ -6092,6 +6113,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySmartSharpen} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReduceNoiseDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowReduceNoiseDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Reduce Noise"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Noise &gt; Reduce Noise</h2>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{reduceNoiseStrength}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={reduceNoiseStrength}
+                onChange={(event) => setReduceNoiseStrength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Preserve Details
+                <span className="control__value">{reduceNoisePreserveDetails}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={reduceNoisePreserveDetails}
+                onChange={(event) => setReduceNoisePreserveDetails(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowReduceNoiseDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyReduceNoise} disabled={busy}>
                 Apply
               </button>
             </div>

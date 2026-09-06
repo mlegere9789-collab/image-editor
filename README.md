@@ -7736,6 +7736,58 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **807 Rust tests total** (800 → 807, 800 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 116 — Filter > Noise > Reduce Noise (Basic mode)
+
+`reduce_noise(id, strength, preserve_details)` reuses `median_at`'s
+own denoise (the same primitive `median` and `smart_sharpen`'s own
+Reduce Noise sub-control already use), fixed at radius `1`, blended
+toward the original by a fraction driven by two sliders together:
+`blend = (strength / 10.0) * (1.0 - preserve_details / 100.0)`, where
+`strength` is Photoshop's own Basic-mode `0..=10` range and
+`preserve_details` its own `0..=100` range. Raising `preserve_details`
+pulls the effective blend back down regardless of `strength`, and
+`strength = 0` or `preserve_details = 100` both collapse to the
+identity. Photoshop's own Reduce Noise dialog genuinely exposes only
+these two sliders in its default Basic mode — this isn't a narrowed
+approximation of the real dialog, it's a direct port of that same
+default view. Advanced mode's separate per-channel Strength dial,
+Reduce Color Noise, and Sharpen Details sliders are all a documented
+scope cut. Alpha untouched. A new **Reduce Noise…** dialog exposes
+Strength and Preserve Details.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture and its own already-verified
+radius-1 median at pixel `(row 0, col 0)`, `20` (the same value
+`smart_sharpen`'s own tests already derive for this pixel). Strength
+`10` (maximum), preserve details `0`: `blend = 1.0`, landing exactly
+on the median, `20`. A second test halves strength to `5`, landing
+halfway between the original `10` and the median `20` for a real `15`.
+A third instead keeps strength at `10` but raises preserve details to
+`50`, reaching that very same `15` through a completely different
+route — `1.0 * (1 - 0.5) = 0.5`, the identical blend fraction —
+confirming the two sliders genuinely multiply together rather than one
+silently overriding the other. A fourth confirms strength `0` is a
+byte-for-byte identity. A fifth confines a single pixel to a
+selection. A sixth confirms out-of-range strength and preserve
+details, plus a locked/unknown layer, all error. All six tests passed
+on the first run, cross-checked against an independent Python script
+emulating Rust's own `f32` rounding via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty-three: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**813 Rust tests total** (807 → 813, 806 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

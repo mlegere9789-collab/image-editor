@@ -1717,6 +1717,62 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Filter > Noise > Reduce Noise (Basic mode only): [`median_at`]'s
+    /// own denoise (the same primitive [`Self::median`] and
+    /// [`Self::smart_sharpen`]'s own Reduce Noise sub-control already
+    /// use), fixed at radius `1`, blended toward the original by a
+    /// fraction driven by two sliders together — `strength` (Photoshop's
+    /// own Basic-mode `0..=10` range) and `preserve_details` (Photoshop's
+    /// own `0..=100` range): `blend = (strength / 10.0) * (1.0 -
+    /// preserve_details / 100.0)`, so raising `preserve_details` pulls
+    /// the effective blend back down regardless of `strength`, and
+    /// `strength = 0` or `preserve_details = 100` both collapse to the
+    /// identity. Photoshop's own Basic mode genuinely exposes only these
+    /// two sliders by default — this is not a narrowed approximation but
+    /// a direct port of that same default view; Advanced mode's separate
+    /// per-channel Strength dial, Reduce Color Noise, and Sharpen Details
+    /// sliders are all a documented scope cut. Alpha untouched.
+    pub fn reduce_noise(
+        &mut self,
+        id: LayerId,
+        strength: u32,
+        preserve_details: u32,
+    ) -> Result<Option<Rect>, String> {
+        if strength > 10 {
+            return Err("Reduce Noise strength must be between 0 and 10.".to_string());
+        }
+        if preserve_details > 100 {
+            return Err("Reduce Noise preserve details must be between 0 and 100.".to_string());
+        }
+        let bounds = self.copy_bounds();
+        let selection = self.selection;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let blend = (strength as f32 / 10.0) * (1.0 - preserve_details as f32 / 100.0);
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let denoised = median_at(&source, doc_width, width, height, row, col, 1);
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                for c in 0..3 {
+                    let original = source[dst + c] as f32;
+                    let final_value = original * (1.0 - blend) + denoised[c] as f32 * blend;
+                    layer.pixels[dst + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Filter > Blur > Blur: Photoshop's one-click "just soften it a
     /// touch" preset — a [`Self::box_blur`] at the smallest possible
     /// radius (1, a 3x3 window), no dialog. Photoshop's own Blur is a
@@ -10420,6 +10476,90 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.smart_sharpen(999, 1, 1.0, 50).is_err());
+    }
+
+    #[test]
+    fn reduce_noise_blends_toward_the_median_denoise() {
+        // ramped_3x3's own R-only ramp. Strength 10 (maximum), preserve
+        // details 0: blend = (10/10.0)*(1-0/100.0) = 1.0, landing
+        // exactly on pixel (0, 0)'s own radius-1 median, 20 (the same
+        // value smart_sharpen's own tests already derive for this
+        // pixel's median).
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.reduce_noise(id, 10, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 20);
+    }
+
+    #[test]
+    fn reduce_noise_strength_scales_the_blend() {
+        // Same pixel, strength 5 halves the blend to 0.5, landing
+        // halfway between the original 10 and the median 20: (10+20)/2
+        // = 15 -- a real, hand-computed change from the strength-10
+        // test's own 20, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.reduce_noise(id, 5, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 15);
+    }
+
+    #[test]
+    fn reduce_noise_preserve_details_pulls_the_blend_back_down() {
+        // Same pixel, strength 10 (maximum) but preserve details 50:
+        // blend = 1.0*(1-0.5) = 0.5, landing on the very same 15 the
+        // strength-5 test reaches by a completely different route --
+        // confirming the two sliders genuinely multiply together rather
+        // than one silently overriding the other.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.reduce_noise(id, 10, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 15);
+    }
+
+    #[test]
+    fn reduce_noise_strength_zero_is_the_identity() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.reduce_noise(id, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(before[idx(0, 0)], 10);
+    }
+
+    #[test]
+    fn reduce_noise_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.reduce_noise(id, 10, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 20);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn reduce_noise_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.reduce_noise(id, 11, 0).is_err());
+        assert!(doc.reduce_noise(id, 10, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.reduce_noise(id, 10, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.reduce_noise(999, 10, 0).is_err());
     }
 
     #[test]

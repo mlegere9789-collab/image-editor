@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 175.**
+**618 distinct capabilities tracked. Currently shipped: 176.**
 
 ## PART I — EVERY TOOL
 
@@ -502,7 +502,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Despeckle (one-click 3x3 median — see README Phase 26)
 - [x] Dust & Scratches (median with Photoshop's Threshold gate — see README Phase 26)
 - [x] Median (per-channel neighbourhood median, radius dialog — see README Phase 26)
-- [ ] Reduce Noise
+- [x] Reduce Noise (`reduce_noise`, Basic mode only: `median_at`'s own radius-1 denoise blended toward the original by `(strength/10) * (1 - preserve_details/100)` — a direct port of Photoshop's own default Basic-mode view, not a narrowed approximation. Advanced mode's separate per-channel Strength, Reduce Color Noise, and Sharpen Details sliders are a documented scope cut — see README Phase 116)
 - [x] High Pass (original − box-blurred + 128 per channel, reusing the box-blur sampler — see README Phase 29)
 - [x] Maximum (per-channel neighbourhood maximum, i.e. morphological dilate — see README Phase 29)
 - [x] Minimum (per-channel neighbourhood minimum, i.e. morphological erode — see README Phase 29)
