@@ -465,6 +465,10 @@ export default function App() {
   const [showTilesDialog, setShowTilesDialog] = useState(false);
   const [tilesTileSize, setTilesTileSize] = useState(6);
   const [tilesMaxOffset, setTilesMaxOffset] = useState(50);
+  const [showMosaicTilesDialog, setShowMosaicTilesDialog] = useState(false);
+  const [mosaicTilesTileSize, setMosaicTilesTileSize] = useState(10);
+  const [mosaicTilesGroutWidth, setMosaicTilesGroutWidth] = useState(2);
+  const [mosaicTilesLightenGrout, setMosaicTilesLightenGrout] = useState(0);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1509,6 +1513,23 @@ export default function App() {
     });
     setShowTilesDialog(false);
   }, [runCommand, selectedId, tilesTileSize, tilesMaxOffset]);
+
+  const applyMosaicTiles = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("mosaic_tiles", {
+      id: selectedId,
+      tileSize: mosaicTilesTileSize,
+      groutWidth: mosaicTilesGroutWidth,
+      lightenGrout: mosaicTilesLightenGrout,
+    });
+    setShowMosaicTilesDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    mosaicTilesTileSize,
+    mosaicTilesGroutWidth,
+    mosaicTilesLightenGrout,
+  ]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2788,6 +2809,14 @@ export default function App() {
             title="Filter Gallery > Texture > Grain"
           >
             Grain…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMosaicTilesDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Texture > Mosaic Tiles"
+          >
+            Mosaic Tiles…
           </button>
           <button
             className="button button--quiet"
@@ -5264,6 +5293,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGrain} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMosaicTilesDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMosaicTilesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Mosaic Tiles"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Mosaic Tiles</h2>
+            <label className="control">
+              <span className="control__label">
+                Tile Size
+                <span className="control__value">{mosaicTilesTileSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={2}
+                max={100}
+                value={mosaicTilesTileSize}
+                onChange={(event) => setMosaicTilesTileSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Grout Width
+                <span className="control__value">{mosaicTilesGroutWidth}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={15}
+                value={mosaicTilesGroutWidth}
+                onChange={(event) => setMosaicTilesGroutWidth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Lighten Grout
+                <span className="control__value">{mosaicTilesLightenGrout}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={mosaicTilesLightenGrout}
+                onChange={(event) => setMosaicTilesLightenGrout(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMosaicTilesDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyMosaicTiles} disabled={busy}>
                 Apply
               </button>
             </div>

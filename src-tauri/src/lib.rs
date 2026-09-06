@@ -1962,6 +1962,20 @@ fn tiles(
     })
 }
 
+/// Filter Gallery > Texture > Mosaic Tiles on layer `id`.
+#[tauri::command]
+fn mosaic_tiles(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tile_size: u32,
+    grout_width: u32,
+    lighten_grout: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.mosaic_tiles(id, tile_size, grout_width, lighten_grout)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2295,6 +2309,7 @@ pub fn run() {
             wind,
             grain,
             tiles,
+            mosaic_tiles,
             hue_saturation,
             black_and_white,
             vibrance,

@@ -7183,6 +7183,94 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Texture > Mosaic Tiles: [`Self::mosaic`]'s own
+    /// per-cell flat-average grid (reimplemented inline, same
+    /// `tile_size`-pixel-square cells and the same truncating
+    /// integer-division mean), overlaid with a solid grayscale "grout"
+    /// border `grout_width` pixels deep along every side of every cell —
+    /// a pixel counts as grout if it sits within `grout_width` pixels of
+    /// any of its own cell's four edges (so adjacent cells' own borders
+    /// double up into one grout line between them, the same as real
+    /// ceramic tile). `lighten_grout` (Photoshop's own `0..=10` range)
+    /// sets the grout's own grayscale value, `lighten_grout / 10.0 *
+    /// 255.0` — `0` a black grout line, `10` a white one — a documented
+    /// simplification of Photoshop's own default dark-grey grout tinted
+    /// lighter, rather than a genuine tint. `tile_size` (Photoshop's own
+    /// `2..=100` range) and `grout_width` (Photoshop's own `0..=15`
+    /// range) are both validated. Alpha is averaged into each cell's own
+    /// mean the same way [`Self::mosaic`] already does, and the grout
+    /// itself is fully opaque. Confined to the selection: cell means and
+    /// grout membership are always computed from the whole, unmodified
+    /// source regardless of selection, and only the selected pixels'
+    /// output is written back.
+    pub fn mosaic_tiles(
+        &mut self,
+        id: LayerId,
+        tile_size: u32,
+        grout_width: u32,
+        lighten_grout: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(2..=100).contains(&tile_size) {
+            return Err("Mosaic Tiles tile size must be between 2 and 100.".to_string());
+        }
+        if grout_width > 15 {
+            return Err("Mosaic Tiles grout width must be between 0 and 15.".to_string());
+        }
+        if lighten_grout > 10 {
+            return Err("Mosaic Tiles lighten grout must be between 0 and 10.".to_string());
+        }
+        let (width, height) = (self.width as usize, self.height as usize);
+        let cell = tile_size as usize;
+        let grout_width = grout_width as usize;
+        let grout_v = (lighten_grout as f32 / 10.0 * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let cells_x = width.div_ceil(cell);
+        let cells_y = height.div_ceil(cell);
+        let mut means = vec![[0u8; CHANNELS]; cells_x * cells_y];
+        for cy in 0..cells_y {
+            for cx in 0..cells_x {
+                let (x0, y0) = (cx * cell, cy * cell);
+                let (x1, y1) = ((x0 + cell).min(width), (y0 + cell).min(height));
+                let mut sums = [0u64; CHANNELS];
+                for y in y0..y1 {
+                    for x in x0..x1 {
+                        let base = (y * width + x) * CHANNELS;
+                        for (sum, &v) in sums.iter_mut().zip(&source[base..base + CHANNELS]) {
+                            *sum += v as u64;
+                        }
+                    }
+                }
+                let count = ((x1 - x0) * (y1 - y0)) as u64;
+                for (slot, sum) in means[cy * cells_x + cx].iter_mut().zip(&sums) {
+                    *slot = (sum / count) as u8;
+                }
+            }
+        }
+        self.filter_pixels(id, move |_, row, col| {
+            let (row, col) = (row as usize, col as usize);
+            let (cx, cy) = (col / cell, row / cell);
+            let (x0, y0) = (cx * cell, cy * cell);
+            let (x1, y1) = ((x0 + cell).min(width), (y0 + cell).min(height));
+            let is_grout = (col - x0) < grout_width
+                || (x1 - 1 - col) < grout_width
+                || (row - y0) < grout_width
+                || (y1 - 1 - row) < grout_width;
+            if is_grout {
+                [grout_v, grout_v, grout_v, 255]
+            } else {
+                means[cy * cells_x + cx]
+            }
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -16364,6 +16452,94 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.tiles(999, 2, 50, 1).is_err());
+    }
+
+    #[test]
+    fn mosaic_tiles_averages_each_cell_and_darkens_the_grout() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40).
+        // Tile size 4 makes the whole 4x4 image one cell, whose mean is
+        // (10+20+30+40)/4 = 25 exactly (truncating integer division, the
+        // same convention mosaic already uses). Grout width 1 marks
+        // every pixel within 1 pixel of the cell's own four edges as
+        // grout, leaving only the interior 2x2 block (columns/rows 1-2)
+        // as the mosaic average: with lighten grout 0 (a black grout
+        // line), corner (0, 0) is grout (0) while interior (1, 1) is the
+        // mean (25).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.mosaic_tiles(id, 4, 1, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [25, 25, 25, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [25, 25, 25, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn mosaic_tiles_lighten_grout_brightens_the_border() {
+        // Same tile size 4 and grout width 1, but lighten grout 10 maps
+        // to 10/10 * 255 = 255, a white grout line: corner (0, 0)
+        // becomes 255 instead of 0 -- a real, hand-computed change, not
+        // a coincidental match -- while the untouched interior (1, 1)
+        // still reads the same mean of 25.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.mosaic_tiles(id, 4, 1, 10).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [25, 25, 25, 255]);
+    }
+
+    #[test]
+    fn mosaic_tiles_zero_grout_width_is_pure_mosaic() {
+        // Grout width 0 marks no pixel as grout, so every pixel in the
+        // single tile-size-4 cell reads the same mean of 25, matching
+        // mosaic's own already-tested single-cell average behaviour.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.mosaic_tiles(id, 4, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [25, 25, 25, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [25, 25, 25, 255]);
+    }
+
+    #[test]
+    fn mosaic_tiles_is_confined_to_the_selection() {
+        // Cell means and grout membership are always computed from the
+        // whole, unmodified source regardless of selection, so selecting
+        // only (0, 0) still produces the same grout value (0) the
+        // unselected first test's own (0, 0) computes.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.mosaic_tiles(id, 4, 1, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn mosaic_tiles_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.mosaic_tiles(id, 1, 1, 0).is_err());
+        assert!(doc.mosaic_tiles(id, 101, 1, 0).is_err());
+        assert!(doc.mosaic_tiles(id, 4, 16, 0).is_err());
+        assert!(doc.mosaic_tiles(id, 4, 1, 11).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.mosaic_tiles(id, 4, 1, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.mosaic_tiles(999, 4, 1, 0).is_err());
     }
 
     #[test]

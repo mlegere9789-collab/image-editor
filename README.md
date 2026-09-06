@@ -6326,6 +6326,60 @@ run build`) is fully green.
 **677 Rust tests total** (672 → 677, 670 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 94 — Filter Gallery > Texture > Mosaic Tiles
+
+`mosaic`'s own per-cell flat-average grid (reimplemented inline, the
+same `tile_size`-pixel-square cells and the same truncating integer-
+division mean), overlaid with a solid grayscale "grout" border
+`grout_width` pixels deep along every side of every cell — a pixel
+counts as grout if it sits within `grout_width` pixels of any of its
+own cell's four edges, so adjacent cells' own borders double up into
+one grout line between them, the same as real ceramic tile.
+`lighten_grout` (Photoshop's own `0..=10` range) sets the grout's own
+grayscale value, `lighten_grout / 10.0 * 255.0` — `0` a black grout
+line, `10` a white one — a documented simplification of Photoshop's
+own default dark-grey grout tinted lighter, rather than a genuine
+tint. `tile_size` (Photoshop's own `2..=100` range) and `grout_width`
+(Photoshop's own `0..=15` range) are both validated. Alpha is averaged
+into each cell's own mean the same way `mosaic` already does, and the
+grout itself is fully opaque. Confined to the selection: cell means
+and grout membership are always computed from the whole, unmodified
+source regardless of selection, and only the selected pixels' output
+is written back. A new **Mosaic Tiles…** dialog exposes Tile Size,
+Grout Width, and Lighten Grout sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`). Tile size `4` makes the whole 4x4
+image one cell, whose mean is `(10+20+30+40)/4 = 25` exactly; grout
+width `1` marks every pixel within `1` pixel of the cell's own four
+edges as grout, leaving only the interior `2x2` block as the mosaic
+average: with lighten grout `0`, corner `(0, 0)` is grout (`0`) while
+interior `(1, 1)` is the mean (`25`). A second test raises lighten
+grout to `10`, mapping to `255` (a white grout line) — a real,
+hand-computed change from the first test's own `0`, not a coincidental
+match, while the untouched interior still reads `25`. A third confirms
+grout width `0` marks no pixel as grout, matching `mosaic`'s own
+already-tested single-cell average behaviour everywhere. A fourth
+confines the fixture to a single-pixel selection at `(0, 0)`. A fifth
+confirms out-of-range tile size, grout width, and lighten grout, plus
+a locked/unknown layer, all error. All five tests passed on the first
+run, cross-checked against an independent Python script.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**682 Rust tests total** (677 → 682, 675 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
