@@ -5268,6 +5268,61 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **595 Rust tests total** (590 → 595, 588 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 77 — Filter Gallery > Sketch > Photocopy
+
+Hard-thresholds a dilated Sobel edge map to pure black or white, the
+flat, high-contrast look of a photocopied line drawing where only
+strong edges survive as black and everything else bleaches to white.
+Reuses the same `sobel_at`/`extreme_at` edge-and-dilate machinery
+`ink_outlines` and `poster_edges` already use, combined with `stamp`'s
+own hard-threshold idea, just thresholding edge strength instead of
+smoothed luma. A documented approximation — Photoshop's real Photocopy
+also factors in each pixel's own original luminance directly, not
+edges alone, which this project doesn't model — not a port of
+Photoshop's own renderer. `Document::photocopy(id, detail, darkness)`:
+`detail` (Photoshop's own `0..=24` range) dilates the measured edge
+map by `detail / 5`; `darkness` (Photoshop's own `0..=50` range) sets
+the threshold, `255 - darkness / 50 * 255`, so `0` requires
+full-strength edges to turn black (bleaching everything else to white)
+and `50` turns every edge, however faint, black. Alpha untouched. A
+new **Photocopy…** dialog exposes Detail and Darkness sliders.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+bright/dark cliff fixture `ink_outlines`/`poster_edges`/
+`accented_edges`/`sumi_e`/`smudge_stick`/`paint_daubs`/`palette_knife`/
+`plastic_wrap`/`rough_pastels`/`underpainting`/`stamp` all already
+share (4×4, columns 0-1 solid `200`, columns 2-3 solid `50`, raw Sobel
+magnitude `[0, 255, 255, 0]`). At detail `0` (no dilation) and darkness
+`0` (threshold `255`): only the full-magnitude edge columns (`1` and
+`2`) turn black, while the flat columns (`0` and `3`, magnitude `0`)
+stay white. A second test confirms darkness `50` (threshold `0`) turns
+every column black, since every magnitude — including the flat
+columns' own `0` — meets a threshold of `0`. A third raises detail to
+`10` (dilation radius `2`), wide enough on this 4-wide fixture to
+spread the raw edge map's `255`-magnitude columns across every column
+(the same dilation reasoning `ink_outlines`'s and `plastic_wrap`'s own
+width tests already use), so even at darkness `0` every column now
+turns black. A fourth confines the fixture to a one-pixel selection. A
+fifth confirms out-of-range detail and darkness, plus a locked/unknown
+layer, all error. All five passed on the first run — no independent
+Python script was needed since every value here reuses `sobel_at`'s
+and `extreme_at`'s own already-verified output directly, and the
+threshold compare is simple enough to verify by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous twenty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**600 Rust tests total** (595 → 600, 593 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

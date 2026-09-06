@@ -1719,6 +1719,17 @@ fn stamp(
     })
 }
 
+/// Filter Gallery > Sketch > Photocopy on layer `id`.
+#[tauri::command]
+fn photocopy(
+    state: State<'_, AppState>,
+    id: LayerId,
+    detail: u32,
+    darkness: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.photocopy(id, detail, darkness))
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2035,6 +2046,7 @@ pub fn run() {
             rough_pastels,
             underpainting,
             stamp,
+            photocopy,
             hue_saturation,
             black_and_white,
             vibrance,

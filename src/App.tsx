@@ -405,6 +405,9 @@ export default function App() {
   const [showStampDialog, setShowStampDialog] = useState(false);
   const [stampLightDarkBalance, setStampLightDarkBalance] = useState(12);
   const [stampSmoothness, setStampSmoothness] = useState(5);
+  const [showPhotocopyDialog, setShowPhotocopyDialog] = useState(false);
+  const [photocopyDetail, setPhotocopyDetail] = useState(3);
+  const [photocopyDarkness, setPhotocopyDarkness] = useState(20);
   const [showCrystallizeDialog, setShowCrystallizeDialog] = useState(false);
   const [crystallizeCellSize, setCrystallizeCellSize] = useState(16);
   const [showPointillizeDialog, setShowPointillizeDialog] = useState(false);
@@ -1245,6 +1248,16 @@ export default function App() {
     });
     setShowStampDialog(false);
   }, [runCommand, selectedId, stampLightDarkBalance, stampSmoothness]);
+
+  const applyPhotocopy = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("photocopy", {
+      id: selectedId,
+      detail: photocopyDetail,
+      darkness: photocopyDarkness,
+    });
+    setShowPhotocopyDialog(false);
+  }, [runCommand, selectedId, photocopyDetail, photocopyDarkness]);
 
   const applyCrystallize = useCallback(async () => {
     if (selectedId === null) return;
@@ -2628,6 +2641,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Stamp"
           >
             Stamp…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPhotocopyDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Photocopy"
+          >
+            Photocopy…
           </button>
           <button
             className="button button--quiet"
@@ -5611,6 +5632,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyStamp} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPhotocopyDialog && (
+        <div className="modal-overlay" onClick={() => setShowPhotocopyDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Photocopy"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Photocopy</h2>
+            <label className="control">
+              <span className="control__label">
+                Detail
+                <span className="control__value">{photocopyDetail}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={24}
+                value={photocopyDetail}
+                onChange={(event) => setPhotocopyDetail(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Darkness
+                <span className="control__value">{photocopyDarkness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={50}
+                value={photocopyDarkness}
+                onChange={(event) => setPhotocopyDarkness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPhotocopyDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPhotocopy} disabled={busy}>
                 Apply
               </button>
             </div>

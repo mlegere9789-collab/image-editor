@@ -6054,6 +6054,94 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Photocopy: hard-thresholds a dilated
+    /// Sobel edge map to pure black or white, the flat, high-contrast
+    /// look of a photocopied line drawing where only strong edges
+    /// survive as black and everything else bleaches to white. Reuses
+    /// the same [`sobel_at`]/[`extreme_at`] edge-and-dilate machinery
+    /// [`Self::ink_outlines`] and [`Self::poster_edges`] already use,
+    /// combined with [`Self::stamp`]'s own hard-threshold idea, just
+    /// thresholding edge strength instead of smoothed luma. A documented
+    /// approximation — Photoshop's real Photocopy also factors in each
+    /// pixel's own original luminance directly, not edges alone, which
+    /// this project doesn't model — not a port of Photoshop's own
+    /// renderer. `detail` (Photoshop's own `0..=24` range) dilates the
+    /// measured edge map by `detail / 5`; `darkness` (Photoshop's own
+    /// `0..=50` range) sets the threshold, `255 - darkness / 50 * 255`,
+    /// so `0` requires full-strength edges to turn black (bleaching
+    /// everything else to white) and `50` turns every edge, however
+    /// faint, black. Alpha untouched. Only the final threshold respects
+    /// the selection; the edge-detection and dilation passes always see
+    /// the whole layer, the same scope cut `ink_outlines` and
+    /// `poster_edges` already make. Errors on an out-of-range parameter
+    /// or a locked/unknown layer.
+    pub fn photocopy(
+        &mut self,
+        id: LayerId,
+        detail: u32,
+        darkness: u32,
+    ) -> Result<Option<Rect>, String> {
+        if detail > 24 {
+            return Err("Photocopy detail must be between 0 and 24.".to_string());
+        }
+        if darkness > 50 {
+            return Err("Photocopy darkness must be between 0 and 50.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let source = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            layer.pixels.clone()
+        };
+        let mut luma_buf = vec![0u8; source.len()];
+        for (src_px, dst_px) in source.chunks(CHANNELS).zip(luma_buf.chunks_mut(CHANNELS)) {
+            let luma =
+                (0.299 * src_px[0] as f32 + 0.587 * src_px[1] as f32 + 0.114 * src_px[2] as f32)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            dst_px[0] = luma;
+            dst_px[1] = luma;
+            dst_px[2] = luma;
+            dst_px[3] = src_px[3];
+        }
+        let mut mag_buf = vec![0u8; source.len()];
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let edge = sobel_at(&luma_buf, doc_width, (width, height), (row, col));
+                mag_buf[dst..dst + CHANNELS].copy_from_slice(&edge);
+            }
+        }
+        let dilate_radius = (detail / 5) as i64;
+        if dilate_radius > 0 {
+            let edges = mag_buf.clone();
+            for row in 0..self.height {
+                for col in 0..self.width {
+                    let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                    let widened = extreme_at(
+                        &edges,
+                        doc_width,
+                        (width, height),
+                        (row, col),
+                        dilate_radius,
+                        true,
+                    );
+                    mag_buf[dst..dst + CHANNELS].copy_from_slice(&widened);
+                }
+            }
+        }
+        let threshold = 255.0 - darkness as f32 / 50.0 * 255.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let edge = mag_buf[base] as f32;
+            let v = if edge >= threshold { 0 } else { 255 };
+            [v, v, v, src[base + 3]]
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -13486,6 +13574,91 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.stamp(999, 10, 5).is_err());
+    }
+
+    #[test]
+    fn photocopy_thresholds_edge_strength_to_black_or_white() {
+        // Same cliff fixture ink_outlines/poster_edges/accented_edges/
+        // sumi_e/smudge_stick/paint_daubs/palette_knife/plastic_wrap/
+        // rough_pastels/underpainting/stamp all already share: 4x4,
+        // columns 0-1 solid 200, columns 2-3 solid 50, raw Sobel
+        // magnitude [0, 255, 255, 0]. Detail 0 means no dilation;
+        // darkness 0 sets the threshold to exactly 255, so only the
+        // full-magnitude edge columns (1 and 2) turn black, while the
+        // flat columns (0 and 3, magnitude 0) stay white.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.photocopy(id, 0, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn photocopy_darkness_fifty_turns_every_edge_black() {
+        // Darkness 50 sets the threshold to exactly 0, which every
+        // magnitude (including the flat columns' own 0) meets, so the
+        // whole fixture turns black regardless of detail.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.photocopy(id, 0, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn photocopy_detail_dilates_the_edge_map_to_full_black() {
+        // Detail 10 gives a dilation radius of 2, wide enough on this
+        // 4-wide fixture to spread the raw edge map's 255-magnitude
+        // columns across every column (the same dilation reasoning
+        // ink_outlines's and plastic_wrap's own width tests already
+        // use), so even at darkness 0 (threshold 255) every column now
+        // reaches the full-magnitude threshold and turns black.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        doc.photocopy(id, 10, 0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        for x in 0..4 {
+            assert_eq!(&p[idx(x, 0)..idx(x, 0) + 4], [0, 0, 0, 255]);
+        }
+    }
+
+    #[test]
+    fn photocopy_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = ink_outlines_cliff_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let dirty = doc.photocopy(id, 0, 0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(&after[idx(1, 0)..idx(1, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 0) + 4..], before[idx(1, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn photocopy_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.photocopy(id, 25, 0).is_err());
+        assert!(doc.photocopy(id, 0, 51).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.photocopy(id, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.photocopy(999, 0, 0).is_err());
     }
 
     #[test]
