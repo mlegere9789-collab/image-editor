@@ -7665,6 +7665,61 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Gradient Overlay, baked in destructively:
+    /// [`Self::color_overlay`]'s own blend-toward-a-target formula, but
+    /// the target colour is interpolated between `color1` and `color2`
+    /// by the pixel's own position along the layer, `t = col /
+    /// (width-1)` for `direction` `0` (horizontal, left `color1` to
+    /// right `color2`) or `t = row / (height-1)` for `direction` `1`
+    /// (vertical, top `color1` to bottom `color2`) — Photoshop's own
+    /// arbitrary gradient angle and its Scale, Style (Radial, Angle,
+    /// Reflected, Diamond), and Dither controls are all a documented
+    /// scope cut in favour of these two hand-checkable axis-aligned
+    /// directions. `opacity` (Photoshop's own `0..=100` range) scales
+    /// the blend exactly as `color_overlay`'s own does. A fully-
+    /// transparent pixel is left completely alone, matching
+    /// `color_overlay`'s own treatment. Alpha untouched.
+    pub fn gradient_overlay(
+        &mut self,
+        id: LayerId,
+        color1: [u8; 3],
+        color2: [u8; 3],
+        direction: u32,
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if direction > 1 {
+            return Err(
+                "Gradient Overlay direction must be 0 (Horizontal) or 1 (Vertical).".to_string(),
+            );
+        }
+        if opacity > 100 {
+            return Err("Gradient Overlay opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        let doc_width = self.width as usize;
+        let frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let a = src[base + 3];
+            if a == 0 {
+                return [src[base], src[base + 1], src[base + 2], a];
+            }
+            let t = if direction == 0 {
+                col as f32 / (width - 1).max(1) as f32
+            } else {
+                row as f32 / (height - 1).max(1) as f32
+            };
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let target = color1[c] as f32 + (color2[c] as f32 - color1[c] as f32) * t;
+                let v = src[base + c] as f32;
+                out[c] = (v * (1.0 - frac) + target * frac).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = a;
+            out
+        })
+    }
+
     /// Image > Adjustments > Hue/Saturation: shifts hue by `hue` degrees,
     /// scales saturation by `1 + saturation/100`, and offsets lightness by
     /// `lightness/100` — each pixel round-trips RGB -> HSL -> (adjusted)
@@ -17508,6 +17563,122 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.color_overlay(999, [255, 0, 0], 50).is_err());
+    }
+
+    #[test]
+    fn gradient_overlay_interpolates_across_the_layer() {
+        // Glass's own column-stripes fixture (4x4, columns 10/20/30/40),
+        // fully opaque. Direction 0 (horizontal), color1 black, color2
+        // white, opacity 100 (a full replace, target only): t = col/3,
+        // target = 255*t. col 0: t=0, target=0. col 1: t=1/3, target=85
+        // exactly (255/3=85). col 2: t=2/3, target=170. col 3: t=1,
+        // target=255. All exact integers.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [85, 85, 85, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [170, 170, 170, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn gradient_overlay_blends_with_the_original_at_partial_opacity() {
+        // Same gradient, but opacity 50 blends the target 50/50 with
+        // each column's own original value:
+        //   col 0: 10*0.5 + 0*0.5 = 5.
+        //   col 1: 20*0.5 + 85*0.5 = 52.5 -> 53 (half away from zero).
+        //   col 2: 30*0.5 + 170*0.5 = 100.
+        //   col 3: 40*0.5 + 255*0.5 = 147.5 -> 148.
+        // Real, hand-computed changes from the opacity-100 test's own
+        // 0, 85, 170, 255, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 50)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [5, 5, 5, 255]);
+        assert_eq!(&p[idx(1, 0)..idx(1, 0) + 4], [53, 53, 53, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [100, 100, 100, 255]);
+        assert_eq!(&p[idx(3, 0)..idx(3, 0) + 4], [148, 148, 148, 255]);
+    }
+
+    #[test]
+    fn gradient_overlay_vertical_direction_interpolates_by_row() {
+        // Direction 1 (vertical) makes t depend on row instead of
+        // column: column 0's own value (10 in every row) sees a real
+        // gradient down the column at opacity 100: row 0 (t=0) gives 0,
+        // row 1 (t=1/3) gives 85, row 2 (t=2/3) gives 170, row 3 (t=1)
+        // gives 255 -- a genuinely different pattern from the horizontal
+        // test's own column 0, which stays flat at 0 across every row
+        // (t always 0 there, since t depends on column, not row).
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay(id, [0, 0, 0], [255, 255, 255], 1, 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 1)..idx(0, 1) + 4], [85, 85, 85, 255]);
+        assert_eq!(&p[idx(0, 2)..idx(0, 2) + 4], [170, 170, 170, 255]);
+        assert_eq!(&p[idx(0, 3)..idx(0, 3) + 4], [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn gradient_overlay_leaves_transparent_pixels_untouched() {
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn gradient_overlay_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 0.0, 2.0, 4.0).unwrap();
+        let dirty = doc
+            .gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 100)
+            .unwrap();
+        let after = &doc.layers()[0].pixels;
+        for y in 0..4 {
+            assert_eq!(&after[idx(1, y)..idx(1, y) + 4], [85, 85, 85, 255]);
+        }
+        assert_eq!(after[..idx(1, 0)], before[..idx(1, 0)]); // unselected, untouched
+        assert_eq!(after[idx(1, 3) + 4..], before[idx(1, 3) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 1,
+                y0: 0,
+                x1: 2,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn gradient_overlay_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc
+            .gradient_overlay(id, [0, 0, 0], [255, 255, 255], 2, 100)
+            .is_err());
+        assert!(doc
+            .gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 101)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .gradient_overlay(id, [0, 0, 0], [255, 255, 255], 0, 100)
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty
+            .gradient_overlay(999, [0, 0, 0], [255, 255, 255], 0, 100)
+            .is_err());
     }
 
     #[test]

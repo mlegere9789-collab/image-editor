@@ -2064,6 +2064,22 @@ fn color_overlay(
     })
 }
 
+/// Layer > Layer Style > Gradient Overlay on layer `id`, baked in
+/// destructively.
+#[tauri::command]
+fn gradient_overlay(
+    state: State<'_, AppState>,
+    id: LayerId,
+    color1: [u8; 3],
+    color2: [u8; 3],
+    direction: u32,
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.gradient_overlay(id, color1, color2, direction, opacity)
+    })
+}
+
 /// Image > Adjustments > Hue/Saturation on layer `id`.
 #[tauri::command]
 fn hue_saturation(
@@ -2404,6 +2420,7 @@ pub fn run() {
             selective_color,
             stroke_outline,
             color_overlay,
+            gradient_overlay,
             hue_saturation,
             black_and_white,
             vibrance,

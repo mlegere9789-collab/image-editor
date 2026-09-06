@@ -248,6 +248,11 @@ export default function App() {
   const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
   const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
   const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
+  const [showGradientOverlayDialog, setShowGradientOverlayDialog] = useState(false);
+  const [gradientOverlayColor1, setGradientOverlayColor1] = useState("#000000");
+  const [gradientOverlayColor2, setGradientOverlayColor2] = useState("#ffffff");
+  const [gradientOverlayDirection, setGradientOverlayDirection] = useState(0);
+  const [gradientOverlayOpacity, setGradientOverlayOpacity] = useState(100);
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -820,6 +825,27 @@ export default function App() {
     });
     setShowColorOverlayDialog(false);
   }, [runCommand, selectedId, colorOverlayColor, colorOverlayOpacity]);
+
+  const applyGradientOverlay = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r1, g1, b1] = hexToRgb(gradientOverlayColor1);
+    const [r2, g2, b2] = hexToRgb(gradientOverlayColor2);
+    await runCommand("gradient_overlay", {
+      id: selectedId,
+      color1: [r1, g1, b1],
+      color2: [r2, g2, b2],
+      direction: gradientOverlayDirection,
+      opacity: gradientOverlayOpacity,
+    });
+    setShowGradientOverlayDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    gradientOverlayColor1,
+    gradientOverlayColor2,
+    gradientOverlayDirection,
+    gradientOverlayOpacity,
+  ]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -2663,6 +2689,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowGradientOverlayDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Gradient Overlay"
+          >
+            Gradient Overlay…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLevelsDialog(true)}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Levels"
@@ -4252,6 +4286,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyColorOverlay} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGradientOverlayDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGradientOverlayDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Gradient Overlay"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Gradient Overlay</h2>
+            <label className="control control--row">
+              <span className="control__label">Color 1</span>
+              <input
+                type="color"
+                value={gradientOverlayColor1}
+                onChange={(event) => setGradientOverlayColor1(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color 2</span>
+              <input
+                type="color"
+                value={gradientOverlayColor2}
+                onChange={(event) => setGradientOverlayColor2(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Direction</span>
+              <select
+                value={gradientOverlayDirection}
+                onChange={(event) => setGradientOverlayDirection(Number(event.target.value))}
+              >
+                <option value={0}>Horizontal</option>
+                <option value={1}>Vertical</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{gradientOverlayOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={gradientOverlayOpacity}
+                onChange={(event) => setGradientOverlayOpacity(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGradientOverlayDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGradientOverlay} disabled={busy}>
                 Apply
               </button>
             </div>

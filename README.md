@@ -6714,6 +6714,61 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **714 Rust tests total** (708 → 714, 707 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 101 — Layer > Layer Style > Gradient Overlay
+
+`color_overlay`'s own blend-toward-a-target formula, but the target
+colour is interpolated between `color1` and `color2` by the pixel's
+own position along the layer: `t = col / (width-1)` for `direction`
+`0` (horizontal, left `color1` to right `color2`) or `t = row /
+(height-1)` for `direction` `1` (vertical, top `color1` to bottom
+`color2`) — Photoshop's own arbitrary gradient angle and its Scale,
+Style (Radial, Angle, Reflected, Diamond), and Dither controls are all
+a documented scope cut in favour of these two hand-checkable
+axis-aligned directions. `opacity` (Photoshop's own `0..=100` range)
+scales the blend exactly as `color_overlay`'s own does. A
+fully-transparent pixel is left completely alone, matching
+`color_overlay`'s own treatment. Alpha untouched. A new **Gradient
+Overlay…** dialog exposes two colour pickers, a Direction dropdown,
+and an Opacity slider.
+
+**Verified two ways.** Six new `document.rs` tests, reusing Glass's
+own `column_stripes_fixture` (4x4, each column its own solid grayscale
+value: `10`, `20`, `30`, `40`). Direction `0` (horizontal), black to
+white, opacity `100` (a full replace): `t = col/3`, giving `0`, `85`
+(`255/3` exactly), `170`, and `255` across the row, all exact
+integers. A second test drops opacity to `50`, blending the target
+50/50 with each column's own original value (`5`, `53`, `100`, `148`
+— the `53` and `148` each landing on a `.5` rounding boundary,
+confirmed to round away from zero) — real, hand-computed changes from
+the opacity-`100` test's own row, not a coincidental match. A third
+switches to direction `1` (vertical): column `0`'s own value (`10` in
+every row) now sees a real gradient down the column (`0`, `85`,
+`170`, `255`), a genuinely different pattern from the horizontal
+test's own column `0`, which stays flat at `0` across every row since
+`t` there depends on column, not row. A fourth reuses Stroke Outline's
+own fixture to confirm a transparent pixel is left completely alone.
+A fifth confines the fixture to a full-column selection at column
+`1`. A sixth confirms out-of-range direction and opacity, plus a
+locked/unknown layer, all error. All six tests passed on the first
+run, with no separate Python cross-check needed for the arithmetic
+itself, though the two `.5`-boundary roundings in the opacity test
+were independently verified via a supplementary Python script before
+being finalized.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous forty-eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**720 Rust tests total** (714 → 720, 713 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
