@@ -7448,6 +7448,74 @@ instead. Every other layer of this project's quality bar
 **783 Rust tests total** (778 → 783, 776 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 112 — Image > Adjustments > Replace Color
+
+`replace_color(id, target, fuzziness, hue, saturation, lightness)`
+composes two mechanisms this project already has rather than
+inventing a colour-range mask from scratch: `hue_saturation`'s own
+`rgb_to_hsl`/`hsl_to_rgb` round trip, reused directly, and the
+Chebyshev-distance shape (`max` of per-channel absolute differences)
+already used throughout this project's edge and colour searches — here
+measuring each pixel's own distance to a chosen `target` colour instead
+of to a transparent or opaque neighbour. A pixel's own `strength` fades
+linearly from a full shift at an exact match (`distance = 0`) to no
+shift at all once `distance` reaches `fuzziness`: `strength = (1.0 -
+distance / fuzziness).clamp(0.0, 1.0)`, standing in for Photoshop's own
+soft-edged colour-range mask; at `fuzziness = 0` this collapses to a
+hard threshold, only an exact match getting the full shift. The final
+colour is a linear blend between the pixel's own original RGB and its
+fully `hue_saturation`-shifted version by that `strength`, so a
+partially-matching pixel is only partially recoloured rather than
+snapping fully on or off. `fuzziness` is Photoshop's own `0..=200`
+dialog range; `hue`/`saturation`/`lightness` share `hue_saturation`'s
+own ranges and its saturating-rather-than-erroring clamp convention.
+Alpha untouched. Photoshop's own interactive eyedropper-driven swatch
+building (plus/minus sampling, a live mask preview) is a documented
+scope cut — `target` here is a single colour chosen once through a
+colour picker, not built up interactively.
+
+**Verified two ways.** Five new `document.rs` tests, on 3-pixel test
+rows built directly rather than a shared fixture, since each test needs
+its own specific distances from its own target colour. Target `(100,
+100, 100)`, fuzziness `50`, lightness `-100` (which always shifts to
+pure black, since HSL lightness `0` is black regardless of hue or
+saturation): pixel `0`, an exact match, fully replaces to `(0, 0, 0)`;
+pixel `1`, `(130, 100, 100)`, sits a Chebyshev distance of `30` away,
+giving `strength = 1 - 30/50 = 0.4` and a real, hand-computed `(78, 60,
+60)`; pixel `2`, `(200, 100, 100)`, sits `100` away, past the
+fuzziness-`50` cutoff, and is left byte-for-byte untouched. A second
+test switches to target `(255, 0, 0)`, fuzziness `10`, hue `+120` (the
+same shift `hue_shift_of_120_turns_pure_red_into_pure_green` already
+verifies): an exact match fully shifts to `(0, 255, 0)`; `(255, 5, 5)`,
+distance `5`, blends its own fully-shifted colour halfway with its own
+original for a real `(130, 130, 5)`; `(255, 20, 20)`, distance `20`,
+is untouched. A third test reuses the first test's own fixture and
+target at fuzziness `0`, confirming only the exact match shifts at all
+— a real, hand-computed difference from the fuzziness-`50` test's own
+partial `(78, 60, 60)` blend, not a coincidental match. A fourth
+confines the shift to a two-pixel selection. A fifth confirms
+out-of-range fuzziness, plus a locked/unknown layer, all error. All
+five tests passed on the first run, cross-checked against an
+independent Python script that ports `rgb_to_hsl`/`hsl_to_rgb`/
+`to_byte`/`to_unit` line-for-line and emulates Rust's own `f32`
+rounding via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous fifty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new **Replace Color…** dialog (a target-colour
+picker plus Fuzziness/Hue/Saturation/Lightness sliders, mirroring
+Hue/Saturation's own dialog layout) was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**788 Rust tests total** (783 → 788, 781 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

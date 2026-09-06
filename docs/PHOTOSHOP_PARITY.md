@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 171.**
+**618 distinct capabilities tracked. Currently shipped: 172.**
 
 ## PART I — EVERY TOOL
 
@@ -472,7 +472,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Equalize Selected Area Only (histogram from the selection, only the selection remapped — see README Phase 28)
 - [x] Equalize Entire Image Based On Selected Area (histogram from the selection, whole layer remapped — see README Phase 28)
 - [ ] Match Color
-- [ ] Replace Color
+- [x] Replace Color (`replace_color`, `hue_saturation`'s own HSL shift blended in by a Chebyshev-distance-to-target fuzziness fraction, `1 - distance/fuzziness`, standing in for Photoshop's own colour-range mask. Its eyedropper-driven interactive swatch building is a documented scope cut — `target` is a single colour chosen once — see README Phase 112)
 - [x] Blur Filter (one-click preset: box blur at radius 1 — see README Phase 25)
 - [x] Blur More (one-click preset: box blur at radius 3 — see README Phase 25)
 - [x] Gaussian Blur (separable binomial kernel with σ = radius, cut at ±3σ, edge-clamped — see README Phase 32)

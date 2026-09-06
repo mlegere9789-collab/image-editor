@@ -2246,6 +2246,22 @@ fn hue_saturation(
     })
 }
 
+/// Image > Adjustments > Replace Color on layer `id`.
+#[tauri::command]
+fn replace_color(
+    state: State<'_, AppState>,
+    id: LayerId,
+    target: [u8; 3],
+    fuzziness: u32,
+    hue: i32,
+    saturation: i32,
+    lightness: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.replace_color(id, target, fuzziness, hue, saturation, lightness)
+    })
+}
+
 /// Image > Adjustments > Black & White on layer `id`.
 #[tauri::command]
 fn black_and_white(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -2585,6 +2601,7 @@ pub fn run() {
             texture,
             texturizer,
             hue_saturation,
+            replace_color,
             black_and_white,
             vibrance,
             photo_filter,

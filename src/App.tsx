@@ -218,6 +218,13 @@ export default function App() {
   const [saturation, setSaturation] = useState(0);
   const [lightness, setLightness] = useState(0);
 
+  const [showReplaceColorDialog, setShowReplaceColorDialog] = useState(false);
+  const [replaceColorTarget, setReplaceColorTarget] = useState("#ff0000");
+  const [replaceColorFuzziness, setReplaceColorFuzziness] = useState(40);
+  const [replaceColorHue, setReplaceColorHue] = useState(0);
+  const [replaceColorSaturation, setReplaceColorSaturation] = useState(0);
+  const [replaceColorLightness, setReplaceColorLightness] = useState(0);
+
   const [showVibranceDialog, setShowVibranceDialog] = useState(false);
   const [vibrance, setVibrance] = useState(0);
   const [vibranceSaturation, setVibranceSaturation] = useState(0);
@@ -771,6 +778,28 @@ export default function App() {
     await runCommand("hue_saturation", { id: selectedId, hue, saturation, lightness });
     setShowHueSaturationDialog(false);
   }, [runCommand, selectedId, hue, saturation, lightness]);
+
+  const applyReplaceColor = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(replaceColorTarget);
+    await runCommand("replace_color", {
+      id: selectedId,
+      target: [r, g, b],
+      fuzziness: replaceColorFuzziness,
+      hue: replaceColorHue,
+      saturation: replaceColorSaturation,
+      lightness: replaceColorLightness,
+    });
+    setShowReplaceColorDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    replaceColorTarget,
+    replaceColorFuzziness,
+    replaceColorHue,
+    replaceColorSaturation,
+    replaceColorLightness,
+  ]);
 
   const applyVibrance = useCallback(async () => {
     if (selectedId === null) return;
@@ -2812,6 +2841,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowReplaceColorDialog(true)}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Replace Color"
+          >
+            Replace Color…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={blackAndWhite}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Black & White"
@@ -4097,6 +4134,94 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyHueSaturation} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReplaceColorDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowReplaceColorDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Replace Color"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Adjustments &gt; Replace Color</h2>
+            <label className="control control--row">
+              <span className="control__label">Target Color</span>
+              <input
+                type="color"
+                value={replaceColorTarget}
+                onChange={(event) => setReplaceColorTarget(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Fuzziness
+                <span className="control__value">{replaceColorFuzziness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={replaceColorFuzziness}
+                onChange={(event) => setReplaceColorFuzziness(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Hue
+                <span className="control__value">{replaceColorHue}</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={replaceColorHue}
+                onChange={(event) => setReplaceColorHue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{replaceColorSaturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={replaceColorSaturation}
+                onChange={(event) => setReplaceColorSaturation(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Lightness
+                <span className="control__value">{replaceColorLightness}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={replaceColorLightness}
+                onChange={(event) => setReplaceColorLightness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowReplaceColorDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyReplaceColor} disabled={busy}>
                 Apply
               </button>
             </div>

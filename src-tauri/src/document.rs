@@ -8633,6 +8633,78 @@ impl Document {
         })
     }
 
+    /// Image > Adjustments > Replace Color: [`Self::hue_saturation`]'s own
+    /// hue/saturation/lightness shift, applied only to pixels close to a
+    /// chosen `target` colour rather than the whole layer — Photoshop's
+    /// own version pairs an eyedropper-driven colour-range mask with that
+    /// same Hue/Saturation-style adjustment, and this reuses
+    /// [`rgb_to_hsl`]/[`hsl_to_rgb`] directly rather than re-deriving the
+    /// shift. A pixel's own Chebyshev distance to `target` (the same
+    /// per-channel max-of-absolute-differences shape used throughout this
+    /// project's edge/colour searches) is compared against `fuzziness`:
+    /// at `fuzziness = 0` a pixel either matches `target` exactly
+    /// (`strength = 1.0`) or is left alone (`strength = 0.0`); otherwise
+    /// `strength = (1.0 - distance / fuzziness).clamp(0.0, 1.0)` fades
+    /// linearly from a full shift at an exact match to no shift at all
+    /// once `distance` reaches `fuzziness`, standing in for Photoshop's
+    /// own soft-edged colour-range mask. The final colour is a linear
+    /// blend between the pixel's own original RGB and its fully
+    /// HSL-shifted version by that `strength`, so a partially-matching
+    /// pixel is only partially recoloured. `fuzziness` is Photoshop's own
+    /// `0..=200` dialog range; `hue`/`saturation`/`lightness` share
+    /// [`Self::hue_saturation`]'s own ranges and clamping convention
+    /// (saturating rather than erroring on an out-of-range value).
+    /// Alpha untouched. Photoshop's own on-canvas eyedropper sampling
+    /// (plus/minus swatches) and live mask preview are a documented scope
+    /// cut — `target` here is a single colour chosen once, not built up
+    /// interactively.
+    pub fn replace_color(
+        &mut self,
+        id: LayerId,
+        target: [u8; 3],
+        fuzziness: u32,
+        hue: i32,
+        saturation: i32,
+        lightness: i32,
+    ) -> Result<Option<Rect>, String> {
+        if fuzziness > 200 {
+            return Err("Replace Color fuzziness must be between 0 and 200.".to_string());
+        }
+        let fuzz = fuzziness as f32;
+        let hue_shift = hue.clamp(-180, 180) as f32;
+        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+        let light_offset = lightness.clamp(-100, 100) as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let dr = (r as i32 - target[0] as i32).abs();
+            let dg = (g as i32 - target[1] as i32).abs();
+            let db = (b as i32 - target[2] as i32).abs();
+            let distance = dr.max(dg).max(db) as f32;
+            let strength = if fuzz <= 0.0 {
+                if distance == 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
+            } else {
+                (1.0 - distance / fuzz).clamp(0.0, 1.0)
+            };
+            if strength == 0.0 {
+                return [r, g, b, a];
+            }
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            let h = (h + hue_shift).rem_euclid(360.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let l = (l + light_offset).clamp(0.0, 1.0);
+            let (nr, ng, nb) = hsl_to_rgb(h, s, l);
+            let blend = |o: u8, n: u8| {
+                (o as f32 * (1.0 - strength) + n as f32 * strength)
+                    .round()
+                    .clamp(0.0, 255.0) as u8
+            };
+            [blend(r, nr), blend(g, ng), blend(b, nb), a]
+        })
+    }
+
     /// Image > Adjustments > Black & White: desaturates a layer to
     /// greyscale using the same ITU-R BT.601 luma weights (`0.299R +
     /// 0.587G + 0.114B`) [`Self::threshold`] uses, setting all three RGB
@@ -19799,6 +19871,113 @@ mod tests {
     fn hue_saturation_on_an_unknown_layer_is_an_error() {
         let mut doc = Document::new(2, 1).unwrap();
         assert!(doc.hue_saturation(999, 10, 10, 10).is_err());
+    }
+
+    #[test]
+    fn replace_color_darkens_only_pixels_within_fuzziness_of_the_target() {
+        // A 3-pixel row: (100, 100, 100) exactly matches the target,
+        // (130, 100, 100) sits a Chebyshev distance of 30 away, and
+        // (200, 100, 100) sits 100 away. Target (100, 100, 100),
+        // fuzziness 50, lightness -100 (which always shifts to pure
+        // black regardless of hue/saturation, since HSL lightness 0 is
+        // black). Pixel 0's own strength is 1.0 (exact match), fully
+        // replaced by black: (0, 0, 0). Pixel 1's own strength is
+        // 1 - 30/50 = 0.4, blending 40% toward black: (130*0.6, 100*0.6,
+        // 100*0.6) = (78, 60, 60). Pixel 2's own distance, 100, exceeds
+        // fuzziness entirely, so strength clamps to 0 and it's left
+        // byte-for-byte untouched: (200, 100, 100).
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[100, 100, 100, 255, 130, 100, 100, 255, 200, 100, 100, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.replace_color(id, [100, 100, 100], 50, 0, 0, -100)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [78, 60, 60, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn replace_color_blends_the_hue_shift_by_its_own_strength() {
+        // Target (255, 0, 0) (pure red), fuzziness 10, hue +120 (the
+        // same shift hue_shift_of_120_turns_pure_red_into_pure_green
+        // already verifies turns pure red into pure green). Pixel 0,
+        // an exact match, fully shifts to (0, 255, 0). Pixel 1, (255,
+        // 5, 5), sits a distance of 5 from the target: strength =
+        // 1 - 5/10 = 0.5, blending its own fully-shifted colour
+        // (5, 255, 5, hand-derived via the same rgb_to_hsl/hsl_to_rgb
+        // round trip and cross-checked in Python) halfway with its own
+        // original (255, 5, 5): (255*0.5+5*0.5, 5*0.5+255*0.5,
+        // 5*0.5+5*0.5) = (130, 130, 5). Pixel 2, (255, 20, 20), sits a
+        // distance of 20, past the fuzziness-10 cutoff, so it's left
+        // completely untouched.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[255, 0, 0, 255, 255, 5, 5, 255, 255, 20, 20, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.replace_color(id, [255, 0, 0], 10, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [130, 130, 5, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 20, 20, 255]);
+    }
+
+    #[test]
+    fn replace_color_fuzziness_zero_is_a_hard_threshold() {
+        // Reusing the first test's own fixture and target, but
+        // fuzziness 0: only an exact match (pixel 0) gets the full
+        // shift; pixel 1, 30 away, gets none at all rather than a
+        // partial blend -- a real, hand-computed difference from the
+        // fuzziness-50 test's own partial (78, 60, 60) result.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[100, 100, 100, 255, 130, 100, 100, 255, 200, 100, 100, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.replace_color(id, [100, 100, 100], 0, 0, 0, -100)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [130, 100, 100, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn replace_color_is_confined_to_the_selection() {
+        let mut doc = Document::new(4, 1).unwrap();
+        let pixels = [100u8, 100, 100, 255].repeat(4);
+        let id = doc.add_layer("row", &pixels, 4, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.replace_color(id, [100, 100, 100], 50, 0, 0, -100)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        // Outside the selection: untouched.
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 100, 100, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn replace_color_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.replace_color(id, [0, 0, 0], 201, 0, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.replace_color(id, [0, 0, 0], 50, 0, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.replace_color(999, [0, 0, 0], 50, 0, 0, 0).is_err());
     }
 
     #[test]
