@@ -349,6 +349,10 @@ export default function App() {
   const [showRippleDialog, setShowRippleDialog] = useState(false);
   const [rippleAmount, setRippleAmount] = useState(100);
   const [rippleSize, setRippleSize] = useState<RippleSize>("medium");
+  const [showRadialBlurDialog, setShowRadialBlurDialog] = useState(false);
+  const [radialBlurAmount, setRadialBlurAmount] = useState(50);
+  const [radialBlurCenterX, setRadialBlurCenterX] = useState(0);
+  const [radialBlurCenterY, setRadialBlurCenterY] = useState(0);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -1974,6 +1978,23 @@ export default function App() {
     setLensFlareCenterY(Math.round((document?.height ?? 2) / 2));
     setShowLensFlareDialog(true);
   }, [document]);
+
+  const openRadialBlurDialog = useCallback(() => {
+    setRadialBlurCenterX(Math.round((document?.width ?? 2) / 2));
+    setRadialBlurCenterY(Math.round((document?.height ?? 2) / 2));
+    setShowRadialBlurDialog(true);
+  }, [document]);
+
+  const applyRadialBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("radial_blur", {
+      id: selectedId,
+      amount: radialBlurAmount,
+      centerX: radialBlurCenterX,
+      centerY: radialBlurCenterY,
+    });
+    setShowRadialBlurDialog(false);
+  }, [runCommand, selectedId, radialBlurAmount, radialBlurCenterX, radialBlurCenterY]);
 
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
@@ -3638,6 +3659,14 @@ export default function App() {
             title="Filter > Distort > Ripple"
           >
             Ripple…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openRadialBlurDialog}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Radial Blur"
+          >
+            Radial Blur…
           </button>
           <button
             className="button button--quiet"
@@ -10225,6 +10254,73 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyLensFlare} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRadialBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowRadialBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Radial Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Radial Blur</h2>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{radialBlurAmount}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={radialBlurAmount}
+                onChange={(event) => setRadialBlurAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Center X
+                <span className="control__value">{radialBlurCenterX}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.width ?? 1}
+                value={radialBlurCenterX}
+                onChange={(event) => setRadialBlurCenterX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Center Y
+                <span className="control__value">{radialBlurCenterY}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={document?.height ?? 1}
+                value={radialBlurCenterY}
+                onChange={(event) => setRadialBlurCenterY(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowRadialBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyRadialBlur} disabled={busy}>
                 Apply
               </button>
             </div>

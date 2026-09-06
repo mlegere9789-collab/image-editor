@@ -888,6 +888,20 @@ fn ripple(
     })
 }
 
+/// Filter > Blur > Radial Blur (Zoom method) on layer `id`.
+#[tauri::command]
+fn radial_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: u32,
+    center_x: f32,
+    center_y: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.radial_blur(id, amount, center_x, center_y)
+    })
+}
+
 /// Filter > Distort > Twirl on layer `id`: `angle` in degrees at the centre.
 #[tauri::command]
 fn twirl(state: State<'_, AppState>, id: LayerId, angle: f32) -> Result<Snapshot, String> {
@@ -2507,6 +2521,7 @@ pub fn run() {
             mosaic,
             fragment,
             ripple,
+            radial_blur,
             twirl,
             pinch,
             spherize,

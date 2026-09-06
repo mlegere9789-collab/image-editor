@@ -2723,6 +2723,68 @@ impl Document {
         })
     }
 
+    /// Filter > Blur > Radial Blur (Zoom method only): averages three
+    /// [`sample_nearest`] lookups per pixel, taken along the line from
+    /// `(center_x, center_y)` through the pixel's own position, at three
+    /// scale factors symmetric around `1.0` — `1.0 − blur`, `1.0`, and
+    /// `1.0 + blur`, where `blur = amount / 100.0` — so a pixel far from
+    /// the centre blends its own colour with samples pulled inward
+    /// toward the centre and pushed outward past itself, the classic
+    /// "zoom trail" look; a pixel sitting exactly at the centre has
+    /// nothing to scale (`dx = dy = 0`) and is left completely
+    /// unchanged regardless of `amount`. All four channels, alpha
+    /// included, are averaged together — the same whole-pixel treatment
+    /// [`Self::ripple`] and [`Self::twirl`] already give displaced
+    /// samples, and the same per-channel averaging [`box_blur_at`] and
+    /// [`motion_blur_at`] already give blurred ones. `amount` is
+    /// Photoshop's own `0..=100` Amount range. Photoshop's own Spin
+    /// method, its Draft/Good/Best sample-count Quality dial (this
+    /// project always takes exactly three samples, a documented scope
+    /// cut), and its interactive on-canvas blur-center dial are all a
+    /// documented scope cut — `center_x`/`center_y` are typed-in pixel
+    /// coordinates here rather than dragged.
+    pub fn radial_blur(
+        &mut self,
+        id: LayerId,
+        amount: u32,
+        center_x: f32,
+        center_y: f32,
+    ) -> Result<Option<Rect>, String> {
+        if amount > 100 {
+            return Err("Radial Blur amount must be between 0 and 100.".to_string());
+        }
+        if !center_x.is_finite() || !center_y.is_finite() {
+            return Err(format!(
+                "Radial Blur center must be finite numbers, got ({center_x}, {center_y})."
+            ));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let blur = amount as f32 / 100.0;
+        let scales = [1.0 - blur, 1.0, 1.0 + blur];
+        self.filter_pixels(id, move |source, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let (dx, dy) = (x - center_x, y - center_y);
+            let mut sums = [0u32; CHANNELS];
+            for &scale in &scales {
+                let sample = sample_nearest(
+                    source,
+                    doc_width,
+                    (width, height),
+                    (center_x + dx * scale, center_y + dy * scale),
+                );
+                for (sum, &v) in sums.iter_mut().zip(sample.iter()) {
+                    *sum += v as u32;
+                }
+            }
+            let mut out = [0u8; CHANNELS];
+            for (slot, &sum) in out.iter_mut().zip(sums.iter()) {
+                *slot = (sum as f32 / 3.0).round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Filter > Distort > Twirl: rotates the layer about its centre by an
     /// angle that falls off with distance — `angle · (1 − r/R)²` degrees,
     /// where `r` is the pixel's distance from the centre and `R` half the
@@ -11644,6 +11706,106 @@ mod tests {
                 y1: 2
             })
         );
+    }
+
+    #[test]
+    fn radial_blur_averages_three_zoom_samples_around_the_centre() {
+        // ramped_3x3's own R-only ramp (10..90 by tens, row-major).
+        // Centre (1.0, 1.0), amount 50 (blur 0.5), scales [0.5, 1.0,
+        // 1.5]. Pixel (row 0, col 0): dx=dy=-1. Sample at scale 0.5
+        // rounds to (1, 1) = 50; at scale 1.0 lands on itself, (0, 0) =
+        // 10; at scale 1.5, (-0.5, -0.5) rounds (half away from zero)
+        // to (-1, -1), clamped to (0, 0) = 10. Average (50+10+10)/3 =
+        // 23.33, rounds to 23.
+        // Pixel (row 0, col 2): dx=1, dy=-1. Scale 0.5 rounds to (2, 1)
+        // = 60; scale 1.0 lands on itself, (2, 0) = 30; scale 1.5,
+        // (2.5, -0.5) rounds to (3, -1), clamped to (2, 0) = 30.
+        // Average (60+30+30)/3 = 40.0, an exact 40.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.radial_blur(id, 50, 1.0, 1.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 23);
+        assert_eq!(p[idx(2, 0)], 40);
+    }
+
+    #[test]
+    fn radial_blur_amount_scales_the_zoom_trail() {
+        // Same pixel (row 0, col 2), same centre, but amount 100 (blur
+        // 1.0, scales [0.0, 1.0, 2.0]): scale 0.0 lands exactly on the
+        // centre, (1, 1) = 50; scale 1.0 lands on itself, (2, 0) = 30;
+        // scale 2.0, (3, -1), clamps to (2, 0) = 30. Average
+        // (50+30+30)/3 = 36.67, rounds to 37 -- a real, hand-computed
+        // change from the amount-50 test's own 40, not a coincidental
+        // match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.radial_blur(id, 100, 1.0, 1.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 0)], 37);
+    }
+
+    #[test]
+    fn radial_blur_center_changes_the_zoom_trail() {
+        // Pixel (row 2, col 2), amount 50, but centre moved to the
+        // opposite corner (0.0, 0.0) instead of the middle: dx=dy=2,
+        // scale 0.5 rounds to (1, 1) = 50, scale 1.0 lands on itself,
+        // (2, 2) = 90, scale 1.5 rounds to (3, 3), clamped to (2, 2) =
+        // 90. Average (50+90+90)/3 = 76.67, rounds to 77 -- a real,
+        // hand-computed change from what this same pixel and amount
+        // would give centred in the middle (where it stays a fully
+        // unchanged 90, every sample already clamped to itself).
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.radial_blur(id, 50, 0.0, 0.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 2)], 77);
+    }
+
+    #[test]
+    fn radial_blur_leaves_the_centre_pixel_untouched() {
+        // Pixel (row 1, col 1) sits exactly at the centre (1.0, 1.0):
+        // dx=dy=0, so every scale factor still resolves to the very
+        // same position, regardless of amount.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.radial_blur(id, 100, 1.0, 1.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 50);
+    }
+
+    #[test]
+    fn radial_blur_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = doc.radial_blur(id, 50, 1.0, 1.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 23);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn radial_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.radial_blur(id, 101, 1.0, 1.0).is_err());
+        assert!(doc.radial_blur(id, 50, f32::NAN, 1.0).is_err());
+        assert!(doc.radial_blur(id, 50, 1.0, f32::NAN).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.radial_blur(id, 50, 1.0, 1.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.radial_blur(999, 50, 1.0, 1.0).is_err());
     }
 
     #[test]

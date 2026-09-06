@@ -7516,6 +7516,71 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **788 Rust tests total** (783 → 788, 781 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 113 — Filter > Blur > Radial Blur (Zoom method)
+
+`radial_blur(id, amount, center_x, center_y)` implements Photoshop's
+own Zoom method only, composing machinery this project already has:
+[`sample_nearest`], the same nearest-neighbour edge-clamped resampling
+primitive `ripple`/`twirl`/`pinch`/`spherize`/`glass` already share.
+Each pixel takes exactly three samples along the line from
+`(center_x, center_y)` through its own position, at scale factors
+symmetric around `1.0` — `1.0 − blur`, `1.0`, and `1.0 + blur`, where
+`blur = amount / 100.0` — pulling one sample inward toward the centre,
+keeping one at the pixel's own position, and pushing one outward past
+it, then averaging all three across all four channels (alpha included,
+the same whole-pixel treatment `ripple`/`twirl` already give displaced
+samples and the same per-channel averaging `box_blur_at`/
+`motion_blur_at` already give blurred ones) — the classic "zoom trail"
+look. A pixel sitting exactly at the centre has nothing to scale
+(`dx = dy = 0`, every sample resolves to the same position) and stays
+completely unchanged regardless of `amount`. `amount` is Photoshop's
+own `0..=100` Amount range. Photoshop's own Spin method, its
+Draft/Good/Best sample-count Quality dial (this project always takes
+exactly three samples, a documented scope cut trading Photoshop's own
+smoother many-sample average for a result a person can still verify by
+hand), and its interactive on-canvas blur-center dial (`center_x`/
+`center_y` are typed-in — well, slider-dragged — pixel coordinates
+here, defaulting to the canvas centre the same way Lens Flare's own
+Center X/Y sliders already default) are all a documented scope cut.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture (3x3, R-only ramp 10 through
+90 by tens, row-major). Centre `(1.0, 1.0)`, amount `50` (blur `0.5`,
+scales `[0.5, 1.0, 1.5]`): pixel `(row 0, col 0)` (`dx = dy = -1`)
+samples `(1, 1) = 50` at scale `0.5` (rounds there), itself, `(0, 0) =
+10`, at scale `1.0`, and `(0, 0) = 10` again at scale `1.5` (rounds to
+`(-1, -1)`, edge-clamped back to `(0, 0)`), averaging `70/3 = 23.33 ->
+23`; pixel `(row 0, col 2)` (`dx = 1, dy = -1`) samples `60`, `30`, and
+`30` for an exact `40`. A second test raises amount to `100` (blur
+`1.0`, scales `[0.0, 1.0, 2.0]`) at the same pixel `(row 0, col 2)`:
+the zero-scale sample now lands exactly on the centre, `(1, 1) = 50`,
+giving `(50+30+30)/3 = 36.67 -> 37` — a real, hand-computed change from
+the amount-`50` test's own `40`. A third moves the centre to the
+opposite corner `(0.0, 0.0)` for pixel `(row 2, col 2)`, giving a real
+`77` instead of that same pixel's own fully-clamped, unchanged `90`
+when centred in the middle. A fourth confirms the centre pixel itself
+stays exactly `50` even at amount `100`. A fifth confines a single
+pixel to a selection. A sixth confirms out-of-range amount, a
+non-finite centre coordinate (either axis), plus a locked/unknown
+layer, all error. All six tests passed on the first run, cross-checked
+against an independent Python script that emulates Rust's own `f32`
+rounding via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous sixty: this session's Xvfb
+instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The new **Radial Blur…** dialog (Amount, Center X, Center
+Y, the same layout shape Lens Flare's own dialog already uses) was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand/script-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**794 Rust tests total** (788 → 794, 787 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
