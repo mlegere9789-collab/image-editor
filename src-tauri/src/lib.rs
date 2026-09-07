@@ -2730,6 +2730,19 @@ fn distort(
     edit_checkpointed(&state, |document| document.distort(id, corners))
 }
 
+/// Edit > Transform > Perspective on layer `id`: mirrored corner insets.
+#[tauri::command]
+fn perspective(
+    state: State<'_, AppState>,
+    id: LayerId,
+    horizontal: f32,
+    vertical: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.perspective(id, horizontal, vertical)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2993,6 +3006,7 @@ pub fn run() {
             free_transform,
             transform_again,
             distort,
+            perspective,
             select_rectangle,
             select_ellipse,
             select_all,

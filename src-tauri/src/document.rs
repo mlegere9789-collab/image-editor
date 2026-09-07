@@ -10365,6 +10365,47 @@ impl Document {
             out
         })
     }
+
+    /// Edit > Transform > Perspective: [`Self::distort`] with the corners
+    /// moved in mirrored pairs, the way Photoshop's own Perspective drags
+    /// one corner and slides its neighbour on the same edge the opposite
+    /// way. `horizontal` is a pixel inset applied to both ends of one
+    /// horizontal edge — positive narrows the top edge, negative narrows
+    /// the bottom — and `vertical` likewise narrows the left edge when
+    /// positive and the right edge when negative, so a positive
+    /// `horizontal` is the classic "building leaning away" keystone. The
+    /// other two corners stay put. Everything else — the projective warp,
+    /// nearest-neighbour resampling, transparent fill, and the error for
+    /// non-finite values — is `distort`'s; an inset that collapses an
+    /// edge to a point (half the canvas width or more) leaves two corners
+    /// coincident and errors the same way any degenerate quad does.
+    pub fn perspective(
+        &mut self,
+        id: LayerId,
+        horizontal: f32,
+        vertical: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(horizontal.is_finite() && vertical.is_finite()) {
+            return Err("Perspective insets must be finite numbers of pixels.".to_string());
+        }
+        let (w, h) = ((self.width - 1) as f32, (self.height - 1) as f32);
+        let mut corners = [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]];
+        if horizontal > 0.0 {
+            corners[0][0] += horizontal;
+            corners[1][0] -= horizontal;
+        } else {
+            corners[3][0] -= horizontal;
+            corners[2][0] += horizontal;
+        }
+        if vertical > 0.0 {
+            corners[0][1] += vertical;
+            corners[3][1] -= vertical;
+        } else {
+            corners[1][1] -= vertical;
+            corners[2][1] += vertical;
+        }
+        self.distort(id, corners)
+    }
 }
 
 /// The eight coefficients `[a, b, c, d, e, f, g, h]` of the projective map
@@ -24691,6 +24732,114 @@ mod tests {
         assert!(doc.distort(id, square).is_err());
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.distort(999, square).is_err());
+    }
+
+    #[test]
+    fn perspective_positive_horizontal_narrows_the_top_edge() {
+        // Inset 0.5 on ramped_3x3 is exactly the Distort trapezoid.
+        let (mut doc, id) = ramped_3x3();
+        doc.perspective(id, 0.5, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 20, 0], vec![40, 50, 60], vec![70, 80, 90]]
+        );
+        let (mut via_distort, id_b) = ramped_3x3();
+        via_distort
+            .distort(id_b, [[0.5, 0.0], [1.5, 0.0], [2.0, 2.0], [0.0, 2.0]])
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, via_distort.layers()[0].pixels);
+
+        let (mut doc, id) = ramped_4x4();
+        doc.perspective(id, 1.0, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![0, 10, 40, 0],
+                vec![0, 100, 110, 0],
+                vec![130, 140, 150, 160],
+                vec![130, 140, 150, 160]
+            ]
+        );
+    }
+
+    #[test]
+    fn perspective_negative_horizontal_narrows_the_bottom_edge() {
+        // The mirror image of the top inset: the top half now reads the
+        // source's top row and the bottom edge draws in.
+        let (mut doc, id) = ramped_4x4();
+        doc.perspective(id, -1.0, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![10, 20, 30, 40],
+                vec![10, 20, 30, 40],
+                vec![0, 60, 70, 0],
+                vec![0, 130, 160, 0]
+            ]
+        );
+    }
+
+    #[test]
+    fn perspective_vertical_narrows_the_left_or_right_edge() {
+        let (mut doc, id) = ramped_4x4();
+        doc.perspective(id, 0.0, 1.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![0, 0, 40, 40],
+                vec![10, 70, 80, 80],
+                vec![130, 110, 120, 120],
+                vec![0, 0, 160, 160]
+            ]
+        );
+        // -1 is the Distort keystone with the tall left edge.
+        let (mut doc, id) = ramped_4x4();
+        doc.perspective(id, 0.0, -1.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![10, 10, 0, 0],
+                vec![50, 50, 60, 40],
+                vec![90, 90, 100, 160],
+                vec![130, 130, 0, 0]
+            ]
+        );
+    }
+
+    #[test]
+    fn perspective_with_no_inset_is_the_identity() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        doc.perspective(id, 0.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn perspective_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.perspective(id, 0.5, 0.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 0);
+        assert_eq!(after[idx(0, 0) + 3], 0);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]);
+    }
+
+    #[test]
+    fn perspective_rejects_a_collapsed_edge_and_propagates_errors() {
+        // An inset of a full pixel on a 3-wide canvas puts both top
+        // corners at x = 1: no homography.
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc.perspective(id, 1.0, 0.0).is_err());
+        assert!(doc.perspective(id, f32::NAN, 0.0).is_err());
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.perspective(id, 0.25, 0.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.perspective(999, 0.25, 0.0).is_err());
     }
 
     #[test]

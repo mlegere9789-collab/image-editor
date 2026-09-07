@@ -9233,6 +9233,56 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **948 Rust tests total** (942 → 948, 941 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 142 — Edit > Transform > Perspective
+
+`perspective(id, horizontal, vertical)` is Phase 141's `distort` with
+its corners moved in mirrored pairs, the way Photoshop's own
+Perspective drags one corner and slides its neighbour on the same edge
+the opposite way. `horizontal` is a pixel inset applied to both ends of
+one horizontal edge — positive narrows the top edge, negative the
+bottom — and `vertical` likewise narrows the left edge when positive
+and the right edge when negative, so a positive `horizontal` is the
+classic "building leaning away" keystone; the other two corners stay
+put. Everything else is `distort`'s: the projective warp, the
+nearest-neighbour resampling and transparent fill, and the error for a
+non-finite value. An inset that collapses an edge to a point (half the
+canvas width or more) leaves two corners coincident, and the
+homography solver rejects it the same way it rejects any degenerate
+quad. A new **Perspective…** dialog takes the two insets with a Reset
+button.
+
+**Verified two ways.** Six new `document.rs` tests, every grid one
+Phase 141's Python solver already produced for the corresponding
+corner quad. A `0.5` horizontal inset on `ramped_3x3` is exactly
+Distort's own trapezoid — `[[0, 20, 0], [40, 50, 60], [70, 80, 90]]` —
+and equals `distort` called with those corners byte-for-byte; a `1`
+inset on `ramped_4x4` is Distort's top-inset grid. The mirror inset
+`-1` narrows the bottom instead: `[[10, 20, 30, 40], [10, 20, 30, 40],
+[0, 60, 70, 0], [0, 130, 160, 0]]`, the top half now reading the
+source's top row. A vertical inset of `1` narrows the left edge —
+`[[0, 0, 40, 40], [10, 70, 80, 80], [130, 110, 120, 120], [0, 0, 160,
+160]]` — and `-1` reproduces Distort's tall-left keystone exactly.
+Zero insets are a byte-for-byte identity. A one-pixel selection
+confines the rewrite (the selected corner pixel, outside the
+trapezoid, becomes transparent while everything else is untouched). A
+full-pixel inset on the 3-wide canvas puts both top corners at `x = 1`
+and errors, as do `NaN`, a locked layer, and an unknown layer. All six
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**954 Rust tests total** (948 → 954, 947 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

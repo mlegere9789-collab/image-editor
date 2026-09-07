@@ -255,6 +255,9 @@ export default function App() {
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
+  const [showPerspectiveDialog, setShowPerspectiveDialog] = useState(false);
+  const [perspectiveHorizontal, setPerspectiveHorizontal] = useState(0);
+  const [perspectiveVertical, setPerspectiveVertical] = useState(0);
   const [showDistortDialog, setShowDistortDialog] = useState(false);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
@@ -1149,6 +1152,16 @@ export default function App() {
     await runCommand("distort", { id: selectedId, corners: distortCorners });
     setShowDistortDialog(false);
   }, [runCommand, selectedId, distortCorners]);
+
+  const applyPerspective = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("perspective", {
+      id: selectedId,
+      horizontal: perspectiveHorizontal,
+      vertical: perspectiveVertical,
+    });
+    setShowPerspectiveDialog(false);
+  }, [runCommand, selectedId, perspectiveHorizontal, perspectiveVertical]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3215,6 +3228,14 @@ export default function App() {
             title="Edit > Transform > Distort (move the four corners; selected layer)"
           >
             Distort…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPerspectiveDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Perspective (mirrored corner insets; selected layer)"
+          >
+            Perspective…
           </button>
         </div>
 
@@ -6147,6 +6168,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDistort} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPerspectiveDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPerspectiveDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Perspective"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Perspective</h2>
+            <p className="modal__hint">
+              Insets in pixels, applied to both ends of an edge. Positive
+              horizontal narrows the top edge, negative the bottom; positive
+              vertical narrows the left edge, negative the right.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Horizontal</span>
+              <input
+                type="number"
+                step={0.5}
+                value={perspectiveHorizontal}
+                onChange={(event) => setPerspectiveHorizontal(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Vertical</span>
+              <input
+                type="number"
+                step={0.5}
+                value={perspectiveVertical}
+                onChange={(event) => setPerspectiveVertical(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setPerspectiveHorizontal(0);
+                  setPerspectiveVertical(0);
+                }}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPerspectiveDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPerspective} disabled={busy}>
                 Apply
               </button>
             </div>

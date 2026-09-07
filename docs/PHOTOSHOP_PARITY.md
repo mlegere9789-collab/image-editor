@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 203.**
+**618 distinct capabilities tracked. Currently shipped: 204.**
 
 ## PART I — EVERY TOOL
 
@@ -221,7 +221,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Rotate (`rotate`, any angle, positive clockwise, about the canvas centre — inverse-mapped nearest-neighbour resampling with the same rounding `sample_nearest` uses, transparent wherever the source falls outside the canvas. The canvas does not grow, so corners rotating past its edges are clipped — a documented scope cut alongside nearest-neighbour rather than bicubic resampling — see README Phase 136)
 - [x] Skew (`skew`, horizontal then vertical shear angles (−89..89°) about the canvas centre, each sliding rows/columns by `tan(angle)` pixels per pixel of distance from the centre — `rotate`/`scale`'s own inverse-mapped nearest-neighbour resampling and transparent fill. Applied as two sequential determinant-1 shears rather than Photoshop's single simultaneous affine, which folds flat when `tan(h)·tan(v) = 1` — a documented difference — see README Phase 138)
 - [x] Distort (`distort`, the layer's four corners sent to four typed `[x, y]` positions, everything between warped by the projective homography those correspondences define — solved by an 8×8 Gaussian elimination in `f64`, inverse-mapped with the Transform family's nearest-neighbour resampling and transparent fill; collinear/coincident corners error. Handles and bicubic resampling are documented scope cuts — see README Phase 141)
-- [ ] Perspective
+- [x] Perspective (`perspective`, `distort` with the corners moved in mirrored pairs — a pixel inset on both ends of the top (positive `horizontal`) or bottom (negative) edge, and of the left (positive `vertical`) or right (negative) edge — the way Photoshop's own Perspective slides a dragged corner's neighbour the opposite way; a collapsed edge errors as a degenerate quad — see README Phase 142)
 - [ ] Warp
 - [x] Rotate 180°
 - [x] Rotate 90° Clockwise (a document-level operation, not per-layer — resizes the whole document and every layer in it together, so the "every layer stays document-sized" invariant holds throughout; see Phase 17 in README.md)
