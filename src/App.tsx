@@ -3624,6 +3624,16 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("constrain_crop", { id: selectedId });
+            }}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Geometry > Constrain Crop (crop the document to the selected layer's largest fully opaque rectangle)"
+          >
+            Constrain Crop
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 209.**
+**618 distinct capabilities tracked. Currently shipped: 210.**
 
 ## PART I — EVERY TOOL
 
@@ -636,7 +636,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Optics
 - [x] Defringe (`defringe`, desaturates pixels in proportion to a `sobel_at`-based edge-strength measured on a luma buffer, via `rgb_to_hsl`/`hsl_to_rgb`. Photoshop's own separate purple/green Amount+Hue sliders are a documented broadening rather than an invented narrow approximation, since defensible hue-range boundaries for each fringe colour would risk fabricating Photoshop's own exact thresholds — see README Phase 120)
 - [x] Geometry (`camera_raw_geometry`, the panel's Manual transforms as one edit: a `GeometrySettings` struct applying `perspective` (Vertical/Horizontal insets), `rotate`, `scale` with Aspect (width `scale × (100 + aspect)%`, height `scale × (100 − aspect)%`), and an offset in that order, skipping neutral stages. Upright's automatic Auto/Level/Vertical/Full/Guided modes and the lens Distortion slider are a documented scope cut — see README Phase 147)
-- [ ] Constrain Crop
+- [x] Constrain Crop (`constrain_crop`, crops the whole document to the largest axis-aligned rectangle of fully opaque pixels on the selected layer — the classic exact row-histogram stack scan, ties going to the widest, topmost candidate — via a new document-level `crop`. Camera Raw's own live checkbox is a documented scope cut: here it is a command run once after the geometry is settled — see README Phase 148)
 - [ ] Masking
 - [ ] Subject Mask
 - [ ] Radial Gradient

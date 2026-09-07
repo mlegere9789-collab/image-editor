@@ -1406,6 +1406,99 @@ impl Document {
         self.last_selection = None;
     }
 
+    /// Crops the whole document — the canvas and every layer in it — to
+    /// `rect`, which must lie within the canvas and cover at least one
+    /// pixel. Like [`Self::rotate_document_90`], the only other operation
+    /// that changes the canvas's own dimensions, this clears the active
+    /// selection and whatever `reselect` would have restored, since their
+    /// bounds no longer mean anything. The defined pattern is kept.
+    pub fn crop(&mut self, rect: Rect) -> Result<(), String> {
+        if rect.x0 >= rect.x1 || rect.y0 >= rect.y1 || rect.x1 > self.width || rect.y1 > self.height
+        {
+            return Err(format!(
+                "Crop rectangle ({}, {})-({}, {}) must cover at least one pixel inside the {}×{} canvas.",
+                rect.x0, rect.y0, rect.x1, rect.y1, self.width, self.height
+            ));
+        }
+        let (new_width, new_height) = (rect.x1 - rect.x0, rect.y1 - rect.y0);
+        let old_width = self.width as usize;
+        for layer in &mut self.layers {
+            let mut cropped =
+                Vec::with_capacity(new_width as usize * new_height as usize * CHANNELS);
+            for y in rect.y0..rect.y1 {
+                let start = (y as usize * old_width + rect.x0 as usize) * CHANNELS;
+                let end = start + new_width as usize * CHANNELS;
+                cropped.extend_from_slice(&layer.pixels[start..end]);
+            }
+            layer.pixels = cropped;
+        }
+        self.width = new_width;
+        self.height = new_height;
+        self.selection = None;
+        self.last_selection = None;
+        Ok(())
+    }
+
+    /// Camera Raw Filter > Geometry > Constrain Crop: crops the document
+    /// to the largest axis-aligned rectangle of fully opaque pixels on
+    /// layer `id`, which is what a rotate, skew, perspective, or other
+    /// geometry correction leaves behind once its transparent corners are
+    /// cut away. The rectangle is found with the classic row-histogram
+    /// stack scan (every row's run of opaque pixels above it, then the
+    /// largest rectangle under each histogram), so it is exact, not a
+    /// heuristic; among equal areas the first found wins — scanning rows
+    /// top to bottom, that is the widest, topmost candidate. Returns the
+    /// rectangle it cropped to. Errors when the layer has no fully opaque
+    /// pixel at all, or is unknown. Camera Raw's own Constrain Crop is a
+    /// checkbox that re-applies as the sliders move; here it is a command
+    /// run once after the geometry is settled.
+    pub fn constrain_crop(&mut self, id: LayerId) -> Result<Rect, String> {
+        let (width, height) = (self.width as usize, self.height as usize);
+        let layer = self.layer(id)?;
+        let mut heights = vec![0u32; width];
+        let mut best: Option<(u32, Rect)> = None;
+        for y in 0..height {
+            for (x, run) in heights.iter_mut().enumerate() {
+                let alpha = layer.pixels[(y * width + x) * CHANNELS + 3];
+                *run = if alpha == 255 { *run + 1 } else { 0 };
+            }
+            let mut stack: Vec<usize> = Vec::new();
+            for x in 0..=width {
+                let current = if x < width { heights[x] } else { 0 };
+                while let Some(&top) = stack.last() {
+                    if heights[top] < current {
+                        break;
+                    }
+                    stack.pop();
+                    let run = heights[top];
+                    let left = stack.last().map_or(0, |&l| l + 1);
+                    let area = run * (x - left) as u32;
+                    let larger = match best {
+                        Some((area_so_far, _)) => area > area_so_far,
+                        None => true,
+                    };
+                    if larger {
+                        best = Some((
+                            area,
+                            Rect {
+                                x0: left as u32,
+                                y0: (y + 1) as u32 - run,
+                                x1: x as u32,
+                                y1: (y + 1) as u32,
+                            },
+                        ));
+                    }
+                }
+                stack.push(x);
+            }
+        }
+        let (_, rect) = best
+            .filter(|&(area, _)| area > 0)
+            .ok_or_else(|| "Constrain Crop needs at least one fully opaque pixel.".to_string())?;
+        self.crop(rect)?;
+        Ok(rect)
+    }
+
     fn layer(&self, id: LayerId) -> Result<&Layer, String> {
         let index = self.index_of(id)?;
         Ok(&self.layers[index])
@@ -25466,6 +25559,141 @@ mod tests {
         assert!(empty
             .camera_raw_geometry(999, GeometrySettings::default())
             .is_err());
+    }
+
+    #[test]
+    fn crop_resizes_the_canvas_and_every_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.add_layer("second", &solid(3, 3, [1, 2, 3, 4]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.crop(Rect {
+            x0: 1,
+            y0: 0,
+            x1: 3,
+            y1: 2,
+        })
+        .unwrap();
+        assert_eq!((doc.width(), doc.height()), (2, 2));
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![20, 0, 0, 255,  30, 0, 0, 255,
+                 50, 0, 0, 255,  60, 0, 0, 255]
+        );
+        assert_eq!(doc.layers()[1].pixels, solid(2, 2, [1, 2, 3, 4]));
+        assert!(doc.selection().is_none());
+        assert_eq!(pixel(&doc, id, 1, 1), [60, 0, 0, 255]);
+    }
+
+    #[test]
+    fn crop_rejects_an_empty_or_out_of_canvas_rectangle() {
+        let (mut doc, _) = ramped_3x3();
+        let empty = Rect {
+            x0: 1,
+            y0: 1,
+            x1: 1,
+            y1: 2,
+        };
+        assert!(doc.crop(empty).is_err());
+        let outside = Rect {
+            x0: 0,
+            y0: 0,
+            x1: 4,
+            y1: 3,
+        };
+        assert!(doc.crop(outside).is_err());
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+    }
+
+    #[test]
+    fn constrain_crop_finds_the_largest_fully_opaque_rectangle() {
+        // ramped_4x4 with the alpha mask
+        //   0 1 1 1
+        //   1 1 1 1
+        //   1 1 1 1
+        //   0 0 1 1
+        // whose unique largest opaque rectangle is columns 1..4 of rows
+        // 0..3 (nine pixels; the two eight-pixel candidates lose).
+        let (mut doc, id) = ramped_4x4();
+        for (x, y) in [(0, 0), (0, 3), (1, 3)] {
+            doc.layers[0].pixels[(y * 4 + x) * 4 + 3] = 0;
+        }
+        let rect = doc.constrain_crop(id).unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 1,
+                y0: 0,
+                x1: 4,
+                y1: 3
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![20, 30, 40], vec![60, 70, 80], vec![100, 110, 120]]
+        );
+        assert!(doc.layers()[0].pixels.chunks_exact(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn constrain_crop_trims_the_corners_a_rotation_leaves_transparent() {
+        // ramped_4x4 turned 45 degrees has transparent corners; the two
+        // eight-pixel candidates (the middle two rows, or the middle two
+        // columns) tie and the scan's first find -- the wide one -- wins.
+        let (mut doc, id) = ramped_4x4();
+        doc.rotate(id, 45.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![0, 50, 20, 0],
+                vec![90, 100, 70, 30],
+                vec![140, 110, 110, 80],
+                vec![0, 150, 120, 0]
+            ]
+        );
+        let rect = doc.constrain_crop(id).unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 1,
+                x1: 4,
+                y1: 3
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (4, 2));
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![90, 100, 70, 30], vec![140, 110, 110, 80]]
+        );
+    }
+
+    #[test]
+    fn constrain_crop_on_a_fully_opaque_layer_keeps_the_whole_canvas() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let rect = doc.constrain_crop(id).unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn constrain_crop_needs_an_opaque_pixel_and_a_known_layer() {
+        let (mut doc, id) = transparent_doc_wh(3, 3);
+        let err = doc.constrain_crop(id).unwrap_err();
+        assert!(err.contains("opaque"), "{err}");
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert!(doc.constrain_crop(999).is_err());
     }
 
     #[test]

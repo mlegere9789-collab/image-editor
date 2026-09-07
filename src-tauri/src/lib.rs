@@ -567,6 +567,13 @@ fn rotate_document_90(state: State<'_, AppState>, clockwise: bool) -> Result<Sna
     })
 }
 
+/// Camera Raw Filter > Geometry > Constrain Crop: crop the whole document to
+/// the largest fully opaque rectangle of layer `id`.
+#[tauri::command]
+fn constrain_crop(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.constrain_crop(id).map(|_| None))
+}
+
 /// Edit > Copy: captures layer `id`'s pixels — within the active selection,
 /// or the whole layer with none — into the clipboard, ready for [`paste`].
 /// Doesn't actually change the document; still returns a [`Snapshot`] (an
@@ -2897,6 +2904,7 @@ pub fn run() {
             flip_layer_vertical,
             rotate_layer_180,
             rotate_document_90,
+            constrain_crop,
             copy,
             cut,
             paste,

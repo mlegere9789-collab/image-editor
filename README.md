@@ -9539,6 +9539,66 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **977 Rust tests total** (972 → 977, 970 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 148 — Camera Raw Filter > Geometry > Constrain Crop
+
+`constrain_crop(id)` crops the whole document to the largest
+axis-aligned rectangle of fully opaque pixels on layer `id` — which is
+what a rotate, skew, perspective, or Geometry correction leaves behind
+once its transparent corners are cut away. It brings with it the first
+document-level crop this app has had: a new `crop(rect)` that resizes
+the canvas and every layer to `rect` (which must cover at least one
+pixel inside the canvas), and, like `rotate_document_90`, the only
+other operation that changes the canvas's dimensions, clears the active
+selection and whatever `reselect` would have restored, since their
+bounds no longer mean anything. The rectangle itself is found with the
+classic row-histogram stack scan — for each row, every column's run of
+opaque pixels ending there, then the largest rectangle under that
+histogram — so it is exact rather than a heuristic; among equal areas
+the first found wins, which, scanning rows top to bottom, is the
+widest, topmost candidate. The command returns the rectangle it cropped
+to, errors when the layer has no fully opaque pixel at all, and is a
+byte-for-byte no-op on a fully opaque layer. Camera Raw's own Constrain
+Crop is a checkbox that re-applies as the sliders move; here it is a
+command run once after the geometry is settled — a documented scope cut
+— exposed as a **Constrain Crop** button beside Geometry.
+
+**Verified two ways.** Six new `document.rs` tests. `crop` itself:
+cropping `ramped_3x3` plus a second solid layer to columns `1..3` of
+rows `0..2` yields a `2x2` document whose first layer is exactly `20 30
+/ 50 60` and whose second is the solid at the new size, with the
+selection cleared; an empty rectangle and one reaching past the canvas
+both error and leave the canvas alone. Then the scan: `ramped_4x4` with
+three pixels made transparent so the alpha mask reads `0111 / 1111 /
+1111 / 0011` has a unique largest opaque rectangle — columns `1..4` of
+rows `0..3`, nine pixels, beating both eight-pixel candidates — and
+cropping to it leaves a fully opaque `3x3` reading `[[20, 30, 40], [60,
+70, 80], [100, 110, 120]]`. `ramped_4x4` turned `45°` (Phase 136's
+mapping gives `[[0, 50, 20, 0], [90, 100, 70, 30], [140, 110, 110, 80],
+[0, 150, 120, 0]]`) has transparent corners and two tied eight-pixel
+candidates; the scan's first find, the wide one, wins, and the document
+becomes the `4x2` middle band `[[90, 100, 70, 30], [140, 110, 110, 80]]`.
+A fully opaque layer reports the whole canvas and is untouched; a fully
+transparent layer errors mentioning "opaque" without resizing, and an
+unknown layer errors. All six passed on the first run, the scan
+cross-checked in Python against a brute-force search over every
+rectangle on the two fixtures and on three hundred random masks up to
+`6x6` (identical areas throughout, and the same tie-break on the
+rotated fixture).
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**983 Rust tests total** (977 → 983, 976 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
