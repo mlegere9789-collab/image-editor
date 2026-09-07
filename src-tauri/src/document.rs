@@ -1575,6 +1575,60 @@ impl Document {
                 pixels[dst..dst + CHANNELS].copy_from_slice(&clipboard.pixels[src..src + CHANNELS]);
             }
         }
+        self.push_pixel_layer(name, pixels)
+    }
+
+    /// Edit > Paste Special > Paste Into: pastes `clipboard` as a new top
+    /// layer centred in the active selection — the layer's origin is the
+    /// selection's bounding box's top-left plus half the difference between
+    /// the two sizes, truncated toward zero — keeping only the pixels that
+    /// fall inside the selection's own shape, so an elliptical or bordered
+    /// selection clips the pasted content to that shape and not just to its
+    /// box. Anything off the canvas or outside the selection is left fully
+    /// transparent. Photoshop implements the clipping as a live layer mask;
+    /// this project's layer model has no masks, so it is baked in as
+    /// transparency — a documented scope cut. Errors when nothing is
+    /// selected, as Photoshop greys the command out.
+    pub fn paste_into(
+        &mut self,
+        clipboard: &Clipboard,
+        name: impl Into<String>,
+    ) -> Result<LayerId, String> {
+        let selection = self
+            .selection
+            .ok_or_else(|| "Paste Into needs an active selection.".to_string())?;
+        let bounds = selection.bounds;
+        let origin_x =
+            bounds.x0 as i64 + ((bounds.x1 - bounds.x0) as i64 - clipboard.width as i64) / 2;
+        let origin_y =
+            bounds.y0 as i64 + ((bounds.y1 - bounds.y0) as i64 - clipboard.height as i64) / 2;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let mut pixels = vec![0u8; self.buffer_len()];
+        for row in 0..clipboard.height as i64 {
+            let py = origin_y + row;
+            if py < 0 || py >= height {
+                continue;
+            }
+            for col in 0..clipboard.width as i64 {
+                let px = origin_x + col;
+                if px < 0 || px >= width {
+                    continue;
+                }
+                if !selection.contains(px as f32 + 0.5, py as f32 + 0.5) {
+                    continue;
+                }
+                let src = (row as usize * clipboard.width as usize + col as usize) * CHANNELS;
+                let dst = (py as usize * doc_width + px as usize) * CHANNELS;
+                pixels[dst..dst + CHANNELS].copy_from_slice(&clipboard.pixels[src..src + CHANNELS]);
+            }
+        }
+        Ok(self.push_pixel_layer(name, pixels))
+    }
+
+    /// Adds a new, visible, unlocked, Normal-blend top layer holding
+    /// `pixels` (already document sized) and returns its id.
+    fn push_pixel_layer(&mut self, name: impl Into<String>, pixels: Vec<u8>) -> LayerId {
         let id = self.next_id;
         self.next_id += 1;
         self.layers.push(Layer {
@@ -25161,6 +25215,93 @@ mod tests {
         doc.define_pattern(id).unwrap();
         doc.add_pattern_layer("solid 90").unwrap();
         assert_eq!(doc.layers()[1].pixels, solid(3, 3, [90, 0, 0, 255]));
+    }
+
+    fn grid_of(doc: &Document, layer: usize) -> Vec<Vec<u8>> {
+        let (w, h) = (doc.width() as usize, doc.height() as usize);
+        let p = &doc.layers()[layer].pixels;
+        (0..h)
+            .map(|y| (0..w).map(|x| p[(y * w + x) * 4]).collect())
+            .collect()
+    }
+
+    #[test]
+    fn paste_into_centres_the_clipboard_in_the_selection() {
+        // Copy the top-left 2x2 (10 20 / 40 50), then paste it into the
+        // bottom-right 2x2: it lands exactly there.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        let pasted = doc.paste_into(&clipboard, "into").unwrap();
+        assert_eq!(doc.layers()[1].id, pasted);
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 10, 20], vec![0, 40, 50]]
+        );
+        assert_eq!(pixel(&doc, pasted, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, pasted, 2, 2), [50, 0, 0, 255]);
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn paste_into_clips_a_larger_clipboard_to_the_selection() {
+        // The whole 3x3 into the bottom-right 2x2: a size difference of -1
+        // truncates to 0, so the clipboard's origin is the selection's own
+        // corner and only its top-left 2x2 is kept.
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.paste_into(&clipboard, "into").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 10, 20], vec![0, 40, 50]]
+        );
+    }
+
+    #[test]
+    fn paste_into_centres_with_truncation_toward_zero() {
+        // 3x3 into a single selected pixel at (2, 2): the origin is
+        // 2 + (1 - 3) / 2 = 1, so only clipboard (1, 1) = 50 lands inside.
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.paste_into(&clipboard, "into").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 0, 0], vec![0, 0, 50]]
+        );
+    }
+
+    #[test]
+    fn paste_into_clips_to_the_selection_shape_not_its_box() {
+        // A canvas-spanning ellipse on 4x4 excludes exactly the four corner
+        // pixels, whose centres lie sqrt(4.5) from the centre against a
+        // radius of 2.
+        let (mut doc, id) = ramped_4x4();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.paste_into(&clipboard, "into").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![
+                vec![0, 20, 30, 0],
+                vec![50, 60, 70, 80],
+                vec![90, 100, 110, 120],
+                vec![0, 140, 150, 0]
+            ]
+        );
+        assert_eq!(pixel(&doc, doc.layers()[1].id, 0, 0)[3], 0);
+        assert_eq!(pixel(&doc, doc.layers()[1].id, 1, 0)[3], 255);
+    }
+
+    #[test]
+    fn paste_into_without_a_selection_is_an_error() {
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        let err = doc.paste_into(&clipboard, "into").unwrap_err();
+        assert!(err.contains("selection"), "{err}");
+        assert_eq!(doc.layers().len(), 1);
     }
 
     #[test]

@@ -9429,6 +9429,60 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **967 Rust tests total** (963 → 967, 960 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 146 — Edit > Paste Special > Paste Into
+
+`paste_into(clipboard, name)` adds the one Paste Special variant this
+app was missing. Where `paste` (and Paste in Place) drops the clipboard
+back at its original coordinates, Paste Into centres it in the active
+selection — the new layer's origin is the selection's bounding box's
+top-left plus half the difference between the two sizes, truncated
+toward zero — and keeps only the pixels that fall inside the
+selection's own shape, so an elliptical or bordered selection clips the
+pasted content to that shape, not just to its bounding box. Anything
+off the canvas or outside the selection is left fully transparent.
+Photoshop implements the clipping as a live layer mask that can be
+moved and edited afterward; this project's layer model has no masks,
+so the mask is baked in as transparency — a documented scope cut,
+alongside the fact that the clipboard here is rectangular pixel data
+rather than a floating selection. It errors when nothing is selected
+(Photoshop greys the command out) and, at the command layer, when
+nothing has been copied yet. A new **Paste Into** button beside Paste
+is enabled only with both a clipboard and a selection.
+
+**Verified two ways.** Five new `document.rs` tests. Copying the
+top-left `2x2` of `ramped_3x3` (`10 20 / 40 50`) and pasting into a
+selection of the bottom-right `2x2` places it exactly there — `[[0, 0,
+0], [0, 10, 20], [0, 40, 50]]`, every kept pixel opaque, the vacated
+ones transparent — and the source layer is untouched. Pasting the whole
+`3x3` into that same `2x2` selection centres it (a size difference of
+`-1`, truncating to `0`, so the origin is the selection's corner) and
+clips it to the same four pixels, `10 20 / 40 50`. Pasting the whole
+`ramped_4x4` into an elliptical selection spanning the canvas keeps
+every pixel except the four corners, whose centres lie `√4.5 ≈ 2.12`
+from the ellipse's centre against a radius of `2` — exactly the
+selection's own `contains` rule, so what the paste keeps is what a
+brush would be allowed to paint. Pasting the whole `3x3` into a single
+selected pixel at `(2, 2)` pins the centring arithmetic's truncation
+toward zero: the origin is `2 + (1 - 3) / 2 = 1`, so only clipboard
+`(1, 1) = 50` lands inside. With no selection the call errors and adds
+no layer. All five passed on the first run; the
+kept pixels are read straight off the fixtures and the ellipse
+membership is the `Selection` type's own, already-tested rule.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**972 Rust tests total** (967 → 972, 965 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

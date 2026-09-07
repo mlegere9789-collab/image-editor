@@ -3149,6 +3149,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => void runCommand("paste_into", {}, "top")}
+            disabled={busy || !hasDocument || !canPaste || !document?.selection}
+            title="Edit > Paste Special > Paste Into (centred in the selection, clipped to it)"
+          >
+            Paste Into
+          </button>
+          <button
+            className="button button--quiet"
             onClick={deleteSelection}
             disabled={busy || selectedId === null}
             title="Edit > Delete"

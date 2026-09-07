@@ -613,6 +613,25 @@ fn paste(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Edit > Paste Special > Paste Into: paste the clipboard centred in the
+/// active selection, keeping only the pixels inside it. Errors if nothing
+/// has been copied yet or nothing is selected.
+#[tauri::command]
+fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let clipboard = {
+        let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "Nothing has been copied or cut yet.".to_string())?
+            .clone()
+    };
+    edit_checkpointed(&state, |document| {
+        document
+            .paste_into(&clipboard, "Pasted Layer")
+            .map(|_| None)
+    })
+}
+
 /// Layer > New > Layer via Copy on layer `id`: unlike [`copy`]/[`paste`],
 /// this never touches the clipboard at all.
 #[tauri::command]
@@ -2869,6 +2888,7 @@ pub fn run() {
             copy,
             cut,
             paste,
+            paste_into,
             new_layer_via_copy,
             new_layer_via_cut,
             delete_selection,
