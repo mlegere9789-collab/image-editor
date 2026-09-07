@@ -11593,7 +11593,7 @@ impl Document {
     /// The Levels and Curves dialogs' Gray Point eyedropper: clicking
     /// pixel `(x, y)` of layer `id` makes that pixel neutral by giving
     /// each channel its own gamma, chosen so the pixel's value in that
-    /// channel lands on the mean of its three channels (rounded) — for a
+    /// channel lands on the mean of its three channels — for a
     /// channel value `c` and target `t`, the exponent `ln(t/255) /
     /// ln(c/255)`, applied as `(v/255)^exponent` to every pixel's value
     /// `v` in that channel, so the clicked pixel's colour cast is removed
@@ -11610,14 +11610,83 @@ impl Document {
         y: u32,
     ) -> Result<Option<Rect>, String> {
         let [r, g, b, _] = self.layer_pixel(id, x, y)?;
-        let target = ((r as f32 + g as f32 + b as f32) / 3.0).round();
-        let exponent = |c: u8| -> Option<f32> {
-            if c == 0 || c == 255 || c as f32 == target {
+        self.neutralize_channels(id, [r as f32, g as f32, b as f32])
+    }
+
+    /// Image > Adjustments > Auto Color: Photoshop's "Find Dark & Light
+    /// Colors" plus "Snap Neutral Midtones". First each channel is
+    /// stretched to full range exactly as [`Self::auto_tone_clipped`]
+    /// does, with the same Clip percentages; then the mean colour of the
+    /// sampled pixels (the selection, or the whole layer) is measured on
+    /// the stretched result and every channel is given the gamma that
+    /// puts its mean on the mean of the three — [`Self::levels_gray_point`]
+    /// applied to the average colour rather than a clicked pixel — so an
+    /// overall cast is removed. A layer whose stretched channels already
+    /// average the same value is left exactly as Auto Tone leaves it.
+    /// Photoshop's own luminosity-preserving snap and its configurable
+    /// target colours are documented scope cuts, as they are for the
+    /// eyedroppers. Returns `None` when nothing was sampled.
+    pub fn auto_color(
+        &mut self,
+        id: LayerId,
+        shadow_clip: u32,
+        highlight_clip: u32,
+    ) -> Result<Option<Rect>, String> {
+        let Some(bounds) = self.auto_stretch(id, false, shadow_clip, highlight_clip)? else {
+            return Ok(None);
+        };
+        let selection = self.selection.clone();
+        let doc_width = self.width as usize;
+        let layer = self.layer(id)?;
+        let mut sums = [0u64; 3];
+        let mut count = 0u64;
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                count += 1;
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (sum, &value) in sums.iter_mut().zip(&layer.pixels[base..base + 3]) {
+                    *sum += value as u64;
+                }
+            }
+        }
+        if count == 0 {
+            return Ok(Some(bounds));
+        }
+        let means = [
+            sums[0] as f32 / count as f32,
+            sums[1] as f32 / count as f32,
+            sums[2] as f32 / count as f32,
+        ];
+        self.neutralize_channels(id, means)?;
+        Ok(Some(bounds))
+    }
+
+    /// [`Self::levels_gray_point`] and [`Self::auto_color`]'s shared
+    /// step: each channel gets the gamma that moves its `value` onto the
+    /// mean of the three, `(v/255)^(ln(target/255) / ln(value/255))` over
+    /// the whole layer; a channel already at the target, or at `0` or
+    /// `255` where no gamma can move it, is left alone. The target is the
+    /// exact mean, not a rounded one, so three equal values — a neutral
+    /// colour — always produce a no-op rather than a hair of gamma.
+    fn neutralize_channels(
+        &mut self,
+        id: LayerId,
+        values: [f32; 3],
+    ) -> Result<Option<Rect>, String> {
+        let target = (values[0] + values[1] + values[2]) / 3.0;
+        let exponent = |value: f32| -> Option<f32> {
+            if value <= 0.0 || value >= 255.0 || value == target {
                 return None;
             }
-            Some((target / 255.0).ln() / (c as f32 / 255.0).ln())
+            Some((target / 255.0).ln() / (value / 255.0).ln())
         };
-        let exponents = [exponent(r), exponent(g), exponent(b)];
+        let exponents = values.map(exponent);
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
             let apply = |v: u8, exponent: Option<f32>| match exponent {
                 Some(exponent) => to_byte(to_unit(v).powf(exponent)),
@@ -22061,6 +22130,81 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.levels_gray_point(id, 0, 0).is_err());
         assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
+    }
+
+    fn cast_fixture() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[40, 60, 80, 255, 140, 160, 180, 255, 200, 100, 60, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn auto_color_stretches_then_snaps_the_mean_to_neutral() {
+        // Stretch: R 40..200, G 60..160, B 60..180 → [0,0,43],
+        // [159,255,255], [255,102,0]; means 138 / 119 / 99.33, target
+        // 119: red's exponent 1.2413, green untouched, blue's 0.8084 —
+        // 43 → 60.48, 159 → 141.88 (Python f32 model).
+        let (mut doc, id) = cast_fixture();
+        doc.auto_color(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 60, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [142, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 102, 0, 255]);
+    }
+
+    #[test]
+    fn auto_color_on_a_neutral_layer_is_auto_tone() {
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_color(id, 500, 500).unwrap();
+        let (mut plain, plain_id) = grey_ramp_40();
+        plain.auto_tone_clipped(plain_id, 500, 500).unwrap();
+        assert_eq!(red_row(&doc, id), red_row(&plain, plain_id));
+        assert_eq!(&red_row(&doc, id)[..5], [0, 0, 0, 7, 15]);
+    }
+
+    #[test]
+    fn auto_color_measures_and_adjusts_only_the_selection() {
+        // Pixels 1-2 selected: their stretch gives [0,255,255] and
+        // [255,0,0], whose means are all 127.5 → target 128, and the
+        // tiny gamma cannot move 0 or 255; pixel 0 is untouched.
+        let (mut doc, id) = cast_fixture();
+        doc.select_rectangle(1.0, 0.0, 3.0, 1.0).unwrap();
+        doc.auto_color(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [40, 60, 80, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn auto_color_keeps_alpha() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[40, 60, 80, 10, 140, 160, 180, 128, 200, 100, 60, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.auto_color(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 60, 10]);
+        assert_eq!(pixel(&doc, id, 1, 0), [142, 255, 255, 128]);
+    }
+
+    #[test]
+    fn auto_color_propagates_errors() {
+        let (mut doc, id) = cast_fixture();
+        assert!(doc.auto_color(id, 1000, 0).is_err());
+        assert!(doc.auto_color(id + 1, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.auto_color(id, 0, 0).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [40, 60, 80, 255]);
     }
 
     #[test]

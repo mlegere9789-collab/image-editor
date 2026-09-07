@@ -5088,6 +5088,21 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("auto_color", {
+                id: selectedId,
+                shadowClip: levelsClipShadows,
+                highlightClip: levelsClipHighlights,
+              })
+            }
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Auto Color: stretch each channel, then snap the average colour to neutral"
+          >
+            Auto Color
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowMaximumDialog(true)}
             disabled={busy || !canPaint}
             title="Filter > Other > Maximum"
@@ -9678,6 +9693,22 @@ export default function App() {
                 onClick={() => setShowCurvesDialog(false)}
               >
                 Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={async () => {
+                  if (selectedId === null) return;
+                  await runCommand("auto_tone", {
+                    id: selectedId,
+                    shadowClip: levelsClipShadows,
+                    highlightClip: levelsClipHighlights,
+                  });
+                  setShowCurvesDialog(false);
+                }}
+                disabled={busy}
+                title="Auto: stretch each channel to full range with the Levels dialog's clip percentages"
+              >
+                Auto
               </button>
               <button
                 className="button button--quiet"

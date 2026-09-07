@@ -1171,6 +1171,20 @@ fn auto_tone(
     })
 }
 
+/// Image > Adjustments > Auto Color on layer `id`: the clipped per-channel
+/// stretch, then the mean snapped to neutral.
+#[tauri::command]
+fn auto_color(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shadow_clip: Option<u32>,
+    highlight_clip: Option<u32>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.auto_color(id, shadow_clip.unwrap_or(0), highlight_clip.unwrap_or(0))
+    })
+}
+
 /// Image > Adjustments > Auto Contrast on layer `id`.
 #[tauri::command]
 fn auto_contrast(
@@ -3745,6 +3759,7 @@ pub fn run() {
             equalize,
             auto_tone,
             auto_contrast,
+            auto_color,
             match_color,
             maximum,
             minimum,

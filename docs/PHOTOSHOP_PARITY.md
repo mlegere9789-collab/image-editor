@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 283.**
+**618 distinct capabilities tracked. Currently shipped: 285.**
 
 ## PART I — EVERY TOOL
 
@@ -464,10 +464,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Curves Histogram
 - [ ] Curves Baseline
 - [ ] Curves Intersection Line
-- [ ] Curves Auto
+- [x] Curves Auto (the Curves dialog's Auto button: Auto Tone with the Levels dialog's Clip percentages, the same `auto_tone_clipped` — see README Phase 198)
 - [x] Auto Tone (`auto_tone`, a two-pass sample-then-remap linear stretch: each RGB channel independently maps its own sampled minimum to 0 and maximum to 255, the same per-channel formula `levels` already applies with typed-in bounds instead of automatically sampled ones — see README Phase 111)
 - [x] Auto Contrast (`auto_contrast`, the same linear stretch as `auto_tone` but with one shared low/high computed across all three channels together, preserving colour balance the way independent per-channel stretching can't — see README Phase 111)
-- [ ] Auto Color
+- [x] Auto Color (`Document::auto_color`, Find Dark & Light Colors plus Snap Neutral Midtones: the clipped per-channel stretch of Auto Tone, then each channel given the gamma that puts its mean over the sampled pixels on the mean of the three; Photoshop's luminosity-preserving snap and target colours are documented scope cuts — see README Phase 198)
 - [x] Equalize (per-channel histogram equalisation via a CDF lookup table — see README Phase 28)
 - [x] Equalize Selected Area Only (histogram from the selection, only the selection remapped — see README Phase 28)
 - [x] Equalize Entire Image Based On Selected Area (histogram from the selection, whole layer remapped — see README Phase 28)

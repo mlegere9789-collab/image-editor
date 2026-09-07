@@ -12112,6 +12112,65 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1230 Rust tests total** (1225 → 1230, 1223 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 198 — Auto Color, and Curves Auto
+
+`Document::auto_color(id, shadow_clip, highlight_clip)` lifts Auto
+Color off the deferred list now that the Gray Point machinery exists.
+It is Photoshop's "Find Dark & Light Colors" followed by "Snap Neutral
+Midtones": first each channel is stretched to full range exactly as
+`auto_tone_clipped` does, with the same Clip percentages; then the
+mean colour of the sampled pixels (the selection, or the whole layer)
+is measured on the stretched result and every channel is given the
+gamma that puts its mean on the mean of the three — the Gray Point
+eyedropper applied to the average colour instead of a clicked pixel —
+so an overall cast is removed. The eyedropper's step was lifted into a
+private `neutralize_channels(id, values)` both share. Its target is now
+the *exact* mean of the three values rather than a rounded one: three
+equal values — a neutral colour — must be a no-op, and a rounded target
+was leaving a hair of gamma behind. Phase 197's numbers are unaffected,
+since its fixture's mean was the integer `150`. Photoshop's
+luminosity-preserving snap and configurable target colours remain
+documented scope cuts. An **Auto Color** button joins Auto Tone and
+Auto Contrast (using the Levels dialog's clip percentages), and the
+Curves dialog gains the same **Auto** button Levels has, so Curves Auto
+is checked off as well.
+
+**Verified two ways.** Five new `document.rs` tests, every byte first
+computed in Python emulating `f32` through both steps. On `[40, 60,
+80]`, `[140, 160, 180]`, `[200, 100, 60]` the stretch (red `40..200`,
+green `60..160`, blue `60..180`) gives `[0, 0, 43]`, `[159, 255, 255]`,
+`[255, 102, 0]`; the means are `138`, `119`, `99.33` with target
+`118.78`, so red's exponent is `1.2443`, green's `1.0025`, blue's
+`0.8104`, and the layer ends `[0, 0, 60]`, `[142, 255, 255]`, `[255,
+102, 0]` (`60.26`, `141.67`, `101.77`). On the forty-pixel grey ramp
+with `5%` clips the result is byte-identical to `auto_tone_clipped`.
+With only the last two pixels selected, their stretch is `[0, 255,
+255]` and `[255, 0, 0]`, whose means are all `127.5`, so nothing moves
+and the first pixel is untouched. Alpha `10` and `128` survive, and a
+`1000` clip, an unknown layer, and a locked layer error with the
+pixels intact. Four of the five passed on the first run: the neutral
+ramp came back one level high in a dozen places, because the rounded
+target (`128` for a `127.6` mean) was applying a `0.996` gamma to a
+layer that should have been left alone. That was a design flaw in the
+shared step, not the test; the target was made exact, the Gray Point
+tests were re-run against the Python model with the exact target (the
+`[0, 128, 255]` case maps `128 → 127.67 → 128` and `50 → 49.69 → 50`,
+the same bytes), and all ten pass.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new buttons were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1235 Rust tests total** (1230 → 1235, 1228 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
