@@ -13709,6 +13709,59 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1385 Rust tests total** (1380 → 1385, 1378 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 229 — Indexed Color
+
+The mode family gains Indexed Color. A `Palette` is Exact, Uniform,
+or `Adaptive { colors }`, and `convert_to_indexed(palette)` builds the
+document's colour table from every layer's non-transparent pixels,
+snaps every pixel to its nearest entry, and sets the mode. Exact takes
+the distinct colours in first-seen order and refuses more than 256;
+Uniform is the 6×6×6 web cube `0, 51, … 255` in red-major order, each
+channel snapped to its nearest level; Adaptive counts colours, keeps
+the `colors` (2–256) most frequent — ties broken by the lower colour —
+and snaps the rest by squared RGB distance, the first entry winning a
+tie. Alpha is untouched. The table lives on the document
+(`color_table()`, its size in the view) and `constrain_color` snaps
+new paint and fills to it, so Indexed joins Grayscale and Bitmap in
+shaping what the brush may lay down; leaving the mode through
+`convert_mode` clears the table, and `convert_mode(Indexed)` chooses
+Exact when it fits and Uniform otherwise. The Mode select gains
+Indexed Color… with a Palette dialog (Exact, Uniform, Adaptive with
+its Colors count) and shows the table's size. Dithering, Local and
+Master palettes, Forced colours, Transparency, and Matte are
+documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, the Uniform
+snaps first checked in Python. Uniform turns `[10, 60, 130]` into `[0,
+51, 153]` and `[25, 26, 255]` into `[0, 51, 255]` keeping alpha, with
+a 216-entry table running from black through `[0, 0, 51]` to white.
+Exact keeps `[9, 8, 7]` and `[1, 2, 3]` in first-seen order ignoring a
+transparent pixel, accepts exactly 256 greys, refuses a 257th colour
+leaving the mode RGB, and `convert_mode(Indexed)` then falls back to
+Uniform's 216. Adaptive on red ×3, green ×2, blue ×2, and one
+near-red keeps red and, by the tie on two, the lexically lower blue,
+snapping near-red to red and green to red (the first of two equal
+distances); three colours keep all three and change only the
+near-red. In Indexed mode a Uniform fill snaps to `[0, 51, 153]` and
+an Exact brush dab of `[0, 200, 0]` lands on the table's green. Colors
+`1` and `257` are refused with nothing changed, a one-colour image
+with Colors `2` tables that colour alone, and converting to Grayscale
+empties the table. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-six: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1390 Rust tests total** (1385 → 1390, 1383 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 372.**
+**618 distinct capabilities tracked. Currently shipped: 373.**
 
 ## PART I — EVERY TOOL
 
@@ -392,7 +392,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] CMYK Color Mode
 - [x] Grayscale Mode (`convert_mode(Grayscale)` replaces every layer pixel's colour with its BT.601 luma, alpha kept, and from then on brush strokes, Fill, and the Paint Bucket lay down the colour's luma as a grey through `constrain_color`; the size ratio option is a documented scope cut — see README Phase 228)
 - [x] Bitmap Mode (`convert_mode(Bitmap, method)` with 50% Threshold, Pattern Dither on the 4×4 Bayer matrix, or Diffusion Dither by Floyd–Steinberg; paint and fills then lay down black or white; output resolution, halftone screen, and custom pattern are documented scope cuts — see README Phase 228)
-- [ ] Indexed Color Mode
+- [x] Indexed Color Mode (`convert_to_indexed(palette)` with Exact — the image's own colours, at most 256 — Uniform, the 6×6×6 web cube, or Adaptive, the N most frequent colours (2–256) by popularity; every pixel snaps to its nearest table entry and paint and fills are constrained to the table; dithering, Local/Master palettes, Forced, Transparency, and Matte are documented scope cuts — see README Phase 229)
 - [ ] Duotone Mode
 - [ ] Multichannel Mode
 - [ ] Lab Color Mode

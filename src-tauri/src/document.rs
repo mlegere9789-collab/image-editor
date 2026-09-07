@@ -131,6 +131,8 @@ pub struct Document {
     saved_selections: Vec<(String, Selection)>,
     /// Image > Mode — see [`ColorMode`].
     mode: ColorMode,
+    /// Indexed Color's colour table, empty in every other mode.
+    color_table: Vec<[u8; 3]>,
     /// Alpha channels made by Image > Calculations, in creation order —
     /// a byte per pixel each, discarded like every other position-bound
     /// thing when the canvas changes size.
@@ -365,6 +367,21 @@ pub enum ColorMode {
     Rgb,
     Grayscale,
     Bitmap,
+    /// Every pixel one of at most 256 colours in the document's colour
+    /// table — see [`Palette`].
+    Indexed,
+}
+
+/// Image > Mode > Indexed Color's Palette: Exact keeps the image's own
+/// colours when there are at most 256; Uniform is the 6×6×6 web cube;
+/// Adaptive keeps the `colors` most frequent colours (2..=256) and snaps
+/// everything else to the nearest of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Palette {
+    Exact,
+    Uniform,
+    Adaptive { colors: u16 },
 }
 
 /// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
@@ -1575,6 +1592,8 @@ pub struct DocumentView {
     pub channels: Vec<String>,
     /// Image > Mode.
     pub mode: ColorMode,
+    /// How many colours Indexed Color's table holds; `0` in other modes.
+    pub color_table_size: usize,
 }
 
 impl Document {
@@ -1594,6 +1613,7 @@ impl Document {
             pattern: None,
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
+            color_table: Vec::new(),
             channels: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
@@ -1637,7 +1657,117 @@ impl Document {
             groups: self.groups.clone(),
             channels: self.channels.iter().map(|c| c.name.clone()).collect(),
             mode: self.mode,
+            color_table_size: self.color_table.len(),
         }
+    }
+
+    /// Indexed Color's colour table — empty in every other mode.
+    pub fn color_table(&self) -> &[[u8; 3]] {
+        &self.color_table
+    }
+
+    /// The table entry nearest `rgb` by squared distance, the first on a
+    /// tie; `rgb` itself with an empty table.
+    fn nearest_table_color(&self, [r, g, b]: [u8; 3]) -> [u8; 3] {
+        let mut best: Option<([u8; 3], i32)> = None;
+        for &entry in &self.color_table {
+            let d = |a: u8, c: u8| {
+                let diff = i32::from(a) - i32::from(c);
+                diff * diff
+            };
+            let distance = d(entry[0], r) + d(entry[1], g) + d(entry[2], b);
+            if best.map_or(true, |(_, best_distance)| distance < best_distance) {
+                best = Some((entry, distance));
+            }
+        }
+        best.map_or([r, g, b], |(entry, _)| entry)
+    }
+
+    /// Image > Mode > Indexed Color: builds the colour table by `palette`
+    /// from every layer's non-transparent pixels, snaps every pixel to its
+    /// nearest entry, and sets the mode. Exact takes the distinct colours
+    /// in first-seen order and refuses more than 256; Uniform is the
+    /// 6×6×6 cube `0, 51, … 255` in red-major order, each channel snapped
+    /// to its nearest level; Adaptive counts colours, keeps the `colors`
+    /// most frequent (ties broken by the lower colour), and snaps the rest
+    /// to the nearest kept entry by squared RGB distance, the first on a
+    /// tie. Alpha is untouched; transparent pixels contribute nothing to
+    /// the table but are snapped like any other. Dithering, Local and
+    /// Master palettes, Forced colours, Transparency, and Matte are
+    /// documented scope cuts.
+    pub fn convert_to_indexed(&mut self, palette: Palette) -> Result<(), String> {
+        let table: Vec<[u8; 3]> = match palette {
+            Palette::Uniform => {
+                let mut cube = Vec::with_capacity(216);
+                for r in 0..6u8 {
+                    for g in 0..6u8 {
+                        for b in 0..6u8 {
+                            cube.push([r * 51, g * 51, b * 51]);
+                        }
+                    }
+                }
+                cube
+            }
+            Palette::Exact => {
+                let mut seen: Vec<[u8; 3]> = Vec::new();
+                for layer in &self.layers {
+                    for px in layer.pixels.chunks_exact(CHANNELS) {
+                        if px[3] == 0 {
+                            continue;
+                        }
+                        let rgb = [px[0], px[1], px[2]];
+                        if !seen.contains(&rgb) {
+                            if seen.len() == 256 {
+                                return Err(
+                                    "The image has more than 256 colours; choose another palette."
+                                        .to_string(),
+                                );
+                            }
+                            seen.push(rgb);
+                        }
+                    }
+                }
+                seen
+            }
+            Palette::Adaptive { colors } => {
+                if !(2..=256).contains(&colors) {
+                    return Err(format!("Colors must be between 2 and 256, not {colors}."));
+                }
+                let mut counts: std::collections::HashMap<[u8; 3], usize> =
+                    std::collections::HashMap::new();
+                for layer in &self.layers {
+                    for px in layer.pixels.chunks_exact(CHANNELS) {
+                        if px[3] == 0 {
+                            continue;
+                        }
+                        *counts.entry([px[0], px[1], px[2]]).or_insert(0) += 1;
+                    }
+                }
+                let mut ranked: Vec<([u8; 3], usize)> = counts.into_iter().collect();
+                ranked.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+                ranked
+                    .into_iter()
+                    .take(usize::from(colors))
+                    .map(|(rgb, _)| rgb)
+                    .collect()
+            }
+        };
+        self.color_table = table;
+        for index in 0..self.layers.len() {
+            let mut pixels = std::mem::take(&mut self.layers[index].pixels);
+            for px in pixels.chunks_exact_mut(CHANNELS) {
+                let snapped = if palette == Palette::Uniform {
+                    let level = |v: u8| ((v as f32 / 51.0).round() as u8) * 51;
+                    [level(px[0]), level(px[1]), level(px[2])]
+                } else {
+                    self.nearest_table_color([px[0], px[1], px[2]])
+                };
+                px[..3].copy_from_slice(&snapped);
+            }
+            self.layers[index].pixels = pixels;
+        }
+        self.mode = ColorMode::Indexed;
+        Ok(())
     }
 
     /// Image > Mode: the document's colour mode.
@@ -1651,6 +1781,10 @@ impl Document {
     pub fn constrain_color(&self, [r, g, b, a]: [u8; 4]) -> [u8; 4] {
         match self.mode {
             ColorMode::Rgb => [r, g, b, a],
+            ColorMode::Indexed => {
+                let [nr, ng, nb] = self.nearest_table_color([r, g, b]);
+                [nr, ng, nb, a]
+            }
             ColorMode::Grayscale => {
                 let v = ApplyChannel::Rgb.value([r, g, b, a]);
                 [v, v, v, a]
@@ -1680,15 +1814,24 @@ impl Document {
     /// masks and alpha channels are untouched. Photoshop's Bitmap dialog
     /// also offers output resolution, a halftone screen, and a custom
     /// pattern, and its Grayscale conversion offers a size ratio — all
-    /// documented scope cuts.
+    /// documented scope cuts. Indexed Color here is Exact when the image
+    /// has at most 256 colours and Uniform otherwise; the dialog's own
+    /// palette choice goes through [`Self::convert_to_indexed`].
     pub fn convert_mode(
         &mut self,
         mode: ColorMode,
         method: Option<BitmapMethod>,
     ) -> Result<(), String> {
         let (width, height) = (self.width as usize, self.height as usize);
+        self.color_table.clear();
         match mode {
             ColorMode::Rgb => {}
+            ColorMode::Indexed => {
+                return match self.convert_to_indexed(Palette::Exact) {
+                    Ok(()) => Ok(()),
+                    Err(_) => self.convert_to_indexed(Palette::Uniform),
+                };
+            }
             ColorMode::Grayscale => {
                 for layer in &mut self.layers {
                     for px in layer.pixels.chunks_exact_mut(CHANNELS) {
@@ -37396,6 +37539,129 @@ mod tests {
         doc.convert_mode(ColorMode::Rgb, None).unwrap();
         doc.fill_selection(id, [9, 8, 7, 255]).unwrap();
         assert_eq!(pixel(&doc, id, 1, 0), [9, 8, 7, 255]);
+    }
+
+    #[test]
+    fn indexed_uniform_snaps_each_channel_to_six_levels() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[10, 60, 130, 255, 25, 26, 255, 128], 2, 1)
+            .unwrap();
+        doc.convert_to_indexed(Palette::Uniform).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Indexed);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 51, 153, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 51, 255, 128]);
+        let table = doc.color_table();
+        assert_eq!(table.len(), 216);
+        assert_eq!(table[0], [0, 0, 0]);
+        assert_eq!(table[1], [0, 0, 51]);
+        assert_eq!(table[215], [255, 255, 255]);
+        assert_eq!(doc.view().color_table_size, 216);
+    }
+
+    #[test]
+    fn indexed_exact_keeps_up_to_256_colours() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[9, 8, 7, 255, 1, 2, 3, 255, 9, 8, 7, 0], 3, 1)
+            .unwrap();
+        doc.convert_to_indexed(Palette::Exact).unwrap();
+        // Unique colours in first-seen order, transparent pixels ignored.
+        assert_eq!(doc.color_table(), &[[9, 8, 7], [1, 2, 3]]);
+        assert_eq!(pixel(&doc, id, 0, 0), [9, 8, 7, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [9, 8, 7, 0]);
+        // 256 distinct greys fit; a 257th colour is one too many.
+        let mut doc = Document::new(16, 16).unwrap();
+        let mut pixels = Vec::new();
+        for v in 0..=255u8 {
+            pixels.extend_from_slice(&[v, v, v, 255]);
+        }
+        doc.add_layer("greys", &pixels, 16, 16).unwrap();
+        doc.convert_to_indexed(Palette::Exact).unwrap();
+        assert_eq!(doc.color_table().len(), 256);
+        doc.convert_mode(ColorMode::Rgb, None).unwrap();
+        doc.add_layer("extra", &[255, 0, 0, 255], 1, 1).unwrap();
+        assert!(doc.convert_to_indexed(Palette::Exact).is_err());
+        assert_eq!(doc.view().mode, ColorMode::Rgb);
+        // `convert_mode(Indexed)` picks Exact when it fits, else Uniform.
+        doc.convert_mode(ColorMode::Indexed, None).unwrap();
+        assert_eq!(doc.color_table().len(), 216);
+    }
+
+    #[test]
+    fn indexed_adaptive_keeps_the_most_popular_colours() {
+        // red ×3, green ×2, blue ×2, near-red ×1: two colours keep red and,
+        // by the tie on two, the lexically lower blue; near-red snaps to
+        // red and green to the nearer of red and blue — blue is 255² +
+        // 255² away, red the same, so the first, red, wins.
+        let mut doc = Document::new(8, 1).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            255, 0, 0, 255,  0, 255, 0, 255,  255, 0, 0, 255,  0, 0, 255, 255,
+            255, 0, 0, 255,  0, 255, 0, 255,  0, 0, 255, 255,  250, 0, 0, 255,
+        ];
+        let id = doc.add_layer("l", &pixels, 8, 1).unwrap();
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 })
+            .unwrap();
+        assert_eq!(doc.color_table(), &[[255, 0, 0], [0, 0, 255]]);
+        assert_eq!(pixel(&doc, id, 7, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 255, 255]);
+        // Three colours keep them all and change nothing but near-red.
+        let mut doc = Document::new(8, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 8, 1).unwrap();
+        doc.convert_to_indexed(Palette::Adaptive { colors: 3 })
+            .unwrap();
+        assert_eq!(doc.color_table(), &[[255, 0, 0], [0, 0, 255], [0, 255, 0]]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 7, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn indexed_mode_constrains_paint_to_the_table() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("l", &[0; 8], 2, 1).unwrap();
+        doc.convert_to_indexed(Palette::Uniform).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.fill_selection(id, [10, 60, 130, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 51, 153, 255]);
+        doc.deselect();
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[255, 0, 0, 255, 0, 255, 0, 255], 2, 1)
+            .unwrap();
+        doc.convert_to_indexed(Palette::Exact).unwrap();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            0.5,
+            Stroke::Brush {
+                color: [0, 200, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn indexed_validates_and_leaving_it_drops_the_table() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[7, 7, 7, 255], 1, 1).unwrap();
+        assert!(doc
+            .convert_to_indexed(Palette::Adaptive { colors: 1 })
+            .is_err());
+        assert!(doc
+            .convert_to_indexed(Palette::Adaptive { colors: 257 })
+            .is_err());
+        assert_eq!(doc.view().mode, ColorMode::Rgb);
+        assert!(doc.color_table().is_empty());
+        doc.convert_to_indexed(Palette::Adaptive { colors: 2 })
+            .unwrap();
+        assert_eq!(doc.color_table(), &[[7, 7, 7]]);
+        doc.convert_mode(ColorMode::Grayscale, None).unwrap();
+        assert!(doc.color_table().is_empty());
+        assert_eq!(doc.view().color_table_size, 0);
+        assert_eq!(pixel(&doc, id, 0, 0), [7, 7, 7, 255]);
     }
 
     #[test]

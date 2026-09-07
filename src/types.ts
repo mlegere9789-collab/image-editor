@@ -131,10 +131,14 @@ export type DocumentView = {
   channels: string[];
   /** Image > Mode. */
   mode: ColorMode;
+  /** How many colours Indexed Color's table holds; 0 in other modes. */
+  colorTableSize: number;
 };
 
-/** Mirrors `ColorMode` / `BitmapMethod` in src-tauri/src/document.rs. */
-export type ColorMode = "rgb" | "grayscale" | "bitmap";
+/** Mirrors `ColorMode` / `BitmapMethod` / `Palette` in
+ * src-tauri/src/document.rs. */
+export type ColorMode = "rgb" | "grayscale" | "bitmap" | "indexed";
+export type Palette = { kind: "exact" } | { kind: "uniform" } | { kind: "adaptive"; colors: number };
 export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:

@@ -1216,6 +1216,23 @@ fn convert_mode(
     })
 }
 
+/// Image > Mode > Indexed Color with the dialog's `palette`.
+#[tauri::command]
+fn convert_to_indexed(
+    state: State<'_, AppState>,
+    palette: document::Palette,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_to_indexed(palette)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Channels panel > New Channel: a black alpha channel, named `name` or
 /// the next free `Alpha N`.
 #[tauri::command]
@@ -4501,6 +4518,7 @@ pub fn run() {
             load_channel,
             add_channel,
             convert_mode,
+            convert_to_indexed,
             rename_channel,
             move_channel,
             delete_channel,

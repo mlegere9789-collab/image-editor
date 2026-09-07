@@ -27,6 +27,7 @@ import type {
   LevelsChannel,
   Measurement,
   MoveDirection,
+  Palette,
   SelectionMode,
   SelectionShape,
   ShapeBlurKernel,
@@ -326,6 +327,10 @@ export default function App() {
   // Image > Mode > Bitmap: its Method dialog.
   const [showBitmapDialog, setShowBitmapDialog] = useState(false);
   const [bitmapMethod, setBitmapMethod] = useState<BitmapMethod>("threshold");
+  // Image > Mode > Indexed Color: its Palette dialog.
+  const [showIndexedDialog, setShowIndexedDialog] = useState(false);
+  const [indexedPalette, setIndexedPalette] = useState<Palette["kind"]>("adaptive");
+  const [indexedColors, setIndexedColors] = useState(256);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
@@ -4641,6 +4646,8 @@ export default function App() {
                 const mode = event.target.value as ColorMode;
                 if (mode === "bitmap") {
                   setShowBitmapDialog(true);
+                } else if (mode === "indexed") {
+                  setShowIndexedDialog(true);
                 } else {
                   void runCommand("convert_mode", { mode, method: null });
                 }
@@ -4649,7 +4656,13 @@ export default function App() {
               <option value="rgb">RGB Color</option>
               <option value="grayscale">Grayscale</option>
               <option value="bitmap">Bitmap…</option>
+              <option value="indexed">Indexed Color…</option>
             </select>
+            {document?.mode === "indexed" && (
+              <span className="control__value" title="Colour table">
+                {document.colorTableSize} colours
+              </span>
+            )}
             <span className="control__value" title="The only depth this editor stores">
               8 Bits/Channel
             </span>
@@ -9316,6 +9329,72 @@ export default function App() {
                 onClick={() => {
                   void runCommand("convert_mode", { mode: "bitmap", method: bitmapMethod });
                   setShowBitmapDialog(false);
+                }}
+                disabled={busy}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showIndexedDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowIndexedDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Indexed Color"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Mode &gt; Indexed Color</h2>
+            <p className="modal__hint">
+              Builds a colour table and snaps every pixel to its nearest entry; paint and
+              fills then use table colours only.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Palette</span>
+              <select
+                value={indexedPalette}
+                onChange={(event) => setIndexedPalette(event.target.value as Palette["kind"])}
+              >
+                <option value="exact">Exact (up to 256 colours)</option>
+                <option value="uniform">Uniform (web 216)</option>
+                <option value="adaptive">Adaptive (most frequent)</option>
+              </select>
+            </label>
+            {indexedPalette === "adaptive" && (
+              <label className="control control--row">
+                <span className="control__label">Colors</span>
+                <input
+                  type="number"
+                  min={2}
+                  max={256}
+                  step={1}
+                  value={indexedColors}
+                  onChange={(event) =>
+                    setIndexedColors(Math.max(2, Math.min(256, Math.round(Number(event.target.value)))))
+                  }
+                />
+              </label>
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowIndexedDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  const palette: Palette =
+                    indexedPalette === "adaptive"
+                      ? { kind: "adaptive", colors: indexedColors }
+                      : { kind: indexedPalette };
+                  void runCommand("convert_to_indexed", { palette });
+                  setShowIndexedDialog(false);
                 }}
                 disabled={busy}
               >
