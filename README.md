@@ -15362,6 +15362,70 @@ fully green.
 **1530 Rust tests total** (1525 → 1530, 1523 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 258 — The Object Finder and Define Brush Preset
+
+`find_objects(id, tolerance)` is Object Selection's Object Finder:
+every object the finder can see on the layer — each 4-connected
+foreground component against the canvas edge's background colour
+within the tolerance, exactly as Mask All Objects finds them — as its
+bounding box, largest object first, read-only; Refresh is simply
+asking again after the picture changes. `select_found_object(mode, id,
+tolerance, index)` is the click on one of them: that object's pixels
+combined with the current selection per mode, an index past the list
+refused with the count. The Object Selection options gain an **Object
+Finder** button that lists the objects as buttons to select, turning
+into **Refresh objects**, with a close. `define_brush_tip(id)` is Edit
+> Define Brush Preset: the layer's opaque bounds captured as a
+`BrushTip` of coverages, each pixel's darkness times its alpha —
+`(255 − luma) / 255 · alpha / 255`, black opaque paint covering fully
+and white or transparent not at all — the way Photoshop reads a
+defined brush from a grayscale image; an empty layer or an all-white
+one is refused. `tip_stroke(id, points, color, spacing)` paints with
+it: the tip is stamped at every point and every `spacing` pixels
+along the segments between them, its centre on the point, each pixel
+taking the greatest tip coverage of any stamp that reaches it, times
+the selection's coverage, and the colour is laid `source-over` like
+the Brush at its alpha times that coverage. A **Define Brush Preset**
+button joins Define Pattern, and a **Tip** checkbox with a Spacing
+slider switches the Brush tool to the tip. Photoshop's tip scaling,
+angle, roundness, scatter, and texture are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every box and
+coverage traced by hand. On a black 7×6 canvas with a 2×2 red block at
+`(1, 1)` and a lone blue pixel at `(5, 4)`, the finder lists the block's
+box `(1, 1)–(3, 3)` first and the pixel's `(5, 4)–(6, 5)` second, a flat
+layer has no objects, and an unknown layer is refused; selecting the
+second object takes exactly that pixel, Add mode adds the block for
+five, and index `2` is refused with "only 2". A 3×3 mark of grey-`128`
+corners, a black centre, and transparent edges defines a 3×3 tip with
+`1` at the centre, `0` on the edges, and `127 / 255` in the corners,
+the document reporting a tip; an all-white layer and an empty one are
+refused. A plus-shaped tip stamped once at `(3.5, 3.5)` on a blank
+layer paints exactly the five pixels of the plus in the colour, a
+stroke from `1.5` to `4.5` at Spacing `1` stamps at columns `1`–`4`
+for `14` pixels reaching columns `0` and `5`, Spacing `3` stamps only
+the ends for `10`, and a grey-`128` tip lands opaque green at alpha
+`127`. Without a tip a stroke is refused, a three-column selection
+clips a 3×3 block to six pixels, Spacing `0` is refused, and a locked
+layer is refused. Four of the five passed on the first run: the
+along-a-segment test's expected pixel count was mis-counted by hand
+(the union of four overlapping plus-shaped stamps is 14 cells, not
+12); the test was corrected, not the stamping code.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and five: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The controls were reviewed by hand instead. Every
+other layer of this project's quality bar (hand-verified Rust tests,
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm run
+build`) is fully green.
+
+**1535 Rust tests total** (1530 → 1535, 1528 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

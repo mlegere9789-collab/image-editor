@@ -512,6 +512,13 @@ export default function App() {
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
   const [magicWandTolerance, setMagicWandTolerance] = useState(32);
+  /** A rectangle in document pixel-index coordinates, as `find_objects` returns. */
+  type ObjectBox = { x0: number; y0: number; x1: number; y1: number };
+  // Object Finder: the boxes it last found, or null when off.
+  const [foundObjects, setFoundObjects] = useState<ObjectBox[] | null>(null);
+  // Define Brush Preset: paint with the captured tip, stamped every Spacing pixels.
+  const [useBrushTip, setUseBrushTip] = useState(false);
+  const [tipSpacing, setTipSpacing] = useState(4);
   // Sharpen tool options: Protect Detail and Sample All Layers.
   // Magnetic Lasso options: the edge search reach in pixels and the
   // minimum edge strength (0-255) that counts as an edge.
@@ -4429,6 +4436,10 @@ export default function App() {
       } else {
         const [r, g, b] = hexToRgb(brushColor);
         const alpha = Math.round(brushOpacity * 255);
+        if (useBrushTip && document?.hasBrushTip) {
+          void runCommand("tip_stroke", { id: selectedId, points, color: [r, g, b, alpha], spacing: tipSpacing });
+          return;
+        }
         void runCommand("paint_stroke", {
           id: selectedId,
           points,
@@ -5506,6 +5517,26 @@ export default function App() {
         </button>
         <button
           className="button button--quiet"
+          onClick={() => {
+            if (selectedId !== null) void runCommand("define_brush_tip", { id: selectedId });
+          }}
+          disabled={busy || selectedId === null}
+          title="Edit > Define Brush Preset: the selected layer's opaque pixels as a tip, dark paint covering most"
+        >
+          Define Brush Preset
+        </button>
+        <label className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
+          <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
+          Tip {document?.hasBrushTip ? "" : "(none defined)"}
+        </label>
+        {useBrushTip && (
+          <label className="tools__slider">
+            Spacing {tipSpacing}
+            <input type="range" min={1} max={50} value={tipSpacing} onChange={(event) => setTipSpacing(Number(event.target.value))} />
+          </label>
+        )}
+        <button
+          className="button button--quiet"
           onClick={() => setShowGradientFillDialog(true)}
           disabled={busy || !hasDocument}
           title="Layer > New Fill Layer > Gradient"
@@ -6287,6 +6318,40 @@ export default function App() {
           >
             Mask All Objects
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId === null) return;
+              invoke<ObjectBox[]>("find_objects", { id: selectedId, tolerance: magicWandTolerance })
+                .then(setFoundObjects)
+                .catch((err) => setError(String(err)));
+            }}
+            disabled={busy || !canPaint}
+            title="Object Finder: list the objects on the layer (Refresh asks again)"
+          >
+            {foundObjects ? "Refresh objects" : "Object Finder"}
+          </button>
+          {foundObjects && (
+            <span className="tools__slider">
+              {foundObjects.map((box, i) => (
+                <button
+                  className="button button--quiet"
+                  key={i}
+                  onClick={() => {
+                    if (selectedId !== null) {
+                      void runCommand("select_found_object", { id: selectedId, tolerance: magicWandTolerance, index: i, mode: selectionMode });
+                    }
+                  }}
+                  title={`Object ${i + 1}: ${box.x1 - box.x0}×${box.y1 - box.y0} at (${box.x0}, ${box.y0})`}
+                >
+                  Object {i + 1}
+                </button>
+              ))}
+              <button className="button button--quiet" onClick={() => setFoundObjects(null)} title="Hide the Object Finder">
+                ×
+              </button>
+            </span>
+          )}
           <button
             className="button button--quiet"
             onClick={() => setShowGuidesDialog(true)}

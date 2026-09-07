@@ -3492,6 +3492,62 @@ fn select_sky(
     })
 }
 
+/// Object Selection's Object Finder: the objects on layer `id` as boxes,
+/// largest first. Read-only; Refresh asks again.
+#[tauri::command]
+fn find_objects(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+) -> Result<Vec<Rect>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.find_objects(id, tolerance)
+}
+
+/// Object Finder: select the `index`th found object.
+#[tauri::command]
+fn select_found_object(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+    index: usize,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_found_object(
+            mode.unwrap_or(document::SelectionMode::New),
+            id,
+            tolerance,
+            index,
+        )?;
+        Ok(None)
+    })
+}
+
+/// Edit > Define Brush Preset from layer `id`'s opaque pixels.
+#[tauri::command]
+fn define_brush_tip(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.define_brush_tip(id).map(|_| None)
+    })
+}
+
+/// Paint with the defined brush tip along `points` — one step of a
+/// gesture the frontend checkpointed, like [`paint_stroke`].
+#[tauri::command]
+fn tip_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    color: [u8; 4],
+    spacing: u32,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.tip_stroke(id, &points, color, spacing)
+    })
+}
+
 /// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
 /// rendered from `fill`.
 #[tauri::command]
@@ -5566,6 +5622,10 @@ pub fn run() {
             select_subject,
             remove_background,
             mask_all_objects,
+            find_objects,
+            select_found_object,
+            define_brush_tip,
+            tip_stroke,
             layer_at,
             group_layers,
             ungroup,

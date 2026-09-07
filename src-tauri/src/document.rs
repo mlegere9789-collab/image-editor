@@ -142,6 +142,8 @@ pub struct Document {
     /// as application-wide presets; here the one defined pattern lives on
     /// the document, so it travels through undo/redo like everything else.
     pattern: Option<Pattern>,
+    /// The brush tip Edit > Define Brush Preset captured, if any.
+    brush_tip: Option<BrushTip>,
     /// Select > Save Selection's named selections, in the order first
     /// saved — Photoshop stores these as alpha channels; here they are the
     /// selections themselves (a mask's bitmap shared through its `Arc`),
@@ -1374,6 +1376,16 @@ pub enum ArtStyle {
     Tight,
     /// The source averaged over twice `area` each way.
     Loose,
+}
+
+/// A brush tip captured by Edit > Define Brush Preset: a `width × height`
+/// grid of coverages in `0..=1`, each pixel's darkness times its alpha —
+/// see [`Document::define_brush_tip`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct BrushTip {
+    pub width: u32,
+    pub height: u32,
+    pub values: Vec<f32>,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -3206,6 +3218,8 @@ pub struct DocumentView {
     pub color_table_size: usize,
     /// Duotone's inks; empty in other modes.
     pub duotone: Vec<Ink>,
+    /// Whether Edit > Define Brush Preset has captured a tip.
+    pub has_brush_tip: bool,
 }
 
 impl Document {
@@ -3223,6 +3237,7 @@ impl Document {
             last_selection: None,
             last_transform: None,
             pattern: None,
+            brush_tip: None,
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
@@ -3282,6 +3297,7 @@ impl Document {
             mode: self.mode,
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
+            has_brush_tip: self.brush_tip.is_some(),
         }
     }
 
@@ -7167,6 +7183,228 @@ impl Document {
         }
         let (width, height) = (self.width, self.height);
         self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// Object Selection's Object Finder: every object the finder can see
+    /// on layer `id` — each 4-connected foreground component against the
+    /// canvas edge's background colour within `tolerance`, as Mask All
+    /// Objects finds them — as its bounding box, largest object first.
+    /// Read-only; Refresh is simply asking again. Errors when no object
+    /// is found or for an unknown layer.
+    pub fn find_objects(&self, id: LayerId, tolerance: u8) -> Result<Vec<Rect>, String> {
+        let region = vec![true; self.width as usize * self.height as usize];
+        let components = self.foreground_components(id, region, tolerance)?;
+        if components.is_empty() {
+            return Err("No object was found on this layer.".to_string());
+        }
+        let w = self.width as usize;
+        Ok(components
+            .iter()
+            .map(|component| {
+                let mut rect = Rect {
+                    x0: u32::MAX,
+                    y0: u32::MAX,
+                    x1: 0,
+                    y1: 0,
+                };
+                for &idx in component {
+                    let (x, y) = ((idx % w) as u32, (idx / w) as u32);
+                    rect.x0 = rect.x0.min(x);
+                    rect.y0 = rect.y0.min(y);
+                    rect.x1 = rect.x1.max(x + 1);
+                    rect.y1 = rect.y1.max(y + 1);
+                }
+                rect
+            })
+            .collect())
+    }
+
+    /// Object Finder's click: selects the `index`th object of
+    /// [`Self::find_objects`]'s list (largest first) on layer `id`,
+    /// combined with the current selection per `mode`. Errors for an
+    /// index past the list.
+    pub fn select_found_object(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        tolerance: u8,
+        index: usize,
+    ) -> Result<(), String> {
+        let region = vec![true; self.width as usize * self.height as usize];
+        let components = self.foreground_components(id, region, tolerance)?;
+        let Some(component) = components.get(index) else {
+            return Err(format!(
+                "The Object Finder sees only {} object(s) on this layer.",
+                components.len()
+            ));
+        };
+        let mut bits = vec![false; self.width as usize * self.height as usize];
+        for &idx in component {
+            bits[idx] = true;
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// Edit > Define Brush Preset: captures layer `id`'s opaque bounds as
+    /// the brush tip. Each pixel's coverage is its darkness times its
+    /// alpha — `(255 − luma) / 255 · alpha / 255`, black opaque paint
+    /// covering fully and white or transparent not at all — the way
+    /// Photoshop reads a defined brush from a grayscale image. Errors for
+    /// a layer with no opaque pixels, or one whose tip would be empty
+    /// (all white), or an unknown layer.
+    pub fn define_brush_tip(&mut self, id: LayerId) -> Result<(), String> {
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to define a brush from.".to_string())?;
+        let layer = self.layer(id)?;
+        let doc_width = self.width as usize;
+        let (width, height) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+        let mut values = Vec::with_capacity((width * height) as usize);
+        for y in bounds.y0..bounds.y1 {
+            for x in bounds.x0..bounds.x1 {
+                let base = (y as usize * doc_width + x as usize) * CHANNELS;
+                let [r, g, b, a] = [
+                    layer.pixels[base],
+                    layer.pixels[base + 1],
+                    layer.pixels[base + 2],
+                    layer.pixels[base + 3],
+                ];
+                let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                values.push(((255.0 - luma) / 255.0 * to_unit(a)).clamp(0.0, 1.0));
+            }
+        }
+        if values.iter().all(|&v| v <= 0.0) {
+            return Err("A brush tip needs some dark paint to capture.".to_string());
+        }
+        self.brush_tip = Some(BrushTip {
+            width,
+            height,
+            values,
+        });
+        Ok(())
+    }
+
+    pub fn brush_tip(&self) -> Option<&BrushTip> {
+        self.brush_tip.as_ref()
+    }
+
+    /// Painting with the defined brush tip: the tip is stamped at every
+    /// point of `points` and every `spacing` pixels along the segments
+    /// between them (`spacing ≥ 1`), its centre on the point, each pixel
+    /// taking the greatest tip coverage of any stamp that reaches it,
+    /// times the selection's coverage; `color` is then laid `source-over`
+    /// like the Brush at its alpha times that coverage. Errors when no
+    /// tip is defined, for a zero spacing, or for a locked or unknown
+    /// layer. Photoshop's tip scaling, angle, roundness, scatter, and
+    /// texture are documented scope cuts.
+    pub fn tip_stroke(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        color: [u8; 4],
+        spacing: u32,
+    ) -> Result<Option<Rect>, String> {
+        let tip = self
+            .brush_tip
+            .clone()
+            .ok_or_else(|| "Define Brush Preset first to paint with a tip.".to_string())?;
+        if spacing == 0 {
+            return Err("Spacing must be at least 1 pixel.".to_string());
+        }
+        if points.is_empty() {
+            return Ok(None);
+        }
+        if points
+            .iter()
+            .any(|(x, y)| !(x.is_finite() && y.is_finite()))
+        {
+            return Err("Stroke points must be finite coordinates.".to_string());
+        }
+        let selection = self.selection.clone();
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        // Every stamp centre.
+        let mut stamps: Vec<(f32, f32)> = vec![points[0]];
+        for pair in points.windows(2) {
+            let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
+            let len = (bx - ax).hypot(by - ay);
+            let steps = (len / spacing as f32).floor() as u32;
+            for step in 1..=steps {
+                let t = step as f32 * spacing as f32 / len;
+                stamps.push((ax + (bx - ax) * t, ay + (by - ay) * t));
+            }
+            if (len / spacing as f32).fract() > 1e-6 || steps == 0 {
+                stamps.push((bx, by));
+            }
+        }
+        let (half_w, half_h) = (tip.width as i64 / 2, tip.height as i64 / 2);
+        let mut coverage: std::collections::HashMap<(i64, i64), f32> =
+            std::collections::HashMap::new();
+        for (sx, sy) in stamps {
+            let (cx, cy) = (sx.floor() as i64, sy.floor() as i64);
+            for ty in 0..tip.height as i64 {
+                for tx in 0..tip.width as i64 {
+                    let v = tip.values[(ty * tip.width as i64 + tx) as usize];
+                    if v <= 0.0 {
+                        continue;
+                    }
+                    let (px, py) = (cx - half_w + tx, cy - half_h + ty);
+                    if px < 0 || py < 0 || px >= width || py >= height {
+                        continue;
+                    }
+                    let slot = coverage.entry((px, py)).or_insert(0.0);
+                    if v > *slot {
+                        *slot = v;
+                    }
+                }
+            }
+        }
+        let mut touched: Option<Rect> = None;
+        for ((px, py), mut c) in coverage {
+            if let Some(s) = &selection {
+                c *= s.coverage(px as f32 + 0.5, py as f32 + 0.5);
+            }
+            let source_alpha = to_unit(color[3]) * c;
+            if source_alpha <= 0.0 {
+                continue;
+            }
+            let base = (py as usize * doc_width + px as usize) * CHANNELS;
+            let dest_alpha = to_unit(layer.pixels[base + 3]);
+            let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
+            let dest = &mut layer.pixels[base..base + CHANNELS];
+            for (channel, &source_byte) in color.iter().enumerate().take(3) {
+                let cs = to_unit(source_byte);
+                let cb = to_unit(dest[channel]);
+                let out = if out_alpha > 0.0 {
+                    (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha)) / out_alpha
+                } else {
+                    0.0
+                };
+                dest[channel] = to_byte(out);
+            }
+            dest[3] = to_byte(out_alpha);
+            let here = Rect {
+                x0: px as u32,
+                y0: py as u32,
+                x1: px as u32 + 1,
+                y1: py as u32 + 1,
+            };
+            touched = Some(match touched {
+                None => here,
+                Some(r) => Rect {
+                    x0: r.x0.min(here.x0),
+                    y0: r.y0.min(here.y0),
+                    x1: r.x1.max(here.x1),
+                    y1: r.y1.max(here.y1),
+                },
+            });
+        }
+        Ok(touched)
     }
 
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
@@ -47961,6 +48199,171 @@ mod tests {
             .contains("locked"));
         assert!(doc
             .stroke(id, &[(1.5, 1.5)], 0.6, mixer([1, 2, 3], 0, 100, 0))
+            .unwrap_err()
+            .contains("locked"));
+    }
+
+    fn two_objects() -> (Document, LayerId) {
+        // A black background with a 2×2 red block at (1,1) and a lone blue
+        // pixel at (5,4).
+        let mut doc = Document::new(7, 6).unwrap();
+        let mut pixels = [0, 0, 0, 255].repeat(42);
+        for (x, y) in [(1, 1), (2, 1), (1, 2), (2, 2)] {
+            pixels[(y * 7 + x) * 4..(y * 7 + x) * 4 + 3].copy_from_slice(&[255, 0, 0]);
+        }
+        pixels[(4 * 7 + 5) * 4..(4 * 7 + 5) * 4 + 3].copy_from_slice(&[0, 0, 255]);
+        let id = doc.add_layer("objects", &pixels, 7, 6).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn object_finder_lists_every_object_largest_first_with_its_box() {
+        let (doc, id) = two_objects();
+        let found = doc.find_objects(id, 0).unwrap();
+        assert_eq!(
+            found,
+            vec![
+                Rect {
+                    x0: 1,
+                    y0: 1,
+                    x1: 3,
+                    y1: 3
+                },
+                Rect {
+                    x0: 5,
+                    y0: 4,
+                    x1: 6,
+                    y1: 5
+                },
+            ]
+        );
+        let (flat, fid) = grey_pixels_4x4([128; 16]);
+        assert!(flat.find_objects(fid, 0).unwrap_err().contains("object"));
+        assert!(doc.find_objects(999, 0).is_err());
+    }
+
+    #[test]
+    fn selecting_a_found_object_takes_only_that_object() {
+        let (mut doc, id) = two_objects();
+        doc.select_found_object(SelectionMode::New, id, 0, 1)
+            .unwrap();
+        let bits = doc.selected_bits().unwrap();
+        assert_eq!(bits.iter().filter(|&&b| b).count(), 1);
+        assert!(bits[4 * 7 + 5]);
+        doc.select_found_object(SelectionMode::Add, id, 0, 0)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap().iter().filter(|&&b| b).count(),
+            5
+        );
+        assert!(doc
+            .select_found_object(SelectionMode::New, id, 0, 2)
+            .unwrap_err()
+            .contains("only 2"));
+    }
+
+    fn tip_layer(values: [[u8; 4]; 9]) -> (Document, LayerId) {
+        let mut doc = Document::new(6, 6).unwrap();
+        let mut pixels = vec![0u8; 6 * 6 * 4];
+        for (n, px) in values.iter().enumerate() {
+            let (x, y) = (1 + n % 3, 1 + n / 3);
+            pixels[(y * 6 + x) * 4..(y * 6 + x) * 4 + 4].copy_from_slice(px);
+        }
+        let id = doc.add_layer("tip", &pixels, 6, 6).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn define_brush_preset_captures_the_opaque_bounds_as_a_darkness_tip() {
+        // A 3×3 mark: black centre, grey 128 corners, transparent edges.
+        let k = [0, 0, 0, 255];
+        let g = [128, 128, 128, 255];
+        let t = [0, 0, 0, 0];
+        let (mut doc, id) = tip_layer([g, t, g, t, k, t, g, t, g]);
+        doc.define_brush_tip(id).unwrap();
+        let tip = doc.brush_tip().unwrap();
+        assert_eq!((tip.width, tip.height), (3, 3));
+        assert_eq!(tip.values[4], 1.0);
+        assert_eq!(tip.values[1], 0.0);
+        assert!((tip.values[0] - 127.0 / 255.0).abs() < 1e-6);
+        assert!(doc.view().has_brush_tip);
+        // White paint leaves no tip; an empty layer has nothing to capture.
+        let (mut white, wid) = grey_pixels_4x4([255; 16]);
+        assert!(white.define_brush_tip(wid).unwrap_err().contains("dark"));
+        let mut empty = Document::new(2, 2).unwrap();
+        let eid = empty.add_layer("empty", &[0; 16], 2, 2).unwrap();
+        assert!(empty.define_brush_tip(eid).unwrap_err().contains("opaque"));
+    }
+
+    #[test]
+    fn tip_stroke_stamps_the_tip_along_the_path() {
+        let k = [0, 0, 0, 255];
+        let t = [0, 0, 0, 0];
+        let (mut doc, id) = tip_layer([t, k, t, k, k, k, t, k, t]);
+        doc.define_brush_tip(id).unwrap();
+        // One stamp at (3.5, 3.5) on a blank layer paints the plus around
+        // pixel (3, 3) in blue.
+        let blank = doc.add_layer("blank", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        doc.tip_stroke(blank, &[(3.5, 3.5)], [0, 0, 255, 255], 1)
+            .unwrap();
+        assert_eq!(
+            filled(&doc, blank),
+            vec![(3, 2), (2, 3), (3, 3), (4, 3), (3, 4)]
+        );
+        assert_eq!(pixel(&doc, blank, 3, 3), [0, 0, 255, 255]);
+        // Along a segment, stamps every `spacing` pixels: from 1.5 to 4.5
+        // at spacing 1 the plus lands at columns 1, 2, 3, 4.
+        let row = doc.add_layer("row", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        doc.tip_stroke(row, &[(1.5, 1.5), (4.5, 1.5)], [255, 0, 0, 255], 1)
+            .unwrap();
+        let hits = filled(&doc, row);
+        assert_eq!(hits.len(), 14);
+        assert!(
+            hits.contains(&(1, 0))
+                && hits.contains(&(4, 0))
+                && hits.contains(&(0, 1))
+                && hits.contains(&(5, 1))
+        );
+        // Spacing 3 stamps only the ends.
+        let sparse = doc.add_layer("sparse", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        doc.tip_stroke(sparse, &[(1.5, 1.5), (4.5, 1.5)], [255, 0, 0, 255], 3)
+            .unwrap();
+        assert_eq!(filled(&doc, sparse).len(), 10);
+        // A grey tip paints at its darkness: 128 grey → coverage 127/255,
+        // so opaque paint lands at alpha 127.
+        let g = [128, 128, 128, 255];
+        let (mut soft, sid) = tip_layer([t, t, t, t, g, t, t, t, t]);
+        soft.define_brush_tip(sid).unwrap();
+        let target = soft.add_layer("target", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        soft.tip_stroke(target, &[(2.5, 2.5)], [0, 255, 0, 255], 1)
+            .unwrap();
+        assert_eq!(pixel(&soft, target, 2, 2), [0, 255, 0, 127]);
+    }
+
+    #[test]
+    fn tip_stroke_needs_a_tip_and_respects_the_selection_and_locks() {
+        let mut doc = Document::new(6, 6).unwrap();
+        let id = doc.add_layer("blank", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        assert!(doc
+            .tip_stroke(id, &[(2.5, 2.5)], [255, 0, 0, 255], 1)
+            .unwrap_err()
+            .contains("Define Brush"));
+        let k = [0, 0, 0, 255];
+        let (mut doc, tid) = tip_layer([k; 9]);
+        doc.define_brush_tip(tid).unwrap();
+        let id = doc.add_layer("blank", &[0; 6 * 6 * 4], 6, 6).unwrap();
+        doc.select_rectangle(0.0, 0.0, 3.0, 6.0).unwrap();
+        doc.tip_stroke(id, &[(2.5, 2.5)], [255, 0, 0, 255], 1)
+            .unwrap();
+        // The 3×3 block around (2,2) is clipped to the selected columns 0–2.
+        assert_eq!(filled(&doc, id).len(), 6);
+        assert!(doc
+            .tip_stroke(id, &[(2.5, 2.5)], [255, 0, 0, 255], 0)
+            .unwrap_err()
+            .contains("Spacing"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .tip_stroke(id, &[(2.5, 2.5)], [255, 0, 0, 255], 1)
             .unwrap_err()
             .contains("locked"));
     }

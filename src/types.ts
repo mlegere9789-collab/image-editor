@@ -201,6 +201,8 @@ export type DocumentView = {
   duotone: Ink[];
   /** Spot colour channels, in overprinting order. */
   spots: SpotChannelView[];
+  /** Whether Edit > Define Brush Preset has captured a tip. */
+  hasBrushTip: boolean;
 };
 
 /** Mirrors `SpotChannelView` in src-tauri/src/document.rs: a spot colour

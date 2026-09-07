@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 470.**
+**618 distinct capabilities tracked. Currently shipped: 473.**
 
 ## PART I — EVERY TOOL
 
@@ -194,7 +194,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Pattern Presets
 - [ ] Custom Shapes
 - [x] Define Pattern (`define_pattern`, captures the selected layer's own pixels inside a plain rectangular selection — or the whole layer with none — as the document's one pattern, for pattern fills to tile; elliptical/rounded/inverted/bordered selections error as Photoshop's own greyed-out command would. Application-wide pattern presets are a documented scope cut: the pattern lives on the document and travels through undo — see README Phase 143)
-- [ ] Define Brush Preset
+- [x] Define Brush Preset (`define_brush_tip`, the selected layer's opaque bounds captured as a tip of darkness-times-alpha coverages, and `tip_stroke`, which stamps it every Spacing pixels along the path and lays the brush colour at its coverage; tip scaling, angle, roundness, scatter, and texture are documented scope cuts — see README Phase 258)
 - [x] Paint Symmetry (`stroke_symmetric`, every Brush, Eraser, and Pattern Stamp stroke repeated mirrored about the canvas's vertical centre line, horizontal centre line, or both — Photoshop's Vertical, Horizontal, and Dual Axis — chosen from a Symmetry drop-down in the tool options; Circular, Spiral, Mandala, and Radial are documented scope cuts — see README Phase 170)
 - [x] Layer Comps (`save_layer_comp` / `apply_layer_comp` / `delete_layer_comp`, named snapshots of every layer's visibility, opacity, and blend mode stored on the document — undoable, listed in the view, restored by name with since-deleted layers skipped and since-added layers left alone; Photoshop's position and layer-style capture are documented scope cuts — see README Phase 171)
 - [x] Smart Guides (`snap_move`, a Move tool drop snapped so an edge of what is moved lands on a guide, another visible layer's opaque edge, or the canvas edge when within 8 px, each axis independently; centre snapping and the pink alignment lines are documented scope cuts — see README Phase 215)
@@ -305,8 +305,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Object Selection — Lasso Mode (`select_object_in_lasso_with`, the region is a freehand outline's polygon — see README Phase 209)
 - [x] Object Selection — Add (`SelectionMode::Add`, Shift while dragging — see README Phase 209)
 - [x] Object Selection — Subtract (`SelectionMode::Subtract`, Alt while dragging — see README Phase 209)
-- [ ] Object Selection — Object Finder
-- [ ] Object Selection — Object Finder Refresh
+- [x] Object Selection — Object Finder (`find_objects`, every object Mask All Objects would find as a bounding box, largest first, and `select_found_object` to select one by its place in that list, combined by the selection mode — see README Phase 258)
+- [x] Object Selection — Object Finder Refresh (the Refresh objects button asks `find_objects` again after the picture changes — see README Phase 258)
 - [x] Object Selection — Hard Edge (always on: the found object is a hard-edged pixel mask; the soft-edged alternative is a documented scope cut — see README Phase 209)
 - [x] Quick Selection — Brush Size (the stroke's radius is the Brush Size; a wider dab seeds more pixels and so a wider colour range — see README Phase 207)
 - [x] Quick Selection — Hardness (`quick_select_hard(…, hardness)`: only the brush's core, `hardness` percent of its radius and never under half a pixel, seeds the colour grow; `100` is the whole brush; the tool's Hardness slider — see README Phase 241)
