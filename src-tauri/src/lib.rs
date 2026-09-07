@@ -2077,9 +2077,20 @@ fn sharpen_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     strength: u8,
+    protect_detail: Option<bool>,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Sharpen { strength })
+        document.stroke(
+            id,
+            &points,
+            radius,
+            Stroke::Sharpen {
+                strength,
+                protect_detail: protect_detail.unwrap_or(false),
+                sample_all_layers: sample_all_layers.unwrap_or(false),
+            },
+        )
     })
 }
 

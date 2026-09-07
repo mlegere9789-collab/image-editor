@@ -352,6 +352,9 @@ export default function App() {
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
   const [magicWandTolerance, setMagicWandTolerance] = useState(32);
+  // Sharpen tool options: Protect Detail and Sample All Layers.
+  const [sharpenProtectDetail, setSharpenProtectDetail] = useState(false);
+  const [sharpenSampleAll, setSharpenSampleAll] = useState(false);
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
@@ -3129,6 +3132,9 @@ export default function App() {
           points,
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
+          ...(tool === "sharpen"
+            ? { protectDetail: sharpenProtectDetail, sampleAllLayers: sharpenSampleAll }
+            : {}),
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
@@ -3180,6 +3186,8 @@ export default function App() {
       spongeSaturate,
       symmetry,
       magicWandTolerance,
+      sharpenProtectDetail,
+      sharpenSampleAll,
     ],
   );
 
@@ -5928,6 +5936,28 @@ export default function App() {
                   {shapeRadius}px
                 </label>
               )}
+            </>
+          )}
+          {tool === "sharpen" && (
+            <>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={sharpenProtectDetail}
+                  disabled={!canPaint}
+                  onChange={(event) => setSharpenProtectDetail(event.target.checked)}
+                />
+                Protect Detail
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={sharpenSampleAll}
+                  disabled={!canPaint}
+                  onChange={(event) => setSharpenSampleAll(event.target.checked)}
+                />
+                Sample All Layers
+              </label>
             </>
           )}
           {(tool === "colorReplace" || tool === "backgroundEraser") && (

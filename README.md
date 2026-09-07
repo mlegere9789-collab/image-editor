@@ -12223,6 +12223,54 @@ run build`) is fully green.
 **1240 Rust tests total** (1235 → 1240, 1233 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 200 — Sharpen tool: Protect Detail and Sample All Layers
+
+`Stroke::Sharpen` grows the Sharpen tool's two options-bar checkboxes.
+**Protect Detail** leaves a channel alone when its local contrast —
+`|sampled − blurred|`, the very difference the tool would amplify — is
+under `PROTECT_DETAIL_THRESHOLD`, eight levels, so flat noise is not
+sharpened into speckle; Photoshop's own Protect Detail is an
+undisclosed halo-and-noise suppressor, and a fixed contrast threshold
+(Unsharp Mask's Threshold at 8) is this project's explicit stand-in.
+**Sample All Layers** measures the sharpening on the pre-stroke
+*composite* rather than the layer alone — `stroke` now builds that
+composite with `composite_pixel` before the layer is mutably borrowed,
+only when the option is on — and paints the resulting change onto the
+current layer's own pre-stroke value, so a sharpen stroke on an empty
+layer can pull contrast up from the layers beneath it, as in Photoshop.
+The `sharpen_stroke` command takes both flags (defaulting off) and the
+Sharpen tool's options bar gains the two checkboxes.
+
+**Verified two ways.** Five new `document.rs` tests on `ramped_3x3`,
+whose radius-1 local contrasts a Python model of the clamped box blur
+gives as `−13 −10 −6 / −3 0 4 / 7 10 14`. Protect Detail at full
+strength leaves the five channels under eight in magnitude alone, so
+the grid is `0 10 30 / 40 50 60 / 70 90 104` against the unprotected
+`0 10 24 / 37 50 64 / 77 90 104`; at half strength the corner still
+moves to `4` while the protected `(2, 0)` stays `30` rather than `27`.
+A fully transparent solid-`50` layer over the ramp has no contrast of
+its own — without Sample All Layers the stroke leaves every `50` — but
+with it the composite is the ramp, whose contrasts land on the `50`s
+as `37 40 44 / 47 50 54 / 57 60 64` with alpha still `0`. On a lone
+opaque layer the option is byte-identical to the plain stroke, and
+both options together on the transparent layer give the gated `37 40
+50 / 50 50 50 / 50 60 64`. A one-pixel selection confines the stroke
+and a locked layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new checkboxes were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1245 Rust tests total** (1240 → 1245, 1238 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

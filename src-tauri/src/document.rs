@@ -7514,6 +7514,24 @@ impl Document {
             })?),
             _ => None,
         };
+        // Sample All Layers reads the pre-stroke composite, which has to be
+        // built before the layer is mutably borrowed.
+        let composite_snapshot: Option<Vec<u8>> = match stroke {
+            Stroke::Sharpen {
+                sample_all_layers: true,
+                ..
+            } => {
+                let this: &Document = self;
+                let mut pixels = Vec::with_capacity(this.buffer_len());
+                for y in 0..this.height {
+                    for x in 0..this.width {
+                        pixels.extend_from_slice(&crate::composite::composite_pixel(this, x, y));
+                    }
+                }
+                Some(pixels)
+            }
+            _ => None,
+        };
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -7844,8 +7862,17 @@ impl Document {
                         }
                         continue;
                     }
-                    Stroke::Sharpen { strength } => {
-                        let source = snapshot.as_ref().expect("taken above");
+                    Stroke::Sharpen {
+                        strength,
+                        protect_detail,
+                        sample_all_layers,
+                    } => {
+                        let snapshot = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot
+                        };
                         let blurred = box_blur_at(
                             source,
                             width as usize,
@@ -7857,8 +7884,12 @@ impl Document {
                         );
                         let amount = f32::from(strength) / 100.0 * c;
                         for (channel, slot) in layer.pixels[base..base + 3].iter_mut().enumerate() {
-                            let original = f32::from(source[base + channel]);
-                            let diff = original - f32::from(blurred[channel]);
+                            let sampled = f32::from(source[base + channel]);
+                            let diff = sampled - f32::from(blurred[channel]);
+                            if protect_detail && diff.abs() < PROTECT_DETAIL_THRESHOLD {
+                                continue;
+                            }
+                            let original = f32::from(snapshot[base + channel]);
                             *slot = (original + diff * amount).round().clamp(0.0, 255.0) as u8;
                         }
                         continue;
@@ -13502,7 +13533,17 @@ pub enum Stroke<'a> {
     /// unsharp-mask formula `original + (original − blurred) · amount`
     /// (clamped, no threshold) that Filter > Sharpen uses, with alpha left
     /// alone. Reads the same pre-stroke snapshot as Blur.
-    Sharpen { strength: u8 },
+    Sharpen {
+        strength: u8,
+        /// Protect Detail: leave a channel alone when its local contrast
+        /// (`|sampled − blurred|`) is under [`PROTECT_DETAIL_THRESHOLD`],
+        /// so flat noise is not amplified into speckle.
+        protect_detail: bool,
+        /// Sample All Layers: measure the sharpening from the pre-stroke
+        /// composite rather than this layer alone, then paint the
+        /// resulting change onto this layer.
+        sample_all_layers: bool,
+    },
     /// The Clone Stamp tool: paints, at each covered pixel, the pre-stroke
     /// layer's pixel `offset` away — the sampling source set by Alt-click
     /// minus the stroke's first point, kept for later strokes (Photoshop's
@@ -13578,6 +13619,12 @@ pub enum Stroke<'a> {
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
+/// The Sharpen tool's Protect Detail gate: a channel whose local contrast
+/// is below this many levels is left alone. Photoshop's own Protect Detail
+/// is an undisclosed halo-and-noise suppressor; a fixed contrast threshold
+/// — Unsharp Mask's Threshold at 8 — is this project's explicit stand-in.
+pub const PROTECT_DETAIL_THRESHOLD: f32 = 8.0;
+
 fn point_segment_distance(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
     let len_sq = dx * dx + dy * dy;
@@ -19943,8 +19990,17 @@ mod tests {
         // original + (original - box blur): the corner 10 - 13 clamps to 0,
         // the far corner 90 + 14 = 104, the centre stays 50.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Sharpen {
+                strength: 100,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(
             red_channel_grid(&doc),
             vec![vec![0, 10, 24], vec![37, 50, 64], vec![77, 90, 104]]
@@ -19959,13 +20015,31 @@ mod tests {
         // Half strength: 10 - 6.5 = 3.5 -> 4 and 90 + 7 = 97; strength 0 is
         // an identity.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 50 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Sharpen {
+                strength: 50,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 0, 0)[0], 4);
         assert_eq!(pixel(&doc, id, 2, 2)[0], 97);
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 0 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Sharpen {
+                strength: 0,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
     }
 
@@ -19974,23 +20048,50 @@ mod tests {
         // Pixel (1, 0) sits sqrt(0.5) from (1, 1): coverage 0.7929, so 20
         // moves by -10 * 0.7929 to 12.07 -> 12.
         let (mut doc, id) = ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Sharpen { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            1.0,
+            Stroke::Sharpen {
+                strength: 100,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 1, 0)[0], 12);
     }
 
     #[test]
     fn sharpen_tool_leaves_alpha_alone_and_respects_the_selection() {
         let (mut doc, id) = depth_ramped_3x3();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Sharpen {
+                strength: 100,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
         assert_eq!(pixel(&doc, id, 0, 1)[3], 0);
 
         let (mut doc, id) = ramped_3x3();
         doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
-        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
-            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::Sharpen {
+                strength: 100,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
+        )
+        .unwrap();
         assert_eq!(pixel(&doc, id, 2, 2)[0], 104);
         assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
     }
@@ -20002,7 +20103,11 @@ mod tests {
             id,
             &[(0.0, 0.0), (3.0, 3.0)],
             3.0,
-            Stroke::Sharpen { strength: 100 },
+            Stroke::Sharpen {
+                strength: 100,
+                protect_detail: false,
+                sample_all_layers: false,
+            },
         )
         .unwrap();
         assert_eq!(
@@ -20011,7 +20116,16 @@ mod tests {
         );
         doc.set_locked(id, true).unwrap();
         assert!(doc
-            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
+            .stroke(
+                id,
+                &[(1.0, 1.0)],
+                3.0,
+                Stroke::Sharpen {
+                    strength: 100,
+                    protect_detail: false,
+                    sample_all_layers: false
+                }
+            )
             .is_err());
     }
 
@@ -22349,6 +22463,108 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.shape_blur(id, ShapeBlurKernel::Diamond, 1).is_err());
         assert_eq!(pixel(&doc, id, 2, 2)[0], 60);
+    }
+
+    fn sharpen(strength: u8, protect_detail: bool, sample_all_layers: bool) -> Stroke<'static> {
+        Stroke::Sharpen {
+            strength,
+            protect_detail,
+            sample_all_layers,
+        }
+    }
+
+    /// `red_channel_grid` for a chosen layer rather than the bottom one.
+    fn red_channel_grid_of(doc: &Document, id: LayerId) -> Vec<Vec<u8>> {
+        (0..doc.height())
+            .map(|y| (0..doc.width()).map(|x| pixel(doc, id, x, y)[0]).collect())
+            .collect()
+    }
+
+    #[test]
+    fn sharpen_protect_detail_skips_low_contrast_channels() {
+        // The ramp's local contrasts are -13 -10 -6 / -3 0 4 / 7 10 14:
+        // the five below 8 in magnitude are left alone, the rest sharpen
+        // exactly as before.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sharpen(100, true, false))
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 30], vec![40, 50, 60], vec![70, 90, 104]]
+        );
+    }
+
+    #[test]
+    fn sharpen_protect_detail_gates_before_the_strength_scales() {
+        // Half strength: the corner still moves (10 - 6.5 → 4) while the
+        // protected (2, 0) stays at 30 rather than 27.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sharpen(50, true, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 4);
+        assert_eq!(pixel(&doc, id, 2, 0)[0], 30);
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 97);
+    }
+
+    #[test]
+    fn sharpen_sample_all_layers_measures_the_composite() {
+        // A fully transparent solid-50 layer over the ramp: alone it has
+        // no contrast to sharpen, but the composite is the ramp, whose
+        // contrasts are painted onto the 50s — and alpha stays 0.
+        let (mut doc, _bottom) = ramped_3x3();
+        let top = doc
+            .add_layer("top", &solid(3, 3, [50, 50, 50, 0]), 3, 3)
+            .unwrap();
+        doc.stroke(top, &[(1.0, 1.0)], 3.0, sharpen(100, false, true))
+            .unwrap();
+        assert_eq!(
+            red_channel_grid_of(&doc, top),
+            vec![vec![37, 40, 44], vec![47, 50, 54], vec![57, 60, 64]]
+        );
+        assert_eq!(pixel(&doc, top, 0, 0)[3], 0);
+        let (mut doc, _bottom) = ramped_3x3();
+        let top = doc
+            .add_layer("top", &solid(3, 3, [50, 50, 50, 0]), 3, 3)
+            .unwrap();
+        doc.stroke(top, &[(1.0, 1.0)], 3.0, sharpen(100, false, false))
+            .unwrap();
+        assert_eq!(red_channel_grid_of(&doc, top), vec![vec![50; 3]; 3]);
+    }
+
+    #[test]
+    fn sharpen_sample_all_layers_on_a_lone_opaque_layer_is_unchanged() {
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sharpen(100, false, true))
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 24], vec![37, 50, 64], vec![77, 90, 104]]
+        );
+        // Both options together: the composite's contrasts, gated.
+        let (mut doc, _bottom) = ramped_3x3();
+        let top = doc
+            .add_layer("top", &solid(3, 3, [50, 50, 50, 0]), 3, 3)
+            .unwrap();
+        doc.stroke(top, &[(1.0, 1.0)], 3.0, sharpen(100, true, true))
+            .unwrap();
+        assert_eq!(
+            red_channel_grid_of(&doc, top),
+            vec![vec![37, 40, 50], vec![50, 50, 50], vec![50, 60, 64]]
+        );
+    }
+
+    #[test]
+    fn sharpen_options_respect_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sharpen(100, true, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 104);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, sharpen(100, true, true))
+            .is_err());
     }
 
     #[test]

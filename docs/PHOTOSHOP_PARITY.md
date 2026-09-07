@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 286.**
+**618 distinct capabilities tracked. Currently shipped: 288.**
 
 ## PART I — EVERY TOOL
 
@@ -493,8 +493,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Sharpen More (one-click preset: unsharp mask at radius 1, 100%, no threshold — see README Phase 25)
 - [x] Smart Sharpen (`smart_sharpen`, `unsharp_mask`'s own sharpening formula with no threshold gate, blended back toward a `median_at`-denoised copy by Reduce Noise percent — a documented, transparent approximation of Photoshop's own proprietary noise-aware deconvolution sharpening, composed entirely from two already-verified primitives — see README Phase 114)
 - [x] Unsharp Mask (built on the existing box_blur convolution as its low-pass filter, with an Amount/Radius/Threshold dialog — see README Phase 22)
-- [ ] Protect Detail
-- [ ] Sample All Layers — Sharpen
+- [x] Protect Detail (the Sharpen tool's `protect_detail`: a channel whose local contrast is under 8 levels is left alone, so flat noise is not amplified — an explicit fixed-threshold stand-in for Photoshop's undisclosed suppressor — see README Phase 200)
+- [x] Sample All Layers — Sharpen (the Sharpen tool's `sample_all_layers`: the sharpening is measured on the pre-stroke composite and the change painted onto the current layer — see README Phase 200)
 - [x] Add Noise (seeded xorshift32 noise with Amount / Distribution / Monochromatic controls — see README Phase 27)
 - [x] Uniform Noise (Add Noise's Uniform distribution — see README Phase 27)
 - [x] Gaussian Noise (Add Noise's Gaussian distribution, an Irwin–Hall mean-of-three approximation — see README Phase 27)
