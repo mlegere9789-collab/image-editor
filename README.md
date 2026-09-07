@@ -8759,6 +8759,68 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **904 Rust tests total** (900 → 904, 897 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 134 — Camera Raw Filter > Curve > Parametric Curve
+
+`parametric_curve(id, highlights, lights, darks, shadows)` completes
+the Camera Raw Curve panel alongside Phase 130's Point Curve. Its four
+sliders — Highlights, Lights, Darks, Shadows, each `-100..=100` in
+Camera Raw's own top-to-bottom order — each lift or lower one quarter
+of the tonal range without moving its neighbours. The tone curve is
+piecewise linear through nine knots at inputs `0, 32, 64, …, 224, 255`;
+the five knots at `0`, `64`, `128`, `192`, `255` are the four bands'
+fixed boundaries, so black, white, and the three splits never move and
+the curve is guaranteed monotonic whatever the sliders say, and each
+slider moves its own band's centre knot by `slider / 100 × 32` —
+Shadows the knot at `32`, Darks at `96`, Lights at `160`, Highlights at
+`224` — so `+100` raises a band's centre all the way up to its upper
+boundary and `-100` lowers it to its lower one. The curve is applied
+identically to all three channels with the same straight-segment
+interpolation `curves` uses (`y0 + t × (y1 - y0)`, rounded). Camera
+Raw's own parametric curve blends its four regions with smooth,
+overlapping falloffs and lets the three split points be dragged; this
+project's own fixed quarter splits and tent-per-band linear shape are a
+documented simplification, the same trade `curves` already made against
+Photoshop's spline, chosen over guessing Camera Raw's own falloff
+widths. Sliders clamp rather than error, like Color Balance's. A new
+**Parametric Curve…** dialog exposes the four sliders and a Reset
+button.
+
+**Verified two ways.** Five new `document.rs` tests. Shadows `+50`
+moves the knot at `32` to `48`, so on `ramped_3x3` every value below
+`32` scales by `1.5` (`10 → 15`, `20 → 30`, `30 → 45`), values between
+`32` and the fixed `64` interpolate from `48` to `64` (`40 → 48 + 8/32 ×
+16 = 52`, `50 → 57`, `60 → 62`), and `70`, `80`, `90` — in the
+untouched Darks band and above — reproduce exactly, all nine pixels
+checked at once. Highlights `-100` moves the knot at `224` down to `192`,
+flattening `192..224` onto `192` (`200 → 192`, `224 → 192`) and
+stretching `224..255` from `192` back up to the fixed `255` (`240 → 192
++ 16/31 × 63 = 224.5 → 225`), while `190` below the band is untouched.
+With every slider at `+100`, a row of the eight knot inputs `32, 64, 96,
+128, 160, 192, 224, 255` comes back as `64, 64, 128, 128, 192, 192, 255,
+255` — each centre reaching its upper boundary, each boundary
+unmoved. All-zero sliders are a byte-for-byte identity, and `9999`
+clamps to the same result as `100`. A one-pixel selection confines the
+lift and a locked/unknown layer errors. All five passed on the first
+run, every value cross-checked against an independent Python port of
+the nine-knot interpolation emulating Rust's `f32` arithmetic and
+rounding via `struct.pack`/`unpack` round-tripping — which also
+confirmed the zero curve reproduces all 256 inputs and the all-`+100`
+curve is monotonic across the whole range.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**909 Rust tests total** (904 → 909, 902 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

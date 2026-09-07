@@ -9988,6 +9988,51 @@ impl Document {
     ) -> Result<Option<Rect>, String> {
         self.replace_color(id, target, range, hue, saturation, luminance)
     }
+
+    /// Camera Raw Filter > Curve > Parametric Curve: four sliders —
+    /// Highlights, Lights, Darks, Shadows, each `-100..=100` — that each
+    /// lift or lower one quarter of the tonal range without moving its
+    /// neighbours. The tone curve is piecewise linear through nine knots
+    /// at inputs `0, 32, 64, …, 224, 255`; the five knots at `0`, `64`,
+    /// `128`, `192`, `255` are the four bands' fixed boundaries (so black,
+    /// white, and the three splits never move and the curve stays
+    /// monotonic), and each slider moves its own band's centre knot by
+    /// `slider / 100 × 32` — Shadows the knot at `32`, Darks at `96`,
+    /// Lights at `160`, Highlights at `224` — so `+100` raises a band's
+    /// centre all the way to its upper boundary and `-100` lowers it to
+    /// its lower one. Applied identically to all three channels, like
+    /// [`Self::curves`], whose straight-segment interpolation this
+    /// shares. Camera Raw's own parametric curve blends its regions with
+    /// smooth overlapping falloffs and lets the three split points be
+    /// dragged; this project's own fixed quarter splits and
+    /// tent-per-band linear shape are a documented simplification, the
+    /// same trade [`Self::curves`] already made against Photoshop's
+    /// spline. Sliders clamp rather than error, like Color Balance's.
+    pub fn parametric_curve(
+        &mut self,
+        id: LayerId,
+        highlights: i32,
+        lights: i32,
+        darks: i32,
+        shadows: i32,
+    ) -> Result<Option<Rect>, String> {
+        const XS: [f32; 9] = [0.0, 32.0, 64.0, 96.0, 128.0, 160.0, 192.0, 224.0, 255.0];
+        let mut ys = XS;
+        for (index, slider) in [(1, shadows), (3, darks), (5, lights), (7, highlights)] {
+            ys[index] = XS[index] + slider.clamp(-100, 100) as f32 / 100.0 * 32.0;
+        }
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |c: u8| {
+                let x = c as f32;
+                let seg = ((x / 32.0) as usize).min(7);
+                let (x0, x1) = (XS[seg], XS[seg + 1]);
+                let (y0, y1) = (ys[seg], ys[seg + 1]);
+                let t = (x - x0) / (x1 - x0);
+                (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
+            };
+            [apply(r), apply(g), apply(b), a]
+        })
+    }
 }
 
 /// The centre hue, in degrees, of each of Camera Raw's eight Color Mixer
@@ -23413,6 +23458,94 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.point_color(999, [10, 20, 30], 50, 120, 0, 0).is_err());
+    }
+
+    #[test]
+    fn parametric_curve_shadows_slider_lifts_only_the_darkest_band() {
+        // Shadows +50 moves the knot at input 32 from 32 to 48. Below it
+        // every value scales by 48/32 = 1.5: 10 -> 15, 20 -> 30, 30 -> 45.
+        // Between 32 and the fixed knot at 64: 40 -> 48 + 8/32 * 16 = 52,
+        // 50 -> 48 + 18/32 * 16 = 57, 60 -> 48 + 28/32 * 16 = 62. From 64
+        // up nothing moved: 70, 80, 90 are untouched.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.parametric_curve(id, 0, 0, 0, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        let got: Vec<u8> = (0..9).map(|i| p[idx(i % 3, i / 3)]).collect();
+        assert_eq!(got, [15, 30, 45, 52, 57, 62, 70, 80, 90]);
+    }
+
+    #[test]
+    fn parametric_curve_highlights_slider_lowers_only_the_brightest_band() {
+        // Highlights -100 moves the knot at 224 down to 192, flattening
+        // 192..224 onto 192 (200 -> 192, 224 -> 192) and stretching
+        // 224..255 from 192 back up to the fixed 255 (240 -> 192 + 16/31 *
+        // 63 = 224.5 -> 225). 190, below the band, is untouched.
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[
+                    200, 200, 200, 255, 224, 224, 224, 255, 240, 240, 240, 255, 190, 190, 190, 255,
+                ],
+                4,
+                1,
+            )
+            .unwrap();
+        doc.parametric_curve(id, -100, 0, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [192, 192, 192, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [192, 192, 192, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [225, 225, 225, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [190, 190, 190, 255]);
+    }
+
+    #[test]
+    fn parametric_curve_band_boundaries_never_move() {
+        // With every slider at +100, each band's centre knot reaches its
+        // upper boundary (32 -> 64, 96 -> 128, 160 -> 192, 224 -> 255)
+        // while the boundaries 64, 128, 192 and the endpoints stay put.
+        let mut doc = Document::new(8, 1).unwrap();
+        let mut pixels = Vec::new();
+        for v in [32u8, 64, 96, 128, 160, 192, 224, 255] {
+            pixels.extend([v, v, v, 255]);
+        }
+        let id = doc.add_layer("row", &pixels, 8, 1).unwrap();
+        doc.parametric_curve(id, 100, 100, 100, 100).unwrap();
+        let got: Vec<u8> = (0..8).map(|x| pixel(&doc, id, x, 0)[0]).collect();
+        assert_eq!(got, [64, 64, 128, 128, 192, 192, 255, 255]);
+    }
+
+    #[test]
+    fn parametric_curve_at_zero_is_the_identity_and_sliders_clamp() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.parametric_curve(id, 0, 0, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        let (mut clamped, id_a) = ramped_3x3();
+        let (mut at_max, id_b) = ramped_3x3();
+        clamped.parametric_curve(id_a, 0, 0, 0, 9999).unwrap();
+        at_max.parametric_curve(id_b, 0, 0, 0, 100).unwrap();
+        assert_eq!(clamped.layers()[0].pixels, at_max.layers()[0].pixels);
+    }
+
+    #[test]
+    fn parametric_curve_is_confined_to_the_selection_and_propagates_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        doc.parametric_curve(id, 0, 0, 0, 50).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 45);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]);
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.parametric_curve(id, 0, 0, 0, 50).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.parametric_curve(999, 0, 0, 0, 50).is_err());
     }
 
     #[test]

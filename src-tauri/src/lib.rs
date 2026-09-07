@@ -2644,6 +2644,21 @@ fn point_color(
     })
 }
 
+/// Camera Raw Filter > Curve > Parametric Curve on layer `id`.
+#[tauri::command]
+fn parametric_curve(
+    state: State<'_, AppState>,
+    id: LayerId,
+    highlights: i32,
+    lights: i32,
+    darks: i32,
+    shadows: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.parametric_curve(id, highlights, lights, darks, shadows)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2899,6 +2914,7 @@ pub fn run() {
             color_grading,
             color_mixer,
             point_color,
+            parametric_curve,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -250,6 +250,8 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showParametricCurveDialog, setShowParametricCurveDialog] = useState(false);
+  const [parametricCurve, setParametricCurve] = useState<number[]>([0, 0, 0, 0]);
   const [showPointColorDialog, setShowPointColorDialog] = useState(false);
   const [pointColorTarget, setPointColorTarget] = useState("#ff0000");
   const [pointColorRange, setPointColorRange] = useState(40);
@@ -1010,6 +1012,17 @@ export default function App() {
     pointColorSaturation,
     pointColorLuminance,
   ]);
+
+  const setParametricCurveValue = useCallback((index: number, value: number) => {
+    setParametricCurve((values) => values.map((v, i) => (i === index ? value : v)));
+  }, []);
+
+  const applyParametricCurve = useCallback(async () => {
+    if (selectedId === null) return;
+    const [highlights, lights, darks, shadows] = parametricCurve;
+    await runCommand("parametric_curve", { id: selectedId, highlights, lights, darks, shadows });
+    setShowParametricCurveDialog(false);
+  }, [runCommand, selectedId, parametricCurve]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3328,6 +3341,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowParametricCurveDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Curve > Parametric Curve"
+          >
+            Parametric Curve…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5457,6 +5478,59 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPointColor} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showParametricCurveDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowParametricCurveDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Parametric Curve"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Curve &gt; Parametric Curve
+            </h2>
+            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map((name, index) => (
+              <label className="control" key={name}>
+                <span className="control__label">
+                  {name}
+                  <span className="control__value">{parametricCurve[index]}</span>
+                </span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={parametricCurve[index]}
+                  onChange={(event) =>
+                    setParametricCurveValue(index, Number(event.target.value))
+                  }
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setParametricCurve([0, 0, 0, 0])}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowParametricCurveDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyParametricCurve} disabled={busy}>
                 Apply
               </button>
             </div>
