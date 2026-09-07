@@ -797,3 +797,13 @@ body {
 .warp-mesh__points input {
   width: 4.5rem;
 }
+
+/* Edit > Puppet Warp's pins on the mesh preview. */
+.puppet-pin {
+  fill: #ffd34d;
+  cursor: grab;
+}
+.puppet-pin--selected {
+  fill: #ff8a3d;
+  stroke: #ffffff;
+}

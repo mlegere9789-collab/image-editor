@@ -239,6 +239,24 @@ export type WarpStyle =
   | "squeeze"
   | "twist";
 
+/** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
+ * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
+ * draws (vertices, where the pins move them, triangles as indices). */
+export type PuppetMode = "rigid" | "normal" | "distort";
+export type PuppetDensity = "fewer" | "normal" | "more";
+export type PuppetPin = { source: [number, number]; target: [number, number]; depth: number };
+export type PuppetWarpOptions = {
+  mode: PuppetMode;
+  density: PuppetDensity;
+  expansion: number;
+  pins: PuppetPin[];
+};
+export type PuppetMesh = {
+  vertices: [number, number][];
+  deformed: [number, number][];
+  triangles: [number, number, number][];
+};
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness. */
 export type Proof = "protanopia" | "deuteranopia";

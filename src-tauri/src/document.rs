@@ -649,6 +649,207 @@ impl WarpMesh {
     }
 }
 
+/// Edit > Puppet Warp's Mode: how the mesh moves between pins — see
+/// [`puppet_deform`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PuppetMode {
+    /// Rotation and translation only: the mesh keeps its shape.
+    Rigid,
+    /// Rotation, translation, and uniform scale.
+    Normal,
+    /// Any affine map, so the mesh may stretch and shear.
+    Distort,
+}
+
+/// Edit > Puppet Warp's Density: how fine the mesh is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PuppetDensity {
+    Fewer,
+    Normal,
+    More,
+}
+
+impl PuppetDensity {
+    /// The mesh's vertex spacing in pixels.
+    fn spacing(self) -> u32 {
+        match self {
+            PuppetDensity::Fewer => 12,
+            PuppetDensity::Normal => 6,
+            PuppetDensity::More => 3,
+        }
+    }
+}
+
+/// One Puppet Warp pin: where it was placed (`source`), where it was
+/// dragged (`target`), both in pixel-index coordinates, and its Pin
+/// Depth — a higher depth draws its part of the mesh over a lower one
+/// where the mesh folds.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PuppetPin {
+    pub source: [f32; 2],
+    pub target: [f32; 2],
+    #[serde(default)]
+    pub depth: i32,
+}
+
+/// Everything Edit > Puppet Warp applies at once — see
+/// [`Document::puppet_warp`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PuppetWarp {
+    pub mode: PuppetMode,
+    pub density: PuppetDensity,
+    /// Pixels the mesh extends beyond the layer's opaque bounds.
+    pub expansion: u32,
+    pub pins: Vec<PuppetPin>,
+}
+
+/// Puppet Warp's mesh for Show Mesh: the grid's vertices, where the pins
+/// move them, and its triangles as vertex indices — see
+/// [`Document::puppet_mesh`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PuppetMesh {
+    pub vertices: Vec<[f32; 2]>,
+    pub deformed: Vec<[f32; 2]>,
+    pub triangles: Vec<[usize; 3]>,
+}
+
+/// Where Puppet Warp's pins send the point `v`: moving-least-squares
+/// deformation (Schaefer, McPhail & Warren 2006) weighting each pin by
+/// the inverse square of its distance. About the weighted centroids
+/// `p*` and `q*` of the pins' sources and targets, Rigid fits the
+/// rotation `atan2(Σw·(p̂ × q̂), Σw·(p̂ · q̂))`, Normal that rotation
+/// scaled by `|Σw·(p̂ · q̂, p̂ × q̂)| / Σw·|p̂|²`, and Distort the least-
+/// squares affine map (falling back to Normal's fit with fewer than
+/// three pins or collinear ones); a point on a pin goes exactly to its
+/// target. Pins that agree on a rigid, similar, or affine map reproduce
+/// it exactly everywhere, so one pin is a move and two pins a turn.
+fn puppet_deform(v: [f32; 2], pins: &[PuppetPin], mode: PuppetMode) -> [f32; 2] {
+    if let Some(on_pin) = pins.iter().find(|pin| pin.source == v) {
+        return on_pin.target;
+    }
+    let (vx, vy) = (v[0] as f64, v[1] as f64);
+    let weights: Vec<f64> = pins
+        .iter()
+        .map(|pin| {
+            let (dx, dy) = (pin.source[0] as f64 - vx, pin.source[1] as f64 - vy);
+            1.0 / (dx * dx + dy * dy)
+        })
+        .collect();
+    let total: f64 = weights.iter().sum();
+    let mut p_star = (0.0f64, 0.0f64);
+    let mut q_star = (0.0f64, 0.0f64);
+    for (w, pin) in weights.iter().zip(pins) {
+        p_star.0 += w * pin.source[0] as f64;
+        p_star.1 += w * pin.source[1] as f64;
+        q_star.0 += w * pin.target[0] as f64;
+        q_star.1 += w * pin.target[1] as f64;
+    }
+    let p_star = (p_star.0 / total, p_star.1 / total);
+    let q_star = (q_star.0 / total, q_star.1 / total);
+    let hats: Vec<(f64, f64, f64, f64)> = pins
+        .iter()
+        .map(|pin| {
+            (
+                pin.source[0] as f64 - p_star.0,
+                pin.source[1] as f64 - p_star.1,
+                pin.target[0] as f64 - q_star.0,
+                pin.target[1] as f64 - q_star.1,
+            )
+        })
+        .collect();
+    let d = (vx - p_star.0, vy - p_star.1);
+    if mode == PuppetMode::Distort && pins.len() >= 3 {
+        let (mut a, mut b, mut c) = (0.0f64, 0.0f64, 0.0f64);
+        for (w, (px, py, _, _)) in weights.iter().zip(&hats) {
+            a += w * px * px;
+            b += w * px * py;
+            c += w * py * py;
+        }
+        let det = a * c - b * b;
+        if det.abs() > 1e-9 {
+            let (mut r00, mut r01, mut r10, mut r11) = (0.0f64, 0.0f64, 0.0f64, 0.0f64);
+            for (w, (px, py, qx, qy)) in weights.iter().zip(&hats) {
+                r00 += w * px * qx;
+                r01 += w * px * qy;
+                r10 += w * py * qx;
+                r11 += w * py * qy;
+            }
+            let (i00, i01, i10, i11) = (c / det, -b / det, -b / det, a / det);
+            let m00 = i00 * r00 + i01 * r10;
+            let m01 = i00 * r01 + i01 * r11;
+            let m10 = i10 * r00 + i11 * r10;
+            let m11 = i10 * r01 + i11 * r11;
+            return [
+                (d.0 * m00 + d.1 * m10 + q_star.0) as f32,
+                (d.0 * m01 + d.1 * m11 + q_star.1) as f32,
+            ];
+        }
+    }
+    let (mut dot, mut cross) = (0.0f64, 0.0f64);
+    for (w, (px, py, qx, qy)) in weights.iter().zip(&hats) {
+        dot += w * (px * qx + py * qy);
+        cross += w * (px * qy - py * qx);
+    }
+    let theta = cross.atan2(dot);
+    let scale = if mode == PuppetMode::Rigid {
+        1.0
+    } else {
+        let mu: f64 = weights
+            .iter()
+            .zip(&hats)
+            .map(|(w, (px, py, _, _))| w * (px * px + py * py))
+            .sum();
+        if mu > 0.0 {
+            dot.hypot(cross) / mu
+        } else {
+            1.0
+        }
+    };
+    let (sin, cos) = (theta.sin() * scale, theta.cos() * scale);
+    [
+        (cos * d.0 - sin * d.1 + q_star.0) as f32,
+        (sin * d.0 + cos * d.1 + q_star.1) as f32,
+    ]
+}
+
+/// Puppet Warp's grid over `bounds`: a vertex every `spacing` pixels from
+/// the top-left plus the far edge, each cell split into two triangles.
+fn puppet_grid(bounds: Rect, spacing: u32) -> (Vec<[f32; 2]>, Vec<[usize; 3]>) {
+    let axis = |from: u32, to: u32| -> Vec<u32> {
+        let mut ticks: Vec<u32> = (from..to).step_by(spacing as usize).collect();
+        if ticks.last() != Some(&to) {
+            ticks.push(to);
+        }
+        ticks
+    };
+    let xs = axis(bounds.x0, bounds.x1 - 1);
+    let ys = axis(bounds.y0, bounds.y1 - 1);
+    let vertices: Vec<[f32; 2]> = ys
+        .iter()
+        .flat_map(|&y| xs.iter().map(move |&x| [x as f32, y as f32]))
+        .collect();
+    let mut triangles = Vec::new();
+    let nx = xs.len();
+    for j in 0..ys.len().saturating_sub(1) {
+        for i in 0..nx.saturating_sub(1) {
+            let (a, b, c, d) = (
+                j * nx + i,
+                j * nx + i + 1,
+                (j + 1) * nx + i + 1,
+                (j + 1) * nx + i,
+            );
+            triangles.push([a, b, c]);
+            triangles.push([a, c, d]);
+        }
+    }
+    (vertices, triangles)
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -17331,6 +17532,149 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             out.copy_from_slice(&pixels[base..base + CHANNELS]);
             out
+        })
+    }
+
+    /// Puppet Warp's mesh bounds: layer `id`'s opaque bounds grown by
+    /// `expansion` pixels on every side and clipped to the canvas.
+    fn puppet_bounds(&self, id: LayerId, expansion: u32) -> Result<Rect, String> {
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to warp.".to_string())?;
+        let bounds = Rect {
+            x0: bounds.x0.saturating_sub(expansion),
+            y0: bounds.y0.saturating_sub(expansion),
+            x1: (bounds.x1 + expansion).min(self.width),
+            y1: (bounds.y1 + expansion).min(self.height),
+        };
+        if bounds.x1 - bounds.x0 < 2 || bounds.y1 - bounds.y0 < 2 {
+            return Err("Puppet Warp needs a layer at least two pixels wide and tall.".to_string());
+        }
+        Ok(bounds)
+    }
+
+    /// Edit > Puppet Warp's Show Mesh: the triangular mesh over layer
+    /// `id`'s opaque bounds grown by `options.expansion` — a vertex every
+    /// Density spacing (Fewer 12, Normal 6, More 3 pixels) plus the far
+    /// edges, each cell split into two triangles — and where the pins
+    /// move every vertex under [`puppet_deform`] (nowhere, with no pins).
+    /// Photoshop's mesh follows the opaque outline; this one is its
+    /// bounding box, a documented scope cut. Errors for a non-finite pin,
+    /// a layer with no opaque pixels or under two pixels wide or tall, or
+    /// an unknown layer.
+    pub fn puppet_mesh(&self, id: LayerId, options: &PuppetWarp) -> Result<PuppetMesh, String> {
+        if options
+            .pins
+            .iter()
+            .flat_map(|pin| pin.source.iter().chain(pin.target.iter()))
+            .any(|v| !v.is_finite())
+        {
+            return Err("Puppet Warp pins must be finite coordinates.".to_string());
+        }
+        let bounds = self.puppet_bounds(id, options.expansion)?;
+        let (vertices, triangles) = puppet_grid(bounds, options.density.spacing());
+        let deformed = if options.pins.is_empty() {
+            vertices.clone()
+        } else {
+            vertices
+                .iter()
+                .map(|&v| puppet_deform(v, &options.pins, options.mode))
+                .collect()
+        };
+        Ok(PuppetMesh {
+            vertices,
+            deformed,
+            triangles,
+        })
+    }
+
+    /// Edit > Puppet Warp: drags layer `id` by its pins. The mesh of
+    /// [`Self::puppet_mesh`] is deformed vertex by vertex, then every
+    /// deformed triangle is rasterised: a pixel centre inside it (edges
+    /// inclusive) reads the layer nearest-neighbour at the same
+    /// barycentric point of the undeformed triangle, transparent off the
+    /// canvas. Triangles draw in order of Pin Depth — each triangle
+    /// belongs to the pin nearest its centre, the first on a tie — so
+    /// where the mesh folds a pin set forward lands on top, and among
+    /// equal depths the later triangle does; pixels no triangle covers
+    /// are transparent. The selection confines it. Errors for no pins, a
+    /// non-finite pin, a layer with no opaque pixels or under two pixels
+    /// wide or tall, or a locked or unknown layer. Not recorded for
+    /// Transform Again.
+    pub fn puppet_warp(
+        &mut self,
+        id: LayerId,
+        options: &PuppetWarp,
+    ) -> Result<Option<Rect>, String> {
+        if options.pins.is_empty() {
+            return Err("Puppet Warp needs at least one pin.".to_string());
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let mesh = self.puppet_mesh(id, options)?;
+        let depth_of = |triangle: &[usize; 3]| -> i32 {
+            let (cx, cy) = triangle.iter().fold((0.0f32, 0.0f32), |(sx, sy), &k| {
+                (
+                    sx + mesh.vertices[k][0] / 3.0,
+                    sy + mesh.vertices[k][1] / 3.0,
+                )
+            });
+            let mut best = (f32::INFINITY, 0i32);
+            for pin in &options.pins {
+                let (dx, dy) = (pin.source[0] - cx, pin.source[1] - cy);
+                let distance = dx * dx + dy * dy;
+                if distance < best.0 {
+                    best = (distance, pin.depth);
+                }
+            }
+            best.1
+        };
+        let mut order: Vec<usize> = (0..mesh.triangles.len()).collect();
+        order.sort_by_key(|&k| (depth_of(&mesh.triangles[k]), k));
+        let (width, height) = (self.width as usize, self.height as usize);
+        let mut sources: Vec<Option<(usize, usize)>> = vec![None; width * height];
+        for k in order {
+            let [ia, ib, ic] = mesh.triangles[k];
+            let [(ax, ay), (bx, by), (cx, cy)] =
+                [ia, ib, ic].map(|i| (mesh.deformed[i][0] as f64, mesh.deformed[i][1] as f64));
+            let det = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let x_lo = ax.min(bx).min(cx).floor().max(0.0) as usize;
+            let x_hi = (ax.max(bx).max(cx).ceil().max(0.0) as usize).min(width - 1);
+            let y_lo = ay.min(by).min(cy).floor().max(0.0) as usize;
+            let y_hi = (ay.max(by).max(cy).ceil().max(0.0) as usize).min(height - 1);
+            for y in y_lo..=y_hi {
+                for x in x_lo..=x_hi {
+                    let (px, py) = (x as f64, y as f64);
+                    let l1 = ((bx - px) * (cy - py) - (cx - px) * (by - py)) / det;
+                    let l2 = ((cx - px) * (ay - py) - (ax - px) * (cy - py)) / det;
+                    let l3 = 1.0 - l1 - l2;
+                    if l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6 {
+                        continue;
+                    }
+                    let [sa, sb, sc] = [ia, ib, ic].map(|i| mesh.vertices[i]);
+                    let sx = (l1 * sa[0] as f64 + l2 * sb[0] as f64 + l3 * sc[0] as f64).round();
+                    let sy = (l1 * sa[1] as f64 + l2 * sb[1] as f64 + l3 * sc[1] as f64).round();
+                    sources[y * width + x] =
+                        (sx >= 0.0 && sy >= 0.0 && sx < width as f64 && sy < height as f64)
+                            .then_some((sx as usize, sy as usize));
+                }
+            }
+        }
+        self.filter_pixels(id, move |pixels, row, col| {
+            match sources[row as usize * width + col as usize] {
+                Some((sx, sy)) => {
+                    let base = (sy * width + sx) * CHANNELS;
+                    let mut out = [0u8; CHANNELS];
+                    out.copy_from_slice(&pixels[base..base + CHANNELS]);
+                    out
+                }
+                None => [0; CHANNELS],
+            }
         })
     }
 
@@ -43113,5 +43457,218 @@ mod tests {
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn pin(sx: f32, sy: f32, tx: f32, ty: f32, depth: i32) -> PuppetPin {
+        PuppetPin {
+            source: [sx, sy],
+            target: [tx, ty],
+            depth,
+        }
+    }
+
+    fn puppet(mode: PuppetMode, pins: Vec<PuppetPin>) -> PuppetWarp {
+        PuppetWarp {
+            mode,
+            density: PuppetDensity::More,
+            expansion: 0,
+            pins,
+        }
+    }
+
+    #[test]
+    fn puppet_warp_with_one_pin_is_a_move_in_every_mode() {
+        for mode in [PuppetMode::Rigid, PuppetMode::Normal, PuppetMode::Distort] {
+            let (mut doc, id) = ramped_4x4();
+            doc.puppet_warp(id, &puppet(mode, vec![pin(0.0, 0.0, 1.0, 0.0, 0)]))
+                .unwrap();
+            let (mut moved, id_b) = ramped_4x4();
+            moved.translate(id_b, 1, 0).unwrap();
+            assert_eq!(doc.layers()[0].pixels, moved.layers()[0].pixels);
+        }
+    }
+
+    #[test]
+    fn puppet_warp_with_two_pins_rotates_rigidly() {
+        // Pins (0,0) held and (3,0) dragged to (0,3): the exact rigid map is
+        // a quarter turn about the origin, (x, y) → (−y, x), so only the
+        // top row lands on the canvas, standing up column 0.
+        for mode in [PuppetMode::Rigid, PuppetMode::Normal] {
+            let (mut doc, id) = ramped_4x4();
+            doc.puppet_warp(
+                id,
+                &puppet(
+                    mode,
+                    vec![pin(0.0, 0.0, 0.0, 0.0, 0), pin(3.0, 0.0, 0.0, 3.0, 0)],
+                ),
+            )
+            .unwrap();
+            for y in 0..4u32 {
+                assert_eq!(pixel(&doc, id, 0, y)[0], (y as u8 + 1) * 10);
+                assert_eq!(pixel(&doc, id, 1, y), [0, 0, 0, 0]);
+                assert_eq!(pixel(&doc, id, 3, y), [0, 0, 0, 0]);
+            }
+        }
+    }
+
+    #[test]
+    fn puppet_warp_distort_with_three_pins_is_the_affine_map_they_define() {
+        // (0,0) ↔ (3,0) swapped and (0,3) → (3,3): x' = 3 − x, a mirror.
+        let (mut doc, id) = ramped_4x4();
+        doc.puppet_warp(
+            id,
+            &puppet(
+                PuppetMode::Distort,
+                vec![
+                    pin(0.0, 0.0, 3.0, 0.0, 0),
+                    pin(3.0, 0.0, 0.0, 0.0, 0),
+                    pin(0.0, 3.0, 3.0, 3.0, 0),
+                ],
+            ),
+        )
+        .unwrap();
+        let (mut flipped, id_b) = ramped_4x4();
+        flipped.flip_layer_horizontal(id_b).unwrap();
+        assert_eq!(doc.layers()[0].pixels, flipped.layers()[0].pixels);
+    }
+
+    #[test]
+    fn puppet_mesh_grids_the_expanded_bounds_and_refuses_bad_input() {
+        let mut doc = Document::new(8, 8).unwrap();
+        let mut pixels = [0u8; 8 * 8 * 4];
+        for y in 2..6 {
+            for x in 2..6 {
+                pixels[(y * 8 + x) * 4 + 3] = 255;
+            }
+        }
+        let id = doc.add_layer("block", &pixels, 8, 8).unwrap();
+        let tight = doc
+            .puppet_mesh(id, &puppet(PuppetMode::Normal, vec![]))
+            .unwrap();
+        assert_eq!(
+            tight.vertices,
+            vec![[2.0, 2.0], [5.0, 2.0], [2.0, 5.0], [5.0, 5.0]]
+        );
+        assert_eq!(tight.triangles, vec![[0, 1, 3], [0, 3, 2]]);
+        assert_eq!(tight.deformed, tight.vertices);
+        let grown = doc
+            .puppet_mesh(
+                id,
+                &PuppetWarp {
+                    expansion: 1,
+                    ..puppet(PuppetMode::Normal, vec![])
+                },
+            )
+            .unwrap();
+        assert_eq!(grown.vertices.len(), 9);
+        assert_eq!(grown.triangles.len(), 8);
+        assert_eq!(grown.vertices[0], [1.0, 1.0]);
+        assert_eq!(grown.vertices[2], [6.0, 1.0]);
+        assert_eq!(grown.vertices[8], [6.0, 6.0]);
+        // Fewer density on a wide layer: a vertex every twelve pixels plus
+        // the far edge, and the deformed mesh follows a pin.
+        let (wide, wid) = ramped_9x2();
+        let few = wide
+            .puppet_mesh(
+                wid,
+                &PuppetWarp {
+                    density: PuppetDensity::Fewer,
+                    ..puppet(PuppetMode::Rigid, vec![pin(0.0, 0.0, 2.0, 0.0, 0)])
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            few.vertices,
+            vec![[0.0, 0.0], [8.0, 0.0], [0.0, 1.0], [8.0, 1.0]]
+        );
+        assert_eq!(
+            few.deformed,
+            vec![[2.0, 0.0], [10.0, 0.0], [2.0, 1.0], [10.0, 1.0]]
+        );
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .puppet_warp(id, &puppet(PuppetMode::Rigid, vec![]))
+            .unwrap_err()
+            .contains("pin"));
+        assert!(doc
+            .puppet_warp(
+                id,
+                &puppet(PuppetMode::Rigid, vec![pin(f32::NAN, 0.0, 0.0, 0.0, 0)])
+            )
+            .unwrap_err()
+            .contains("finite"));
+        let empty = doc.add_layer("empty", &[0; 64], 4, 4).unwrap();
+        assert!(doc
+            .puppet_warp(
+                empty,
+                &puppet(PuppetMode::Rigid, vec![pin(0.0, 0.0, 1.0, 0.0, 0)])
+            )
+            .unwrap_err()
+            .contains("opaque"));
+        assert!(doc
+            .puppet_warp(
+                999,
+                &puppet(PuppetMode::Rigid, vec![pin(0.0, 0.0, 1.0, 0.0, 0)])
+            )
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .puppet_warp(
+                id,
+                &puppet(PuppetMode::Rigid, vec![pin(0.0, 0.0, 1.0, 0.0, 0)])
+            )
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn puppet_warp_pin_depth_decides_which_fold_lands_on_top() {
+        // A 13×2 strip pinned at both ends, the right pin dragged from 12
+        // to 4: the strip folds — mesh columns 3, 6, 9 land at 2.2, 2, 1.8
+        // on the top row — so output column 2 is covered by every cell.
+        // With equal depths the last cell (pin 12's) wins, reading source
+        // 9.27 → 9; with pin 0 set forward its cells draw last and column
+        // 2 reads the fold's vertex, source 6.
+        let ends = |left_depth: i32| {
+            puppet(
+                PuppetMode::Rigid,
+                vec![
+                    pin(0.0, 0.0, 0.0, 0.0, left_depth),
+                    pin(12.0, 0.0, 4.0, 0.0, 0),
+                ],
+            )
+        };
+        let (mut doc, id) = ramped_9x2();
+        assert!(doc.puppet_warp(id, &ends(0)).is_ok());
+        let mut wide = Document::new(13, 2).unwrap();
+        let mut pixels = Vec::new();
+        for y in 0..2u8 {
+            for x in 0..13u8 {
+                pixels.extend([(x + 1) * 10 + y * 100, 0, 0, 255]);
+            }
+        }
+        let id = wide.add_layer("strip", &pixels, 13, 2).unwrap();
+        let mut level = wide.clone();
+        level.puppet_warp(id, &ends(0)).unwrap();
+        assert_eq!(
+            reds_of(&level, id, 0),
+            vec![10, 20, 100, 120, 130, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            reds_of(&level, id, 1),
+            vec![110, 120, 200, 220, 230, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        let mut forward = wide.clone();
+        forward.puppet_warp(id, &ends(1)).unwrap();
+        assert_eq!(
+            reds_of(&forward, id, 0),
+            vec![10, 20, 70, 120, 130, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            reds_of(&forward, id, 1),
+            vec![110, 120, 170, 220, 230, 0, 0, 0, 0, 0, 0, 0, 0]
+        );
     }
 }

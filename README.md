@@ -14555,6 +14555,80 @@ run build`) is fully green.
 **1465 Rust tests total** (1460 → 1465, 1458 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 245 — Puppet Warp
+
+Edit > Puppet Warp lands whole: pins, mesh, the three modes, Density,
+Expansion, Show Mesh, Pin Depth, and Remove All Pins. A `PuppetWarp`
+carries the options bar — `mode`, `density`, `expansion` — and its
+`PuppetPin`s, each a `source` (where it was placed), a `target` (where
+it was dragged), and a `depth`. `puppet_mesh(id, options)` builds the
+mesh: a grid over the layer's opaque bounds grown by Expansion and
+clipped to the canvas, a vertex every Density spacing (Fewer 12,
+Normal 6, More 3 pixels) plus the far edges, each cell two triangles;
+and where the pins move every vertex under moving-least-squares
+deformation (Schaefer, McPhail & Warren 2006), each pin weighted by the
+inverse square of its distance. About the weighted centroids of the
+pins' sources and targets, Rigid fits the best rotation, Normal that
+rotation with a uniform scale, and Distort the least-squares affine
+map — falling back to Normal's fit with fewer than three pins or
+collinear ones — and a vertex on a pin goes exactly to its target.
+Pins that agree on a rigid, similar, or affine map reproduce it
+exactly everywhere, which is what makes the tests below exact: one pin
+is a move and two pins a turn. `puppet_warp(id, options)` then
+rasterises every deformed triangle: a pixel centre inside it (edges
+inclusive) reads the layer nearest-neighbour at the same barycentric
+point of the undeformed triangle, transparent off the canvas.
+Triangles draw in order of Pin Depth — each belongs to the pin nearest
+its centre — so where the mesh folds a pin set forward lands on top,
+and among equal depths the later triangle does; pixels no triangle
+covers are transparent, and the selection confines it. No pins, a
+non-finite pin, a layer with no opaque pixels or under two pixels wide
+or tall, and a locked or unknown layer are refused. A **Puppet Warp…**
+dialog has Mode, Density, Expansion, and Show Mesh, an SVG preview
+where a click places a pin and a drag moves it, the deformed mesh
+drawn live, Set Pin Forward / Backward, Remove Pin, Remove All Pins,
+and OK / Cancel. Photoshop's mesh follows the opaque outline; this
+one is its bounding box, a documented scope cut, as are Pin Rotation
+and bicubic resampling.
+
+**Verified two ways.** Five new `document.rs` tests, every mapping
+traced by hand and cross-checked by an independent Python port of the
+deformation and the rasteriser. One pin dragged one pixel right is
+byte-identical to a translate in every mode. Two pins, `(0,0)` held
+and `(3,0)` dragged to `(0,3)`, agree on a quarter turn about the
+origin, so the 4×4 ramp's top row stands up column `0` (`10 20 30 40`)
+and everything else is transparent, in Rigid and Normal alike. Three
+Distort pins swapping `(0,0)` with `(3,0)` and holding `(0,3)` at
+`(3,3)` define `x' = 3 − x`, byte-identical to a horizontal flip. On
+an 8×8 canvas a 4×4 block's mesh at More density is its four corners
+(`(2,2) … (5,5)`, two triangles), Expansion `1` grows it to nine
+vertices from `(1,1)` to `(6,6)` and eight triangles, Fewer density on
+a nine-wide strip puts vertices at `0` and `8`, and one pin dragged
+two pixels moves every deformed vertex by two; no pins, a NaN pin, an
+empty, unknown, and locked layer are refused. A 13×2 strip pinned at
+both ends with the right pin dragged from `12` to `4` folds — the
+mesh columns `3, 6, 9` land at `2.2, 2, 1.8` — so output column `2` is
+covered by every cell: with equal depths the last cell wins and reads
+source `9.27 → 9` (`100`, `200`), while with the left pin set forward
+its cells draw last and column `2` reads the fold's vertex, source `6`
+(`70`, `170`); columns `0, 1, 3, 4` read `0, 1.36, 10.64, 12` either
+way and columns `5` on are transparent. All five passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and ninety-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1470 Rust tests total** (1465 → 1470, 1463 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

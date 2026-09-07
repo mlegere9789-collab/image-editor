@@ -1371,6 +1371,30 @@ fn cylindrical_warp(
     })
 }
 
+/// Edit > Puppet Warp on layer `id` with its mode, density, expansion,
+/// and pins.
+#[tauri::command]
+fn puppet_warp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::PuppetWarp,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.puppet_warp(id, &options))
+}
+
+/// Puppet Warp's Show Mesh: the mesh over layer `id` and where the pins
+/// move it. Read-only.
+#[tauri::command]
+fn puppet_mesh(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::PuppetWarp,
+) -> Result<document::PuppetMesh, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.puppet_mesh(id, &options)
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -4776,6 +4800,8 @@ pub fn run() {
             warp,
             warp_mesh,
             cylindrical_warp,
+            puppet_warp,
+            puppet_mesh,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

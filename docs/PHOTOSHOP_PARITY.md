@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 424.**
+**618 distinct capabilities tracked. Currently shipped: 433.**
 
 ## PART I — EVERY TOOL
 
@@ -256,15 +256,15 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Perspective Warp — Auto Warp to Horizontal and Vertical (`PerspectiveAuto::Both` — see README Phase 242)
 - [x] Perspective Warp — Commit Perspective Warp (the dialog's OK, one undo step through the `perspective_warp` command — see README Phase 242)
 - [x] Perspective Warp — Cancel (the dialog's Cancel, nothing sent — see README Phase 242)
-- [ ] Puppet Warp
-- [ ] Puppet Warp — Mesh
-- [ ] Puppet Warp — Mode: Distort
-- [ ] Puppet Warp — Density
-- [ ] Puppet Warp — Expansion
-- [ ] Puppet Warp — Show Mesh
-- [ ] Puppet Warp — Pins
-- [ ] Puppet Warp — Pin Depth
-- [ ] Puppet Warp — Remove All Pins
+- [x] Puppet Warp (`puppet_warp`, moving-least-squares deformation (Schaefer 2006, inverse-square weights) of a triangular mesh over the layer's opaque bounds by its pins, every deformed triangle rasterised with barycentric inverse mapping and nearest-neighbour resampling; one pin is a move, two a turn — see README Phase 245)
+- [x] Puppet Warp — Mesh (`puppet_mesh`, a grid of vertices at the Density spacing plus the far edges over the expanded bounds, each cell two triangles; the bounding-box mesh rather than Photoshop's outline-following one is a documented scope cut — see README Phase 245)
+- [x] Puppet Warp — Mode: Distort (`PuppetMode::{Rigid, Normal, Distort}`: rigid, similarity, or affine least-squares fit at every vertex; Distort falls back to Normal's fit with fewer than three or collinear pins — see README Phase 245)
+- [x] Puppet Warp — Density (`PuppetDensity::{Fewer, Normal, More}`: vertex spacing 12, 6, or 3 pixels — see README Phase 245)
+- [x] Puppet Warp — Expansion (`PuppetWarp.expansion`, pixels the mesh grows beyond the opaque bounds, clipped to the canvas — see README Phase 245)
+- [x] Puppet Warp — Show Mesh (the dialog's SVG preview draws `puppet_mesh`'s deformed triangles, toggled by its Show Mesh checkbox — see README Phase 245)
+- [x] Puppet Warp — Pins (`PuppetPin { source, target, depth }`: click the preview to place, drag to move, Remove Pin — see README Phase 245)
+- [x] Puppet Warp — Pin Depth (`PuppetPin.depth` with Set Pin Forward / Backward: triangles draw in depth order, each owned by the pin nearest its centre, so a forward pin's part lands on top where the mesh folds — see README Phase 245)
+- [x] Puppet Warp — Remove All Pins (the dialog's Remove All Pins button — see README Phase 245)
 - [x] Cylindrical Transform Warp (`cylindrical_warp`, the layer's opaque bounds wrapped around a vertical cylinder whose arc of `angle` degrees keeps the bounds' chord — `x = cx + R·sin θ`, `R = (w/2) / sin(angle/2)` — viewed from `tilt` degrees above or below, rows squashed by `cos tilt` and each pixel lifted by `R·(1 − cos θ)·sin tilt`; inverse-mapped nearest-neighbour, selection-confined — see README Phase 244)
 - [x] New Selection (`SelectionMode::New`, the marquee tools' default — the selection is replaced outright; the explicit mode of the four-way Mode picker in the marquee tool options — see README Phase 158)
 - [x] Add to Selection (`SelectionMode::Add` via `select_rectangle_with` / `select_ellipse_with`: the current selection rasterised and unioned pixel by pixel with the new marquee into a pixel-mask selection; Shift while dragging, or the Mode picker — see README Phase 158)

@@ -34,6 +34,9 @@ import type {
   PerspectivePlane,
   WarpMesh,
   WarpStyle,
+  PuppetMesh,
+  PuppetPin,
+  PuppetWarpOptions,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -435,6 +438,19 @@ export default function App() {
   const [showCylinderDialog, setShowCylinderDialog] = useState(false);
   const [cylinderAngle, setCylinderAngle] = useState(120);
   const [cylinderTilt, setCylinderTilt] = useState(0);
+  // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
+  const [showPuppetDialog, setShowPuppetDialog] = useState(false);
+  const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
+    mode: "normal",
+    density: "normal",
+    expansion: 2,
+    pins: [],
+  });
+  const [puppetShowMesh, setPuppetShowMesh] = useState(true);
+  const [puppetMesh, setPuppetMesh] = useState<PuppetMesh | null>(null);
+  const [puppetSelected, setPuppetSelected] = useState<number | null>(null);
+  const [puppetDrag, setPuppetDrag] = useState<number | null>(null);
+  const puppetSvgRef = useRef<SVGSVGElement | null>(null);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1921,6 +1937,56 @@ export default function App() {
     await runCommand("cylindrical_warp", { id: selectedId, angle: cylinderAngle, tilt: cylinderTilt });
     setShowCylinderDialog(false);
   }, [runCommand, selectedId, cylinderAngle, cylinderTilt]);
+
+  // Puppet Warp: every change to the options or pins re-reads the mesh.
+  const updatePuppet = useCallback(
+    (next: Partial<PuppetWarpOptions>) => {
+      if (selectedId === null) return;
+      const options = { ...puppetOptions, ...next };
+      setPuppetOptions(options);
+      invoke<PuppetMesh>("puppet_mesh", { id: selectedId, options })
+        .then(setPuppetMesh)
+        .catch((err) => setError(String(err)));
+    },
+    [puppetOptions, selectedId],
+  );
+
+  const openPuppetDialog = useCallback(() => {
+    if (selectedId === null) return;
+    const options: PuppetWarpOptions = { mode: "normal", density: "normal", expansion: 2, pins: [] };
+    setPuppetOptions(options);
+    setPuppetSelected(null);
+    setPuppetDrag(null);
+    invoke<PuppetMesh>("puppet_mesh", { id: selectedId, options })
+      .then(setPuppetMesh)
+      .catch((err) => setError(String(err)));
+    setShowPuppetDialog(true);
+  }, [selectedId]);
+
+  const puppetSvgPoint = useCallback((event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
+    const svg = puppetSvgRef.current;
+    if (!svg) return null;
+    const box = svg.getBoundingClientRect();
+    const view = svg.viewBox.baseVal;
+    if (box.width === 0 || box.height === 0) return null;
+    return [
+      Math.round((view.x + ((event.clientX - box.left) / box.width) * view.width) * 2) / 2,
+      Math.round((view.y + ((event.clientY - box.top) / box.height) * view.height) * 2) / 2,
+    ];
+  }, []);
+
+  const setPuppetPin = useCallback(
+    (index: number, pin: PuppetPin) => {
+      updatePuppet({ pins: puppetOptions.pins.map((p, i) => (i === index ? pin : p)) });
+    },
+    [puppetOptions.pins, updatePuppet],
+  );
+
+  const applyPuppetWarp = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("puppet_warp", { id: selectedId, options: puppetOptions });
+    setShowPuppetDialog(false);
+  }, [runCommand, selectedId, puppetOptions]);
 
   // The mesh's iso-curves at u, v ∈ {0, ⅓, ⅔, 1}: each is itself a cubic
   // Bézier whose control points are the Bernstein blend of the grid's.
@@ -5349,6 +5415,14 @@ export default function App() {
             title="Cylindrical Transform Warp: wrap the layer around a cylinder"
           >
             Cylinder Warp…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openPuppetDialog}
+            disabled={busy || !canPaint}
+            title="Edit > Puppet Warp: pin the layer and drag the pins"
+          >
+            Puppet Warp…
           </button>
           <button
             className="button button--quiet"
@@ -10935,6 +11009,164 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCylinderWarp} disabled={busy} title="Commit the cylinder warp">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPuppetDialog && (
+        <div className="modal-overlay" onClick={() => setShowPuppetDialog(false)} role="presentation">
+          <div className="modal modal--wide" role="dialog" aria-label="Puppet Warp" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Edit &gt; Puppet Warp</h2>
+            <p className="modal__hint">
+              Click the picture to place pins, then drag them. A pin set forward draws its
+              part of the mesh over the rest where the mesh folds.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Mode</span>
+              <select
+                value={puppetOptions.mode}
+                onChange={(event) => updatePuppet({ mode: event.target.value as PuppetWarpOptions["mode"] })}
+              >
+                <option value="rigid">Rigid</option>
+                <option value="normal">Normal</option>
+                <option value="distort">Distort</option>
+              </select>
+              <span className="control__label">Density</span>
+              <select
+                value={puppetOptions.density}
+                onChange={(event) => updatePuppet({ density: event.target.value as PuppetWarpOptions["density"] })}
+              >
+                <option value="fewer">Fewer Points</option>
+                <option value="normal">Normal</option>
+                <option value="more">More Points</option>
+              </select>
+              <span className="control__label">Expansion</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                value={puppetOptions.expansion}
+                onChange={(event) => updatePuppet({ expansion: Math.max(0, Math.round(Number(event.target.value))) })}
+              />
+              <label className="control control--row">
+                <input type="checkbox" checked={puppetShowMesh} onChange={(event) => setPuppetShowMesh(event.target.checked)} />
+                <span className="control__label">Show Mesh</span>
+              </label>
+            </label>
+            {puppetMesh && document && (
+              <svg
+                ref={puppetSvgRef}
+                className="warp-mesh"
+                viewBox={`${-document.width / 4} ${-document.height / 4} ${document.width * 1.5} ${document.height * 1.5}`}
+                onPointerDown={(event) => {
+                  if (puppetDrag !== null) return;
+                  const point = puppetSvgPoint(event);
+                  if (!point) return;
+                  const pins = [...puppetOptions.pins, { source: point, target: point, depth: 0 }];
+                  updatePuppet({ pins });
+                  setPuppetSelected(pins.length - 1);
+                }}
+                onPointerMove={(event) => {
+                  if (puppetDrag === null) return;
+                  const point = puppetSvgPoint(event);
+                  if (point) setPuppetPin(puppetDrag, { ...puppetOptions.pins[puppetDrag], target: point });
+                }}
+                onPointerUp={() => setPuppetDrag(null)}
+                onPointerLeave={() => setPuppetDrag(null)}
+              >
+                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                {puppetShowMesh &&
+                  puppetMesh.triangles.map(([a, b, c], i) => (
+                    <polygon
+                      className="warp-mesh__curve"
+                      points={[a, b, c].map((k) => `${puppetMesh.deformed[k][0]},${puppetMesh.deformed[k][1]}`).join(" ")}
+                      key={i}
+                    />
+                  ))}
+                {puppetOptions.pins.map((pin, i) => (
+                  <circle
+                    className={`warp-mesh__handle puppet-pin${puppetSelected === i ? " puppet-pin--selected" : ""}`}
+                    cx={pin.target[0]}
+                    cy={pin.target[1]}
+                    r={Math.max(document.width, document.height) / 50}
+                    key={i}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      event.preventDefault();
+                      setPuppetSelected(i);
+                      setPuppetDrag(i);
+                    }}
+                  />
+                ))}
+              </svg>
+            )}
+            <div className="control control--row">
+              <span className="control__label">
+                {puppetSelected !== null && puppetOptions.pins[puppetSelected]
+                  ? `Pin ${puppetSelected + 1} depth ${puppetOptions.pins[puppetSelected].depth}`
+                  : `${puppetOptions.pins.length} pins`}
+              </span>
+              <button
+                className="button button--quiet"
+                disabled={puppetSelected === null}
+                onClick={() => {
+                  if (puppetSelected === null) return;
+                  const pin = puppetOptions.pins[puppetSelected];
+                  setPuppetPin(puppetSelected, { ...pin, depth: pin.depth + 1 });
+                }}
+                title="Set Pin Forward"
+              >
+                Set Pin Forward
+              </button>
+              <button
+                className="button button--quiet"
+                disabled={puppetSelected === null}
+                onClick={() => {
+                  if (puppetSelected === null) return;
+                  const pin = puppetOptions.pins[puppetSelected];
+                  setPuppetPin(puppetSelected, { ...pin, depth: pin.depth - 1 });
+                }}
+                title="Set Pin Backward"
+              >
+                Set Pin Backward
+              </button>
+              <button
+                className="button button--quiet"
+                disabled={puppetSelected === null}
+                onClick={() => {
+                  if (puppetSelected === null) return;
+                  updatePuppet({ pins: puppetOptions.pins.filter((_, i) => i !== puppetSelected) });
+                  setPuppetSelected(null);
+                }}
+                title="Remove the selected pin"
+              >
+                Remove Pin
+              </button>
+              <button
+                className="button button--quiet"
+                disabled={puppetOptions.pins.length === 0}
+                onClick={() => {
+                  updatePuppet({ pins: [] });
+                  setPuppetSelected(null);
+                }}
+                title="Remove All Pins"
+              >
+                Remove All Pins
+              </button>
+            </div>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPuppetDialog(false)} title="Cancel">
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyPuppetWarp}
+                disabled={busy || puppetOptions.pins.length === 0}
+                title="Commit Puppet Warp"
+              >
                 OK
               </button>
             </div>
