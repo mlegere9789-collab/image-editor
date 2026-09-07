@@ -1961,6 +1961,51 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Per-channel 256-bin counts of layer `id`'s own R, G, and B values,
+    /// plus the number of pixels sampled, over the active selection (or
+    /// the whole layer with none). Every sampled pixel counts regardless
+    /// of its alpha. Shared by [`Self::equalize`] (which builds its remap
+    /// table from it) and [`Self::histogram`] (which reports it).
+    fn layer_histogram(&self, id: LayerId) -> Result<([[u32; 256]; 3], u32), String> {
+        let selection = self.selection;
+        let doc_width = self.width as usize;
+        let sample_bounds = self.copy_bounds();
+        let layer = self.layer(id)?;
+        let mut histogram = [[0u32; 256]; 3];
+        let mut sampled = 0u32;
+        for row in sample_bounds.y0..sample_bounds.y1 {
+            for col in sample_bounds.x0..sample_bounds.x1 {
+                let keep =
+                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                sampled += 1;
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                for (c, counts) in histogram.iter_mut().enumerate() {
+                    counts[layer.pixels[base + c] as usize] += 1;
+                }
+            }
+        }
+        Ok((histogram, sampled))
+    }
+
+    /// Camera Raw Filter > Histogram (and Window > Histogram's own RGB
+    /// view): the per-channel distribution of layer `id`'s own pixel
+    /// values, 256 bins for each of R, G, and B, sampled over the active
+    /// selection or the whole layer with none — exactly the sampling
+    /// [`Self::equalize`] already uses to build its own remap table,
+    /// factored out into [`Self::layer_histogram`] and shared rather than
+    /// re-derived. Read-only: nothing is modified, so it works on a locked
+    /// layer too, and only an unknown layer errors. Every sampled pixel
+    /// counts once regardless of its alpha, the same convention
+    /// [`Self::equalize`] already keeps; weighting or excluding pixels by
+    /// transparency is a documented scope cut, as are Camera Raw's own
+    /// luminance overlay and shadow/highlight clipping warnings.
+    pub fn histogram(&self, id: LayerId) -> Result<[[u32; 256]; 3], String> {
+        self.layer_histogram(id).map(|(counts, _)| counts)
+    }
+
     /// Image > Adjustments > Equalize: redistributes each channel's values
     /// so its histogram is as flat as possible — the darkest level present
     /// becomes 0, the brightest 255, and every level in between lands
@@ -1999,26 +2044,10 @@ impl Document {
         } else {
             sample_bounds
         };
+        let (histogram, sampled) = self.layer_histogram(id)?;
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
-        }
-
-        let mut histogram = [[0u32; 256]; 3];
-        let mut sampled = 0u32;
-        for row in sample_bounds.y0..sample_bounds.y1 {
-            for col in sample_bounds.x0..sample_bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
-                if !keep {
-                    continue;
-                }
-                sampled += 1;
-                let base = (row as usize * doc_width + col as usize) * CHANNELS;
-                for (c, counts) in histogram.iter_mut().enumerate() {
-                    counts[layer.pixels[base + c] as usize] += 1;
-                }
-            }
         }
 
         let mut lut = [[0u8; 256]; 3];
@@ -22799,6 +22828,51 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.camera_raw_saturation(999, 50).is_err());
+    }
+
+    #[test]
+    fn histogram_counts_each_channels_values_over_the_whole_layer() {
+        // ramped_3x3's R channel holds 10, 20, ..., 90 once each; its G
+        // and B channels hold 0 nine times.
+        let (doc, id) = ramped_3x3();
+        let [r, g, b] = doc.histogram(id).unwrap();
+        for value in [10, 20, 30, 40, 50, 60, 70, 80, 90] {
+            assert_eq!(r[value], 1, "R bin {value}");
+        }
+        assert_eq!(r.iter().sum::<u32>(), 9);
+        assert_eq!(g[0], 9);
+        assert_eq!(g.iter().sum::<u32>(), 9);
+        assert_eq!(b[0], 9);
+        assert_eq!(b.iter().sum::<u32>(), 9);
+    }
+
+    #[test]
+    fn histogram_samples_only_the_selection() {
+        // Column 2 alone holds R values 30, 60, 90.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 0.0, 3.0, 3.0).unwrap();
+        let [r, g, b] = doc.histogram(id).unwrap();
+        assert_eq!((r[30], r[60], r[90]), (1, 1, 1));
+        assert_eq!(r.iter().sum::<u32>(), 3);
+        assert_eq!(r[10] + r[20] + r[40] + r[50] + r[70] + r[80], 0);
+        assert_eq!(g[0], 3);
+        assert_eq!(b[0], 3);
+    }
+
+    #[test]
+    fn histogram_is_read_only_so_a_locked_layer_is_fine() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.set_locked(id, true).unwrap();
+        let [r, _, _] = doc.histogram(id).unwrap();
+        assert_eq!(r[50], 1);
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn histogram_of_an_unknown_layer_is_an_error() {
+        let doc = Document::new(2, 2).unwrap();
+        assert!(doc.histogram(999).is_err());
     }
 
     #[test]

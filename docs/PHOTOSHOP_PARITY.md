@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 188.**
+**618 distinct capabilities tracked. Currently shipped: 189.**
 
 ## PART I — EVERY TOOL
 
@@ -618,7 +618,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Smart Filter — Neural Filter Output
 - [ ] New Document — Neural Filter Output
 - [ ] Camera Raw Filter
-- [ ] Camera Raw Histogram
+- [x] Camera Raw Histogram (`histogram`, a read-only per-channel 256-bin count of the layer's own R/G/B values over the selection or whole layer — the exact sampling `equalize` already used to build its own remap table, factored out into a shared `layer_histogram` helper — drawn as three overlaid channel curves in a Histogram dialog. Camera Raw's own luminance overlay and clipping warnings, and any alpha weighting, are a documented scope cut — see README Phase 127)
 - [ ] RGB Levels
 - [ ] Shadow Clipping
 - [x] Temperature (`temperature_tint`, a direct per-channel shift — adds to red, subtracts from blue — standing in for Photoshop's own Kelvin-based white-balance model, since this project has no raw-metadata source for a file's own native white balance — see README Phase 117)

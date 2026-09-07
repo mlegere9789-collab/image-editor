@@ -242,6 +242,7 @@ export default function App() {
   const [clarityAmount, setClarityAmount] = useState(20);
   const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] = useState(false);
   const [cameraRawSaturation, setCameraRawSaturation] = useState(25);
+  const [histogramData, setHistogramData] = useState<number[][] | null>(null);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
   const [defringeAmount, setDefringeAmount] = useState(50);
 
@@ -905,6 +906,13 @@ export default function App() {
     });
     setShowCameraRawSaturationDialog(false);
   }, [runCommand, selectedId, cameraRawSaturation]);
+
+  const openHistogramDialog = useCallback(() => {
+    if (selectedId === null) return;
+    void invoke<number[][]>("histogram", { id: selectedId })
+      .then((counts) => setHistogramData(counts))
+      .catch((err) => setError(String(err)));
+  }, [selectedId]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3157,6 +3165,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={openHistogramDialog}
+            disabled={busy || selectedId === null}
+            title="Camera Raw Filter > Histogram"
+          >
+            Histogram…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -4934,6 +4950,61 @@ export default function App() {
               </button>
               <button className="button" onClick={applyCameraRawSaturation} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {histogramData && (
+        <div
+          className="modal-overlay"
+          onClick={() => setHistogramData(null)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Histogram"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Histogram</h2>
+            <p className="modal__hint">
+              Red, green, and blue value distributions for the selected layer
+              (the active selection only, when there is one). Each curve is
+              scaled to the tallest bin across all three channels.
+            </p>
+            {(() => {
+              const peak = Math.max(1, ...histogramData.flat());
+              const colors = ["#e5484d", "#46a758", "#3e63dd"];
+              return (
+                <svg
+                  className="histogram"
+                  viewBox="0 0 256 100"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-label="RGB histogram"
+                >
+                  {histogramData.map((counts, channel) => (
+                    <path
+                      key={channel}
+                      fill={colors[channel]}
+                      fillOpacity={0.45}
+                      d={
+                        `M0,100 ` +
+                        counts
+                          .map((count, value) => `L${value},${100 - (count / peak) * 100}`)
+                          .join(" ") +
+                        " L255,100 Z"
+                      }
+                    />
+                  ))}
+                </svg>
+              );
+            })()}
+            <div className="modal__actions">
+              <button className="button" onClick={() => setHistogramData(null)}>
+                Close
               </button>
             </div>
           </div>

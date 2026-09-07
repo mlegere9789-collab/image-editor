@@ -8394,6 +8394,59 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **873 Rust tests total** (867 → 873, 866 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 127 — Camera Raw Filter > Histogram
+
+`histogram(id)` is this project's first read-only analysis command: the
+per-channel distribution of a layer's own pixel values, 256 bins for
+each of R, G, and B, sampled over the active selection or the whole
+layer with none — Camera Raw's own Histogram panel (and Window >
+Histogram's own RGB view). It is exactly the sampling `equalize` has
+built its own remap table from since Phase 28, factored out of
+`equalize` into a shared private `layer_histogram` helper (which also
+returns the sampled-pixel count `equalize` needs) rather than
+re-derived, so the two can never disagree about what counts as a
+sampled pixel. Nothing is modified, so the command works on a locked
+layer too; only an unknown layer errors. Every sampled pixel counts
+once regardless of its alpha, the same convention `equalize` already
+keeps; weighting or excluding pixels by transparency is a documented
+scope cut, as are Camera Raw's own luminance overlay and its
+shadow/highlight clipping warnings. The Tauri command hands the counts
+back as nested `Vec`s only because serde has no serializer for
+256-element arrays. A new **Histogram…** button with the other Camera
+Raw entries opens a dialog drawing the three channels as overlaid,
+translucent filled curves in an SVG, each scaled against the tallest
+bin across all three channels, with a one-line hint explaining what is
+being counted.
+
+**Verified two ways.** Four new `document.rs` tests on the box-blur
+suite's own `ramped_3x3` fixture, whose values are known by
+construction: its R channel holds `10, 20, …, 90` exactly once each
+(so those nine bins each read `1` and every other R bin `0`, summing to
+`9`), while its G and B channels hold `0` nine times (bin `0` reads `9`
+in each, summing to `9`). Selecting column `2` alone leaves R bins
+`30`, `60`, `90` at `1` each and the other six ramp bins at `0`, with G
+and B bin `0` at `3`. A locked layer still yields its histogram (R bin
+`50` reads `1`) and is left byte-for-byte untouched; an unknown layer
+errors. The refactor of `equalize` onto the shared helper is guarded by
+`equalize`'s own seven pre-existing tests, all still green. Counting
+values in a fixture whose contents are written out literally needs no
+arithmetic to cross-check, so no Python script was written this phase —
+the "second way" is the fixture's own source listing.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-four: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring and SVG path construction
+were reviewed by hand instead. Every other layer of this project's
+quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**877 Rust tests total** (873 → 877, 870 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

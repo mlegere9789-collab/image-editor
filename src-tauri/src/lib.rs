@@ -2556,6 +2556,18 @@ fn camera_raw_saturation(
     })
 }
 
+/// Camera Raw Filter > Histogram: read-only per-channel 256-bin counts of
+/// layer `id`'s own R, G, and B values over the selection (or whole layer).
+/// Nested `Vec`s rather than `[[u32; 256]; 3]` only because serde has no
+/// serializer for arrays that long.
+#[tauri::command]
+fn histogram(state: State<'_, AppState>, id: LayerId) -> Result<Vec<Vec<u32>>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    let counts = document.histogram(id)?;
+    Ok(counts.iter().map(|channel| channel.to_vec()).collect())
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2804,6 +2816,7 @@ pub fn run() {
             spin_blur,
             lens_blur,
             camera_raw_saturation,
+            histogram,
             select_rectangle,
             select_ellipse,
             select_all,
