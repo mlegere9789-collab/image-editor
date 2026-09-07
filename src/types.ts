@@ -165,6 +165,8 @@ export type Tool =
   | "magicWand"
   | "lasso"
   | "magneticLasso"
+  | "objectSelect"
+  | "objectSelectLasso"
   | "polygonLasso"
   | "selectionBrush"
   | "quickSelection"

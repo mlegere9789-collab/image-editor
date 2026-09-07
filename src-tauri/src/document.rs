@@ -1429,6 +1429,165 @@ impl Document {
         self.select_polygon_with(mode, &distinct)
     }
 
+    /// The Object Selection tool in Rectangle mode: drag a box and the
+    /// object inside it is selected. See [`Self::select_object_in_bits`]
+    /// for how the object is found. The box is normalised and clipped to
+    /// the canvas like a marquee; one that covers no pixel errors.
+    #[allow(clippy::too_many_arguments)]
+    pub fn select_object_in_rect_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        tolerance: u8,
+    ) -> Result<(), String> {
+        let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
+        let width = self.width;
+        let region: Vec<bool> = (0..self.width * self.height)
+            .map(|idx| {
+                let (x, y) = (idx % width, idx / width);
+                (bounds.x0..bounds.x1).contains(&x) && (bounds.y0..bounds.y1).contains(&y)
+            })
+            .collect();
+        self.select_object_in_bits(mode, id, region, tolerance)
+    }
+
+    /// The Object Selection tool in Lasso mode: the region is the polygon
+    /// through `trail` (three or more distinct points, pixel centres inside
+    /// by the even-odd rule) instead of a box.
+    pub fn select_object_in_lasso_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        trail: &[(f32, f32)],
+        tolerance: u8,
+    ) -> Result<(), String> {
+        if trail.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("Selection coordinates must be finite numbers.".to_string());
+        }
+        let mut distinct: Vec<(f32, f32)> = Vec::with_capacity(trail.len());
+        for &point in trail {
+            if distinct.last() != Some(&point) {
+                distinct.push(point);
+            }
+        }
+        if distinct.len() < 3 {
+            return Err("A lasso needs to enclose an area.".to_string());
+        }
+        let width = self.width;
+        let region: Vec<bool> = (0..self.width * self.height)
+            .map(|idx| {
+                let (x, y) = (idx % width, idx / width);
+                point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, &distinct)
+            })
+            .collect();
+        self.select_object_in_bits(mode, id, region, tolerance)
+    }
+
+    /// The Object Selection tool's finder, this project's explicit stand-in
+    /// for Photoshop's neural object detection: within `region`, the
+    /// background is taken to be the most common colour of the region's
+    /// border ring (its pixels with a 4-neighbour outside the region or
+    /// off the canvas), every region pixel outside that colour ± `tolerance`
+    /// per channel is foreground, and the object is the largest
+    /// 4-connected foreground component. The result is always hard-edged
+    /// and is combined with the current selection per `mode`. Errors for
+    /// an unknown layer, a region with no pixels, or one in which no
+    /// foreground pixel is found.
+    fn select_object_in_bits(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        region: Vec<bool>,
+        tolerance: u8,
+    ) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        let layer = self.layer(id)?;
+        let at = |x: u32, y: u32| -> usize { (y * width + x) as usize };
+        let pixel = |idx: usize| -> [u8; 4] {
+            let base = idx * CHANNELS;
+            [
+                layer.pixels[base],
+                layer.pixels[base + 1],
+                layer.pixels[base + 2],
+                layer.pixels[base + 3],
+            ]
+        };
+        let neighbours = |x: u32, y: u32| {
+            [
+                x.checked_sub(1).map(|nx| (nx, y)),
+                (x + 1 < width).then_some((x + 1, y)),
+                y.checked_sub(1).map(|ny| (x, ny)),
+                (y + 1 < height).then_some((x, y + 1)),
+            ]
+        };
+        // The border ring's most common colour is the background.
+        let mut counts: std::collections::HashMap<[u8; 4], u32> = std::collections::HashMap::new();
+        for idx in 0..region.len() {
+            if !region[idx] {
+                continue;
+            }
+            let (x, y) = (idx as u32 % width, idx as u32 / width);
+            let on_ring = neighbours(x, y)
+                .into_iter()
+                .any(|n| n.map_or(true, |(nx, ny)| !region[at(nx, ny)]));
+            if on_ring {
+                *counts.entry(pixel(idx)).or_insert(0) += 1;
+            }
+        }
+        let Some((&background, _)) = counts
+            .iter()
+            .max_by_key(|&(colour, &count)| (count, std::cmp::Reverse(*colour)))
+        else {
+            return Err("The object selection covers no pixels.".to_string());
+        };
+        let is_background = |idx: usize| {
+            pixel(idx)
+                .iter()
+                .zip(background.iter())
+                .all(|(&c, &b)| c.abs_diff(b) <= tolerance)
+        };
+        let foreground: Vec<bool> = (0..region.len())
+            .map(|idx| region[idx] && !is_background(idx))
+            .collect();
+        // The largest 4-connected foreground component is the object.
+        let mut seen = vec![false; foreground.len()];
+        let mut best: Vec<usize> = Vec::new();
+        for start in 0..foreground.len() {
+            if !foreground[start] || seen[start] {
+                continue;
+            }
+            let mut component = vec![start];
+            let mut stack = vec![start];
+            seen[start] = true;
+            while let Some(idx) = stack.pop() {
+                let (x, y) = (idx as u32 % width, idx as u32 / width);
+                for (nx, ny) in neighbours(x, y).into_iter().flatten() {
+                    let n = at(nx, ny);
+                    if foreground[n] && !seen[n] {
+                        seen[n] = true;
+                        component.push(n);
+                        stack.push(n);
+                    }
+                }
+            }
+            if component.len() > best.len() {
+                best = component;
+            }
+        }
+        if best.is_empty() {
+            return Err("No object was found in that area.".to_string());
+        }
+        let mut bits = vec![false; foreground.len()];
+        for idx in best {
+            bits[idx] = true;
+        }
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
     /// The Magnetic Lasso tool: a freehand `trail` whose points snap to
     /// the strongest nearby edge before the enclosed area is selected.
     /// For each trail point the square window of half-size `width`
@@ -23691,6 +23850,117 @@ mod tests {
         // Two points, or a snapped trail that collapses to a line.
         assert!(doc
             .select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL[..2], 2, 128)
+            .is_err());
+        assert!(doc.selection().is_none());
+    }
+
+    /// A 7×7 black canvas with a 3×3 grey-200 object at (2..5, 2..5), a
+    /// one-pixel 200 speck at (0, 6), and a faint 40 mark at (5, 1).
+    fn object_scene() -> (Document, LayerId) {
+        let mut pixels = solid(7, 7, [0, 0, 0, 255]);
+        let set = |pixels: &mut Vec<u8>, x: usize, y: usize, v: u8| {
+            let base = (y * 7 + x) * 4;
+            pixels[base] = v;
+            pixels[base + 1] = v;
+            pixels[base + 2] = v;
+        };
+        for y in 2..5 {
+            for x in 2..5 {
+                set(&mut pixels, x, y, 200);
+            }
+        }
+        set(&mut pixels, 0, 6, 200);
+        set(&mut pixels, 5, 1, 40);
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc.add_layer("scene", &pixels, 7, 7).unwrap();
+        (doc, id)
+    }
+
+    const OBJECT_GRID: [&str; 7] = [
+        ".......", ".......", "..###..", "..###..", "..###..", ".......", ".......",
+    ];
+
+    #[test]
+    fn object_selection_picks_the_largest_thing_that_is_not_background() {
+        // The whole canvas: the ring's most common colour is black, so the
+        // object, the speck, and the mark are all foreground, and the
+        // 9-pixel object is the largest component.
+        let (mut doc, id) = object_scene();
+        doc.select_object_in_rect_with(SelectionMode::New, id, 0.0, 0.0, 7.0, 7.0, 0)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+        // A box around just the object finds the same nine pixels.
+        doc.select_object_in_rect_with(SelectionMode::New, id, 1.0, 1.0, 6.0, 6.0, 0)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+    }
+
+    #[test]
+    fn object_selection_tolerance_folds_faint_marks_into_the_background() {
+        // Boxed alone, the 40 mark is the only foreground at tolerance 0
+        // and disappears into the background at 50.
+        let (mut doc, id) = object_scene();
+        doc.select_object_in_rect_with(SelectionMode::New, id, 4.0, 0.0, 7.0, 2.0, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".......", ".....#.", ".......", ".......", ".......", ".......", "......."]
+        );
+        assert!(doc
+            .select_object_in_rect_with(SelectionMode::New, id, 4.0, 0.0, 7.0, 2.0, 50)
+            .is_err());
+        // A 2×2 box on the speck: three black ring pixels outvote the speck.
+        doc.select_object_in_rect_with(SelectionMode::New, id, 0.0, 5.0, 2.0, 7.0, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".......", ".......", ".......", ".......", ".......", ".......", "#......"]
+        );
+    }
+
+    #[test]
+    fn object_selection_lasso_mode_uses_the_polygon_as_the_region() {
+        // A diamond through the canvas's edge midpoints encloses the
+        // object and none of the corners.
+        let (mut doc, id) = object_scene();
+        let diamond = [(3.5, 0.0), (7.0, 3.5), (3.5, 7.0), (0.0, 3.5)];
+        doc.select_object_in_lasso_with(SelectionMode::New, id, &diamond, 0)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+    }
+
+    #[test]
+    fn object_selection_adds_and_subtracts() {
+        let (mut doc, id) = object_scene();
+        doc.select_all().unwrap();
+        doc.select_object_in_rect_with(SelectionMode::Subtract, id, 0.0, 0.0, 7.0, 7.0, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#######", "#######", "##...##", "##...##", "##...##", "#######", "#######"]
+        );
+        doc.select_object_in_rect_with(SelectionMode::Add, id, 0.0, 5.0, 2.0, 7.0, 0)
+            .unwrap();
+        assert_eq!(selection_grid(&doc)[6], "#######");
+        doc.select_object_in_rect_with(SelectionMode::Add, id, 1.0, 1.0, 6.0, 6.0, 0)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), ["#######"; 7]);
+    }
+
+    #[test]
+    fn object_selection_rejects_empty_regions_and_finds_nothing_in_flat_colour() {
+        let (mut doc, id) = object_scene();
+        assert!(doc
+            .select_object_in_rect_with(SelectionMode::New, id, 9.0, 9.0, 12.0, 12.0, 0)
+            .is_err());
+        assert!(doc
+            .select_object_in_rect_with(SelectionMode::New, id, 3.0, 3.0, 4.0, 4.0, 0)
+            .is_err());
+        assert!(doc
+            .select_object_in_rect_with(SelectionMode::New, id + 1, 0.0, 0.0, 7.0, 7.0, 0)
+            .is_err());
+        assert!(doc
+            .select_object_in_lasso_with(SelectionMode::New, id, &[(0.0, 0.0), (7.0, 7.0)], 0)
             .is_err());
         assert!(doc.selection().is_none());
     }

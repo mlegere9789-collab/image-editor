@@ -12655,6 +12655,66 @@ instead. Every other layer of this project's quality bar
 **1285 Rust tests total** (1280 → 1285, 1278 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 209 — Object Selection tool
+
+`Document::select_object_in_rect_with(mode, id, x0, y0, x1, y1,
+tolerance)` and `select_object_in_lasso_with(mode, id, trail,
+tolerance)` are Photoshop's Object Selection tool in its Rectangle and
+Lasso modes, built on one private finder that is this project's
+explicit stand-in for Photoshop's neural detection. Within the dragged
+region — a marquee-normalised box, or the even-odd polygon through a
+freehand outline — the *background* is taken to be the most common
+colour of the region's border ring (its pixels with a 4-neighbour
+outside the region or off the canvas; ties go to the lower colour),
+every region pixel outside that colour ± `tolerance` per channel is
+foreground, and the *object* is the largest 4-connected foreground
+component. The result is always a hard-edged mask combined with the
+current selection per `mode`. A region with no pixels, or one in which
+no foreground pixel is found, errors. Photoshop's Object Finder (hover
+detection), its refresh, and its soft edge are documented scope cuts.
+Two tool buttons follow Magnetic Lasso — **Object Select**, which
+reuses the marquee's box drag, and **Object Lasso**, which reuses the
+lasso's trail — both showing the Tolerance slider and honouring the
+marquee modifier keys, through `select_object_rect` and
+`select_object_lasso` commands.
+
+**Verified two ways.** Five new `document.rs` tests on a `7×7` black
+canvas with a `3×3` grey-`200` object, a one-pixel `200` speck at the
+bottom-left corner, and a faint `40` mark at `(5, 1)`, every result
+first produced by a Python model of the ring vote, the tolerance test,
+and the component search. Boxing the whole canvas votes black, makes
+the object, the speck, and the mark foreground, and selects the
+nine-pixel object as the largest component; a box just around the
+object finds the same nine. Boxing the mark alone selects its single
+pixel at tolerance `0` and finds nothing at `50`; a `2×2` box on the
+speck has three black ring pixels outvoting it, so the speck is
+selected. A diamond lasso through the canvas's edge midpoints encloses
+the object and none of the corners and selects the nine again.
+Subtracting the object from Select All cuts a `3×3` hole, adding the
+speck fills its row, and adding the object fills the canvas. A box off
+the canvas, a box inside the object's flat colour, an unknown layer,
+and a two-point lasso all error with nothing selected. Four of the five
+passed on the first run: the mark test first put its expected pixel on
+row 0 when the fixture places the mark on row 1, and its `3`-row box
+also caught a corner of the object, which the finder correctly
+reported as foreground at tolerance `50` where the test expected
+nothing — both slips in the fixture, not the finder. The box was
+shortened to two rows and the row fixed, and it passed.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifty-six:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The tools' wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1290 Rust tests total** (1285 → 1290, 1283 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -3382,6 +3382,8 @@ export default function App() {
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
   const isMagneticLasso = tool === "magneticLasso";
+  const isObjectSelect = tool === "objectSelect";
+  const isObjectSelectLasso = tool === "objectSelectLasso";
   // The Quick Selection tool shares the Selection Brush's stroke capture.
   const isSelectionBrush = tool === "selectionBrush" || tool === "quickSelection";
 
@@ -3600,7 +3602,7 @@ export default function App() {
         moveStart.current = toDocPoint(event, document);
         return;
       }
-      if (isLasso || isMagneticLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
@@ -3653,7 +3655,7 @@ export default function App() {
         gradientStart.current = toDocPoint(event, document);
         return;
       }
-      if (isMarqueeTool || (isRectangle && canPaint)) {
+      if (isMarqueeTool || ((isRectangle || isObjectSelect) && canPaint)) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const point = toDocPoint(event, document);
         marqueeStart.current = point;
@@ -3705,6 +3707,8 @@ export default function App() {
       cloneSource,
       isLasso,
       isMagneticLasso,
+      isObjectSelect,
+      isObjectSelectLasso,
       isSelectionBrush,
       isPolygonLasso,
       lassoPoints,
@@ -3760,13 +3764,13 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       readLevelsAt(event);
-      if (isLasso || isMagneticLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
         return;
       }
-      if (isMarqueeTool || isRectangle) {
+      if (isMarqueeTool || isRectangle || isObjectSelect) {
         if (marqueeStart.current === null) return;
         setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
         return;
@@ -3781,6 +3785,8 @@ export default function App() {
       document,
       isLasso,
       isMagneticLasso,
+      isObjectSelectLasso,
+      isObjectSelect,
       isSelectionBrush,
       isMarqueeTool,
       isRectangle,
@@ -3815,6 +3821,57 @@ export default function App() {
               setShowCurvesDialog(true);
             })
             .catch((err) => setError(String(err)));
+        }
+        return;
+      }
+      if (isObjectSelect) {
+        const start = marqueeStart.current;
+        marqueeStart.current = null;
+        setMarqueePreview(null);
+        if (start && document && selectedId !== null) {
+          const [x0, y0] = start;
+          const [x1, y1] = toDocPoint(event, document);
+          if (x0 !== x1 || y0 !== y1) {
+            const mode: SelectionMode =
+              event.shiftKey && event.altKey
+                ? "intersect"
+                : event.shiftKey
+                  ? "add"
+                  : event.altKey
+                    ? "subtract"
+                    : selectionMode;
+            void runCommand("select_object_rect", {
+              id: selectedId,
+              x0,
+              y0,
+              x1,
+              y1,
+              tolerance: magicWandTolerance,
+              mode,
+            });
+          }
+        }
+        return;
+      }
+      if (isObjectSelectLasso) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 3 && selectedId !== null) {
+          const mode: SelectionMode =
+            event.shiftKey && event.altKey
+              ? "intersect"
+              : event.shiftKey
+                ? "add"
+                : event.altKey
+                  ? "subtract"
+                  : selectionMode;
+          void runCommand("select_object_lasso", {
+            id: selectedId,
+            trail,
+            tolerance: magicWandTolerance,
+            mode,
+          });
         }
         return;
       }
@@ -4034,6 +4091,8 @@ export default function App() {
     [
       isLasso,
       isMagneticLasso,
+      isObjectSelect,
+      isObjectSelectLasso,
       magneticWidth,
       magneticContrast,
       isSelectionBrush,
@@ -4694,6 +4753,24 @@ export default function App() {
             title="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
           >
             Magnetic Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "objectSelect" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "objectSelect"}
+            onClick={() => setTool("objectSelect")}
+            title="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
+          >
+            Object Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "objectSelectLasso" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "objectSelectLasso"}
+            onClick={() => setTool("objectSelectLasso")}
+            title="Object Selection, Lasso mode: draw a rough outline around an object to select it"
+          >
+            Object Lasso
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -6260,7 +6337,11 @@ export default function App() {
               </label>
             </>
           )}
-          {(tool === "colorReplace" || tool === "backgroundEraser" || tool === "quickSelection") && (
+          {(tool === "colorReplace" ||
+            tool === "backgroundEraser" ||
+            tool === "quickSelection" ||
+            tool === "objectSelect" ||
+            tool === "objectSelectLasso") && (
             <label className="tools__slider">
               Tolerance
               <input

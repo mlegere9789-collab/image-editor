@@ -454,6 +454,44 @@ fn quick_select(
     })
 }
 
+/// Object Selection tool, Rectangle mode: the largest non-background thing
+/// inside a dragged box on layer `id`, combined per `mode`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn select_object_rect(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    tolerance: u8,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_object_in_rect_with(mode, id, x0, y0, x1, y1, tolerance)?;
+        Ok(None)
+    })
+}
+
+/// Object Selection tool, Lasso mode: the same finder inside a freehand
+/// outline.
+#[tauri::command]
+fn select_object_lasso(
+    state: State<'_, AppState>,
+    id: LayerId,
+    trail: Vec<(f32, f32)>,
+    tolerance: u8,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_object_in_lasso_with(mode, id, &trail, tolerance)?;
+        Ok(None)
+    })
+}
+
 /// Magnetic Lasso tool: a freehand trail snapped to the strongest edge of
 /// layer `id` within `width` pixels that is at least `contrast` strong,
 /// then selected as a lasso, combined per `mode`.
@@ -4094,6 +4132,8 @@ pub fn run() {
             select_lasso,
             select_brush,
             select_magnetic_lasso,
+            select_object_rect,
+            select_object_lasso,
             quick_select,
             select_magic_wand,
             select_color_range,
