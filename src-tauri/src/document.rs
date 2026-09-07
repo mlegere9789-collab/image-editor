@@ -384,6 +384,115 @@ pub enum ColorMode {
     Multichannel,
 }
 
+/// A 3D colour lookup table — Image > Adjustments > Color Lookup's `.cube`
+/// file: `size³` RGB triples in `0.0..=1.0`, red index running fastest,
+/// sampled by trilinear interpolation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Lut3d {
+    pub size: usize,
+    pub table: Vec<[f32; 3]>,
+    /// The input range the grid spans (`DOMAIN_MIN` / `DOMAIN_MAX`).
+    pub domain: ([f32; 3], [f32; 3]),
+}
+
+impl Lut3d {
+    /// The table's output for `rgb` (each `0.0..=1.0`, clamped): trilinear
+    /// interpolation between the eight surrounding grid points.
+    pub fn sample(&self, rgb: [f32; 3]) -> [f32; 3] {
+        let n = self.size;
+        let (lo, hi) = self.domain;
+        let mut index = [0usize; 3];
+        let mut frac = [0f32; 3];
+        for c in 0..3 {
+            let span = hi[c] - lo[c];
+            let v = if span > 0.0 {
+                ((rgb[c] - lo[c]) / span).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            let p = v * (n - 1) as f32;
+            let i = (p.floor() as usize).min(n - 2);
+            index[c] = i;
+            frac[c] = p - i as f32;
+        }
+        let at = |r: usize, g: usize, b: usize| self.table[r + g * n + b * n * n];
+        let lerp3 = |a: [f32; 3], b: [f32; 3], t: f32| {
+            [
+                a[0] + (b[0] - a[0]) * t,
+                a[1] + (b[1] - a[1]) * t,
+                a[2] + (b[2] - a[2]) * t,
+            ]
+        };
+        let [r, g, b] = index;
+        let [tr, tg, tb] = frac;
+        let c00 = lerp3(at(r, g, b), at(r + 1, g, b), tr);
+        let c10 = lerp3(at(r, g + 1, b), at(r + 1, g + 1, b), tr);
+        let c01 = lerp3(at(r, g, b + 1), at(r + 1, g, b + 1), tr);
+        let c11 = lerp3(at(r, g + 1, b + 1), at(r + 1, g + 1, b + 1), tr);
+        let c0 = lerp3(c00, c10, tg);
+        let c1 = lerp3(c01, c11, tg);
+        lerp3(c0, c1, tb)
+    }
+}
+
+/// Parses an Adobe/IRIDAS `.cube` file: `LUT_3D_SIZE n` (2 or more),
+/// optional `TITLE`, `DOMAIN_MIN`, and `DOMAIN_MAX` lines, `#` comments,
+/// and exactly `n³` lines of three numbers. 1D cubes (`LUT_1D_SIZE`) are a
+/// documented scope cut.
+pub fn parse_cube(text: &str) -> Result<Lut3d, String> {
+    let mut size: Option<usize> = None;
+    let mut domain = ([0.0f32; 3], [1.0f32; 3]);
+    let mut table: Vec<[f32; 3]> = Vec::new();
+    let triple = |line: &str, what: &str| -> Result<[f32; 3], String> {
+        let values: Vec<f32> = line
+            .split_whitespace()
+            .map(|v| v.parse::<f32>())
+            .collect::<Result<_, _>>()
+            .map_err(|_| format!("Bad {what} line in the .cube file: \"{line}\"."))?;
+        if values.len() != 3 || values.iter().any(|v| !v.is_finite()) {
+            return Err(format!("Bad {what} line in the .cube file: \"{line}\"."));
+        }
+        Ok([values[0], values[1], values[2]])
+    };
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') || line.starts_with("TITLE") {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("LUT_3D_SIZE") {
+            let n: usize = rest
+                .trim()
+                .parse()
+                .map_err(|_| "Bad LUT_3D_SIZE in the .cube file.".to_string())?;
+            if n < 2 {
+                return Err("LUT_3D_SIZE must be at least 2.".to_string());
+            }
+            size = Some(n);
+        } else if let Some(rest) = line.strip_prefix("DOMAIN_MIN") {
+            domain.0 = triple(rest, "DOMAIN_MIN")?;
+        } else if let Some(rest) = line.strip_prefix("DOMAIN_MAX") {
+            domain.1 = triple(rest, "DOMAIN_MAX")?;
+        } else if line.starts_with("LUT_1D_SIZE") {
+            return Err("1D .cube files are not supported; use a 3D LUT.".to_string());
+        } else {
+            table.push(triple(line, "table")?);
+        }
+    }
+    let size = size.ok_or_else(|| "The .cube file has no LUT_3D_SIZE.".to_string())?;
+    if table.len() != size * size * size {
+        return Err(format!(
+            "The .cube file should have {} entries for size {size}, not {}.",
+            size * size * size,
+            table.len()
+        ));
+    }
+    Ok(Lut3d {
+        size,
+        table,
+        domain,
+    })
+}
+
 /// The naive, profile-free CMYK split of an RGB pixel as ink coverages
 /// `0..=255`: `K = 1 − max(r, g, b)` and each ink `(1 − channel − K) /
 /// (1 − K)`, zero for black. Photoshop's own conversion goes through an
@@ -10712,6 +10821,18 @@ impl Document {
     /// Photoshop's own Invert applies, with no intermediate curve.
     pub fn invert_colors(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
         self.adjust_with(id, Adjustment::Invert)
+    }
+
+    /// Image > Adjustments > Color Lookup: every selected pixel's colour
+    /// through `lut` ([`Lut3d::sample`]), alpha untouched. Confined to
+    /// the selection and blocked by a locked layer like every adjustment.
+    /// Photoshop's Abstract and Device Link profiles are documented scope
+    /// cuts; `.cube` 3D LUTs are the one format read.
+    pub fn color_lookup(&mut self, id: LayerId, lut: &Lut3d) -> Result<Option<Rect>, String> {
+        self.adjust_layer_pixels(id, |[r, g, b, a]| {
+            let [nr, ng, nb] = lut.sample([to_unit(r), to_unit(g), to_unit(b)]);
+            [to_byte(nr), to_byte(ng), to_byte(nb), a]
+        })
     }
 
     /// One of the [`Adjustment`]s applied destructively to layer `id`'s own
@@ -38091,6 +38212,101 @@ mod tests {
         // Converting again would need the names free.
         assert!(doc.convert_mode(ColorMode::Multichannel, None).is_err());
         assert_eq!(doc.view().channels.len(), 3);
+    }
+
+    const IDENTITY_CUBE: &str = "TITLE \"identity\"\n# a comment\nLUT_3D_SIZE 2\nDOMAIN_MIN 0 0 0\nDOMAIN_MAX 1 1 1\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n";
+
+    #[test]
+    fn parse_cube_reads_the_grid_and_rejects_bad_files() {
+        let lut = parse_cube(IDENTITY_CUBE).unwrap();
+        assert_eq!(lut.size, 2);
+        assert_eq!(lut.table.len(), 8);
+        // Red runs fastest: entry 1 is the red corner, entry 2 the green.
+        assert_eq!(lut.table[1], [1.0, 0.0, 0.0]);
+        assert_eq!(lut.table[2], [0.0, 1.0, 0.0]);
+        assert_eq!(lut.table[4], [0.0, 0.0, 1.0]);
+        assert!(parse_cube("LUT_3D_SIZE 2\n0 0 0\n").is_err());
+        assert!(parse_cube("0 0 0\n1 1 1\n").is_err());
+        assert!(parse_cube(
+            "LUT_3D_SIZE 2\n0 0 x\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n"
+        )
+        .is_err());
+        assert!(parse_cube("LUT_3D_SIZE 1\n0 0 0\n").is_err());
+        assert!(parse_cube("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n").is_err());
+    }
+
+    #[test]
+    fn an_identity_cube_changes_nothing() {
+        let lut = parse_cube(IDENTITY_CUBE).unwrap();
+        assert_eq!(lut.sample([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
+        assert_eq!(lut.sample([1.0, 0.0, 0.0]), [1.0, 0.0, 0.0]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[10, 200, 77, 255, 0, 0, 0, 3], 2, 1)
+            .unwrap();
+        doc.color_lookup(id, &lut).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 200, 77, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 3]);
+    }
+
+    #[test]
+    fn an_inverting_cube_inverts_by_interpolation() {
+        let inverted = "LUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n";
+        let lut = parse_cube(inverted).unwrap();
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[100, 0, 255, 128], 1, 1).unwrap();
+        doc.color_lookup(id, &lut).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [155, 255, 0, 128]);
+    }
+
+    #[test]
+    fn a_three_point_cube_interpolates_between_grid_points() {
+        // A 3×3×3 cube whose entries square each channel independently:
+        // grid 0, 0.5, 1 → 0, 0.25, 1. Between grid points the sample is
+        // linear: 64 → 32, 100 → 50, 191 → 159, 255 → 255.
+        let mut text = String::from("LUT_3D_SIZE 3\n");
+        let grid = [0.0f32, 0.25, 1.0];
+        for b in 0..3 {
+            for g in 0..3 {
+                for r in 0..3 {
+                    text.push_str(&format!("{} {} {}\n", grid[r], grid[g], grid[b]));
+                }
+            }
+        }
+        let lut = parse_cube(&text).unwrap();
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[
+                    64, 64, 64, 255, 100, 100, 100, 255, 191, 191, 191, 255, 255, 255, 255, 255,
+                ],
+                4,
+                1,
+            )
+            .unwrap();
+        doc.color_lookup(id, &lut).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [32, 32, 32, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [159, 159, 159, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn color_lookup_respects_the_selection_and_the_lock() {
+        let inverted = "LUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n";
+        let lut = parse_cube(inverted).unwrap();
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[100, 100, 100, 255, 100, 100, 100, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.color_lookup(id, &lut).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [155, 155, 155, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 100, 100, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.color_lookup(id, &lut).is_err());
+        assert!(doc.color_lookup(999, &lut).is_err());
     }
 
     #[test]

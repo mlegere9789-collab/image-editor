@@ -13869,6 +13869,51 @@ hand instead. Every other layer of this project's quality bar
 **1400 Rust tests total** (1395 → 1400, 1393 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 232 — Color Lookup
+
+Image > Adjustments > Color Lookup arrives as a `.cube` 3D LUT
+loader. `parse_cube(text)` reads the Adobe/IRIDAS format —
+`LUT_3D_SIZE n` (at least 2), optional `TITLE`, `DOMAIN_MIN`, and
+`DOMAIN_MAX`, `#` comments, and exactly `n³` lines of three finite
+numbers with the red index running fastest — into a `Lut3d`, refusing
+a missing or bad size, a wrong entry count, a bad line, and 1D cubes.
+`Lut3d::sample(rgb)` maps each channel through the domain, clamps to
+the grid, and interpolates trilinearly between the eight surrounding
+points. `color_lookup(id, lut)` puts every selected pixel's colour
+through it, alpha untouched, through `adjust_layer_pixels`, so the
+selection and the lock apply as for every adjustment. A `color_lookup`
+command reads the file at a path, and a **Color Lookup…** button opens
+a `.cube` file picker for the selected layer. Photoshop's Abstract and
+Device Link profiles, its bundled presets, and 1D cubes are documented
+scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, the interpolated
+bytes first computed in Python emulating `f32`. An identity cube with
+a title, a comment, and domain lines parses to eight entries with the
+red, green, and blue corners at indices `1`, `2`, and `4`; a short
+table, a missing size, a non-number, size `1`, and a 1D cube are each
+refused. The identity cube leaves `[10, 200, 77]` and a transparent
+pixel alone, and samples its corners exactly. An inverting cube turns
+`[100, 0, 255]` into `[155, 255, 0]` keeping alpha `128`. A 3×3×3 cube
+squaring each channel at its grid points (`0, 0.25, 1`) interpolates
+`64 → 32`, `100 → 50`, `191 → 159`, `255 → 255`. With one pixel
+selected only it inverts, and a locked or unknown layer errors. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The button was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1405 Rust tests total** (1400 → 1405, 1398 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

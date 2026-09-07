@@ -39,6 +39,7 @@ import type {
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 const PROJECT_FILTER = [{ name: "Image Editor Project", extensions: ["iep"] }];
+const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
 /** One row per output channel (R, G, B); each row is
  * [rCoeff, gCoeff, bCoeff, constant]. This is the no-op matrix. */
@@ -3420,6 +3421,14 @@ export default function App() {
     if (typeof selected === "string") await runCommand("add_layer", { path: selected }, "top");
   }, [runCommand]);
 
+  const applyColorLookup = useCallback(async () => {
+    if (selectedId === null) return;
+    const selected = await open({ multiple: false, directory: false, filters: CUBE_FILTER });
+    if (typeof selected === "string") {
+      await runCommand("color_lookup", { id: selectedId, path: selected });
+    }
+  }, [runCommand, selectedId]);
+
   // Unlike runCommand, exporting reads the open document but never mutates
   // it — there is no new Snapshot to apply, only success or an error to show.
   const exportDocument = useCallback(async () => {
@@ -6053,6 +6062,14 @@ export default function App() {
             title="Image > Adjustments > Auto Color: stretch each channel, then snap the average colour to neutral"
           >
             Auto Color
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyColorLookup()}
+            disabled={busy || !canPaint}
+            title="Image > Adjustments > Color Lookup: apply a .cube 3D LUT file to the selected layer"
+          >
+            Color Lookup…
           </button>
           <button
             className="button button--quiet"

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 377.**
+**618 distinct capabilities tracked. Currently shipped: 378.**
 
 ## PART I — EVERY TOOL
 
@@ -139,7 +139,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] BLACK & WHITE
 - [x] PHOTO FILTER
 - [x] CHANNEL MIXER
-- [ ] COLOR LOOKUP
+- [x] COLOR LOOKUP (`parse_cube` / `Lut3d::sample` / `color_lookup`: an Adobe `.cube` 3D LUT — `LUT_3D_SIZE`, `TITLE`, `DOMAIN_MIN`/`MAX`, comments, `n³` red-fastest triples — sampled by trilinear interpolation over every selected pixel, alpha untouched; Abstract and Device Link profiles and 1D cubes are documented scope cuts — see README Phase 232)
 - [x] INVERT
 - [x] POSTERIZE
 - [x] THRESHOLD

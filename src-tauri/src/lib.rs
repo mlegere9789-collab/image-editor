@@ -1205,6 +1205,16 @@ fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, St
     })
 }
 
+/// Image > Adjustments > Color Lookup: apply the `.cube` 3D LUT at `path`
+/// to layer `id`.
+#[tauri::command]
+fn color_lookup(state: State<'_, AppState>, id: LayerId, path: String) -> Result<Snapshot, String> {
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    let lut = document::parse_cube(&text)?;
+    edit_checkpointed(&state, |document| document.color_lookup(id, &lut))
+}
+
 /// Image > Mode: convert the document to `mode`, with Bitmap's `method`.
 #[tauri::command]
 fn convert_mode(
@@ -4542,6 +4552,7 @@ pub fn run() {
             load_channel,
             add_channel,
             convert_mode,
+            color_lookup,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,
