@@ -278,6 +278,16 @@ export default function App() {
   const [showSkewDialog, setShowSkewDialog] = useState(false);
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
+  const [showGeometryDialog, setShowGeometryDialog] = useState(false);
+  const [geometry, setGeometry] = useState({
+    vertical: 0,
+    horizontal: 0,
+    rotate: 0,
+    aspect: 0,
+    scale: 100,
+    offsetX: 0,
+    offsetY: 0,
+  });
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
@@ -1095,6 +1105,16 @@ export default function App() {
     await runCommand("rotate", { id: selectedId, degrees: rotateDegrees });
     setShowRotateDialog(false);
   }, [runCommand, selectedId, rotateDegrees]);
+
+  const setGeometryField = useCallback((key: keyof typeof geometry, value: number) => {
+    setGeometry((settings) => ({ ...settings, [key]: value }));
+  }, []);
+
+  const applyGeometry = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_geometry", { id: selectedId, settings: geometry });
+    setShowGeometryDialog(false);
+  }, [runCommand, selectedId, geometry]);
 
   const applyScale = useCallback(async () => {
     if (selectedId === null) return;
@@ -3596,6 +3616,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowGeometryDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Geometry (manual perspective, rotate, aspect, scale, offset)"
+          >
+            Geometry…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5904,6 +5932,76 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCameraRaw} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGeometryDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGeometryDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Geometry"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Geometry</h2>
+            <p className="modal__hint">
+              Manual corrections applied in order — perspective, rotate, aspect and
+              scale, then offset — as one edit. Upright's automatic modes are not
+              available.
+            </p>
+            {(
+              [
+                ["vertical", "Vertical (px inset)", 0.5],
+                ["horizontal", "Horizontal (px inset)", 0.5],
+                ["rotate", "Rotate (°)", 0.1],
+                ["aspect", "Aspect (−99..99)", 1],
+                ["scale", "Scale (%)", 1],
+                ["offsetX", "X offset (px)", 1],
+                ["offsetY", "Y offset (px)", 1],
+              ] as const
+            ).map(([key, label, step]) => (
+              <label className="control control--row" key={key}>
+                <span className="control__label">{label}</span>
+                <input
+                  type="number"
+                  step={step}
+                  value={geometry[key]}
+                  onChange={(event) => setGeometryField(key, Number(event.target.value))}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  setGeometry({
+                    vertical: 0,
+                    horizontal: 0,
+                    rotate: 0,
+                    aspect: 0,
+                    scale: 100,
+                    offsetX: 0,
+                    offsetY: 0,
+                  })
+                }
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGeometryDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyGeometry} disabled={busy}>
                 Apply
               </button>
             </div>

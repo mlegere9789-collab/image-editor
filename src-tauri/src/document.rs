@@ -10567,6 +10567,79 @@ impl Document {
         }
         self.distort(id, corners)
     }
+
+    /// Camera Raw Filter > Geometry, Manual mode: the panel's sliders as
+    /// one edit, each mapped onto a transform this project already has.
+    /// Runs, in this fixed order, [`Self::perspective`] (`horizontal`,
+    /// `vertical` — pixel insets exactly as that command takes them), then
+    /// [`Self::rotate`], then [`Self::scale`] carrying the aspect — width
+    /// `scale × (100 + aspect) / 100` percent, height `scale × (100 -
+    /// aspect) / 100` percent, so a positive aspect widens and a negative
+    /// one narrows — then a transparent-fill offset. A stage left at its
+    /// [`GeometrySettings`] default is skipped, so all-default settings
+    /// are an exact identity, and each stage keeps its own erroring rules
+    /// (an aspect of `±100` is a zero-percent axis and errors through
+    /// `scale`). Upright's automatic modes and the lens Distortion slider
+    /// are a documented scope cut.
+    pub fn camera_raw_geometry(
+        &mut self,
+        id: LayerId,
+        settings: GeometrySettings,
+    ) -> Result<Option<Rect>, String> {
+        let neutral = GeometrySettings::default();
+        let mut touched = self.layer(id).map(|_| None)?;
+        if (settings.horizontal, settings.vertical) != (neutral.horizontal, neutral.vertical) {
+            touched = self.perspective(id, settings.horizontal, settings.vertical)?;
+        }
+        if settings.rotate != neutral.rotate {
+            touched = self.rotate(id, settings.rotate)?;
+        }
+        if (settings.scale, settings.aspect) != (neutral.scale, neutral.aspect) {
+            let width_percent = settings.scale * (100.0 + settings.aspect) / 100.0;
+            let height_percent = settings.scale * (100.0 - settings.aspect) / 100.0;
+            touched = self.scale(id, width_percent, height_percent)?;
+        }
+        if (settings.offset_x, settings.offset_y) != (neutral.offset_x, neutral.offset_y) {
+            touched = self.translate(id, settings.offset_x, settings.offset_y)?;
+        }
+        Ok(touched)
+    }
+}
+
+/// Every Manual-mode value Camera Raw Filter > Geometry applies at once —
+/// see [`Document::camera_raw_geometry`]. `Default` is the neutral panel.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeometrySettings {
+    /// Perspective inset in pixels: positive narrows the left edge,
+    /// negative the right.
+    pub vertical: f32,
+    /// Perspective inset in pixels: positive narrows the top edge,
+    /// negative the bottom.
+    pub horizontal: f32,
+    /// Degrees, positive clockwise.
+    pub rotate: f32,
+    /// `-99..=99`: widens (positive) or narrows (negative) relative to the
+    /// height.
+    pub aspect: f32,
+    /// Percent.
+    pub scale: f32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
+
+impl Default for GeometrySettings {
+    fn default() -> Self {
+        Self {
+            vertical: 0.0,
+            horizontal: 0.0,
+            rotate: 0.0,
+            aspect: 0.0,
+            scale: 100.0,
+            offset_x: 0,
+            offset_y: 0,
+        }
+    }
 }
 
 /// The eight coefficients `[a, b, c, d, e, f, g, h]` of the projective map
@@ -25302,6 +25375,97 @@ mod tests {
         let err = doc.paste_into(&clipboard, "into").unwrap_err();
         assert!(err.contains("selection"), "{err}");
         assert_eq!(doc.layers().len(), 1);
+    }
+
+    #[test]
+    fn camera_raw_geometry_equals_the_per_stage_calls_in_order() {
+        let settings = GeometrySettings {
+            horizontal: 1.0,
+            rotate: 90.0,
+            scale: 50.0,
+            offset_x: 1,
+            ..GeometrySettings::default()
+        };
+        let (mut composite, id_a) = ramped_4x4();
+        composite.camera_raw_geometry(id_a, settings).unwrap();
+
+        let (mut sequential, id_b) = ramped_4x4();
+        sequential.perspective(id_b, 1.0, 0.0).unwrap();
+        sequential.rotate(id_b, 90.0).unwrap();
+        sequential.scale(id_b, 50.0, 50.0).unwrap();
+        sequential.translate(id_b, 1, 0).unwrap();
+
+        assert_eq!(composite.layers()[0].pixels, sequential.layers()[0].pixels);
+        assert_ne!(
+            composite.layers()[0].pixels,
+            ramped_4x4().0.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn camera_raw_geometry_at_defaults_is_an_exact_identity() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let touched = doc
+            .camera_raw_geometry(id, GeometrySettings::default())
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(touched, None);
+    }
+
+    #[test]
+    fn camera_raw_geometry_rotate_alone_is_a_rotate() {
+        let (mut doc, id) = ramped_3x3();
+        let settings = GeometrySettings {
+            rotate: 90.0,
+            ..GeometrySettings::default()
+        };
+        doc.camera_raw_geometry(id, settings).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![70, 40, 10], vec![80, 50, 20], vec![90, 60, 30]]
+        );
+    }
+
+    #[test]
+    fn camera_raw_geometry_aspect_scales_the_axes_apart() {
+        // Aspect -50 at scale 100: width 50%, height 150% -- only the
+        // middle column survives, every row reading itself.
+        let (mut doc, id) = ramped_3x3();
+        let settings = GeometrySettings {
+            aspect: -50.0,
+            ..GeometrySettings::default()
+        };
+        doc.camera_raw_geometry(id, settings).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 20, 0], vec![0, 50, 0], vec![0, 80, 0]]
+        );
+        let (mut via_scale, id_b) = ramped_3x3();
+        via_scale.scale(id_b, 50.0, 150.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, via_scale.layers()[0].pixels);
+    }
+
+    #[test]
+    fn camera_raw_geometry_propagates_each_stages_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        let flat = GeometrySettings {
+            aspect: 100.0,
+            ..GeometrySettings::default()
+        };
+        assert!(doc.camera_raw_geometry(id, flat).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        doc.set_locked(id, true).unwrap();
+        let turn = GeometrySettings {
+            rotate: 90.0,
+            ..GeometrySettings::default()
+        };
+        assert!(doc.camera_raw_geometry(id, turn).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.camera_raw_geometry(999, turn).is_err());
+        assert!(empty
+            .camera_raw_geometry(999, GeometrySettings::default())
+            .is_err());
     }
 
     #[test]

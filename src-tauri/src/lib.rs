@@ -632,6 +632,18 @@ fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Camera Raw Filter > Geometry (Manual) on layer `id`, as one undo step.
+#[tauri::command]
+fn camera_raw_geometry(
+    state: State<'_, AppState>,
+    id: LayerId,
+    settings: document::GeometrySettings,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.camera_raw_geometry(id, settings)
+    })
+}
+
 /// Layer > New > Layer via Copy on layer `id`: unlike [`copy`]/[`paste`],
 /// this never touches the clipboard at all.
 #[tauri::command]
@@ -2889,6 +2901,7 @@ pub fn run() {
             cut,
             paste,
             paste_into,
+            camera_raw_geometry,
             new_layer_via_copy,
             new_layer_via_cut,
             delete_selection,

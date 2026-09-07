@@ -9483,6 +9483,62 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **972 Rust tests total** (967 → 972, 965 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 147 — Camera Raw Filter > Geometry (Manual)
+
+`camera_raw_geometry(id, settings)` fills in the Camera Raw Geometry
+panel's Manual mode, and it is almost entirely composition: with
+Phases 136–142 having built rotation, scaling, a transparent-fill move,
+and mirrored-inset perspective, the panel's sliders map onto them
+directly. The settings travel as a new `GeometrySettings` struct
+(serde, camelCase) — `vertical` and `horizontal` (the panel's two
+perspective sliders, here as pixel insets exactly as `perspective`
+takes them), `rotate` (degrees, clockwise), `aspect` (`-99..=99`),
+`scale` (percent), `offset_x` and `offset_y` (pixels) — with a
+neutral `Default`. The stages run in a fixed, documented order on the
+same layer: `perspective(horizontal, vertical)`, then `rotate`, then
+`scale` carrying the aspect — width `scale × (100 + aspect) / 100`
+percent, height `scale × (100 - aspect) / 100` percent, so a positive
+aspect widens and a negative one narrows, this project's own explicit
+definition of a slider Camera Raw documents only by feel — then the
+offset. Stages left at their defaults are skipped, so all-default
+settings are an exact identity; every stage keeps its own erroring
+rules, so an aspect of `±100` (a zero-percent axis) errors through
+`scale` exactly as a degenerate perspective errors through `distort`.
+Upright's automatic modes (Auto, Level, Vertical, Full, Guided) need
+line detection this project has no basis for, and the lens Distortion
+slider needs a lens model; both are a documented scope cut, as is the
+panel's on-preview grid. A new **Geometry…** dialog beside the Camera
+Raw Filter button exposes the seven values with a Reset button.
+
+**Verified two ways.** Five new `document.rs` tests. With every stage
+non-neutral on `ramped_4x4` — horizontal inset `1`, rotate `90`, scale
+`50` at aspect `0`, offset `(1, 0)` — the composite equals the four
+calls made in that order byte-for-byte and differs from the untouched
+fixture. All-default settings are a byte-for-byte identity reporting
+`None` touched. With only `rotate = 90` the result is Phase 136's grid
+`[[70, 40, 10], [80, 50, 20], [90, 60, 30]]`. Aspect alone is pinned
+against `scale` directly: aspect `-50` at scale `100` on `ramped_3x3`
+equals `scale(50, 150)`, which keeps only the middle column (`[[0, 20,
+0], [0, 50, 0], [0, 80, 0]]` — the height factor of `150%` reads
+`1 + (y - 1) / 1.5`, rounding every row back to itself). An aspect of
+`100`, a locked layer, and an unknown layer all error. All five passed
+on the first run; as with the other composites, every byte is one an
+earlier phase already hand-computed and cross-checked.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**977 Rust tests total** (972 → 977, 970 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
