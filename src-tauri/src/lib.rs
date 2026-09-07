@@ -2465,6 +2465,24 @@ fn draw_triangle(
     })
 }
 
+/// Move tool Auto-Select: the topmost visible layer with an opaque pixel
+/// at `(x, y)`. Read-only.
+#[tauri::command]
+fn layer_at(state: State<'_, AppState>, x: u32, y: u32) -> Result<Option<LayerId>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    Ok(document.layer_at(x, y))
+}
+
+/// Move tool hover bounds: the bounding box of layer `id`'s opaque pixels.
+/// Read-only.
+#[tauri::command]
+fn layer_bounds(state: State<'_, AppState>, id: LayerId) -> Result<Option<Rect>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.layer_bounds(id)
+}
+
 /// View > New Guide.
 #[tauri::command]
 fn add_guide(
@@ -4234,6 +4252,8 @@ pub fn run() {
             select_subject,
             remove_background,
             mask_all_objects,
+            layer_at,
+            layer_bounds,
             add_guide,
             remove_guide,
             clear_guides,

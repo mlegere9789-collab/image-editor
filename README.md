@@ -12913,6 +12913,50 @@ instead. Every other layer of this project's quality bar
 **1310 Rust tests total** (1305 → 1310, 1303 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 214 — Move tool: Auto-Select and hover layer bounds
+
+Two read-only queries give the Move tool its Photoshop options.
+`Document::layer_at(x, y)` is Auto-Select in its Layer mode: the
+topmost visible layer with a non-transparent pixel at that point, or
+`None` when nothing is there — hidden layers and fully transparent
+pixels are looked through, and a point off the canvas is `None`.
+`layer_bounds(id)` is the hover outline: the bounding box of a layer's
+non-transparent pixels, `None` for an empty layer, an error for an
+unknown one. With the Move tool active the options bar shows an
+**Auto-Select** checkbox; when it is on, pressing on the canvas asks
+`layer_at` for the layer under the pointer and makes it the selected
+layer before the drag moves it. Hovering with the Move tool asks
+`layer_at` and then `layer_bounds` once per pixel the pointer enters
+and draws the result as a yellow outline over the canvas, cleared
+while dragging. Auto-Select's Group mode is a documented scope cut in
+this groupless layer model, as is Show Transform Controls.
+
+**Verified two ways.** Five new `document.rs` tests on the three-dot
+fixture, every answer reasoned out by hand. With the blue dot on top
+the origin belongs to blue; move blue one pixel right and the origin
+belongs to green while `(1, 0)` belongs to blue; move green away and
+the origin belongs to red. Hiding blue, then green, hands the origin
+down the stack, an empty pixel is `None`, and a point off the canvas
+is `None`. Red's bounds are the origin pixel, `(0, 0)–(1, 1)`, and
+`(1, 2)–(2, 3)` after a move; a `5×4` layer with a barely visible
+pixel at `(3, 1)` and an opaque one at `(0, 3)` spans `(0, 1)–(4, 4)`,
+a fully transparent layer has `None`, and an unknown layer errors. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and sixty-one:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The hover and press wiring was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1315 Rust tests total** (1310 → 1315, 1308 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

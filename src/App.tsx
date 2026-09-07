@@ -356,6 +356,16 @@ export default function App() {
   // Sharpen tool options: Protect Detail and Sample All Layers.
   // Magnetic Lasso options: the edge search reach in pixels and the
   // minimum edge strength (0-255) that counts as an edge.
+  // Move tool options: Auto-Select picks the layer under the pointer on
+  // press; hovering shows the bounds of the layer under the pointer.
+  const [moveAutoSelect, setMoveAutoSelect] = useState(false);
+  const [hoverBounds, setHoverBounds] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const lastHoverPixel = useRef<string | null>(null);
   const [magneticWidth, setMagneticWidth] = useState(10);
   const [magneticContrast, setMagneticContrast] = useState(32);
   const [sharpenProtectDetail, setSharpenProtectDetail] = useState(false);
@@ -3607,6 +3617,16 @@ export default function App() {
         if (!canPaint || (isPatch && !hasSelection)) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         moveStart.current = toDocPoint(event, document);
+        if (isMove && moveAutoSelect) {
+          // Photoshop's Auto-Select: the press picks the topmost layer with
+          // an opaque pixel under the pointer, then the drag moves it.
+          const [px, py] = moveStart.current;
+          void invoke<number | null>("layer_at", { x: Math.floor(px), y: Math.floor(py) })
+            .then((id) => {
+              if (id !== null) setSelectedId(id);
+            })
+            .catch((err) => setError(String(err)));
+        }
         return;
       }
       if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
@@ -3735,6 +3755,7 @@ export default function App() {
       canPaint,
       checkpoint,
       applyStroke,
+      moveAutoSelect,
       levelsEyedropper,
       selectedId,
       runCommand,
@@ -3771,6 +3792,27 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       readLevelsAt(event);
+      if (isMove && moveStart.current === null) {
+        // Hover Layer Bounds: outline the layer under the pointer.
+        const [fx, fy] = toDocPoint(event, document);
+        const key = `${Math.floor(fx)}:${Math.floor(fy)}`;
+        if (lastHoverPixel.current !== key) {
+          lastHoverPixel.current = key;
+          void invoke<number | null>("layer_at", { x: Math.floor(fx), y: Math.floor(fy) })
+            .then((id) =>
+              id === null
+                ? null
+                : invoke<{ x0: number; y0: number; x1: number; y1: number } | null>(
+                    "layer_bounds",
+                    { id },
+                  ),
+            )
+            .then((bounds) => setHoverBounds(bounds))
+            .catch(() => setHoverBounds(null));
+        }
+      } else if (hoverBounds !== null) {
+        setHoverBounds(null);
+      }
       if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
@@ -3799,6 +3841,8 @@ export default function App() {
       isRectangle,
       applyStroke,
       readLevelsAt,
+      isMove,
+      hoverBounds,
     ],
   );
 
@@ -6338,6 +6382,17 @@ export default function App() {
                 </label>
               )}
             </>
+          )}
+          {tool === "move" && (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={moveAutoSelect}
+                disabled={!canPaint}
+                onChange={(event) => setMoveAutoSelect(event.target.checked)}
+              />
+              Auto-Select
+            </label>
           )}
           {tool === "magneticLasso" && (
             <>
@@ -15946,6 +16001,13 @@ export default function App() {
                     marqueeBounds(marqueePreview.start, marqueePreview.current, document),
                     document,
                   )}
+                />
+              )}
+              {hoverBounds && tool === "move" && (
+                <div
+                  className="hover-bounds"
+                  style={overlayStyle(hoverBounds, document)}
+                  aria-hidden="true"
                 />
               )}
               {document.guides.map((guide) => (

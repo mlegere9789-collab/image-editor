@@ -538,6 +538,13 @@ body {
   pointer-events: none;
 }
 
+.hover-bounds {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid #f5c400;
+  box-sizing: border-box;
+}
+
 .guide-line {
   position: absolute;
   background: #22d3ee;

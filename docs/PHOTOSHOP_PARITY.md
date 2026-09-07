@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 318.**
+**618 distinct capabilities tracked. Currently shipped: 321.**
 
 ## PART I — EVERY TOOL
 
@@ -328,9 +328,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Fill (flat colour only, no pattern/history/content-aware source — see README Phase 19)
 - [x] Content-Aware Fill from Selection (the same `content_aware_fill`, driven by the active selection — see README Phase 185)
 - [x] Delete and Fill Selection (the same `content_aware_fill`: the selected pixels are discarded and refilled from their surroundings in one step — see README Phase 185)
-- [ ] Move Tool — Hover Layer Bounds
-- [ ] Layer Auto-Select
-- [ ] Layer Auto-Select — Layer
+- [x] Move Tool — Hover Layer Bounds (`layer_bounds`, the bounding box of a layer's opaque pixels, outlined while the Move tool hovers over that layer — see README Phase 214)
+- [x] Layer Auto-Select (`layer_at`, the topmost visible layer with an opaque pixel under the pointer, picked on press when the Move tool's Auto-Select is on — see README Phase 214)
+- [x] Layer Auto-Select — Layer (the Layer mode of Auto-Select; Group mode is a documented scope cut in this groupless layer model — see README Phase 214)
 - [ ] Layer Auto-Select — Group
 - [ ] Show Transform Controls
 - [x] Select > Modify > Border (duplicate of MODIFY > BORDER in PART II, already shipped there — checked here for consistency)

@@ -1528,6 +1528,47 @@ impl Document {
         self.select_polygon_with(mode, &distinct)
     }
 
+    /// The Move tool's Auto-Select (Layer): the topmost visible layer with
+    /// a non-transparent pixel at `(x, y)`, or `None` when nothing is
+    /// there — the layer Photoshop would pick up when Auto-Select is on.
+    /// Hidden layers and fully transparent pixels are looked through; a
+    /// point off the canvas is `None`. Read-only. Auto-Select's Group
+    /// mode is a documented scope cut, as this layer model has no groups.
+    pub fn layer_at(&self, x: u32, y: u32) -> Option<LayerId> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let base = (y as usize * self.width as usize + x as usize) * CHANNELS;
+        self.layers
+            .iter()
+            .rev()
+            .find(|layer| layer.visible && layer.pixels[base + 3] > 0)
+            .map(|layer| layer.id)
+    }
+
+    /// The Move tool's hover bounds: the bounding box of layer `id`'s
+    /// non-transparent pixels, or `None` for a fully transparent layer.
+    /// Read-only; errors for an unknown layer.
+    pub fn layer_bounds(&self, id: LayerId) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        let width = self.width as usize;
+        let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+        for (idx, px) in layer.pixels.chunks_exact(CHANNELS).enumerate() {
+            if px[3] == 0 {
+                continue;
+            }
+            let (x, y) = ((idx % width) as u32, (idx / width) as u32);
+            x0 = x0.min(x);
+            y0 = y0.min(y);
+            x1 = x1.max(x + 1);
+            y1 = y1.max(y + 1);
+        }
+        if x1 == 0 {
+            return Ok(None);
+        }
+        Ok(Some(Rect { x0, y0, x1, y1 }))
+    }
+
     /// The Object Selection tool in Rectangle mode: drag a box and the
     /// object inside it is selected. See [`Self::select_object_in_bits`]
     /// for how the object is found. The box is normalised and clipped to
@@ -24605,6 +24646,80 @@ mod tests {
         assert_eq!(pixel(&doc, blue, 0, 0), [0, 0, 255, 255]);
         assert_eq!(pixel(&doc, green, 0, 0), [0, 255, 0, 255]);
         assert!(doc.set_linked(blue + 100, true).is_err());
+    }
+
+    #[test]
+    fn layer_at_picks_the_topmost_opaque_layer() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        assert_eq!(doc.layer_at(0, 0), Some(blue));
+        doc.move_pixels(blue, 1, 0).unwrap();
+        assert_eq!(doc.layer_at(0, 0), Some(green));
+        assert_eq!(doc.layer_at(1, 0), Some(blue));
+        doc.move_pixels(green, 2, 2).unwrap();
+        assert_eq!(doc.layer_at(0, 0), Some(red));
+    }
+
+    #[test]
+    fn layer_at_looks_through_hidden_layers_and_transparency() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        doc.set_visible(blue, false).unwrap();
+        assert_eq!(doc.layer_at(0, 0), Some(green));
+        doc.set_visible(green, false).unwrap();
+        assert_eq!(doc.layer_at(0, 0), Some(red));
+        assert_eq!(doc.layer_at(2, 2), None);
+        assert_eq!(doc.layer_at(3, 0), None);
+    }
+
+    #[test]
+    fn layer_bounds_boxes_the_opaque_pixels() {
+        let (mut doc, [red, _green, _blue]) = three_dots();
+        assert_eq!(
+            doc.layer_bounds(red).unwrap(),
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+        doc.move_pixels(red, 1, 2).unwrap();
+        assert_eq!(
+            doc.layer_bounds(red).unwrap(),
+            Some(Rect {
+                x0: 1,
+                y0: 2,
+                x1: 2,
+                y1: 3
+            })
+        );
+    }
+
+    #[test]
+    fn layer_bounds_spans_scattered_pixels_and_is_none_when_empty() {
+        let mut doc = Document::new(5, 4).unwrap();
+        let mut pixels = solid(5, 4, [0, 0, 0, 0]);
+        pixels[(5 + 3) * 4 + 3] = 1; // (3, 1), barely visible
+        pixels[(3 * 5) * 4 + 3] = 255; // (0, 3)
+        let id = doc.add_layer("scatter", &pixels, 5, 4).unwrap();
+        assert_eq!(
+            doc.layer_bounds(id).unwrap(),
+            Some(Rect {
+                x0: 0,
+                y0: 1,
+                x1: 4,
+                y1: 4
+            })
+        );
+        let empty = doc
+            .add_layer("empty", &solid(5, 4, [9, 9, 9, 0]), 5, 4)
+            .unwrap();
+        assert_eq!(doc.layer_bounds(empty).unwrap(), None);
+    }
+
+    #[test]
+    fn layer_bounds_errors_for_an_unknown_layer() {
+        let (doc, [_, _, blue]) = three_dots();
+        assert!(doc.layer_bounds(blue + 100).is_err());
     }
 
     #[test]
