@@ -9002,6 +9002,62 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **925 Rust tests total** (919 → 925, 918 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 138 — Edit > Transform > Skew
+
+`skew(id, horizontal_degrees, vertical_degrees)` is the third of the
+Transform family's inverse-mapped resamplers, and the two-hundredth
+capability shipped. It shears a layer by `horizontal_degrees` — each
+row slides sideways in proportion to its distance from the centre row,
+by `tan(angle)` pixels per pixel — and then by `vertical_degrees`, each
+column sliding up or down likewise, about the same canvas centre
+`rotate` and `scale` use, with their own nearest-neighbour rounding and
+transparent fill wherever a source position falls off the canvas. The
+two shears are applied one after the other, horizontal first, rather
+than as Photoshop's single simultaneous affine: each has determinant
+`1`, so no combination is degenerate, whereas Photoshop's own combined
+skew folds the layer flat whenever `tan(h) × tan(v) = 1` (both at
+`45°`, say) — the first draft of this phase's Python model used the
+simultaneous form and divided by zero at exactly that pair, which is
+what prompted the sequential definition. This is a documented
+difference in how the two angles compose, not an approximation of an
+intermediate result. Each angle must be finite and strictly inside
+`-90..90`, Photoshop's own `-89..=89` skew range rounded out to where
+`tan` stops being finite. A new **Skew…** dialog exposes the two
+angle sliders and a Reset button.
+
+**Verified two ways.** Six new `document.rs` tests, four asserting
+whole grids. On `ramped_3x3`, horizontal `45°` (`tan = 1`) makes the
+top row (`dy = -1`) read one pixel to its right, the middle row read
+itself, and the bottom row read one to its left, vacated ends
+transparent: `[[20, 30, 0], [40, 50, 60], [0, 70, 80]]`; `-45°` is the
+mirror `[[0, 10, 20], [40, 50, 60], [80, 90, 0]]`; vertical `45°` does
+the same to columns, `[[40, 20, 0], [70, 50, 30], [0, 80, 60]]`. Both
+at `45°` — the pair that would be singular in Photoshop's form — reads
+source `y = row - (col - 1)` then source `x = col - (y - 1)` and gives
+`[[40, 30, 0], [0, 50, 0], [0, 70, 60]]`. On the even `ramped_4x4`,
+horizontal `45°` puts the top row `dy = -1.5` from the centre so it
+reads `x + 1.5`, rounding away from zero to `x + 2`: `[[30, 40, 0, 0],
+[60, 70, 80, 0], [0, 100, 110, 120], [0, 0, 140, 150]]`. Zero skew is a
+byte-for-byte identity. A one-pixel selection confines the rewrite, and
+`90°`, `-90°`, `NaN`, a locked layer, and an unknown layer all error.
+All six passed on the first run, every grid cross-checked against an
+independent Python port of the sequential inverse mapping emulating
+Rust's `f32` `tan` and half-away-from-zero rounding.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-five: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**931 Rust tests total** (925 → 931, 924 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

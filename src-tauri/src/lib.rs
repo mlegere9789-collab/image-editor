@@ -2689,6 +2689,19 @@ fn scale(
     })
 }
 
+/// Edit > Transform > Skew layer `id` by horizontal then vertical angles.
+#[tauri::command]
+fn skew(
+    state: State<'_, AppState>,
+    id: LayerId,
+    horizontal_degrees: f32,
+    vertical_degrees: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.skew(id, horizontal_degrees, vertical_degrees)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2948,6 +2961,7 @@ pub fn run() {
             camera_raw_filter,
             rotate,
             scale,
+            skew,
             select_rectangle,
             select_ellipse,
             select_all,

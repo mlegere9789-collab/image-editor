@@ -255,6 +255,9 @@ export default function App() {
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
+  const [showSkewDialog, setShowSkewDialog] = useState(false);
+  const [skewHorizontal, setSkewHorizontal] = useState(0);
+  const [skewVertical, setSkewVertical] = useState(0);
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
@@ -1082,6 +1085,16 @@ export default function App() {
     });
     setShowScaleDialog(false);
   }, [runCommand, selectedId, scaleWidthPercent, scaleHeightPercent]);
+
+  const applySkew = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("skew", {
+      id: selectedId,
+      horizontalDegrees: skewHorizontal,
+      verticalDegrees: skewVertical,
+    });
+    setShowSkewDialog(false);
+  }, [runCommand, selectedId, skewHorizontal, skewVertical]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3114,6 +3127,14 @@ export default function App() {
             title="Edit > Transform > Scale (selected layer)"
           >
             Scale…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSkewDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Skew (selected layer)"
+          >
+            Skew…
           </button>
         </div>
 
@@ -5852,6 +5873,74 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyScale} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSkewDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSkewDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Skew"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Skew</h2>
+            <p className="modal__hint">
+              Horizontal skew slides each row sideways by its distance from the
+              centre row; vertical skew slides each column likewise, applied
+              second. Uncovered pixels become transparent.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Horizontal
+                <span className="control__value">{skewHorizontal}°</span>
+              </span>
+              <input
+                type="range"
+                min={-89}
+                max={89}
+                value={skewHorizontal}
+                onChange={(event) => setSkewHorizontal(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Vertical
+                <span className="control__value">{skewVertical}°</span>
+              </span>
+              <input
+                type="range"
+                min={-89}
+                max={89}
+                value={skewVertical}
+                onChange={(event) => setSkewVertical(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setSkewHorizontal(0);
+                  setSkewVertical(0);
+                }}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSkewDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySkew} disabled={busy}>
                 Apply
               </button>
             </div>

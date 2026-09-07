@@ -10167,6 +10167,52 @@ impl Document {
             out
         })
     }
+
+    /// Edit > Transform > Skew: shears layer `id` by `horizontal_degrees`
+    /// (each row slides sideways in proportion to its distance from the
+    /// centre row, by `tan(angle)` pixels per pixel) and then by
+    /// `vertical_degrees` (each column slides up or down likewise), about
+    /// the canvas centre, with [`Self::rotate`]'s and [`Self::scale`]'s
+    /// own inverse-mapped nearest-neighbour resampling and transparent
+    /// fill. The two shears are applied one after the other — horizontal
+    /// first — rather than as Photoshop's single simultaneous affine, so
+    /// each has determinant `1` and no combination is degenerate;
+    /// Photoshop's own combined skew folds the layer flat whenever
+    /// `tan(h) × tan(v) = 1` (both at `45°`, say), which a sequential
+    /// composition simply never does — a documented difference, not an
+    /// approximation of an intermediate result. Each angle must be finite
+    /// and strictly inside `-90..90`, Photoshop's own `-89..=89` skew
+    /// range rounded out to where `tan` stops being finite.
+    pub fn skew(
+        &mut self,
+        id: LayerId,
+        horizontal_degrees: f32,
+        vertical_degrees: f32,
+    ) -> Result<Option<Rect>, String> {
+        let in_range = |a: f32| a.is_finite() && a.abs() < 90.0;
+        if !(in_range(horizontal_degrees) && in_range(vertical_degrees)) {
+            return Err("Skew angles must be finite and between -89 and 89 degrees.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (th, tv) = (
+            horizontal_degrees.to_radians().tan(),
+            vertical_degrees.to_radians().tan(),
+        );
+        self.filter_pixels(id, move |source, row, col| {
+            let sy_f = row as f32 - tv * (col as f32 - cx);
+            let sx_f = col as f32 - th * (sy_f - cy);
+            let (sx, sy) = (sx_f.round() as i64, sy_f.round() as i64);
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
 }
 
 /// Every panel value Filter > Camera Raw Filter applies at once — see
@@ -24024,6 +24070,96 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.scale(999, 200.0, 200.0).is_err());
+    }
+
+    #[test]
+    fn skew_horizontal_45_slides_each_row_by_its_distance_from_the_centre() {
+        // tan 45 = 1: the top row (dy = -1) reads one pixel to its right,
+        // the middle row reads itself, the bottom row reads one to its
+        // left, with the vacated ends transparent.
+        let (mut doc, id) = ramped_3x3();
+        doc.skew(id, 45.0, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![20, 30, 0], vec![40, 50, 60], vec![0, 70, 80]]
+        );
+        let (mut doc, id) = ramped_3x3();
+        doc.skew(id, -45.0, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 20], vec![40, 50, 60], vec![80, 90, 0]]
+        );
+    }
+
+    #[test]
+    fn skew_vertical_45_slides_each_column_by_its_distance_from_the_centre() {
+        let (mut doc, id) = ramped_3x3();
+        doc.skew(id, 0.0, 45.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 20, 0], vec![70, 50, 30], vec![0, 80, 60]]
+        );
+    }
+
+    #[test]
+    fn skew_applies_the_horizontal_shear_before_the_vertical_one() {
+        // Both at 45: Photoshop's simultaneous affine would be singular
+        // (tan 45 * tan 45 = 1); the sequential composition is not, and
+        // reads, per output pixel, source y = row - (col - 1) then source
+        // x = col - (y - 1).
+        let (mut doc, id) = ramped_3x3();
+        doc.skew(id, 45.0, 45.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 30, 0], vec![0, 50, 0], vec![0, 70, 60]]
+        );
+    }
+
+    #[test]
+    fn skew_on_an_even_canvas_rounds_half_pixel_slides_away_from_zero() {
+        // ramped_4x4, horizontal 45: the top row sits dy = -1.5 from the
+        // centre and reads x + 1.5, rounding to x + 2.
+        let (mut doc, id) = ramped_4x4();
+        doc.skew(id, 45.0, 0.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![30, 40, 0, 0],
+                vec![60, 70, 80, 0],
+                vec![0, 100, 110, 120],
+                vec![0, 0, 140, 150]
+            ]
+        );
+    }
+
+    #[test]
+    fn skew_by_zero_is_the_identity() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.skew(id, 0.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn skew_is_confined_to_the_selection_and_propagates_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.skew(id, 45.0, 0.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 20);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.skew(id, 90.0, 0.0).is_err());
+        assert!(doc.skew(id, 0.0, -90.0).is_err());
+        assert!(doc.skew(id, f32::NAN, 0.0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.skew(id, 45.0, 0.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.skew(999, 45.0, 0.0).is_err());
     }
 
     #[test]
