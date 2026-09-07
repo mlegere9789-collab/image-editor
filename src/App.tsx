@@ -3377,7 +3377,8 @@ export default function App() {
   const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
-  const isSelectionBrush = tool === "selectionBrush";
+  // The Quick Selection tool shares the Selection Brush's stroke capture.
+  const isSelectionBrush = tool === "selectionBrush" || tool === "quickSelection";
 
   const closeLasso = useCallback(
     (mode: SelectionMode) => {
@@ -3810,7 +3811,18 @@ export default function App() {
           // The Selection Brush adds by default; Alt subtracts, Shift+Alt intersects.
           const mode: SelectionMode =
             event.shiftKey && event.altKey ? "intersect" : event.altKey ? "subtract" : "add";
-          void runCommand("select_brush", { points: trail, radius: brushSize, mode });
+          if (tool === "quickSelection") {
+            if (selectedId === null) return;
+            void runCommand("quick_select", {
+              id: selectedId,
+              points: trail,
+              radius: brushSize,
+              tolerance: magicWandTolerance,
+              mode,
+            });
+          } else {
+            void runCommand("select_brush", { points: trail, radius: brushSize, mode });
+          }
         }
         return;
       }
@@ -3985,6 +3997,7 @@ export default function App() {
       isLasso,
       isSelectionBrush,
       brushSize,
+      magicWandTolerance,
       isMove,
       isPatch,
       isRuler,
@@ -4640,6 +4653,15 @@ export default function App() {
             title="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
           >
             Selection Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "quickSelection" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "quickSelection"}
+            onClick={() => setTool("quickSelection")}
+            title="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
+          >
+            Quick Selection
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -6160,7 +6182,7 @@ export default function App() {
               </label>
             </>
           )}
-          {(tool === "colorReplace" || tool === "backgroundEraser") && (
+          {(tool === "colorReplace" || tool === "backgroundEraser" || tool === "quickSelection") && (
             <label className="tools__slider">
               Tolerance
               <input
@@ -15646,7 +15668,7 @@ export default function App() {
                   preserveAspectRatio="none"
                   aria-hidden="true"
                 >
-                  {tool === "selectionBrush" && (
+                  {(tool === "selectionBrush" || tool === "quickSelection") && (
                     <polyline
                       points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
                       fill="none"

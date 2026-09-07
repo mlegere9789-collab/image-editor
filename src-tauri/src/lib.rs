@@ -436,6 +436,24 @@ fn select_lasso(
     })
 }
 
+/// Quick Selection tool: a Selection Brush stroke grown through similar,
+/// connected colour on layer `id`, combined per `mode` (Add by default).
+#[tauri::command]
+fn quick_select(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    tolerance: u8,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::Add);
+        document.quick_select_with(mode, id, &points, radius, tolerance)?;
+        Ok(None)
+    })
+}
+
 /// Selection Brush tool: select within `radius` of a painted stroke,
 /// combined with the current selection per `mode` (Add by default).
 #[tauri::command]
@@ -4056,6 +4074,7 @@ pub fn run() {
             select_polygon,
             select_lasso,
             select_brush,
+            quick_select,
             select_magic_wand,
             select_color_range,
             grow_selection,

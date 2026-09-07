@@ -166,6 +166,7 @@ export type Tool =
   | "lasso"
   | "polygonLasso"
   | "selectionBrush"
+  | "quickSelection"
   | "selectRect"
   | "selectEllipse"
   | "selectRow"

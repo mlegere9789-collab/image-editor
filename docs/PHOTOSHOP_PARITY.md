@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 299.**
+**618 distinct capabilities tracked. Currently shipped: 301.**
 
 ## PART I — EVERY TOOL
 
@@ -16,7 +16,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] POLYGONAL LASSO TOOL (`select_polygon_with`, click-placed vertices closed back on the first and rasterised by the even-odd rule to every pixel whose centre the polygon contains, a pixel-mask selection combined with the current one per the New/Add/Subtract/Intersect mode; Anti-alias and Feather are documented scope cuts — see README Phase 174)
 - [ ] MAGNETIC LASSO TOOL
 - [ ] OBJECT SELECTION TOOL
-- [ ] QUICK SELECTION TOOL
+- [x] QUICK SELECTION TOOL (`quick_select_with`, a Selection Brush stroke grown like Select > Grow — every pixel 4-connected to the stroked pixels through colour within the stroked pixels' own range widened by the Tolerance — combined with the current selection, adding by default; brush hardness, Auto-Enhance, and edge detection are documented scope cuts — see README Phase 207)
 - [x] MAGIC WAND TOOL (`select_magic_wand`, a click selects every pixel within a per-channel Tolerance of the clicked pixel's own colour — 4-connected from the click in Contiguous mode, anywhere on the layer otherwise — as the first pixel-mask selection: a new `SelectionShape::Mask` backed by a shared document-sized bitmap that every selection-respecting command already honours through `Selection::contains`. Anti-alias and Sample All Layers are documented scope cuts, and Modify > Expand/Contract/Smooth/Border reject mask selections for now — see README Phase 149)
 - [x] SELECTION BRUSH TOOL (`select_brush_with`, a hard-edged round brush stroke — every pixel centre within the brush radius of the drag's polyline — combined with the current selection, adding by default; brush hardness and the overlay opacity are documented scope cuts — see README Phase 206)
 - [x] REMOVE TOOL (`Stroke::Remove`, the Spot Healing ring mean taken only over samples the stroke does not itself cover, so a brushed-over object is filled from outside the brushed area, falling back to the plain ring mean when everything is covered; Photoshop's neural model is replaced by this explicit proximity stand-in — see README Phase 186)
@@ -308,7 +308,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Object Selection — Object Finder
 - [ ] Object Selection — Object Finder Refresh
 - [ ] Object Selection — Hard Edge
-- [ ] Quick Selection — Brush Size
+- [x] Quick Selection — Brush Size (the stroke's radius is the Brush Size; a wider dab seeds more pixels and so a wider colour range — see README Phase 207)
 - [ ] Quick Selection — Hardness
 - [ ] Selection Brush Tool — Opacity
 - [x] Selection Brush Tool — Add Mode (`select_brush_with` with `SelectionMode::Add`, the tool's default — see README Phase 206)

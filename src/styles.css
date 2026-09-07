@@ -187,7 +187,8 @@ body {
   cursor: copy;
 }
 
-.canvas--selectionBrush {
+.canvas--selectionBrush,
+.canvas--quickSelection {
   cursor: crosshair;
 }
 

@@ -840,6 +840,117 @@ pub struct Clipboard {
 /// RGBA8 `pixels`, set where the pixel is within `tolerance` of the pixel
 /// at `(x, y)` on every channel and — when `contiguous` — 4-connected to
 /// it through such pixels. `(x, y)` must be on the canvas.
+/// The Selection Brush's bitmap: every pixel of a `width × height` canvas
+/// whose centre lies within `radius` of the polyline through `points` —
+/// [`point_segment_distance`], hard-edged. Only the pixels inside the
+/// stroke's radius-grown bounding box are tested. Errors for no points, a
+/// non-positive radius, or non-finite coordinates.
+fn brush_bits(
+    width: u32,
+    height: u32,
+    points: &[(f32, f32)],
+    radius: f32,
+) -> Result<Vec<bool>, String> {
+    if points.is_empty() {
+        return Err("A selection brush stroke needs at least one point.".to_string());
+    }
+    if !(radius.is_finite() && radius > 0.0) {
+        return Err("Brush radius must be a positive number.".to_string());
+    }
+    if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+        return Err("Selection coordinates must be finite numbers.".to_string());
+    }
+    let segments: Vec<((f32, f32), (f32, f32))> = if points.len() == 1 {
+        vec![(points[0], points[0])]
+    } else {
+        points.windows(2).map(|pair| (pair[0], pair[1])).collect()
+    };
+    let (min_x, max_x) = points
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(x, _)| {
+            (lo.min(x), hi.max(x))
+        });
+    let (min_y, max_y) = points
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, y)| {
+            (lo.min(y), hi.max(y))
+        });
+    let x0 = ((min_x - radius).floor().max(0.0) as u32).min(width);
+    let y0 = ((min_y - radius).floor().max(0.0) as u32).min(height);
+    let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
+    let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
+    let mut bits = vec![false; width as usize * height as usize];
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            if segments
+                .iter()
+                .any(|&(a, b)| point_segment_distance(px, py, a, b) <= radius)
+            {
+                bits[(y * width + x) as usize] = true;
+            }
+        }
+    }
+    Ok(bits)
+}
+
+/// A [`SelectionShape::Mask`] selection over `bits`, ready for
+/// [`Document::combine_with`]; errors when no bit is set.
+fn mask_selection(width: u32, height: u32, bits: Vec<bool>) -> Result<Selection, String> {
+    let mask = SelectionMask {
+        width,
+        height,
+        bits,
+    };
+    let Some(bounds) = mask.bounds() else {
+        return Err("The selection brush touched no pixels.".to_string());
+    };
+    Ok(Selection {
+        shape: SelectionShape::Mask,
+        bounds,
+        inverted: false,
+        border: None,
+        mask: Some(Arc::new(mask)),
+    })
+}
+
+/// Select > Grow's flood: every pixel 4-connected to a set bit of `bits`
+/// through pixels whose RGBA lies within the set bits' own per-channel
+/// range widened by `tolerance` is set too.
+fn grow_bits(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    mut bits: Vec<bool>,
+    tolerance: u8,
+) -> Vec<bool> {
+    let range = colour_range_of(pixels, &bits, tolerance);
+    let in_range = |idx: usize| {
+        pixels[idx * CHANNELS..(idx + 1) * CHANNELS]
+            .iter()
+            .zip(range.iter())
+            .all(|(c, (lo, hi))| (*lo..=*hi).contains(c))
+    };
+    let mut stack: Vec<usize> = (0..bits.len()).filter(|&idx| bits[idx]).collect();
+    while let Some(idx) = stack.pop() {
+        let (px, py) = (idx as u32 % width, idx as u32 / width);
+        let neighbours = [
+            px.checked_sub(1).map(|nx| (nx, py)),
+            (px + 1 < width).then_some((px + 1, py)),
+            py.checked_sub(1).map(|ny| (px, ny)),
+            (py + 1 < height).then_some((px, py + 1)),
+        ];
+        for (nx, ny) in neighbours.into_iter().flatten() {
+            let n = (ny * width + nx) as usize;
+            if !bits[n] && in_range(n) {
+                bits[n] = true;
+                stack.push(n);
+            }
+        }
+    }
+    bits
+}
+
 fn wand_bits(
     pixels: &[u8],
     width: u32,
@@ -1336,63 +1447,9 @@ impl Document {
         points: &[(f32, f32)],
         radius: f32,
     ) -> Result<(), String> {
-        if points.is_empty() {
-            return Err("A selection brush stroke needs at least one point.".to_string());
-        }
-        if !(radius.is_finite() && radius > 0.0) {
-            return Err("Brush radius must be a positive number.".to_string());
-        }
-        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
-            return Err("Selection coordinates must be finite numbers.".to_string());
-        }
-        let segments: Vec<((f32, f32), (f32, f32))> = if points.len() == 1 {
-            vec![(points[0], points[0])]
-        } else {
-            points.windows(2).map(|pair| (pair[0], pair[1])).collect()
-        };
-        let (min_x, max_x) = points
-            .iter()
-            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(x, _)| {
-                (lo.min(x), hi.max(x))
-            });
-        let (min_y, max_y) = points
-            .iter()
-            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, y)| {
-                (lo.min(y), hi.max(y))
-            });
         let (width, height) = (self.width, self.height);
-        let x0 = ((min_x - radius).floor().max(0.0) as u32).min(width);
-        let y0 = ((min_y - radius).floor().max(0.0) as u32).min(height);
-        let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
-        let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
-        let mut bits = vec![false; width as usize * height as usize];
-        for y in y0..y1 {
-            for x in x0..x1 {
-                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                if segments
-                    .iter()
-                    .any(|&(a, b)| point_segment_distance(px, py, a, b) <= radius)
-                {
-                    bits[(y * width + x) as usize] = true;
-                }
-            }
-        }
-        let mask = SelectionMask {
-            width,
-            height,
-            bits,
-        };
-        let Some(bounds) = mask.bounds() else {
-            return Err("The selection brush touched no pixels.".to_string());
-        };
-        let new = Selection {
-            shape: SelectionShape::Mask,
-            bounds,
-            inverted: false,
-            border: None,
-            mask: Some(Arc::new(mask)),
-        };
-        self.combine_with(mode, new)
+        let bits = brush_bits(width, height, points, radius)?;
+        self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
     /// [`Self::combine_selection`]'s engine over an already-built `new`
@@ -1706,33 +1763,35 @@ impl Document {
     /// leaving the selection intact either way.
     pub fn grow_selection(&mut self, id: LayerId, tolerance: u8) -> Result<(), String> {
         let (width, height) = (self.width, self.height);
-        let mut bits = self.selected_bits()?;
+        let bits = self.selected_bits()?;
         let layer = self.layer(id)?;
-        let range = colour_range_of(&layer.pixels, &bits, tolerance);
-        let in_range = |idx: usize| {
-            layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS]
-                .iter()
-                .zip(range.iter())
-                .all(|(c, (lo, hi))| (*lo..=*hi).contains(c))
-        };
-        let mut stack: Vec<usize> = (0..bits.len()).filter(|&idx| bits[idx]).collect();
-        while let Some(idx) = stack.pop() {
-            let (px, py) = (idx as u32 % width, idx as u32 / width);
-            let neighbours = [
-                px.checked_sub(1).map(|nx| (nx, py)),
-                (px + 1 < width).then_some((px + 1, py)),
-                py.checked_sub(1).map(|ny| (px, ny)),
-                (py + 1 < height).then_some((px, py + 1)),
-            ];
-            for (nx, ny) in neighbours.into_iter().flatten() {
-                let n = (ny * width + nx) as usize;
-                if !bits[n] && in_range(n) {
-                    bits[n] = true;
-                    stack.push(n);
-                }
-            }
-        }
-        self.set_mask_selection(bits)
+        let grown = grow_bits(&layer.pixels, width, height, bits, tolerance);
+        self.set_mask_selection(grown)
+    }
+
+    /// The Quick Selection tool: a Selection Brush stroke that then grows
+    /// like Select > Grow — every pixel 4-connected to the stroked pixels
+    /// through pixels whose colour lies within the stroked pixels' own
+    /// range widened by `tolerance` joins in — so a short dab inside a
+    /// region selects the region, and the result is combined with the
+    /// current selection per `mode` (adding by default, Alt subtracts).
+    /// The stroke is [`Self::select_brush_with`]'s hard-edged capsule at
+    /// `radius`; Photoshop's brush hardness, its Auto-Enhance, and its
+    /// edge detection are documented scope cuts. Errors as the Selection
+    /// Brush does, and for an unknown layer.
+    pub fn quick_select_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        tolerance: u8,
+    ) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        let stroked = brush_bits(width, height, points, radius)?;
+        let layer = self.layer(id)?;
+        let grown = grow_bits(&layer.pixels, width, height, stroked, tolerance);
+        self.combine_with(mode, mask_selection(width, height, grown)?)
     }
 
     /// Select > Similar: extends the current selection to every pixel of
@@ -23331,6 +23390,118 @@ mod tests {
             selection_grid(&doc),
             [".....", ".....", "..#..", ".....", "....."]
         );
+    }
+
+    /// A 5×5 whose three left columns are red and two right columns blue,
+    /// with one slightly different red at (1, 1).
+    fn two_regions() -> (Document, LayerId) {
+        let mut pixels = Vec::new();
+        for y in 0..5 {
+            for x in 0..5 {
+                let px: [u8; 4] = if x < 3 {
+                    if (x, y) == (1, 1) {
+                        [220, 0, 0, 255]
+                    } else {
+                        [200, 0, 0, 255]
+                    }
+                } else {
+                    [0, 0, 200, 255]
+                };
+                pixels.extend(px);
+            }
+        }
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc.add_layer("l", &pixels, 5, 5).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn quick_selection_grows_a_dab_into_its_region() {
+        // A dot at (0, 4) with tolerance 0 floods every exact-200 red pixel
+        // but stops at the 220 one.
+        let (mut doc, id) = two_regions();
+        doc.quick_select_with(SelectionMode::New, id, &[(0.5, 4.5)], 0.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["###..", "#.#..", "###..", "###..", "###.."]
+        );
+        // Tolerance 20 lets it through.
+        doc.quick_select_with(SelectionMode::New, id, &[(0.5, 4.5)], 0.5, 20)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["###..", "###..", "###..", "###..", "###.."]
+        );
+    }
+
+    #[test]
+    fn quick_selection_stroke_spanning_both_regions_takes_both() {
+        // The stroked pixels' own per-channel range is red 0..=200, green
+        // 0, blue 0..=200, which every pixel but the 220 red satisfies, so
+        // the flood crosses the boundary and takes both regions.
+        let (mut doc, id) = two_regions();
+        doc.quick_select_with(SelectionMode::New, id, &[(2.5, 3.5), (3.5, 3.5)], 0.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#####", "#.###", "#####", "#####", "#####"]
+        );
+    }
+
+    #[test]
+    fn quick_selection_adds_and_subtracts() {
+        let (mut doc, id) = two_regions();
+        doc.quick_select_with(SelectionMode::Add, id, &[(4.5, 0.5)], 0.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["...##", "...##", "...##", "...##", "...##"]
+        );
+        doc.quick_select_with(SelectionMode::Add, id, &[(0.5, 0.5)], 0.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#####", "#.###", "#####", "#####", "#####"]
+        );
+        doc.quick_select_with(SelectionMode::Subtract, id, &[(3.5, 2.5)], 0.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["###..", "#.#..", "###..", "###..", "###.."]
+        );
+    }
+
+    #[test]
+    fn quick_selection_brush_size_seeds_more_pixels() {
+        // Radius 1.5 around (1, 1) already covers the 220 pixel, so the
+        // seeds' own range includes it and the whole red region floods
+        // even at tolerance 0.
+        let (mut doc, id) = two_regions();
+        doc.quick_select_with(SelectionMode::New, id, &[(1.5, 1.5)], 1.5, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["###..", "###..", "###..", "###..", "###.."]
+        );
+    }
+
+    #[test]
+    fn quick_selection_rejects_bad_strokes_and_layers() {
+        let (mut doc, id) = two_regions();
+        assert!(doc
+            .quick_select_with(SelectionMode::New, id, &[], 1.0, 0)
+            .is_err());
+        assert!(doc
+            .quick_select_with(SelectionMode::New, id, &[(9.0, 9.0)], 0.5, 0)
+            .is_err());
+        assert!(doc
+            .quick_select_with(SelectionMode::New, id + 1, &[(0.5, 0.5)], 0.5, 0)
+            .is_err());
+        assert!(doc
+            .quick_select_with(SelectionMode::Subtract, id, &[(0.5, 0.5)], 0.5, 0)
+            .is_err());
+        assert!(doc.selection().is_none());
     }
 
     #[test]

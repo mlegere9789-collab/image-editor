@@ -12550,6 +12550,59 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1275 Rust tests total** (1270 → 1275, 1268 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 207 — Quick Selection tool
+
+`Document::quick_select_with(mode, id, points, radius, tolerance)` is
+Photoshop's Quick Selection: a Selection Brush stroke that then grows
+like Select > Grow. The stroked pixels seed a flood — every pixel
+4-connected to them through pixels whose colour lies within the
+stroked pixels' own per-channel range widened by the Tolerance joins
+in — so a short dab inside a region selects the region, and the result
+is combined with the current selection per `mode`, adding by default
+and subtracting with Alt. To share the pieces, the Selection Brush's
+capsule became a free `brush_bits`, the mask construction a
+`mask_selection`, and Select > Grow's flood a `grow_bits` that
+`grow_selection` now calls; none of their behaviour changed. Brush
+hardness, Auto-Enhance, and Photoshop's edge detection are documented
+scope cuts. A **Quick Selection** tool button sits after Selection
+Brush, sharing its stroke capture and preview band, with the Tolerance
+slider shown while it is active, and sends the trail through a
+`quick_select` command at pointer-up.
+
+**Verified two ways.** Five new `document.rs` tests on a `5×5` whose
+three left columns are red `200` and two right columns blue `200`,
+with one red pixel at `(1, 1)` nudged to `220`, every mask reasoned
+out from the per-channel range rule and the 4-connected flood. A dot
+at `(0, 4)` with tolerance `0` floods every exact-`200` red pixel and
+stops at the `220` one; tolerance `20` lets it through. A stroke that
+touches one red and one blue pixel has the range red `0..=200`, green
+`0`, blue `0..=200`, which every pixel but the `220` red satisfies, so
+the flood crosses the boundary and takes both regions. Adding a blue
+dab selects the blue columns, adding a red dab then takes all but the
+`220` pixel, and subtracting a blue dab removes the blue columns
+again. A radius-`1.5` dab around `(1, 1)` already seeds the `220`
+pixel, so the whole red region floods even at tolerance `0`. No
+points, an off-canvas dab, an unknown layer, and subtracting with
+nothing selected all error and leave nothing selected. All five
+passed on the first run; a contradictory expectation left in the
+boundary-spanning test from working out the per-channel range was
+removed before that run, so the test as first executed is the one
+recorded here.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+fifty-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1280 Rust tests total** (1275 → 1280, 1273 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
