@@ -29,6 +29,7 @@ import type {
   Measurement,
   MoveDirection,
   Palette,
+  Proof,
   SelectionMode,
   SelectionShape,
   ShapeBlurKernel,
@@ -381,6 +382,8 @@ export default function App() {
   // The Channels panel: what the canvas shows, and the thumbnail size.
   const [channelView, setChannelView] = useState<ChannelView>({ kind: "composite" });
   const [channelThumbs, setChannelThumbs] = useState<ChannelThumbs>("small");
+  // View > Proof Colors: a colour-blindness proof of the composite, or off.
+  const [proof, setProof] = useState<Proof | "off">("off");
   // Load Channel: which alpha channel to load as the selection.
   const [showLoadChannelDialog, setShowLoadChannelDialog] = useState(false);
   const [loadChannelName, setLoadChannelName] = useState("");
@@ -4525,7 +4528,11 @@ export default function App() {
   const compositeSrc =
     generation !== null
       ? `composite://composite.png?g=${generation}${
-          shownChannel.kind === "composite" ? "" : `&channel=${channelQuery(shownChannel)}`
+          shownChannel.kind === "composite"
+            ? proof === "off"
+              ? ""
+              : `&proof=${proof}`
+            : `&channel=${channelQuery(shownChannel)}`
         }`
       : null;
 
@@ -4685,6 +4692,18 @@ export default function App() {
             <span className="control__value" title="The only depth this editor stores">
               8 Bits/Channel
             </span>
+          </label>
+          <label className="tools__slider" title="View > Proof Setup > Color Blindness, shown with Proof Colors on">
+            Proof
+            <select
+              value={proof}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setProof(event.target.value as Proof | "off")}
+            >
+              <option value="off">Off</option>
+              <option value="protanopia">Protanopia-type</option>
+              <option value="deuteranopia">Deuteranopia-type</option>
+            </select>
           </label>
           <button
             className="button button--quiet"

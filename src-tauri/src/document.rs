@@ -493,6 +493,52 @@ pub fn parse_cube(text: &str) -> Result<Lut3d, String> {
     })
 }
 
+/// View > Proof Setup > Color Blindness: the two dichromacies Photoshop
+/// simulates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Proof {
+    Protanopia,
+    Deuteranopia,
+}
+
+/// An sRGB pixel as a protanope or deuteranope would see it: linearised,
+/// put through the Viénot–Brettel–Mollon (1999) reduction matrix for that
+/// dichromacy, and re-encoded. Rows sum to one, so neutrals survive.
+pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
+    let linear = |v: u8| {
+        let c = to_unit(v);
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let encode = |c: f32| {
+        let c = c.clamp(0.0, 1.0);
+        let v = if c <= 0.0031308 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        };
+        to_byte(v)
+    };
+    let matrix: [[f32; 3]; 3] = match proof {
+        Proof::Protanopia => [
+            [0.56667, 0.43333, 0.0],
+            [0.55833, 0.44167, 0.0],
+            [0.0, 0.24167, 0.75833],
+        ],
+        Proof::Deuteranopia => [[0.625, 0.375, 0.0], [0.7, 0.3, 0.0], [0.0, 0.3, 0.7]],
+    };
+    let l = [linear(r), linear(g), linear(b)];
+    let mut out = [0u8; 3];
+    for (slot, row) in out.iter_mut().zip(matrix.iter()) {
+        *slot = encode(row[0] * l[0] + row[1] * l[1] + row[2] * l[2]);
+    }
+    out
+}
+
 /// The naive, profile-free CMYK split of an RGB pixel as ink coverages
 /// `0..=255`: `K = 1 − max(r, g, b)` and each ink `(1 − channel − K) /
 /// (1 − K)`, zero for black. Photoshop's own conversion goes through an
@@ -2294,6 +2340,20 @@ impl Document {
             }
         }
         Ok(())
+    }
+
+    /// The composite as a colour-blind viewer would see it — View > Proof
+    /// Colors with a Color Blindness proof: every pixel's colour through
+    /// [`simulate_color_blindness`], alpha kept. A view: nothing changes.
+    pub fn proof_image(&self, proof: Proof) -> Vec<u8> {
+        let mut pixels = crate::composite::flatten(self).pixels;
+        for px in pixels.chunks_exact_mut(CHANNELS) {
+            let [r, g, b] = simulate_color_blindness([px[0], px[1], px[2]], proof);
+            px[0] = r;
+            px[1] = g;
+            px[2] = b;
+        }
+        pixels
     }
 
     /// The canvas as the Channels panel shows it for `view`: the composite
@@ -38307,6 +38367,83 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.color_lookup(id, &lut).is_err());
         assert!(doc.color_lookup(999, &lut).is_err());
+    }
+
+    #[test]
+    fn protanopia_collapses_red_and_green() {
+        assert_eq!(
+            simulate_color_blindness([255, 0, 0], Proof::Protanopia),
+            [198, 197, 0]
+        );
+        assert_eq!(
+            simulate_color_blindness([0, 255, 0], Proof::Protanopia),
+            [176, 177, 135]
+        );
+        assert_eq!(
+            simulate_color_blindness([0, 0, 255], Proof::Protanopia),
+            [0, 0, 226]
+        );
+        assert_eq!(
+            simulate_color_blindness([200, 100, 50], Proof::Protanopia),
+            [166, 165, 66]
+        );
+    }
+
+    #[test]
+    fn deuteranopia_collapses_red_and_green_its_own_way() {
+        assert_eq!(
+            simulate_color_blindness([255, 0, 0], Proof::Deuteranopia),
+            [207, 218, 0]
+        );
+        assert_eq!(
+            simulate_color_blindness([0, 255, 0], Proof::Deuteranopia),
+            [165, 149, 149]
+        );
+        assert_eq!(
+            simulate_color_blindness([0, 0, 255], Proof::Deuteranopia),
+            [0, 0, 218]
+        );
+        assert_eq!(
+            simulate_color_blindness([200, 100, 50], Proof::Deuteranopia),
+            [171, 178, 70]
+        );
+    }
+
+    #[test]
+    fn neutrals_survive_both_simulations() {
+        for grey in [[0, 0, 0], [128, 128, 128], [255, 255, 255]] {
+            assert_eq!(simulate_color_blindness(grey, Proof::Protanopia), grey);
+            assert_eq!(simulate_color_blindness(grey, Proof::Deuteranopia), grey);
+        }
+    }
+
+    #[test]
+    fn proof_image_simulates_the_composite_and_keeps_alpha() {
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("l", &[200, 100, 50, 255, 255, 0, 0, 128], 2, 1)
+            .unwrap();
+        assert_eq!(
+            doc.proof_image(Proof::Protanopia),
+            vec![166, 165, 66, 255, 198, 197, 0, 128]
+        );
+        assert_eq!(
+            doc.proof_image(Proof::Deuteranopia),
+            vec![171, 178, 70, 255, 207, 218, 0, 128]
+        );
+    }
+
+    #[test]
+    fn proof_image_reads_the_flattened_stack() {
+        // Red at half opacity over black composites to [128, 0, 0], which
+        // protanopia sees as [98, 97, 0] and deuteranopia as [103, 108, 0].
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("under", &[0, 0, 0, 255], 1, 1).unwrap();
+        doc.add_layer("over", &[255, 0, 0, 128], 1, 1).unwrap();
+        assert_eq!(crate::composite::flatten(&doc).pixels, vec![128, 0, 0, 255]);
+        assert_eq!(doc.proof_image(Proof::Protanopia), vec![98, 97, 0, 255]);
+        assert_eq!(doc.proof_image(Proof::Deuteranopia), vec![103, 108, 0, 255]);
+        // The layers are untouched: a proof is a view.
+        assert_eq!(doc.layers()[1].pixels, vec![255, 0, 0, 128]);
     }
 
     #[test]

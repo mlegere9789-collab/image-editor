@@ -13914,6 +13914,48 @@ by hand instead. Every other layer of this project's quality bar
 **1405 Rust tests total** (1400 → 1405, 1398 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 233 — Color Blindness proofing
+
+View > Proof Setup > Color Blindness arrives as a soft proof. A
+`Proof` is Protanopia or Deuteranopia, and
+`simulate_color_blindness(rgb, proof)` linearises the sRGB pixel,
+puts it through the Viénot–Brettel–Mollon (1999) reduction matrix for
+that dichromacy — rows summing to one, so neutrals survive — and
+re-encodes it. `proof_image(proof)` applies that to every pixel of the
+flattened composite, alpha kept, and the composite protocol reads a
+`proof=` query beside `channel=` and serves the proof rendered on
+request; the layers never change, a proof being a view. A Proof
+select in the toolbar (Off, Protanopia-type, Deuteranopia-type)
+switches the canvas, the channel views taking precedence when one is
+selected. Proof Setup's press profiles, Proof Colors for CMYK, Gamut
+Warning, and Simulate Paper Color / Black Ink remain unshipped: each
+needs an ICC profile this project does not carry.
+
+**Verified two ways.** Five new `document.rs` tests, every byte first
+computed in Python emulating `f32`. Protanopia turns red into `[198,
+197, 0]`, green into `[176, 177, 135]`, blue into `[0, 0, 226]`, and
+`[200, 100, 50]` into `[166, 165, 66]`; deuteranopia gives `[207, 218,
+0]`, `[165, 149, 149]`, `[0, 0, 218]`, and `[171, 178, 70]`. Black,
+mid grey, and white survive both. `proof_image` on `[200, 100, 50]`
+and half-transparent red gives those colours with alpha `255` and
+`128` kept, and on red at half opacity over black — the composite
+`[128, 0, 0]` — gives `[98, 97, 0]` and `[103, 108, 0]` with the
+layers untouched. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and eighty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The select was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1410 Rust tests total** (1405 → 1410, 1403 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 378.**
+**618 distinct capabilities tracked. Currently shipped: 379.**
 
 ## PART I — EVERY TOOL
 
@@ -435,7 +435,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Proof Setup
 - [ ] Proof Colors
 - [ ] Gamut Warning
-- [ ] Color Blindness Proofing
+- [x] Color Blindness Proofing (`Proof::{Protanopia, Deuteranopia}`, `simulate_color_blindness`, and `proof_image`: the composite linearised, put through the Viénot–Brettel–Mollon 1999 reduction matrix, and re-encoded, served as a view through the composite protocol's `proof=` query without touching the pixels; a Proof select in the toolbar — see README Phase 233)
 - [ ] Simulate Paper Color
 - [ ] Simulate Black Ink
 - [ ] Color & Vibrance

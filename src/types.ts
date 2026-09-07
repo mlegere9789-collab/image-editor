@@ -173,6 +173,10 @@ export type ColorRange =
   | { kind: "sampled"; samples: ColorSample[]; fuzziness: number; localized: number | null }
   | { kind: ColorRangePreset };
 
+/** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
+ * Color Blindness. */
+export type Proof = "protanopia" | "deuteranopia";
+
 /** Mirrors `ChannelView` in src-tauri/src/document.rs (serde tagged by
  * `kind`): what the canvas shows — the composite, one colour channel as a
  * grey, or an alpha channel. */

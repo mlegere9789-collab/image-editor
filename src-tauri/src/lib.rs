@@ -269,6 +269,40 @@ fn sample_pixel_color(cache: &CompositeCache, x: u32, y: u32) -> Result<[u8; 4],
 /// Decodes the `channel=` query value of a `composite://` request into the
 /// view to serve: `composite` (or none), `red`, `green`, `blue`, or
 /// `alpha:<percent-encoded name>`.
+/// Decodes the `proof=` query value of a `composite://` request:
+/// `protanopia` or `deuteranopia`.
+fn proof_of(query: Option<&str>) -> Option<document::Proof> {
+    let value = query?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("proof="))?;
+    match value {
+        "protanopia" => Some(document::Proof::Protanopia),
+        "deuteranopia" => Some(document::Proof::Deuteranopia),
+        _ => None,
+    }
+}
+
+/// Serves the composite as a colour-blind viewer would see it — View >
+/// Proof Colors under a Color Blindness proof. Rendered on request.
+fn serve_proof(state: &AppState, proof: document::Proof) -> tauri::http::Response<Vec<u8>> {
+    let bytes = state.document.lock().ok().and_then(|guard| {
+        let document = guard.as_ref()?;
+        let pixels = document.proof_image(proof);
+        png::encode_pixels(document.width(), document.height(), &pixels).ok()
+    });
+    match bytes {
+        Some(bytes) => tauri::http::Response::builder()
+            .header(tauri::http::header::CONTENT_TYPE, "image/png")
+            .header(tauri::http::header::CACHE_CONTROL, "no-store")
+            .body(bytes)
+            .expect("a static response is always well-formed"),
+        None => tauri::http::Response::builder()
+            .status(tauri::http::StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .expect("a static response is always well-formed"),
+    }
+}
+
 fn channel_view_of(query: Option<&str>) -> Option<document::ChannelView> {
     let value = query?
         .split('&')
@@ -4515,11 +4549,15 @@ pub fn run() {
         // resource fetch instead of a base64 string through IPC/JSON.
         .register_uri_scheme_protocol("composite", |ctx, request| {
             let state = ctx.app_handle().state::<AppState>();
-            match channel_view_of(request.uri().query()) {
+            let query = request.uri().query();
+            match channel_view_of(query) {
                 Some(view) if view != document::ChannelView::Composite => {
                     serve_channel(&state, &view)
                 }
-                _ => serve_composite(&state.composite),
+                _ => match proof_of(query) {
+                    Some(proof) => serve_proof(&state, proof),
+                    None => serve_composite(&state.composite),
+                },
             }
         })
         .invoke_handler(tauri::generate_handler![
