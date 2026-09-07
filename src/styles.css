@@ -422,6 +422,26 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.smart-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.smart-filter-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+
 .control input[type="range"] {
   width: 100%;
   accent-color: var(--accent);

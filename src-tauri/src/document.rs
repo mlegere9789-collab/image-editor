@@ -1424,12 +1424,22 @@ pub struct ShapeLayer {
 }
 
 /// A smart object's embedded contents: the layer's pixels as they were
-/// when it was made (its source) and the [`FreeTransform`] they are shown
-/// through — see [`Document::convert_to_smart_object`].
+/// when it was made (its source), the [`FreeTransform`] they are shown
+/// through, and its Smart Filters — see
+/// [`Document::convert_to_smart_object`] and
+/// [`Document::add_smart_filter`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct SmartObject {
     pub source: Vec<u8>,
     pub transform: FreeTransform,
+    /// Layer > Smart Filters: adjustments applied in order to the
+    /// transformed source, non-destructively — removing one re-renders
+    /// from `source` as though it had never run. Restricted to the same
+    /// four per-pixel [`Adjustment`]s adjustment layers already express
+    /// live; Photoshop's neighbourhood filters (Blur, Sharpen, and the
+    /// rest of the Filter menu) as Smart Filters are a documented scope
+    /// cut.
+    pub filters: Vec<Adjustment>,
 }
 
 /// The Art History Brush's stroke style: how much of the history source
@@ -7169,6 +7179,7 @@ impl Document {
         layer.smart = Some(SmartObject {
             source: layer.pixels.clone(),
             transform: FreeTransform::default(),
+            filters: Vec::new(),
         });
         Ok(())
     }
@@ -7216,6 +7227,7 @@ impl Document {
             smart: Some(SmartObject {
                 source: pixels.clone(),
                 transform: FreeTransform::default(),
+                filters: Vec::new(),
             }),
             pixels,
         };
@@ -7232,15 +7244,16 @@ impl Document {
         Ok(id)
     }
 
-    /// A smart object's transform: layer `id`'s pixels are restored from
-    /// its source and shown through `transform` by [`Self::free_transform`],
-    /// so every transform starts from the embedded pixels rather than the
-    /// last result — scaling down and back up returns the source exactly —
-    /// and the transform is remembered. A transform the tool refuses
-    /// leaves the pixels and the remembered transform as they were.
-    /// Errors for a layer that is not a smart object, or a locked or
-    /// unknown layer.
-    pub fn set_smart_transform(
+    /// Shared by [`Self::set_smart_transform`], [`Self::add_smart_filter`],
+    /// and [`Self::remove_smart_filter`]: resets layer `id`'s pixels to its
+    /// smart object's source, replays `transform` through
+    /// [`Self::free_transform`], and — on success — applies every Smart
+    /// Filter in the smart object's own `filters` list in order, each a
+    /// plain per-pixel [`Adjustment`] via [`apply_adjustment`] over the
+    /// whole canvas. Restores the pixels the layer had before this call on
+    /// failure. Errors for a layer that is not a smart object, or a locked
+    /// or unknown layer.
+    fn render_smart_object(
         &mut self,
         id: LayerId,
         transform: FreeTransform,
@@ -7254,14 +7267,20 @@ impl Document {
         };
         let before = layer.pixels.clone();
         let source = smart.source.clone();
+        let filters = smart.filters.clone();
         self.layer_mut(id)?.pixels = source;
         match self.free_transform(id, transform) {
             Ok(touched) => {
-                self.layer_mut(id)?
-                    .smart
-                    .as_mut()
-                    .expect("checked above")
-                    .transform = transform;
+                if !filters.is_empty() {
+                    let layer = self.layer_mut(id)?;
+                    for pixel in layer.pixels.chunks_exact_mut(CHANNELS) {
+                        let mut rgb = [pixel[0], pixel[1], pixel[2]];
+                        for &adjustment in &filters {
+                            rgb = apply_adjustment(adjustment, rgb);
+                        }
+                        pixel[..3].copy_from_slice(&rgb);
+                    }
+                }
                 Ok(touched.or(Some(Rect {
                     x0: 0,
                     y0: 0,
@@ -7274,6 +7293,99 @@ impl Document {
                 Err(err)
             }
         }
+    }
+
+    /// A smart object's transform: layer `id`'s pixels are restored from
+    /// its source and shown through `transform` by [`Self::free_transform`],
+    /// so every transform starts from the embedded pixels rather than the
+    /// last result — scaling down and back up returns the source exactly —
+    /// and the transform is remembered, with any Smart Filters re-applied
+    /// on top. A transform the tool refuses leaves the pixels and the
+    /// remembered transform as they were. Errors for a layer that is not a
+    /// smart object, or a locked or unknown layer.
+    pub fn set_smart_transform(
+        &mut self,
+        id: LayerId,
+        transform: FreeTransform,
+    ) -> Result<Option<Rect>, String> {
+        let touched = self.render_smart_object(id, transform)?;
+        self.layer_mut(id)?
+            .smart
+            .as_mut()
+            .expect("checked above")
+            .transform = transform;
+        Ok(touched)
+    }
+
+    /// Layer > Smart Filters: appends `adjustment` to smart object `id`'s
+    /// filter list and re-renders from its source through its transform
+    /// and every filter in order, [`Self::render_smart_object`]'s own
+    /// mechanism. Non-destructive: [`Self::remove_smart_filter`] re-renders
+    /// without it, exactly as though it had never been applied. Errors for
+    /// an `adjustment` [`Adjustment::validate`] rejects, a layer that is
+    /// not a smart object, or a locked or unknown layer.
+    pub fn add_smart_filter(
+        &mut self,
+        id: LayerId,
+        adjustment: Adjustment,
+    ) -> Result<Option<Rect>, String> {
+        adjustment.validate()?;
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let Some(smart) = layer.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        let transform = smart.transform;
+        self.layer_mut(id)?
+            .smart
+            .as_mut()
+            .expect("checked above")
+            .filters
+            .push(adjustment);
+        self.render_smart_object(id, transform)
+    }
+
+    /// Layer > Smart Filters: removes the filter at `index` (in the order
+    /// [`Self::add_smart_filter`] appended them) from smart object `id`'s
+    /// filter list and re-renders from its source through its transform
+    /// and the filters that remain. Errors for an `index` past the end of
+    /// the filter list, a layer that is not a smart object, or a locked or
+    /// unknown layer.
+    pub fn remove_smart_filter(
+        &mut self,
+        id: LayerId,
+        index: usize,
+    ) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let Some(smart) = layer.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        if index >= smart.filters.len() {
+            return Err(format!("No Smart Filter at index {index}."));
+        }
+        let transform = smart.transform;
+        self.layer_mut(id)?
+            .smart
+            .as_mut()
+            .expect("checked above")
+            .filters
+            .remove(index);
+        self.render_smart_object(id, transform)
+    }
+
+    /// Read-only: smart object `id`'s own Smart Filters list, in
+    /// application order. Errors for a layer that is not a smart object, or
+    /// an unknown layer.
+    pub fn smart_filters(&self, id: LayerId) -> Result<Vec<Adjustment>, String> {
+        let Some(smart) = self.layer(id)?.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        Ok(smart.filters.clone())
     }
 
     /// Layer > Rasterize > Smart Object: layer `id` keeps the pixels it
@@ -49271,6 +49383,126 @@ mod tests {
             .set_smart_transform(999, FreeTransform::default())
             .is_err());
         assert_eq!(doc.layers()[0].pixels, shrunk);
+    }
+
+    #[test]
+    fn add_smart_filter_applies_the_adjustment_over_the_whole_canvas() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_smart_filter(id, Adjustment::Invert).unwrap();
+        // Invert is 255 - v with alpha untouched: R = 10, 20, ..., 160
+        // becomes 245, 235, ..., 95, and the untouched G/B (0) become 255.
+        let expected: Vec<u8> = (1..=16u8)
+            .flat_map(|i| [255 - i * 10, 255, 255, 255])
+            .collect();
+        assert_eq!(doc.layers()[0].pixels, expected);
+        assert_eq!(doc.smart_filters(id).unwrap(), vec![Adjustment::Invert]);
+    }
+
+    #[test]
+    fn smart_filters_apply_in_the_order_they_were_added() {
+        // Brightness/Contrast (brightness 20, contrast 0, so its factor is
+        // exactly 1.0) then Invert applied to pixel (0, 0)'s (10, 0, 0):
+        // BC gives (30, 20, 20), Invert gives (225, 235, 235) --
+        // independently confirmed in Python emulating Rust f32
+        // arithmetic. Applying the very same two filters in the opposite
+        // order gives a different, fully white result at that pixel
+        // instead: Invert gives (245, 255, 255), then BC's + 20 clips
+        // every channel at 255 -- proof the list is not commutative.
+        let bc = Adjustment::BrightnessContrast {
+            brightness: 20,
+            contrast: 0,
+        };
+        let (mut forward, fid) = ramped_4x4();
+        forward.convert_to_smart_object(fid).unwrap();
+        forward.add_smart_filter(fid, bc).unwrap();
+        forward.add_smart_filter(fid, Adjustment::Invert).unwrap();
+        assert_eq!(&forward.layers()[0].pixels[0..4], &[225, 235, 235, 255]);
+        assert_eq!(
+            forward.smart_filters(fid).unwrap(),
+            vec![bc, Adjustment::Invert]
+        );
+
+        let (mut reverse, rid) = ramped_4x4();
+        reverse.convert_to_smart_object(rid).unwrap();
+        reverse.add_smart_filter(rid, Adjustment::Invert).unwrap();
+        reverse.add_smart_filter(rid, bc).unwrap();
+        assert_eq!(&reverse.layers()[0].pixels[0..4], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn remove_smart_filter_re_renders_as_though_it_had_never_run() {
+        let bc = Adjustment::BrightnessContrast {
+            brightness: 20,
+            contrast: 0,
+        };
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_smart_filter(id, bc).unwrap();
+        doc.add_smart_filter(id, Adjustment::Invert).unwrap();
+        doc.remove_smart_filter(id, 0).unwrap();
+        assert_eq!(doc.smart_filters(id).unwrap(), vec![Adjustment::Invert]);
+
+        let (mut only_invert, oid) = ramped_4x4();
+        only_invert.convert_to_smart_object(oid).unwrap();
+        only_invert
+            .add_smart_filter(oid, Adjustment::Invert)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, only_invert.layers()[0].pixels);
+    }
+
+    #[test]
+    fn set_smart_transform_re_applies_existing_filters_after_the_transform() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_smart_filter(id, Adjustment::Invert).unwrap();
+        doc.set_smart_transform(id, half()).unwrap();
+
+        // Filters apply to the transformed pixels, not the raw source: a
+        // plain document scaled the same way and then inverted pixel by
+        // pixel (re-using the exact `apply_adjustment` this project's
+        // Adjustment Layers already ship and test) must match exactly.
+        let (mut plain, pid) = ramped_4x4();
+        plain.free_transform(pid, half()).unwrap();
+        for pixel in plain.layers[0].pixels.chunks_exact_mut(CHANNELS) {
+            let inverted = apply_adjustment(Adjustment::Invert, [pixel[0], pixel[1], pixel[2]]);
+            pixel[..3].copy_from_slice(&inverted);
+        }
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+    }
+
+    #[test]
+    fn smart_filters_validate_arguments_and_layer_state() {
+        let (mut doc, id) = ramped_4x4();
+        // Not a smart object yet.
+        assert!(doc
+            .add_smart_filter(id, Adjustment::Invert)
+            .unwrap_err()
+            .contains("smart object"));
+        assert!(doc.smart_filters(id).unwrap_err().contains("smart object"));
+        doc.convert_to_smart_object(id).unwrap();
+        // Adjustment::validate's own bounds are enforced too.
+        assert!(doc
+            .add_smart_filter(id, Adjustment::Threshold { level: 0 })
+            .unwrap_err()
+            .contains("Threshold"));
+        doc.add_smart_filter(id, Adjustment::Invert).unwrap();
+        assert!(doc
+            .remove_smart_filter(id, 1)
+            .unwrap_err()
+            .contains("index 1"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .add_smart_filter(id, Adjustment::Invert)
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .remove_smart_filter(id, 0)
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc.add_smart_filter(999, Adjustment::Invert).is_err());
+        assert!(doc.remove_smart_filter(999, 0).is_err());
+        assert!(doc.smart_filters(999).is_err());
     }
 
     #[test]

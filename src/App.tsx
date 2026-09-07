@@ -145,6 +145,20 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** An `Adjustment["kind"]` as the Adjustment Layer dialog's own option text — used for both that dialog and a smart object's Smart Filters list. */
+function adjustmentKindLabel(kind: Adjustment["kind"]): string {
+  switch (kind) {
+    case "brightnessContrast":
+      return "Brightness/Contrast";
+    case "threshold":
+      return "Threshold";
+    case "posterize":
+      return "Posterize";
+    default:
+      return "Invert";
+  }
+}
+
 /** A pointer event's position, in document pixel coordinates. */
 /** The Polygon and Star tools' vertices for a drag from `centre` to
  * `first`, which becomes the first (outer) vertex — the same construction
@@ -865,6 +879,9 @@ export default function App() {
   const [adjustmentContrast, setAdjustmentContrast] = useState(0);
   const [adjustmentLevel, setAdjustmentLevel] = useState(128);
   const [adjustmentLevels, setAdjustmentLevels] = useState(4);
+  // Layer > Smart Filters: the selected smart object's own filter list,
+  // shown and edited from the same Adjustment Layer dialog.
+  const [smartFilterList, setSmartFilterList] = useState<Adjustment[]>([]);
   // Fill layer dialog: which of the three live fills to add or re-tune.
   const [showFillLayerDialog, setShowFillLayerDialog] = useState(false);
   const [fillLayerKind, setFillLayerKind] = useState<Fill["kind"]>("solidColor");
@@ -2773,6 +2790,37 @@ export default function App() {
     await runCommand("set_adjustment", { id: selectedId, adjustment: currentAdjustment() });
     setShowAdjustmentDialog(false);
   }, [runCommand, selectedId, currentAdjustment]);
+
+  // Layer > Smart Filters: kept in sync with the selected layer's own
+  // filter list whenever the dialog is open, the selection changes, or an
+  // edit lands (`generation` bumps on every applied command).
+  useEffect(() => {
+    let cancelled = false;
+    const layer = document?.layers.find((l) => l.id === selectedId);
+    if (!showAdjustmentDialog || selectedId === null || !layer?.smart) {
+      setSmartFilterList([]);
+      return;
+    }
+    invoke<Adjustment[]>("smart_filters", { id: selectedId }).then((list) => {
+      if (!cancelled) setSmartFilterList(list);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAdjustmentDialog, selectedId, document, generation]);
+
+  const addSmartFilter = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("add_smart_filter", { id: selectedId, adjustment: currentAdjustment() });
+  }, [runCommand, selectedId, currentAdjustment]);
+
+  const removeSmartFilter = useCallback(
+    async (index: number) => {
+      if (selectedId === null) return;
+      await runCommand("remove_smart_filter", { id: selectedId, index });
+    },
+    [runCommand, selectedId],
+  );
 
   /** The fill the dialog currently describes: the brush colour for Solid
    * Color, the brush and gradient-end colours for Gradient. */
@@ -14630,6 +14678,32 @@ export default function App() {
                 />
               </label>
             )}
+            {document?.layers.find((l) => l.id === selectedId)?.smart && (
+              <div className="control">
+                <span className="control__label">
+                  Smart Filters — applied to the selected smart object, non-destructively
+                </span>
+                {smartFilterList.length === 0 ? (
+                  <p className="modal__hint">None yet — Add Smart Filter appends the recipe above.</p>
+                ) : (
+                  <ul className="smart-filter-list">
+                    {smartFilterList.map((filter, index) => (
+                      <li key={index} className="smart-filter-list__item">
+                        <span>{adjustmentKindLabel(filter.kind)}</span>
+                        <button
+                          className="button button--quiet"
+                          onClick={() => void removeSmartFilter(index)}
+                          disabled={busy}
+                          title="Remove this Smart Filter and re-render without it"
+                        >
+                          Remove
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -14645,6 +14719,16 @@ export default function App() {
               >
                 Update Selected
               </button>
+              {document?.layers.find((l) => l.id === selectedId)?.smart && (
+                <button
+                  className="button button--quiet"
+                  onClick={() => void addSmartFilter()}
+                  disabled={busy}
+                  title="Layer > Smart Filters: append this recipe to the selected smart object"
+                >
+                  Add Smart Filter
+                </button>
+              )}
               <button className="button" onClick={addAdjustmentLayer} disabled={busy}>
                 Add Layer
               </button>

@@ -16250,6 +16250,78 @@ green.
 **1599 Rust tests total** (1590 → 1599, 1592 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 271 — Smart Filters
+
+Layer > Smart Filters, the scope cut Phase 255's Smart Object explicitly
+named and deferred: filters applied to a smart object non-destructively,
+listed and removable at any time without ever touching its embedded
+source. `SmartObject` gained a third field, `filters: Vec<Adjustment>`
+— the same four-variant per-pixel enum (Invert, Brightness/Contrast,
+Threshold, Posterize) Adjustment Layers already apply live with
+`apply_adjustment`, reused rather than inventing a second filter
+vocabulary. `set_smart_transform`'s own render step — reset to `source`,
+replay the stored `FreeTransform` — moved into a new private
+`render_smart_object`, which now also walks `filters` in order afterward,
+applying each one over the whole canvas with the very same
+`apply_adjustment` call Adjustment Layers use. `add_smart_filter` appends
+to the list and re-renders; `remove_smart_filter` removes by index and
+re-renders without it, so deleting a filter shows exactly what the smart
+object would look like had it never been added — true non-destructive
+editing, the same guarantee `set_smart_transform` already gives scaling
+down and back up. A read-only `smart_filters(id)` lists the current
+filters for the frontend. The Adjustment Layer dialog gained a Smart
+Filters section, visible only when the selected layer is a smart object:
+the same Adjustment picker and parameter fields already used to build an
+adjustment layer or retune one now also drive an "Add Smart Filter"
+button, with the smart object's current filters listed underneath, each
+with its own Remove button that re-fetches the list after the command
+runs. Photoshop's neighbourhood filters — Blur, Sharpen, and the rest of
+the Filter menu — as Smart Filters remain a documented scope cut: this
+phase only reaches the four filters that are already pure per-pixel
+functions with no neighbourhood to resample.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the
+existing `ramped_4x4` smart-object fixture. Adding Invert alone confirms
+every one of the sixteen pixels inverted correctly (R going
+`10, 20, ..., 160` to `245, 235, ..., 95`, with the untouched G/B `0`
+coming out `255`) and that `smart_filters` reports it back. A second
+test adds Brightness/Contrast (brightness 20, contrast 0, so its own
+factor is exactly `1.0`) then Invert, landing on `(225, 235, 235, 255)`
+for the first pixel — hand-derived and independently confirmed in a
+Python script computing the same `f32` arithmetic — and then applies the
+identical two filters in the opposite order on a fresh smart object,
+landing on a fully clipped-white `(255, 255, 255, 255)` instead, proof
+the list is not commutative. A third test removes the first of two
+filters and confirms the result matches a smart object that only ever
+had the second, both in its rendered pixels and in what `smart_filters`
+reports. A fourth confirms filters apply after the transform, not before:
+a smart object scaled to 50% with an Invert filter matches a plain
+document scaled the identical way and then inverted pixel by pixel with
+the very same `apply_adjustment` this project's Adjustment Layers already
+ship and test — no new floating-point derivation needed for that
+equivalence, since `free_transform`'s own resampling already has its
+extensive tests elsewhere, the same reasoning Phase 267's Lens Correction
+used comparing byte for byte against `camera_raw_optics`. A fifth
+exercises every error path: adding to or reading from a layer that is not
+a smart object, `Adjustment::validate`'s own bounds (a Threshold level of
+`0`), an out-of-range remove index, a locked layer, and an unknown layer
+id. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and eighteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Adjustment Layer dialog's new Smart Filters section was
+reviewed by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1604 Rust tests total** (1599 → 1604, 1597 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

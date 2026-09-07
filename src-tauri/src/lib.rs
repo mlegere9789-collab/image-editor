@@ -3826,6 +3826,39 @@ fn set_smart_transform(
     })
 }
 
+/// Layer > Smart Filters: appends `adjustment` to smart object `id`'s
+/// filter list.
+#[tauri::command]
+fn add_smart_filter(
+    state: State<'_, AppState>,
+    id: LayerId,
+    adjustment: document::Adjustment,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.add_smart_filter(id, adjustment))
+}
+
+/// Layer > Smart Filters: removes the filter at `index` from smart object
+/// `id`'s filter list.
+#[tauri::command]
+fn remove_smart_filter(
+    state: State<'_, AppState>,
+    id: LayerId,
+    index: usize,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.remove_smart_filter(id, index))
+}
+
+/// Read-only: smart object `id`'s own Smart Filters list.
+#[tauri::command]
+fn smart_filters(
+    state: State<'_, AppState>,
+    id: LayerId,
+) -> Result<Vec<document::Adjustment>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.smart_filters(id)
+}
+
 /// Layer > Rasterize > Smart Object on layer `id`.
 #[tauri::command]
 fn rasterize_smart_object(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -5853,6 +5886,9 @@ pub fn run() {
             convert_to_smart_object,
             smart_object_from_layers,
             set_smart_transform,
+            add_smart_filter,
+            remove_smart_filter,
+            smart_filters,
             rasterize_smart_object,
             add_frame_layer,
             place_into_frame,
