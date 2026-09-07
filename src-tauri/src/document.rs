@@ -2901,6 +2901,87 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// The Polygon tool in its Pixels mode: paints a regular polygon of
+    /// `sides` sides onto layer `id` in a flat `color`. As in Photoshop the
+    /// drag starts at the centre `(cx, cy)` and ends at `(x, y)`, which
+    /// becomes the first vertex — so the drag's length is the polygon's
+    /// circumradius and its angle the polygon's rotation — with the
+    /// remaining vertices spaced evenly around the circle from there. A
+    /// pixel is painted when its centre is inside the polygon by the
+    /// even-odd rule ([`point_in_polygon`], the Polygonal Lasso's own
+    /// test), the same hard pixel-centre rule the other shape tools use;
+    /// Photoshop's Anti-alias option, its star ratio and smooth corners
+    /// (the Star tool's territory), its stroke, and its Shape and Path
+    /// modes are documented scope cuts. Pixels are overwritten outright
+    /// and the active selection confines the paint. Returns the
+    /// vertices' bounding box clipped to the canvas, or `None` — painting
+    /// nothing — for a zero-length drag or a polygon entirely off the
+    /// canvas. Errors for `sides` outside `3..=100`, non-finite
+    /// coordinates, or a locked or unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_polygon(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        sides: u32,
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        if !(3..=100).contains(&sides) {
+            return Err("A polygon needs between 3 and 100 sides.".to_string());
+        }
+        if ![cx, cy, x, y].iter().all(|v| v.is_finite()) {
+            return Err("Polygon coordinates must be finite numbers.".to_string());
+        }
+        let radius = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+        if radius <= f32::EPSILON {
+            return Ok(None);
+        }
+        let start = (y - cy).atan2(x - cx);
+        let vertices: Vec<(f32, f32)> = (0..sides)
+            .map(|k| {
+                let angle = start + std::f32::consts::TAU * k as f32 / sides as f32;
+                (cx + radius * angle.cos(), cy + radius * angle.sin())
+            })
+            .collect();
+        let (min_x, max_x) = vertices
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(vx, _)| {
+                (lo.min(vx), hi.max(vx))
+            });
+        let (min_y, max_y) = vertices
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, vy)| {
+                (lo.min(vy), hi.max(vy))
+            });
+        let Ok(bounds) =
+            normalize_selection_bounds(min_x, min_y, max_x, max_y, self.width, self.height)
+        else {
+            return Ok(None);
+        };
+        let selection = self.selection.clone();
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
+                if !point_in_polygon(px, py, &vertices)
+                    || selection.as_ref().is_some_and(|s| !s.contains(px, py))
+                {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// The pixel-mode shape tools' shared painter. The box is normalised
     /// and clipped to the canvas exactly as the marquee tools' is, and a
     /// pixel is inside `shape` when its centre is — the same `+0.5`
@@ -20983,6 +21064,98 @@ mod tests {
         assert!(doc.draw_line(id + 1, 0.0, 2.5, 5.0, 2.5, 1, FILL).is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 1, FILL).is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn polygon_tool_paints_a_diamond_from_its_centre() {
+        // Four sides, dragged straight up 2.2 pixels: a diamond whose
+        // pixel centres satisfy |dx| + |dy| ≤ 2.2 — thirteen of them.
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 4, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", ".FFF.", "FFFFF", ".FFF.", "..F.."]
+        );
+    }
+
+    #[test]
+    fn polygon_tool_rotates_with_the_drag() {
+        // Three sides dragged up from (2.5, 2.9): apex (2.5, 0.2), base
+        // corners (4.838, 4.25) and (0.162, 4.25) — the bottom row's
+        // centres at y = 4.5 lie below the base and stay untouched.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_polygon(id, 2.5, 2.9, 2.5, 0.2, 3, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", "..F..", ".FFF.", ".FFF.", "....."]
+        );
+    }
+
+    #[test]
+    fn polygon_tool_paints_a_hexagon() {
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        let dirty = doc.draw_polygon(id, 3.5, 3.5, 6.3, 3.5, 6, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 1,
+                x1: 7,
+                y1: 6
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", "..FFF..", ".FFFFF.", ".FFFFF.", ".FFFFF.", "..FFF..", "......."]
+        );
+    }
+
+    #[test]
+    fn polygon_tool_respects_the_selection_and_clips_to_the_canvas() {
+        let (mut doc, id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 4, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".F...", "FF...", ".F...", "....."]
+        );
+        // A diamond centred off the canvas whose box never reaches it.
+        assert_eq!(
+            doc.draw_polygon(id, 9.0, 9.0, 9.0, 7.0, 4, FILL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn polygon_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 2, FILL).is_err());
+        assert!(doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 101, FILL).is_err());
+        assert!(doc
+            .draw_polygon(id, 2.5, f32::NAN, 2.5, 0.3, 4, FILL)
+            .is_err());
+        assert_eq!(
+            doc.draw_polygon(id, 2.5, 2.5, 2.5, 2.5, 4, FILL).unwrap(),
+            None
+        );
+        assert!(doc
+            .draw_polygon(id + 1, 2.5, 2.5, 2.5, 0.3, 4, FILL)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 4, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }
 

@@ -150,6 +150,7 @@ export type Tool =
   | "rectangle"
   | "ellipse"
   | "line"
+  | "polygon"
   | "historyBrush"
   | "magicWand"
   | "lasso"

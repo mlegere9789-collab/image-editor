@@ -2215,6 +2215,25 @@ fn draw_line(
     })
 }
 
+/// Polygon tool (Pixels mode): paint a regular polygon dragged out from
+/// its centre.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn draw_polygon(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cx: f32,
+    cy: f32,
+    x: f32,
+    y: f32,
+    sides: u32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_polygon(id, cx, cy, x, y, sides, color)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3702,6 +3721,7 @@ pub fn run() {
             draw_rectangle,
             draw_ellipse,
             draw_line,
+            draw_polygon,
             clone_stroke,
             set_history_source,
             history_stroke,

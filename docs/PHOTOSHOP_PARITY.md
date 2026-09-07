@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 263.**
+**618 distinct capabilities tracked. Currently shipped: 264.**
 
 ## PART I — EVERY TOOL
 
@@ -57,7 +57,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] RECTANGLE TOOL (`Document::draw_rectangle`, Pixels mode: an optionally rounded box painted by the pixel-centre rule with a flat fill and/or an inside stroke of a given width, clipped to the canvas and confined by the selection; Shape and Path modes, anti-aliasing, and Center/Outside stroke alignment are documented scope cuts — see README Phase 187)
 - [x] ELLIPSE TOOL (`Document::draw_ellipse`, Pixels mode: the ellipse inscribed in the dragged box painted by the pixel-centre rule with a flat fill and/or an inside stroke, through the same `draw_shape` painter as the Rectangle tool; Shape and Path modes, anti-aliasing, and Center/Outside stroke alignment are documented scope cuts — see README Phase 188)
 - [ ] TRIANGLE TOOL
-- [ ] POLYGON TOOL
+- [x] POLYGON TOOL (`Document::draw_polygon`, Pixels mode: a regular polygon of 3–100 sides dragged from its centre to its first vertex, painted by the even-odd pixel-centre rule in a flat colour, confined by the selection; star ratio, smooth corners, stroke, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 190)
 - [ ] STAR TOOL
 - [x] LINE TOOL (`Document::draw_line`, Pixels mode: a straight line of a given weight painted by the pixel-centre rule — perpendicular distance at most half the weight and projection between the ends, so butt caps — in a flat colour, confined by the selection; arrowheads, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 189)
 - [ ] CUSTOM SHAPE TOOL

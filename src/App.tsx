@@ -102,6 +102,22 @@ function rgbToHex(r: number, g: number, b: number): string {
 }
 
 /** A pointer event's position, in document pixel coordinates. */
+/** The Polygon tool's vertices for a drag from `centre` to `first`, which
+ * becomes the first vertex — the same construction `Document::draw_polygon`
+ * uses, for the live preview. */
+function polygonPoints(
+  centre: [number, number],
+  first: [number, number],
+  sides: number,
+): [number, number][] {
+  const radius = Math.hypot(first[0] - centre[0], first[1] - centre[1]);
+  const start = Math.atan2(first[1] - centre[1], first[0] - centre[0]);
+  return Array.from({ length: sides }, (_, k) => {
+    const angle = start + (2 * Math.PI * k) / sides;
+    return [centre[0] + radius * Math.cos(angle), centre[1] + radius * Math.sin(angle)];
+  });
+}
+
 function toDocPoint(
   event: React.PointerEvent<HTMLImageElement>,
   doc: DocumentView,
@@ -816,6 +832,8 @@ export default function App() {
   const [shapeRadius, setShapeRadius] = useState(0);
   // Line tool: the line's weight in pixels; it is painted in the brush colour.
   const [lineWeight, setLineWeight] = useState(1);
+  // Polygon tool: the number of sides; the drag runs from the centre to the first vertex.
+  const [polygonSides, setPolygonSides] = useState(5);
 
   // The gradient drag's live start point — a ref, not state, read directly
   // at pointerup the same way `marqueeStart` below is; the gradient itself
@@ -3109,7 +3127,8 @@ export default function App() {
   const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
   // The pixel-mode shape tools share one drag, preview, and options bar.
-  const isRectangle = tool === "rectangle" || tool === "ellipse" || tool === "line";
+  const isRectangle =
+    tool === "rectangle" || tool === "ellipse" || tool === "line" || tool === "polygon";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3572,7 +3591,17 @@ export default function App() {
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
             const fill = shapeFill ? [r, g, b, 255] : null;
             const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
-            if (tool === "line") {
+            if (tool === "polygon") {
+              void runCommand("draw_polygon", {
+                id: selectedId,
+                cx: x0,
+                cy: y0,
+                x: x1,
+                y: y1,
+                sides: polygonSides,
+                color: [r, g, b, 255],
+              });
+            } else if (tool === "line") {
               void runCommand("draw_line", {
                 id: selectedId,
                 x0,
@@ -3674,6 +3703,7 @@ export default function App() {
       shapeStrokeColor,
       shapeRadius,
       lineWeight,
+      polygonSides,
     ],
   );
 
@@ -4394,6 +4424,15 @@ export default function App() {
             title="Line: drag to paint a straight line of the chosen weight in the brush colour"
           >
             Line
+          </button>
+          <button
+            className={`button button--quiet${tool === "polygon" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "polygon"}
+            onClick={() => setTool("polygon")}
+            title="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
+          >
+            Polygon
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5653,6 +5692,20 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "polygon" && (
+            <label className="tools__slider">
+              Sides
+              <input
+                type="range"
+                min={3}
+                max={12}
+                value={polygonSides}
+                disabled={!canPaint}
+                onChange={(event) => setPolygonSides(Number(event.target.value))}
+              />
+              {polygonSides}
+            </label>
           )}
           {tool === "line" && (
             <label className="tools__slider">
@@ -14687,6 +14740,24 @@ export default function App() {
                   if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
                 }}
               />
+              {marqueePreview && tool === "polygon" && (
+                <svg
+                  className="lasso-preview"
+                  viewBox={`0 0 ${document.width} ${document.height}`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polygon
+                    points={polygonPoints(marqueePreview.start, marqueePreview.current, polygonSides)
+                      .map(([px, py]) => `${px},${py}`)
+                      .join(" ")}
+                    fill="none"
+                    stroke="#fff"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
               {marqueePreview && tool === "line" && (
                 <svg
                   className="lasso-preview"
@@ -14705,7 +14776,7 @@ export default function App() {
                   />
                 </svg>
               )}
-              {marqueePreview && tool !== "line" && (
+              {marqueePreview && tool !== "line" && tool !== "polygon" && (
                 <div
                   className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
                   style={overlayStyle(

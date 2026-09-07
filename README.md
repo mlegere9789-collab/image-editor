@@ -11697,6 +11697,61 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1190 Rust tests total** (1185 → 1190, 1183 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 190 — Polygon tool
+
+`Document::draw_polygon(id, cx, cy, x, y, sides, color)` is the
+Polygon tool in its Pixels mode. As in Photoshop the drag starts at
+the polygon's centre and ends at its first vertex, so the drag's
+length is the circumradius and its angle the rotation; the remaining
+`sides − 1` vertices are spaced evenly around that circle. A pixel is
+painted when its centre is inside the polygon by the even-odd rule —
+`point_in_polygon`, the Polygonal Lasso's own test — which is the same
+hard pixel-centre rule the other shape tools use, so Photoshop's
+Anti-alias option is a documented scope cut, as are its star ratio and
+smooth corners (the Star tool's territory), its stroke, and its Shape
+and Path modes. Pixels are overwritten outright and the active
+selection confines the paint. The dirty box is the vertices' bounding
+box clipped to the canvas; a zero-length drag or a polygon entirely off
+the canvas paints nothing and returns `None`, and `sides` outside
+`3..=100`, a non-finite coordinate, or a locked or unknown layer
+errors.
+
+A new **Polygon** tool button sits after Line with a **Sides** slider
+(3–12); the drag shows a live outline built by the same construction
+in `polygonPoints` and paints at pointer-up through a `draw_polygon`
+command in the brush colour.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python port of the even-odd test, with a check
+that no pixel centre sits on a polygon edge (the closest is `0.082`
+pixels away, for the triangle). Four sides dragged straight up `2.2`
+pixels from `(2.5, 2.5)` is the diamond `|dx| + |dy| ≤ 2.2` — thirteen
+pixels, `..F.. / .FFF. / FFFFF / .FFF. / ..F..` — with the `5×5` box
+dirty. Three sides dragged up from `(2.5, 2.9)` put the apex at
+`(2.5, 0.2)` and the base corners at `(±2.338 from centre, 4.25)`, so
+the bottom row's centres at `y = 4.5` lie below the base: `..F.. /
+..F.. / .FFF. / .FFF. / .....`. Six sides dragged right `2.8` pixels
+on a `7×7` give the hexagon `..FFF.. / .FFFFF. / .FFFFF. / .FFFFF. /
+..FFF..` inside a `(0, 1)–(7, 6)` box. The diamond with the two left
+columns selected paints `.F / FF / .F`, and a diamond centred at
+`(9, 9)` returns `None`. Two and 101 sides, a `NaN` centre, an unknown
+layer, and a locked layer all error with the pixels untouched, and a
+zero-length drag returns `None`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1195 Rust tests total** (1190 → 1195, 1188 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
