@@ -151,6 +151,7 @@ export type Tool =
   | "ellipse"
   | "line"
   | "polygon"
+  | "star"
   | "historyBrush"
   | "magicWand"
   | "lasso"

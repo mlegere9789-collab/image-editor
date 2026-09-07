@@ -2234,6 +2234,26 @@ fn draw_polygon(
     })
 }
 
+/// Star tool (Pixels mode): paint a star dragged out from its centre,
+/// with `ratio` percent inner points.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn draw_star(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cx: f32,
+    cy: f32,
+    x: f32,
+    y: f32,
+    points: u32,
+    ratio: u32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_star(id, cx, cy, x, y, points, ratio, color)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3722,6 +3742,7 @@ pub fn run() {
             draw_ellipse,
             draw_line,
             draw_polygon,
+            draw_star,
             clone_stroke,
             set_history_source,
             history_stroke,

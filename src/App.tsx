@@ -102,19 +102,23 @@ function rgbToHex(r: number, g: number, b: number): string {
 }
 
 /** A pointer event's position, in document pixel coordinates. */
-/** The Polygon tool's vertices for a drag from `centre` to `first`, which
- * becomes the first vertex — the same construction `Document::draw_polygon`
- * uses, for the live preview. */
+/** The Polygon and Star tools' vertices for a drag from `centre` to
+ * `first`, which becomes the first (outer) vertex — the same construction
+ * `Document::draw_polygon` and `draw_star` use, for the live preview. A
+ * `starRatio` (percent) adds an inner vertex midway between each pair. */
 function polygonPoints(
   centre: [number, number],
   first: [number, number],
   sides: number,
+  starRatio: number | null,
 ): [number, number][] {
   const radius = Math.hypot(first[0] - centre[0], first[1] - centre[1]);
   const start = Math.atan2(first[1] - centre[1], first[0] - centre[0]);
-  return Array.from({ length: sides }, (_, k) => {
-    const angle = start + (2 * Math.PI * k) / sides;
-    return [centre[0] + radius * Math.cos(angle), centre[1] + radius * Math.sin(angle)];
+  const count = starRatio === null ? sides : 2 * sides;
+  return Array.from({ length: count }, (_, k) => {
+    const r = starRatio !== null && k % 2 === 1 ? (radius * starRatio) / 100 : radius;
+    const angle = start + (Math.PI * k) / (count / 2);
+    return [centre[0] + r * Math.cos(angle), centre[1] + r * Math.sin(angle)];
   });
 }
 
@@ -834,6 +838,8 @@ export default function App() {
   const [lineWeight, setLineWeight] = useState(1);
   // Polygon tool: the number of sides; the drag runs from the centre to the first vertex.
   const [polygonSides, setPolygonSides] = useState(5);
+  // Star tool: the inner points' radius as a percentage of the outer, Photoshop's Star Ratio.
+  const [starRatio, setStarRatio] = useState(50);
 
   // The gradient drag's live start point — a ref, not state, read directly
   // at pointerup the same way `marqueeStart` below is; the gradient itself
@@ -3128,7 +3134,11 @@ export default function App() {
   const isGradient = tool === "gradient";
   // The pixel-mode shape tools share one drag, preview, and options bar.
   const isRectangle =
-    tool === "rectangle" || tool === "ellipse" || tool === "line" || tool === "polygon";
+    tool === "rectangle" ||
+    tool === "ellipse" ||
+    tool === "line" ||
+    tool === "polygon" ||
+    tool === "star";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3591,7 +3601,18 @@ export default function App() {
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
             const fill = shapeFill ? [r, g, b, 255] : null;
             const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
-            if (tool === "polygon") {
+            if (tool === "star") {
+              void runCommand("draw_star", {
+                id: selectedId,
+                cx: x0,
+                cy: y0,
+                x: x1,
+                y: y1,
+                points: polygonSides,
+                ratio: starRatio,
+                color: [r, g, b, 255],
+              });
+            } else if (tool === "polygon") {
               void runCommand("draw_polygon", {
                 id: selectedId,
                 cx: x0,
@@ -3704,6 +3725,7 @@ export default function App() {
       shapeRadius,
       lineWeight,
       polygonSides,
+      starRatio,
     ],
   );
 
@@ -4433,6 +4455,15 @@ export default function App() {
             title="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
           >
             Polygon
+          </button>
+          <button
+            className={`button button--quiet${tool === "star" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "star"}
+            onClick={() => setTool("star")}
+            title="Star: drag from the centre to the first point to paint a star in the brush colour"
+          >
+            Star
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5693,9 +5724,9 @@ export default function App() {
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
           )}
-          {tool === "polygon" && (
+          {(tool === "polygon" || tool === "star") && (
             <label className="tools__slider">
-              Sides
+              {tool === "star" ? "Points" : "Sides"}
               <input
                 type="range"
                 min={3}
@@ -5705,6 +5736,20 @@ export default function App() {
                 onChange={(event) => setPolygonSides(Number(event.target.value))}
               />
               {polygonSides}
+            </label>
+          )}
+          {tool === "star" && (
+            <label className="tools__slider">
+              Ratio
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={starRatio}
+                disabled={!canPaint}
+                onChange={(event) => setStarRatio(Number(event.target.value))}
+              />
+              {starRatio}%
             </label>
           )}
           {tool === "line" && (
@@ -14740,7 +14785,7 @@ export default function App() {
                   if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
                 }}
               />
-              {marqueePreview && tool === "polygon" && (
+              {marqueePreview && (tool === "polygon" || tool === "star") && (
                 <svg
                   className="lasso-preview"
                   viewBox={`0 0 ${document.width} ${document.height}`}
@@ -14748,7 +14793,12 @@ export default function App() {
                   aria-hidden="true"
                 >
                   <polygon
-                    points={polygonPoints(marqueePreview.start, marqueePreview.current, polygonSides)
+                    points={polygonPoints(
+                      marqueePreview.start,
+                      marqueePreview.current,
+                      polygonSides,
+                      tool === "star" ? starRatio : null,
+                    )
                       .map(([px, py]) => `${px},${py}`)
                       .join(" ")}
                     fill="none"
@@ -14776,7 +14826,7 @@ export default function App() {
                   />
                 </svg>
               )}
-              {marqueePreview && tool !== "line" && tool !== "polygon" && (
+              {marqueePreview && tool !== "line" && tool !== "polygon" && tool !== "star" && (
                 <div
                   className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
                   style={overlayStyle(

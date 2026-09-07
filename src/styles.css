@@ -198,7 +198,8 @@ body {
 .canvas--rectangle,
 .canvas--ellipse,
 .canvas--line,
-.canvas--polygon {
+.canvas--polygon,
+.canvas--star {
   cursor: crosshair;
 }
 

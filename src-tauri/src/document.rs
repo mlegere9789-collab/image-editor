@@ -2946,6 +2946,68 @@ impl Document {
                 (cx + radius * angle.cos(), cy + radius * angle.sin())
             })
             .collect();
+        self.paint_polygon(id, &vertices, color)
+    }
+
+    /// The Star tool in its Pixels mode: [`Self::draw_polygon`] with
+    /// `points` outer vertices on the drag's circle and, midway between
+    /// each pair, an inner vertex at `ratio` percent of that radius —
+    /// Photoshop's own Star Ratio, where `100` is the plain polygon and
+    /// smaller values cut deeper notches. The drag runs from the centre
+    /// `(cx, cy)` to the first outer point `(x, y)`; everything else (the
+    /// even-odd pixel-centre fill, the selection, the dirty box, the
+    /// `None` for a zero-length or off-canvas drag, the scope cuts) is
+    /// the Polygon tool's. Errors for `points` outside `3..=100`, a
+    /// `ratio` outside `1..=100`, non-finite coordinates, or a locked or
+    /// unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_star(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        points: u32,
+        ratio: u32,
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        if !(3..=100).contains(&points) {
+            return Err("A star needs between 3 and 100 points.".to_string());
+        }
+        if !(1..=100).contains(&ratio) {
+            return Err("Star ratio must be between 1 and 100 percent.".to_string());
+        }
+        if ![cx, cy, x, y].iter().all(|v| v.is_finite()) {
+            return Err("Star coordinates must be finite numbers.".to_string());
+        }
+        let radius = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+        if radius <= f32::EPSILON {
+            return Ok(None);
+        }
+        let inner = radius * ratio as f32 / 100.0;
+        let start = (y - cy).atan2(x - cx);
+        let vertices: Vec<(f32, f32)> = (0..2 * points)
+            .map(|k| {
+                let r = if k % 2 == 0 { radius } else { inner };
+                let angle = start + std::f32::consts::PI * k as f32 / points as f32;
+                (cx + r * angle.cos(), cy + r * angle.sin())
+            })
+            .collect();
+        self.paint_polygon(id, &vertices, color)
+    }
+
+    /// [`Self::draw_polygon`] and [`Self::draw_star`]'s shared painter:
+    /// overwrites every pixel of layer `id` whose centre is inside
+    /// `vertices` by the even-odd rule and inside the active selection,
+    /// returning the vertices' bounding box clipped to the canvas, or
+    /// `None` when that box misses the canvas entirely.
+    fn paint_polygon(
+        &mut self,
+        id: LayerId,
+        vertices: &[(f32, f32)],
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
         let (min_x, max_x) = vertices
             .iter()
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(vx, _)| {
@@ -2970,7 +3032,7 @@ impl Document {
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
                 let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
-                if !point_in_polygon(px, py, &vertices)
+                if !point_in_polygon(px, py, vertices)
                     || selection.as_ref().is_some_and(|s| !s.contains(px, py))
                 {
                     continue;
@@ -21156,6 +21218,103 @@ mod tests {
             .is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_polygon(id, 2.5, 2.5, 2.5, 0.3, 4, FILL).is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn star_tool_cuts_notches_into_the_polygon() {
+        // The Polygon tool's diamond with a 50% ratio: the inner vertices
+        // sit 1.1 pixels out on the diagonals, so the diagonal pixels'
+        // centres (√2 ≈ 1.414 out) fall in the notches and the diamond
+        // becomes a plus.
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 50, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", "..F..", "FFFFF", "..F..", "..F.."]
+        );
+    }
+
+    #[test]
+    fn star_tool_at_full_ratio_is_the_polygon() {
+        let (mut doc, id) = blank_5x5();
+        doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 100, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", ".FFF.", "FFFFF", ".FFF.", "..F.."]
+        );
+    }
+
+    #[test]
+    fn star_tool_paints_a_three_pointed_star() {
+        // Dragged up 3.3 pixels from (3.5, 3.9) at 30%: the top arm is a
+        // one-pixel spike and the two lower arms, tipped at y = 5.55, only
+        // reach the centres of row 4.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 7, [0, 0, 0, 0]), 7, 7)
+            .unwrap();
+        let dirty = doc.draw_star(id, 3.5, 3.9, 3.5, 0.6, 3, 30, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 7,
+                y1: 6
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".......", "...F...", "...F...", "...F...", "..FFF..", ".......", "......."]
+        );
+    }
+
+    #[test]
+    fn star_tool_respects_the_selection_and_clips_to_the_canvas() {
+        let (mut doc, id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 50, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".....", "FF...", ".....", "....."]
+        );
+        assert_eq!(
+            doc.draw_star(id, 9.0, 9.0, 9.0, 7.0, 4, 50, FILL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn star_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 2, 50, FILL).is_err());
+        assert!(doc
+            .draw_star(id, 2.5, 2.5, 2.5, 0.3, 101, 50, FILL)
+            .is_err());
+        assert!(doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 0, FILL).is_err());
+        assert!(doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 101, FILL).is_err());
+        assert!(doc
+            .draw_star(id, 2.5, 2.5, f32::INFINITY, 0.3, 4, 50, FILL)
+            .is_err());
+        assert_eq!(
+            doc.draw_star(id, 2.5, 2.5, 2.5, 2.5, 4, 50, FILL).unwrap(),
+            None
+        );
+        assert!(doc
+            .draw_star(id + 1, 2.5, 2.5, 2.5, 0.3, 4, 50, FILL)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 50, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }
 

@@ -11752,6 +11752,60 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1195 Rust tests total** (1190 → 1195, 1188 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 191 — Star tool
+
+`Document::draw_star(id, cx, cy, x, y, points, ratio, color)` is the
+Star tool in its Pixels mode: the Polygon tool's construction with
+`points` outer vertices on the drag's circle and, midway between each
+pair, an inner vertex at `ratio` percent of that radius — Photoshop's
+own Star Ratio, where `100` is the plain polygon and smaller values
+cut deeper notches. The drag runs from the centre to the first outer
+point, and the fill, selection confinement, dirty box, `None` for a
+zero-length or off-canvas drag, and scope cuts (smooth indents,
+stroke, anti-aliasing, Shape and Path modes) are all the Polygon
+tool's, through a new private `paint_polygon` that both tools now
+share. `points` outside `3..=100` and a `ratio` outside `1..=100`
+error, as do non-finite coordinates and a locked or unknown layer.
+
+A new **Star** tool button sits after Polygon; it shares the Polygon
+tool's **Points** slider and adds a **Ratio** slider (1–100%), and its
+live outline is the same `polygonPoints` preview with the inner
+vertices added. It paints at pointer-up through a `draw_star` command
+in the brush colour.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python port of the even-odd test with the same
+edge-margin check as the Polygon tool (closest centre `0.040` pixels
+from an edge, for the three-pointed star). The Polygon tool's diamond
+at a `50%` ratio puts the inner vertices `1.1` pixels out on the
+diagonals, so the diagonal pixels' centres — `√2 ≈ 1.414` out — fall in
+the notches and the thirteen-pixel diamond becomes a nine-pixel plus,
+`..F.. / ..F.. / FFFFF / ..F.. / ..F..`, with the `5×5` box dirty. The
+same drag at `100%` reproduces the diamond exactly. A three-pointed
+star dragged up `3.3` pixels from `(3.5, 3.9)` at `30%` on a `7×7` is a
+one-pixel spike over a three-pixel base — `...F... / ...F... / ...F... /
+..FFF..` on rows 1–4 — because its lower arms, tipped at `y = 5.55`,
+only reach row 4's centres; its box is `(0, 0)–(7, 6)`. The plus with
+the two left columns selected keeps only `(0, 2)` and `(1, 2)`, and a
+star centred at `(9, 9)` returns `None`. Two and 101 points, ratios
+`0` and `101`, an infinite coordinate, an unknown layer, and a locked
+layer all error with the pixels untouched, and a zero-length drag
+returns `None`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1200 Rust tests total** (1195 → 1200, 1193 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
