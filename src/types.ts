@@ -147,7 +147,13 @@ export type DocumentView = {
   colorTableSize: number;
   /** Duotone's inks; empty in other modes. */
   duotone: Ink[];
+  /** Spot colour channels, in overprinting order. */
+  spots: SpotChannelView[];
 };
+
+/** Mirrors `SpotChannelView` in src-tauri/src/document.rs: a spot colour
+ * channel's name, screen colour, and Solidity percent. */
+export type SpotChannelView = { name: string; color: [number, number, number]; solidity: number };
 
 /** Mirrors `Ink` in src-tauri/src/document.rs: a Duotone ink's colour and
  * curve points (darkness → coverage); an empty curve is the straight line. */
@@ -276,7 +282,8 @@ export type ChannelView =
   | { kind: "lightness" }
   | { kind: "aStar" }
   | { kind: "bStar" }
-  | { kind: "alpha"; name: string };
+  | { kind: "alpha"; name: string }
+  | { kind: "spot"; name: string };
 
 /** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >
  * Calculations' two sources. */

@@ -150,7 +150,7 @@ fn snapshot(state: &AppState, document: &Document, rect: Option<Rect>) -> Result
         *pixels_guard = Some(fresh);
     }
     let composite = pixels_guard.as_ref().expect("just populated above");
-    let bytes = png::encode(composite)?;
+    let bytes = encode_with_spots(document, composite)?;
     drop(pixels_guard);
 
     *state
@@ -231,6 +231,21 @@ fn perform_redo(state: &AppState) -> Result<Snapshot, String> {
     *doc_guard = Some(next);
     drop(history);
     snapshot(state, doc_guard.as_ref().expect("just set"), None)
+}
+
+/// Encodes `composite` as the canvas shows it: with the document's spot
+/// channels overprinted ([`Document::spot_preview`]); a plain encode when
+/// there are none.
+fn encode_with_spots(
+    document: &Document,
+    composite: &composite::Composite,
+) -> Result<Vec<u8>, String> {
+    if document.spots().is_empty() {
+        return png::encode(composite);
+    }
+    let mut pixels = composite.pixels.clone();
+    document.spot_preview(&mut pixels);
+    png::encode_pixels(composite.width, composite.height, &pixels)
 }
 
 /// Flatten `document` and write the result to `path` as PNG. Kept separate
@@ -319,8 +334,13 @@ fn channel_view_of(query: Option<&str>) -> Option<document::ChannelView> {
         "lightness" => document::ChannelView::Lightness,
         "aStar" => document::ChannelView::AStar,
         "bStar" => document::ChannelView::BStar,
-        other => document::ChannelView::Alpha {
-            name: percent_decode(other.strip_prefix("alpha:")?),
+        other => match other.strip_prefix("spot:") {
+            Some(name) => document::ChannelView::Spot {
+                name: percent_decode(name),
+            },
+            None => document::ChannelView::Alpha {
+                name: percent_decode(other.strip_prefix("alpha:")?),
+            },
         },
     })
 }
@@ -1545,6 +1565,100 @@ fn paint_channel(
         document.paint_channel(&name, &points, radius, grey)?;
         Ok(None)
     })
+}
+
+/// Channels panel > New Spot Channel, inked from the selection.
+#[tauri::command]
+fn new_spot_channel(
+    state: State<'_, AppState>,
+    name: String,
+    color: [u8; 3],
+    solidity: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.new_spot_channel(&name, color, solidity)?;
+        Ok(None)
+    })
+}
+
+/// Spot Channel Options: rename, recolour, and set the solidity.
+#[tauri::command]
+fn set_spot_channel(
+    state: State<'_, AppState>,
+    name: String,
+    new_name: String,
+    color: [u8; 3],
+    solidity: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_spot_channel(&name, &new_name, color, solidity)?;
+        Ok(None)
+    })
+}
+
+/// Spot Channel Overprinting Order: move a spot channel up or down.
+#[tauri::command]
+fn move_spot_channel(
+    state: State<'_, AppState>,
+    name: String,
+    direction: MoveDirection,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.move_spot_channel(&name, direction)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_spot_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_spot_channel(&name)?;
+        Ok(None)
+    })
+}
+
+/// Convert Alpha Channel to Spot Channel.
+#[tauri::command]
+fn convert_channel_to_spot(
+    state: State<'_, AppState>,
+    name: String,
+    color: [u8; 3],
+    solidity: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_channel_to_spot(&name, color, solidity)?;
+        Ok(None)
+    })
+}
+
+/// Merge Spot Channel: flatten and print the ink into the image.
+#[tauri::command]
+fn merge_spot_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.merge_spot_channel(&name).map(|_| None)
+    })
+}
+
+/// Paint ink along `points` on spot channel `name` — one step of a
+/// gesture the frontend checkpointed, like [`paint_channel`].
+#[tauri::command]
+fn paint_spot_channel(
+    state: State<'_, AppState>,
+    name: String,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    grey: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.paint_spot_channel(&name, &points, radius, grey)?;
+        Ok(None)
+    })
+}
+
+/// Color Libraries: the named inks the Spot Channel dialog offers.
+#[tauri::command]
+fn spot_library() -> Vec<(String, [u8; 3])> {
+    document::spot_library()
 }
 
 /// Edit > Copy Merged: capture the visible composite within the active
@@ -4808,6 +4922,14 @@ pub fn run() {
             move_channel,
             delete_channel,
             paint_channel,
+            new_spot_channel,
+            set_spot_channel,
+            move_spot_channel,
+            delete_spot_channel,
+            convert_channel_to_spot,
+            merge_spot_channel,
+            paint_spot_channel,
+            spot_library,
             cut,
             paste,
             paste_into,

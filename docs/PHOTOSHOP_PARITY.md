@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 433.**
+**618 distinct capabilities tracked. Currently shipped: 441.**
 
 ## PART I — EVERY TOOL
 
@@ -375,14 +375,14 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Apply Image — Transparency Mask (`channel: Transparency` reads the mask image's alpha — see README Phase 224)
 - [x] Apply Image — Mask Invert (`invert` uses `255 − value` — see README Phase 224)
 - [ ] Apply Image — Preview
-- [ ] Spot Channel
-- [ ] New Spot Channel
-- [ ] Spot Channel Color
-- [ ] Color Libraries
-- [ ] Spot Channel Solidity
-- [ ] Convert Alpha Channel to Spot Channel
-- [ ] Merge Spot Channel
-- [ ] Spot Channel Overprinting Order
+- [x] Spot Channel (`SpotChannel { name, color, solidity, pixels }` on the document, an ink density per pixel overprinted on the composite view in panel order by `spot_preview` — a transparent pixel is white paper — see README Phase 246)
+- [x] New Spot Channel (`new_spot_channel(name, color, solidity)`, inked in full wherever the selection covers a pixel centre, `Spot Color N` when unnamed — see README Phase 246)
+- [x] Spot Channel Color (`SpotChannel.color`, set by New Spot Channel and Spot Channel Options (`set_spot_channel`) — see README Phase 246)
+- [x] Color Libraries (`spot_library`, twelve conventional ink names with approximate sRGB screen colours in the dialog's Library list; no vendor swatch books ship — see README Phase 246)
+- [x] Spot Channel Solidity (`SpotChannel.solidity`: `100` shows the ink opaque, `0` a pure multiply overprint, between their mix per channel — see README Phase 246)
+- [x] Convert Alpha Channel to Spot Channel (`convert_channel_to_spot`, the alpha channel's white areas become ink (`255 − grey`) and it leaves the alpha channels — see README Phase 246)
+- [x] Merge Spot Channel (`merge_spot_channel`, flattens the image and prints the ink into the one layer, opaque over transparent pixels, then removes the channel — see README Phase 246)
+- [x] Spot Channel Overprinting Order (`move_spot_channel(name, Up | Down)`: the panel's order is the printing order, the later channel over the earlier — see README Phase 246)
 - [x] Alpha Channel Reordering (`move_channel(name, Up | Down)` swaps an alpha channel with its neighbour in the Channels panel; a channel at either end stays put — see README Phase 227)
 - [x] Alpha Channel Renaming (`rename_channel(old, new)`, non-blank and unique; double-click a channel in the panel — see README Phase 227)
 - [x] Channel Thumbnail Options (the Channels panel's Thumbnails select: None, Small, Medium, Large, each row's thumbnail served through the `composite://` protocol's new `channel=` query — see README Phase 227)

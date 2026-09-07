@@ -451,6 +451,14 @@ export default function App() {
   const [puppetSelected, setPuppetSelected] = useState<number | null>(null);
   const [puppetDrag, setPuppetDrag] = useState<number | null>(null);
   const puppetSvgRef = useRef<SVGSVGElement | null>(null);
+  // Channels panel > New Spot Channel / Spot Channel Options / Convert.
+  const [spotDialog, setSpotDialog] = useState<
+    { mode: "new" } | { mode: "edit"; name: string } | { mode: "convert"; name: string } | null
+  >(null);
+  const [spotName, setSpotName] = useState("");
+  const [spotColor, setSpotColor] = useState("#00aeef");
+  const [spotSolidity, setSpotSolidity] = useState(100);
+  const [spotLibrary, setSpotLibrary] = useState<[string, [number, number, number]][]>([]);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1987,6 +1995,42 @@ export default function App() {
     await runCommand("puppet_warp", { id: selectedId, options: puppetOptions });
     setShowPuppetDialog(false);
   }, [runCommand, selectedId, puppetOptions]);
+
+  const openSpotDialog = useCallback(
+    (dialog: { mode: "new" } | { mode: "edit"; name: string } | { mode: "convert"; name: string }) => {
+      const existing =
+        dialog.mode === "edit" ? document?.spots.find((s) => s.name === dialog.name) : undefined;
+      setSpotName(dialog.mode === "new" ? "" : dialog.name);
+      setSpotColor(existing ? rgbToHex(...existing.color) : "#00aeef");
+      setSpotSolidity(existing ? existing.solidity : 100);
+      if (spotLibrary.length === 0) {
+        invoke<[string, [number, number, number]][]>("spot_library")
+          .then(setSpotLibrary)
+          .catch((err) => setError(String(err)));
+      }
+      setSpotDialog(dialog);
+    },
+    [document, spotLibrary.length],
+  );
+
+  const applySpotDialog = useCallback(async () => {
+    if (!spotDialog) return;
+    const color = hexToRgb(spotColor);
+    if (spotDialog.mode === "new") {
+      await runCommand("new_spot_channel", { name: spotName, color, solidity: spotSolidity });
+    } else if (spotDialog.mode === "edit") {
+      await runCommand("set_spot_channel", { name: spotDialog.name, newName: spotName, color, solidity: spotSolidity });
+      setChannelView((current) =>
+        current.kind === "spot" && current.name === spotDialog.name ? { kind: "spot", name: spotName.trim() } : current,
+      );
+    } else {
+      await runCommand("convert_channel_to_spot", { name: spotDialog.name, color, solidity: spotSolidity });
+      setChannelView((current) =>
+        current.kind === "alpha" && current.name === spotDialog.name ? { kind: "spot", name: spotDialog.name } : current,
+      );
+    }
+    setSpotDialog(null);
+  }, [runCommand, spotDialog, spotName, spotColor, spotSolidity]);
 
   // The mesh's iso-curves at u, v ∈ {0, ⅓, ⅔, 1}: each is itself a cubic
   // Bézier whose control points are the Bernstein blend of the grid's.
@@ -4005,11 +4049,12 @@ export default function App() {
           opacity: Math.round(brushOpacity * 255),
           symmetry: mirrored,
         });
-      } else if (channelView.kind === "alpha") {
-        // Editing an alpha channel: the brush lays down the colour's luma.
+      } else if (channelView.kind === "alpha" || channelView.kind === "spot") {
+        // Editing an alpha or spot channel: the brush lays down the
+        // colour's luma (black brushes full ink on a spot channel).
         const [r, g, b] = hexToRgb(brushColor);
         const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        void runCommand("paint_channel", {
+        void runCommand(channelView.kind === "alpha" ? "paint_channel" : "paint_spot_channel", {
           name: channelView.name,
           points,
           radius: brushSize,
@@ -10965,6 +11010,80 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyWarp} disabled={busy || !warpMesh} title="Commit Warp">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {spotDialog && (
+        <div className="modal-overlay" onClick={() => setSpotDialog(null)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Spot Channel" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">
+              {spotDialog.mode === "new"
+                ? "New Spot Channel"
+                : spotDialog.mode === "edit"
+                  ? "Spot Channel Options"
+                  : `Convert "${spotDialog.name}" to Spot Channel`}
+            </h2>
+            <p className="modal__hint">
+              {spotDialog.mode === "new"
+                ? "The selection is inked in full; without one the channel starts empty. Black brush strokes add ink."
+                : spotDialog.mode === "edit"
+                  ? "Rename the ink, pick its screen colour, and set how solid it looks."
+                  : "The alpha channel's white (selected) areas become ink and it leaves the alpha channels."}
+            </p>
+            {spotDialog.mode !== "convert" && (
+              <label className="control control--row">
+                <span className="control__label">Name</span>
+                <input
+                  type="text"
+                  value={spotName}
+                  placeholder="Spot Color 1"
+                  onChange={(event) => setSpotName(event.target.value)}
+                />
+              </label>
+            )}
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input type="color" value={spotColor} onChange={(event) => setSpotColor(event.target.value)} />
+              <span className="control__label">Library</span>
+              <select
+                value=""
+                onChange={(event) => {
+                  const entry = spotLibrary.find(([name]) => name === event.target.value);
+                  if (entry) {
+                    setSpotColor(rgbToHex(...entry[1]));
+                    if (spotDialog.mode === "new" && spotName.trim() === "") setSpotName(entry[0]);
+                  }
+                }}
+                title="Color Libraries: conventional ink names with approximate screen colours"
+              >
+                <option value="">Pick an ink…</option>
+                {spotLibrary.map(([name]) => (
+                  <option value={name} key={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Solidity %</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={spotSolidity}
+                onChange={(event) => setSpotSolidity(Number(event.target.value))}
+              />
+              <span className="control__value">{spotSolidity}</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setSpotDialog(null)} title="Cancel">
+                Cancel
+              </button>
+              <button className="button" onClick={applySpotDialog} disabled={busy} title="OK">
                 OK
               </button>
             </div>
@@ -19083,6 +19202,7 @@ export default function App() {
             <ChannelPanel
               generation={generation}
               channels={document?.channels ?? []}
+              spots={document?.spots ?? []}
               view={shownChannel}
               mode={document?.mode ?? "rgb"}
               thumbs={channelThumbs}
@@ -19102,6 +19222,24 @@ export default function App() {
               onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
               onDelete={(name) => void runCommand("delete_channel", { name })}
               onLoad={(name) => void runCommand("load_channel", { name })}
+              onNewSpot={() => openSpotDialog({ mode: "new" })}
+              onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
+              onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
+              onDeleteSpot={(name) => {
+                void runCommand("delete_spot_channel", { name }).then(() => {
+                  setChannelView((current) =>
+                    current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+                  );
+                });
+              }}
+              onMergeSpot={(name) => {
+                void runCommand("merge_spot_channel", { name }).then(() => {
+                  setChannelView((current) =>
+                    current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+                  );
+                });
+              }}
+              onConvertToSpot={(name) => openSpotDialog({ mode: "convert", name })}
             />
           )}
         </LayerPanel>

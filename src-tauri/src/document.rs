@@ -139,6 +139,8 @@ pub struct Document {
     /// a byte per pixel each, discarded like every other position-bound
     /// thing when the canvas changes size.
     channels: Vec<AlphaChannel>,
+    /// Spot colour channels, in overprinting order (the panel's order).
+    spots: Vec<SpotChannel>,
     /// The Count tool's numbered marks, in placement order — document
     /// data in Photoshop too (they save with the file and undo), and
     /// discarded, like every position-bound thing here, when the canvas
@@ -1286,6 +1288,88 @@ pub enum ChannelView {
     Alpha {
         name: String,
     },
+    /// A spot colour channel, shown as its ink density: black where the
+    /// ink is full.
+    Spot {
+        name: String,
+    },
+}
+
+/// A spot colour channel — Photoshop's Channels panel > New Spot
+/// Channel: one ink, its screen colour, its Solidity, and an ink
+/// density per document pixel (`255` full ink), overprinted on the
+/// composite view in panel order — see [`Document::spot_preview`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpotChannel {
+    pub name: String,
+    pub color: [u8; 3],
+    /// Percent: `100` shows the ink opaque, `0` as a pure overprint
+    /// (multiply), between as their mix.
+    pub solidity: f32,
+    pub pixels: Vec<u8>,
+}
+
+/// What the Channels panel shows of a spot channel — see
+/// [`DocumentView::spots`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpotChannelView {
+    pub name: String,
+    pub color: [u8; 3],
+    pub solidity: f32,
+}
+
+/// Color Libraries: twelve conventional ink names with approximate sRGB
+/// screen colours, for the Spot Channel dialog's library list. No vendor
+/// swatch books ship; these are the project's own approximations.
+pub fn spot_library() -> Vec<(String, [u8; 3])> {
+    [
+        ("Process Cyan", [0, 174, 239]),
+        ("Process Magenta", [236, 0, 140]),
+        ("Process Yellow", [255, 241, 0]),
+        ("Process Black", [35, 31, 32]),
+        ("Warm Red", [249, 66, 58]),
+        ("Rubine Red", [206, 0, 88]),
+        ("Rhodamine Red", [225, 0, 152]),
+        ("Bright Orange", [254, 80, 0]),
+        ("Reflex Blue", [0, 20, 137]),
+        ("Emerald Green", [0, 171, 132]),
+        ("Violet", [187, 41, 187]),
+        ("Gold Yellow", [255, 215, 0]),
+    ]
+    .into_iter()
+    .map(|(name, color)| (name.to_string(), color))
+    .collect()
+}
+
+/// Overprints one spot channel on `pixels` (document-sized RGBA8) — the
+/// arithmetic behind [`Document::spot_preview`] and
+/// [`Document::merge_spot_channel`]. Per pixel with ink density `d` and
+/// solidity `s` (both `0..=1`): a transparent pixel is white paper; each
+/// colour channel becomes the mix `multiply + (opaque − multiply) · s` of
+/// the overprint `base · (1 − d · (1 − ink))` and the opaque ink `base +
+/// (ink − base) · d`; alpha rises to at least the ink density.
+fn apply_spot(spot: &SpotChannel, pixels: &mut [u8]) {
+    let ink = spot.color.map(to_unit);
+    let solidity = spot.solidity / 100.0;
+    for (px, &density) in pixels.chunks_exact_mut(CHANNELS).zip(&spot.pixels) {
+        if density == 0 {
+            continue;
+        }
+        let d = to_unit(density);
+        let transparent = px[3] == 0;
+        for (channel, &ink) in ink.iter().enumerate() {
+            let base = if transparent {
+                1.0
+            } else {
+                to_unit(px[channel])
+            };
+            let multiply = base * (1.0 - d * (1.0 - ink));
+            let opaque = base + (ink - base) * d;
+            px[channel] = to_byte(multiply + (opaque - multiply) * solidity);
+        }
+        px[3] = px[3].max(density);
+    }
 }
 
 /// An alpha channel: one byte per document pixel, row-major, as
@@ -2570,6 +2654,8 @@ pub struct DocumentView {
     pub groups: Vec<LayerGroup>,
     /// Alpha channel names, in creation order.
     pub channels: Vec<String>,
+    /// Spot colour channels, in overprinting order.
+    pub spots: Vec<SpotChannelView>,
     /// Image > Mode.
     pub mode: ColorMode,
     /// How many colours Indexed Color's table holds; `0` in other modes.
@@ -2598,6 +2684,7 @@ impl Document {
             color_table: Vec::new(),
             duotone: Vec::new(),
             channels: Vec::new(),
+            spots: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
             layer_comps: Vec::new(),
@@ -2639,6 +2726,15 @@ impl Document {
             guides: self.guides.clone(),
             groups: self.groups.clone(),
             channels: self.channels.iter().map(|c| c.name.clone()).collect(),
+            spots: self
+                .spots
+                .iter()
+                .map(|s| SpotChannelView {
+                    name: s.name.clone(),
+                    color: s.color,
+                    solidity: s.solidity,
+                })
+                .collect(),
             mode: self.mode,
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
@@ -2981,6 +3077,198 @@ impl Document {
         &self.channels
     }
 
+    pub fn spots(&self) -> &[SpotChannel] {
+        &self.spots
+    }
+
+    #[cfg(test)]
+    pub(crate) fn spots_mut(&mut self) -> &mut [SpotChannel] {
+        &mut self.spots
+    }
+
+    fn spot_index(&self, name: &str) -> Result<usize, String> {
+        self.spots
+            .iter()
+            .position(|s| s.name == name)
+            .ok_or_else(|| format!("No spot channel named \"{name}\"."))
+    }
+
+    fn check_spot(&self, name: &str, solidity: f32) -> Result<(), String> {
+        if !(solidity.is_finite() && (0.0..=100.0).contains(&solidity)) {
+            return Err("Solidity must be between 0 and 100 percent.".to_string());
+        }
+        if self.spots.iter().any(|s| s.name == name) {
+            return Err(format!("A spot channel named \"{name}\" already exists."));
+        }
+        Ok(())
+    }
+
+    /// Channels panel > New Spot Channel: adds a spot channel of `color`
+    /// at `solidity` percent named `name`, or the lowest free `Spot Color
+    /// N` when blank, inked in full wherever the selection covers a pixel
+    /// centre — and nowhere without one; returns the name. Errors for a
+    /// solidity out of `0..=100` or a name already taken.
+    pub fn new_spot_channel(
+        &mut self,
+        name: &str,
+        color: [u8; 3],
+        solidity: f32,
+    ) -> Result<String, String> {
+        let name = match name.trim() {
+            "" => (1..)
+                .map(|n| format!("Spot Color {n}"))
+                .find(|candidate| !self.spots.iter().any(|s| &s.name == candidate))
+                .expect("some number is always free"),
+            given => given.to_string(),
+        };
+        self.check_spot(&name, solidity)?;
+        let pixels = (0..self.height)
+            .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let inked = self
+                    .selection
+                    .as_ref()
+                    .is_some_and(|s| s.contains(x as f32 + 0.5, y as f32 + 0.5));
+                if inked {
+                    255
+                } else {
+                    0
+                }
+            })
+            .collect();
+        self.spots.push(SpotChannel {
+            name: name.clone(),
+            color,
+            solidity,
+            pixels,
+        });
+        Ok(name)
+    }
+
+    /// Spot Channel Options: renames spot channel `name` to `new_name`
+    /// (non-blank, not taken by another) and sets its colour and solidity.
+    pub fn set_spot_channel(
+        &mut self,
+        name: &str,
+        new_name: &str,
+        color: [u8; 3],
+        solidity: f32,
+    ) -> Result<(), String> {
+        let index = self.spot_index(name)?;
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("A spot channel needs a name.".to_string());
+        }
+        if new_name != name {
+            self.check_spot(new_name, solidity)?;
+        } else if !(solidity.is_finite() && (0.0..=100.0).contains(&solidity)) {
+            return Err("Solidity must be between 0 and 100 percent.".to_string());
+        }
+        let spot = &mut self.spots[index];
+        spot.name = new_name.to_string();
+        spot.color = color;
+        spot.solidity = solidity;
+        Ok(())
+    }
+
+    /// Spot Channel Overprinting Order: moves spot channel `name` one step
+    /// up (printed earlier) or down (later); at the end it stays put.
+    pub fn move_spot_channel(
+        &mut self,
+        name: &str,
+        direction: MoveDirection,
+    ) -> Result<(), String> {
+        let index = self.spot_index(name)?;
+        let target = match direction {
+            MoveDirection::Up if index > 0 => index - 1,
+            MoveDirection::Down if index + 1 < self.spots.len() => index + 1,
+            _ => return Ok(()),
+        };
+        self.spots.swap(index, target);
+        Ok(())
+    }
+
+    /// Deletes spot channel `name`.
+    pub fn delete_spot_channel(&mut self, name: &str) -> Result<(), String> {
+        let index = self.spot_index(name)?;
+        self.spots.remove(index);
+        Ok(())
+    }
+
+    /// Channels panel > Convert Alpha Channel to Spot Channel: alpha
+    /// channel `name` becomes a spot channel of `color` at `solidity`,
+    /// its selected (white) areas inked — density `255 − grey` — and is
+    /// removed from the alpha channels. Errors for an unknown alpha
+    /// channel, a spot channel already named `name`, or a bad solidity.
+    pub fn convert_channel_to_spot(
+        &mut self,
+        name: &str,
+        color: [u8; 3],
+        solidity: f32,
+    ) -> Result<(), String> {
+        let index = self.channel_index(name)?;
+        self.check_spot(name, solidity)?;
+        let alpha = self.channels.remove(index);
+        self.spots.push(SpotChannel {
+            name: alpha.name,
+            color,
+            solidity,
+            pixels: alpha.pixels.iter().map(|&v| 255 - v).collect(),
+        });
+        Ok(())
+    }
+
+    /// Channels panel > Merge Spot Channel: flattens the image
+    /// ([`Self::flatten_image`]) and prints spot channel `name` into the
+    /// one layer left — [`apply_spot`] on its pixels, so ink over a
+    /// transparent pixel prints on white paper and makes it opaque — then
+    /// removes the channel; other spot channels stay as they are. Returns
+    /// the flattened layer's id.
+    pub fn merge_spot_channel(&mut self, name: &str) -> Result<LayerId, String> {
+        let index = self.spot_index(name)?;
+        let id = self.flatten_image()?;
+        let spot = self.spots.remove(index);
+        let layer = self
+            .layers
+            .iter_mut()
+            .find(|l| l.id == id)
+            .expect("flatten_image leaves the layer it returns");
+        apply_spot(&spot, &mut layer.pixels);
+        Ok(id)
+    }
+
+    /// Paints spot channel `name` as the Channels panel edits it: every
+    /// pixel within `radius` of the polyline through `points` takes ink
+    /// density `255 − grey`, black brushing full ink. The selection is
+    /// not consulted. Errors as [`brush_bits`] does, or for an unknown
+    /// channel.
+    pub fn paint_spot_channel(
+        &mut self,
+        name: &str,
+        points: &[(f32, f32)],
+        radius: f32,
+        grey: u8,
+    ) -> Result<(), String> {
+        let index = self.spot_index(name)?;
+        let bits = brush_bits(self.width, self.height, points, radius)?;
+        for (pixel, hit) in self.spots[index].pixels.iter_mut().zip(bits) {
+            if hit {
+                *pixel = 255 - grey;
+            }
+        }
+        Ok(())
+    }
+
+    /// Overprints every spot channel, in panel order, on `pixels` — the
+    /// document-sized RGBA8 composite — as the canvas shows them; see
+    /// [`apply_spot`] for the ink arithmetic. A view: the layers are not
+    /// touched, and exports carry no spot ink.
+    pub fn spot_preview(&self, pixels: &mut [u8]) {
+        for spot in &self.spots {
+            apply_spot(spot, pixels);
+        }
+    }
+
     /// The lowest `Alpha N` not yet taken.
     fn next_channel_name(&self) -> String {
         (1..)
@@ -3109,7 +3397,15 @@ impl Document {
             pixels
         };
         Ok(match view {
-            ChannelView::Composite => crate::composite::flatten(self).pixels,
+            ChannelView::Composite => {
+                let mut pixels = crate::composite::flatten(self).pixels;
+                self.spot_preview(&mut pixels);
+                pixels
+            }
+            ChannelView::Spot { name } => {
+                let index = self.spot_index(name)?;
+                grey_of(self.spots[index].pixels.iter().map(|&d| 255 - d).collect())
+            }
             ChannelView::Cyan | ChannelView::Magenta | ChannelView::Yellow | ChannelView::Black => {
                 let index = match view {
                     ChannelView::Cyan => 0,
@@ -5898,6 +6194,7 @@ impl Document {
         self.last_selection = None;
         self.saved_selections.clear();
         self.channels.clear();
+        self.spots.clear();
         self.count_marks.clear();
         self.notes.clear();
         // A guide is a boundary line, so it turns with the picture: a
@@ -5966,6 +6263,7 @@ impl Document {
         self.last_selection = None;
         self.saved_selections.clear();
         self.channels.clear();
+        self.spots.clear();
         self.count_marks.clear();
         self.notes.clear();
         // Guides ride along with the pixels they sit between; those left
@@ -43670,5 +43968,177 @@ mod tests {
             reds_of(&forward, id, 1),
             vec![110, 120, 170, 220, 230, 0, 0, 0, 0, 0, 0, 0, 0]
         );
+    }
+
+    fn grey_doc_2x2(grey: u8) -> (Document, LayerId) {
+        let mut doc = Document::new(2, 2).unwrap();
+        let pixels = [grey, grey, grey, 255].repeat(4);
+        let id = doc.add_layer("grey", &pixels, 2, 2).unwrap();
+        (doc, id)
+    }
+
+    fn preview_pixel(doc: &Document, x: u32, y: u32) -> [u8; 4] {
+        let mut pixels = crate::composite::flatten(doc).pixels;
+        doc.spot_preview(&mut pixels);
+        let base = (y as usize * doc.width() as usize + x as usize) * CHANNELS;
+        [
+            pixels[base],
+            pixels[base + 1],
+            pixels[base + 2],
+            pixels[base + 3],
+        ]
+    }
+
+    #[test]
+    fn new_spot_channel_inks_the_selection_and_previews_the_ink_at_full_solidity() {
+        let (mut doc, _) = grey_doc_2x2(200);
+        doc.select_rectangle(0.0, 0.0, 1.0, 2.0).unwrap();
+        let name = doc.new_spot_channel("", [0, 128, 255], 100.0).unwrap();
+        assert_eq!(name, "Spot Color 1");
+        assert_eq!(doc.spots()[0].pixels, vec![255, 0, 255, 0]);
+        assert_eq!(preview_pixel(&doc, 0, 0), [0, 128, 255, 255]);
+        assert_eq!(preview_pixel(&doc, 1, 0), [200, 200, 200, 255]);
+        assert_eq!(preview_pixel(&doc, 0, 1), [0, 128, 255, 255]);
+        // Without a selection the new channel holds no ink.
+        doc.deselect();
+        assert_eq!(
+            doc.new_spot_channel("", [255, 0, 0], 100.0).unwrap(),
+            "Spot Color 2"
+        );
+        assert_eq!(doc.spots()[1].pixels, vec![0; 4]);
+        assert!(doc
+            .new_spot_channel("Spot Color 1", [0, 0, 0], 100.0)
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(doc
+            .new_spot_channel("", [0, 0, 0], 101.0)
+            .unwrap_err()
+            .contains("Solidity"));
+        assert!(doc
+            .new_spot_channel("", [0, 0, 0], f32::NAN)
+            .unwrap_err()
+            .contains("Solidity"));
+    }
+
+    #[test]
+    fn spot_solidity_blends_between_overprint_and_opaque_ink() {
+        // Grey 200 under ink (0, 128, 255) at full density: solidity 0 is a
+        // multiply — 200 · 128/255 = 100.4 → 100, 200 · 1 = 200 — and 50 the
+        // midpoint of that and the ink, 114.2 → 114 and 227.5 → 228.
+        let (mut doc, _) = grey_doc_2x2(200);
+        doc.select_all().unwrap();
+        doc.new_spot_channel("Ink", [0, 128, 255], 0.0).unwrap();
+        assert_eq!(preview_pixel(&doc, 0, 0), [0, 100, 200, 255]);
+        doc.set_spot_channel("Ink", "Ink", [0, 128, 255], 50.0)
+            .unwrap();
+        assert_eq!(preview_pixel(&doc, 1, 1), [0, 114, 228, 255]);
+        doc.set_spot_channel("Ink", "Renamed", [0, 128, 255], 100.0)
+            .unwrap();
+        assert_eq!(doc.spots()[0].name, "Renamed");
+        assert_eq!(preview_pixel(&doc, 1, 1), [0, 128, 255, 255]);
+        // Half density at full solidity is halfway to the ink: 200 → 100,
+        // 164, 227.5 → 228 (127.5/255 · (255 − 200) + 200 = 227.5).
+        doc.paint_spot_channel("Renamed", &[(0.5, 0.5)], 0.6, 128)
+            .unwrap();
+        assert_eq!(doc.spots()[0].pixels[0], 127);
+        assert_eq!(doc.spots()[0].pixels[1], 255);
+        assert!(doc
+            .set_spot_channel("Renamed", "", [0, 0, 0], 100.0)
+            .unwrap_err()
+            .contains("name"));
+        assert!(doc.set_spot_channel("Nope", "X", [0, 0, 0], 100.0).is_err());
+    }
+
+    #[test]
+    fn spot_channels_overprint_in_panel_order_and_alpha_channels_convert_inverted() {
+        let (mut doc, _) = grey_doc_2x2(200);
+        doc.select_all().unwrap();
+        doc.new_spot_channel("Red", [255, 0, 0], 100.0).unwrap();
+        doc.new_spot_channel("Blue", [0, 0, 255], 100.0).unwrap();
+        // The later channel prints over the earlier one.
+        assert_eq!(preview_pixel(&doc, 0, 0), [0, 0, 255, 255]);
+        doc.move_spot_channel("Blue", MoveDirection::Up).unwrap();
+        assert_eq!(doc.spots()[0].name, "Blue");
+        assert_eq!(preview_pixel(&doc, 0, 0), [255, 0, 0, 255]);
+        doc.move_spot_channel("Blue", MoveDirection::Up).unwrap();
+        assert_eq!(doc.spots()[0].name, "Blue");
+        doc.delete_spot_channel("Red").unwrap();
+        assert_eq!(doc.spots().len(), 1);
+        assert_eq!(preview_pixel(&doc, 0, 0), [0, 0, 255, 255]);
+        // An alpha channel's white (selected) areas become ink.
+        doc.add_channel("Mask", vec![255, 0, 128, 64]).unwrap();
+        doc.convert_channel_to_spot("Mask", [0, 255, 0], 100.0)
+            .unwrap();
+        assert!(doc.channels().is_empty());
+        assert_eq!(doc.spots()[1].name, "Mask");
+        assert_eq!(doc.spots()[1].pixels, vec![0, 255, 127, 191]);
+        assert_eq!(doc.spots()[1].color, [0, 255, 0]);
+        assert!(doc
+            .convert_channel_to_spot("Mask", [0, 0, 0], 100.0)
+            .is_err());
+        assert!(doc.move_spot_channel("Nope", MoveDirection::Down).is_err());
+        assert!(doc.delete_spot_channel("Nope").is_err());
+    }
+
+    #[test]
+    fn merge_spot_channel_bakes_the_ink_into_one_layer() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let a = doc
+            .add_layer("a", &[200, 200, 200, 255, 0, 0, 0, 0], 2, 1)
+            .unwrap();
+        doc.add_layer("b", &[0; 8], 2, 1).unwrap();
+        doc.select_all().unwrap();
+        doc.new_spot_channel("Ink", [0, 128, 255], 100.0).unwrap();
+        doc.new_spot_channel("Other", [255, 0, 0], 100.0).unwrap();
+        doc.spots_mut()[0].pixels[1] = 0;
+        let merged = doc.merge_spot_channel("Ink").unwrap();
+        assert_eq!(doc.layers().len(), 1);
+        assert_ne!(merged, a);
+        assert_eq!(pixel(&doc, merged, 0, 0), [0, 128, 255, 255]);
+        // No ink on the transparent pixel: it stays transparent.
+        assert_eq!(pixel(&doc, merged, 1, 0), [0, 0, 0, 0]);
+        assert_eq!(doc.spots().len(), 1);
+        assert_eq!(doc.spots()[0].name, "Other");
+        // Ink over a transparent pixel prints on white paper and becomes
+        // opaque.
+        let merged = doc.merge_spot_channel("Other").unwrap();
+        assert_eq!(pixel(&doc, merged, 1, 0), [255, 0, 0, 255]);
+        assert!(doc.spots().is_empty());
+        assert!(doc.merge_spot_channel("Ink").is_err());
+    }
+
+    #[test]
+    fn spot_channel_views_show_ink_as_black_and_the_library_names_inks() {
+        let (mut doc, _) = grey_doc_2x2(200);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.new_spot_channel("Ink", [0, 128, 255], 100.0).unwrap();
+        let image = doc
+            .channel_image(&ChannelView::Spot {
+                name: "Ink".to_string(),
+            })
+            .unwrap();
+        assert_eq!(&image[..8], &[0, 0, 0, 255, 255, 255, 255, 255]);
+        assert!(doc
+            .channel_image(&ChannelView::Spot {
+                name: "Nope".to_string(),
+            })
+            .is_err());
+        // Painting grey 64 lays down 191 ink.
+        doc.paint_spot_channel("Ink", &[(1.5, 1.5)], 0.6, 64)
+            .unwrap();
+        assert_eq!(doc.spots()[0].pixels[3], 191);
+        assert!(doc
+            .paint_spot_channel("Nope", &[(1.5, 1.5)], 0.6, 64)
+            .is_err());
+        let library = spot_library();
+        assert_eq!(library.len(), 12);
+        assert!(library
+            .iter()
+            .any(|(name, color)| name == "Warm Red" && *color == [249, 66, 58]));
+        let names: std::collections::HashSet<&str> =
+            library.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names.len(), 12);
+        assert_eq!(doc.view().spots[0].color, [0, 128, 255]);
+        assert_eq!(doc.view().spots[0].solidity, 100.0);
     }
 }

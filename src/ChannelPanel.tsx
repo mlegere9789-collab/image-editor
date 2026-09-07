@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChannelView, ColorMode, MoveDirection } from "./types";
+import type { ChannelView, ColorMode, MoveDirection, SpotChannelView } from "./types";
 
 /** Channel Thumbnail Options: the size of the thumbnail beside each row. */
 export type ChannelThumbs = "none" | "small" | "medium" | "large";
@@ -9,6 +9,8 @@ type Props = {
   generation: number | null;
   /** Alpha channel names, in panel order. */
   channels: string[];
+  /** Spot colour channels, in overprinting order. */
+  spots: SpotChannelView[];
   /** What the canvas is showing. */
   view: ChannelView;
   /** Image > Mode, which decides the fixed rows. */
@@ -22,15 +24,23 @@ type Props = {
   onMove: (name: string, direction: MoveDirection) => void;
   onDelete: (name: string) => void;
   onLoad: (name: string) => void;
+  onNewSpot: () => void;
+  onEditSpot: (name: string) => void;
+  onMoveSpot: (name: string, direction: MoveDirection) => void;
+  onDeleteSpot: (name: string) => void;
+  onMergeSpot: (name: string) => void;
+  onConvertToSpot: (name: string) => void;
 };
 
 /** The query value the `composite://` protocol reads for a view. */
 export function channelQuery(view: ChannelView): string {
-  return view.kind === "alpha" ? `alpha:${encodeURIComponent(view.name)}` : view.kind;
+  if (view.kind === "alpha") return `alpha:${encodeURIComponent(view.name)}`;
+  if (view.kind === "spot") return `spot:${encodeURIComponent(view.name)}`;
+  return view.kind;
 }
 
 function sameView(a: ChannelView, b: ChannelView): boolean {
-  return a.kind === b.kind && (a.kind !== "alpha" || b.kind !== "alpha" || a.name === b.name);
+  return a.kind === b.kind && (!("name" in a) || !("name" in b) || a.name === b.name);
 }
 
 /** The fixed rows for each mode — Photoshop's own Channels panel layout. */
@@ -76,6 +86,7 @@ function fixedRows(mode: ColorMode): { view: ChannelView; label: string }[] {
 export default function ChannelPanel({
   generation,
   channels,
+  spots,
   view,
   mode,
   thumbs,
@@ -87,6 +98,12 @@ export default function ChannelPanel({
   onMove,
   onDelete,
   onLoad,
+  onNewSpot,
+  onEditSpot,
+  onMoveSpot,
+  onDeleteSpot,
+  onMergeSpot,
+  onConvertToSpot,
 }: Props) {
   const [renaming, setRenaming] = useState<{ name: string; draft: string } | null>(null);
 
@@ -194,6 +211,14 @@ export default function ChannelPanel({
                   </button>
                   <button
                     className="button button--quiet"
+                    onClick={() => onConvertToSpot(label)}
+                    disabled={disabled}
+                    title="Convert Alpha Channel to Spot Channel: its white areas become ink"
+                  >
+                    Spot
+                  </button>
+                  <button
+                    className="button button--quiet"
                     onClick={() => onDelete(label)}
                     disabled={disabled}
                     title="Delete the channel"
@@ -206,8 +231,71 @@ export default function ChannelPanel({
           );
         })}
       </ul>
+      {spots.length > 0 && (
+        <ul className="layers">
+          {spots.map((spot) => {
+            const rowView: ChannelView = { kind: "spot", name: spot.name };
+            const active = sameView(rowView, view);
+            return (
+              <li
+                key={`spot:${spot.name}`}
+                className={`layer channel${active ? " layer--selected" : ""}`}
+                onClick={() => onSelect(rowView)}
+                title="Show and edit this spot channel on the canvas; black brush strokes lay down ink"
+              >
+                {thumbs !== "none" && generation !== null && (
+                  <img
+                    className={`channel__thumb channel__thumb--${thumbs}`}
+                    src={`composite://composite.png?g=${generation}&channel=${channelQuery(rowView)}`}
+                    alt=""
+                    draggable={false}
+                  />
+                )}
+                <span
+                  className="channel__swatch"
+                  style={{ background: `rgb(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]})` }}
+                  title={`Solidity ${spot.solidity}%`}
+                />
+                <span className="layer__name" onDoubleClick={() => onEditSpot(spot.name)} title="Double-click for Spot Channel Options">
+                  {spot.name}
+                </span>
+                <span className="channel__actions" onClick={(event) => event.stopPropagation()}>
+                  <button className="button button--quiet" onClick={() => onEditSpot(spot.name)} disabled={disabled} title="Spot Channel Options">
+                    …
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => onMoveSpot(spot.name, "up")}
+                    disabled={disabled || spots[0].name === spot.name}
+                    title="Overprint earlier (move up)"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => onMoveSpot(spot.name, "down")}
+                    disabled={disabled || spots[spots.length - 1].name === spot.name}
+                    title="Overprint later (move down)"
+                  >
+                    ↓
+                  </button>
+                  <button className="button button--quiet" onClick={() => onMergeSpot(spot.name)} disabled={disabled} title="Merge Spot Channel: flatten and print the ink into the image">
+                    Merge
+                  </button>
+                  <button className="button button--quiet" onClick={() => onDeleteSpot(spot.name)} disabled={disabled} title="Delete the spot channel">
+                    ×
+                  </button>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <button className="button button--quiet" onClick={onAdd} disabled={disabled} title="New Channel: a black alpha channel">
         New Channel
+      </button>
+      <button className="button button--quiet" onClick={onNewSpot} disabled={disabled} title="New Spot Channel: an ink filled from the selection">
+        New Spot Channel…
       </button>
     </section>
   );

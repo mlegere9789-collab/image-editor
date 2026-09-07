@@ -14629,6 +14629,80 @@ run build`) is fully green.
 **1470 Rust tests total** (1465 → 1470, 1463 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 246 — Spot Channels
+
+The Channels panel's spot colour plates land: New Spot Channel, Spot
+Channel Color and Solidity, Color Libraries, Convert Alpha Channel to
+Spot Channel, Merge Spot Channel, and Overprinting Order. A
+`SpotChannel` is an ink — a `name`, a screen `color`, a `solidity`
+percent — with an ink density per document pixel (`255` full ink), kept
+on the document in panel order. `new_spot_channel(name, color,
+solidity)` inks the new channel in full wherever the selection covers a
+pixel centre (nowhere without one) and names it `Spot Color N` when
+unnamed; `set_spot_channel` renames, recolours, and sets Solidity;
+`move_spot_channel` reorders; `convert_channel_to_spot` turns an alpha
+channel into ink — its white, selected areas become density `255 −
+grey` — and removes it from the alpha channels; `paint_spot_channel`
+lets a black brush lay down full ink on a shown spot channel. The
+composite view overprints every spot channel in order
+(`spot_preview`): per pixel with density `d` and solidity `s`, each
+colour channel becomes the mix `multiply + (opaque − multiply) · s` of
+the pure overprint `base · (1 − d · (1 − ink))` and the opaque ink `base
++ (ink − base) · d`, a transparent pixel printing on white paper and
+becoming as opaque as the ink; the canvas PNG, the composite thumbnail,
+and `channel_image(Composite)` all show it, a spot channel's own view
+is its density as black-is-ink grey, and exports carry no spot ink, as
+Photoshop's flattened exports don't. `merge_spot_channel` flattens the
+image and prints one channel's ink into the layer left, then removes
+it. `spot_library` is Color Libraries: twelve conventional ink names
+with approximate sRGB screen colours — no vendor swatch books ship. The
+Channels panel lists spot channels under the alpha channels with a
+swatch, Options (…), ↑ / ↓ for the overprinting order, Merge, and
+delete, gives every alpha channel a **Spot** button, and adds **New
+Spot Channel…**; one dialog serves New, Options, and Convert with Name,
+Color, a Library list, and a Solidity slider. Solidity out of `0..=100`,
+a taken or blank name, and unknown channels are refused.
+
+**Verified two ways.** Five new `document.rs` tests, every byte traced
+by hand and cross-checked by an independent `f32` Python port of the
+ink arithmetic. On a 2×2 grey-`200` layer with the left column selected,
+the new channel is `Spot Color 1` with densities `255 0 255 0`, and the
+preview at Solidity `100` is exactly the ink `(0, 128, 255)` on the
+left and `200` untouched on the right; without a selection the next
+channel is `Spot Color 2` and empty. Under full ink Solidity `0` is a
+multiply — `200 · 128/255 = 100.4 → 100`, `200 · 1 = 200` — and
+Solidity `50` the midpoint of that and the ink, `114.2 → 114` and
+`227.5 → 228`; painting grey `128` lays down density `127`. Red then
+blue channels at full ink preview blue, moving Blue up previews red,
+and an alpha channel `255 0 128 64` converts to densities `0 255 127
+191`. Merging prints the ink into the single flattened layer — `(0, 128,
+255)` on the grey pixel, the un-inked transparent pixel left alone —
+and a second ink over that transparent pixel prints red on white
+paper, opaque. A spot channel's view shows full ink as `0` and none as
+`255`, painting grey `64` lays down `191`, the library holds twelve
+distinct names including Warm Red `(249, 66, 58)`, and the document
+view carries each channel's colour and solidity. Two of the five
+passed on the first run: the other three had test bugs, not ink bugs —
+two brush dabs were aimed at pixel corners rather than the pixel
+centres `brush_bits` reads, and the merge test kept reading the layer
+id from the first merge after the second flatten had replaced it; the
+expected values themselves were right, and all five pass with the dabs
+at `(0.5, 0.5)` and `(1.5, 1.5)` and the id re-read.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The panel and dialog were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1475 Rust tests total** (1470 → 1475, 1468 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -807,3 +807,13 @@ body {
   fill: #ff8a3d;
   stroke: #ffffff;
 }
+
+/* Channels panel: a spot channel's ink swatch. */
+.channel__swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 2px;
+  margin-right: 6px;
+}
