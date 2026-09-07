@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 204.**
+**618 distinct capabilities tracked. Currently shipped: 205.**
 
 ## PART I — EVERY TOOL
 
@@ -193,7 +193,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Gradient Presets
 - [ ] Pattern Presets
 - [ ] Custom Shapes
-- [ ] Define Pattern
+- [x] Define Pattern (`define_pattern`, captures the selected layer's own pixels inside a plain rectangular selection — or the whole layer with none — as the document's one pattern, for pattern fills to tile; elliptical/rounded/inverted/bordered selections error as Photoshop's own greyed-out command would. Application-wide pattern presets are a documented scope cut: the pattern lives on the document and travels through undo — see README Phase 143)
 - [ ] Define Brush Preset
 - [ ] Paint Symmetry
 - [ ] Layer Comps

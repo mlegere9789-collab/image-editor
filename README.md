@@ -9283,6 +9283,53 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **954 Rust tests total** (948 → 954, 947 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 143 — Edit > Define Pattern
+
+`define_pattern(id)` is the first half of pattern support: it captures
+layer `id`'s own pixels inside the active selection — or the whole
+layer with none — as the document's pattern, a new `Pattern { width,
+height, pixels }` value kept on the `Document`, for pattern fills to
+tile. Photoshop's own Define Pattern insists on a plain rectangular
+marquee (no feather; the command is greyed out for anything else), and
+this does the same, erroring on an elliptical, rounded, inverted, or
+bordered selection, since a tile is a rectangle by definition. It reads
+the one layer's own stored bytes rather than the flattened composite
+(Photoshop samples the active layer too), so a locked layer is fine and
+only an unknown layer errors, and nothing on the canvas changes.
+Photoshop keeps patterns as application-wide presets that outlive any
+document; here the one defined pattern lives on the document and
+travels through undo and redo with everything else — a documented scope
+cut, the same shape as Transform Again's remembered transform.
+`DocumentView` (and its TypeScript mirror) gains a `has_pattern` flag,
+and a new **Define Pattern** button sits with the fill-layer buttons;
+the pattern's consumers arrive in the next phase.
+
+**Verified two ways.** Five new `document.rs` tests on `ramped_3x3`,
+whose bytes are the expected values by construction. With no
+selection, the pattern is the whole `3x3` layer byte-for-byte, the
+canvas is untouched, and `has_pattern` flips from `false` to `true`.
+Selecting columns `1..3` of rows `0..2` captures a `2x2` tile reading
+`20 30 / 50 60` (each `(R, 0, 0, 255)`), pinned as the exact
+sixteen-byte vector. An elliptical selection and an inverted rectangle
+both error and leave no pattern behind. Defining twice replaces the
+first pattern with the second (a `1x1` of `(10, 0, 0, 255)`). A locked
+layer can be sampled and an unknown layer errors. All five passed on
+the first run; the second verification is the fixture listing itself.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**959 Rust tests total** (954 → 959, 952 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

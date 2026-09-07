@@ -83,6 +83,20 @@ pub struct Document {
     /// or `free_transform`), kept for `transform_again` (Edit > Transform
     /// > Again) to repeat. Travels with the document through undo/redo.
     last_transform: Option<FreeTransform>,
+    /// The pattern most recently captured by `define_pattern` (Edit >
+    /// Define Pattern), for pattern fills to tile. Photoshop keeps patterns
+    /// as application-wide presets; here the one defined pattern lives on
+    /// the document, so it travels through undo/redo like everything else.
+    pattern: Option<Pattern>,
+}
+
+/// A rectangle of RGBA8 pixels captured by [`Document::define_pattern`],
+/// tiled by pattern fills.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pattern {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
 }
 
 /// How Filter > Stylize > Diffuse decides which neighbour a pixel takes.
@@ -801,6 +815,8 @@ pub struct DocumentView {
     pub can_reselect: bool,
     /// Whether `transform_again` has a transform to repeat right now.
     pub can_transform_again: bool,
+    /// Whether `define_pattern` has captured a pattern for fills to tile.
+    pub has_pattern: bool,
 }
 
 impl Document {
@@ -817,7 +833,13 @@ impl Document {
             selection: None,
             last_selection: None,
             last_transform: None,
+            pattern: None,
         })
+    }
+
+    /// The pattern `define_pattern` most recently captured, if any.
+    pub fn pattern(&self) -> Option<&Pattern> {
+        self.pattern.as_ref()
     }
 
     pub fn width(&self) -> u32 {
@@ -840,7 +862,55 @@ impl Document {
             selection: self.selection,
             can_reselect: self.last_selection.is_some(),
             can_transform_again: self.last_transform.is_some(),
+            has_pattern: self.pattern.is_some(),
         }
+    }
+
+    /// Edit > Define Pattern: captures layer `id`'s own pixels inside the
+    /// active selection — or the whole layer with none — as the document's
+    /// pattern, for pattern fills to tile. Photoshop's own Define Pattern
+    /// insists on a plain rectangular marquee (no feather, and it greys the
+    /// command out for anything else); this does the same, erroring on an
+    /// elliptical, rounded, inverted, or bordered selection, since a
+    /// tile is a rectangle by definition. Reads the one layer's own stored
+    /// bytes rather than the flattened composite (Photoshop samples the
+    /// active layer too), so a locked layer is fine; only an unknown layer
+    /// errors. Nothing on the canvas changes.
+    pub fn define_pattern(&mut self, id: LayerId) -> Result<(), String> {
+        let bounds = match self.selection {
+            None => Rect {
+                x0: 0,
+                y0: 0,
+                x1: self.width,
+                y1: self.height,
+            },
+            Some(Selection {
+                shape: SelectionShape::Rectangle,
+                bounds,
+                inverted: false,
+                border: None,
+            }) => bounds,
+            Some(_) => {
+                return Err(
+                    "Define Pattern needs a plain rectangular selection (or none).".to_string(),
+                )
+            }
+        };
+        let doc_width = self.width as usize;
+        let layer = self.layer(id)?;
+        let (width, height) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+        let mut pixels = Vec::with_capacity((width * height) as usize * CHANNELS);
+        for y in bounds.y0..bounds.y1 {
+            let start = (y as usize * doc_width + bounds.x0 as usize) * CHANNELS;
+            let end = start + width as usize * CHANNELS;
+            pixels.extend_from_slice(&layer.pixels[start..end]);
+        }
+        self.pattern = Some(Pattern {
+            width,
+            height,
+            pixels,
+        });
+        Ok(())
     }
 
     /// Replace the selection with an axis-aligned rectangle spanning the two
@@ -24840,6 +24910,67 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.perspective(999, 0.25, 0.0).is_err());
+    }
+
+    #[test]
+    fn define_pattern_with_no_selection_captures_the_whole_layer() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(!doc.view().has_pattern);
+        assert!(doc.pattern().is_none());
+        doc.define_pattern(id).unwrap();
+        let pattern = doc.pattern().unwrap();
+        assert_eq!((pattern.width, pattern.height), (3, 3));
+        assert_eq!(pattern.pixels, doc.layers()[0].pixels);
+        assert!(doc.view().has_pattern);
+        // The canvas itself is untouched.
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn define_pattern_captures_a_rectangular_selection() {
+        // Columns 1..3 of rows 0..2: a 2x2 tile reading 20 30 / 50 60.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        let pattern = doc.pattern().unwrap();
+        assert_eq!((pattern.width, pattern.height), (2, 2));
+        #[rustfmt::skip]
+        assert_eq!(
+            pattern.pixels,
+            vec![20, 0, 0, 255,  30, 0, 0, 255,
+                 50, 0, 0, 255,  60, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn define_pattern_rejects_non_rectangular_selections() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_ellipse(0.0, 0.0, 3.0, 3.0).unwrap();
+        assert!(doc.define_pattern(id).is_err());
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.invert_selection().unwrap();
+        assert!(doc.define_pattern(id).is_err());
+        assert!(doc.pattern().is_none());
+    }
+
+    #[test]
+    fn define_pattern_replaces_the_previous_pattern() {
+        let (mut doc, id) = ramped_3x3();
+        doc.define_pattern(id).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        let pattern = doc.pattern().unwrap();
+        assert_eq!((pattern.width, pattern.height), (1, 1));
+        assert_eq!(pattern.pixels, vec![10, 0, 0, 255]);
+    }
+
+    #[test]
+    fn define_pattern_reads_a_locked_layer_and_needs_a_known_one() {
+        let (mut doc, id) = ramped_3x3();
+        doc.set_locked(id, true).unwrap();
+        doc.define_pattern(id).unwrap();
+        assert!(doc.pattern().is_some());
+        assert!(doc.define_pattern(999).is_err());
     }
 
     #[test]

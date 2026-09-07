@@ -61,6 +61,8 @@ export type DocumentView = {
   canReselect: boolean;
   /** Whether Edit > Transform > Again has a transform to repeat right now. */
   canTransformAgain: boolean;
+  /** Whether Edit > Define Pattern has captured a pattern for fills to tile. */
+  hasPattern: boolean;
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */

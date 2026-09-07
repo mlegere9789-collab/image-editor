@@ -3054,6 +3054,16 @@ export default function App() {
         </button>
         <button
           className="button button--quiet"
+          onClick={() => {
+            if (selectedId !== null) void runCommand("define_pattern", { id: selectedId });
+          }}
+          disabled={busy || selectedId === null}
+          title="Edit > Define Pattern (the selected layer's pixels inside a rectangular selection, or the whole layer)"
+        >
+          Define Pattern
+        </button>
+        <button
+          className="button button--quiet"
           onClick={() => setShowGradientFillDialog(true)}
           disabled={busy || !hasDocument}
           title="Layer > New Fill Layer > Gradient"

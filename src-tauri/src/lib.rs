@@ -2743,6 +2743,13 @@ fn perspective(
     })
 }
 
+/// Edit > Define Pattern: capture layer `id`'s pixels inside the selection
+/// (or the whole layer) as the document's pattern.
+#[tauri::command]
+fn define_pattern(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.define_pattern(id).map(|_| None))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -3007,6 +3014,7 @@ pub fn run() {
             transform_again,
             distort,
             perspective,
+            define_pattern,
             select_rectangle,
             select_ellipse,
             select_all,
