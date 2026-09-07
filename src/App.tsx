@@ -506,8 +506,20 @@ export default function App() {
   // the curve's lookup table, and which point is being edited (its
   // input/output get the intersection lines).
   const [curveHistogram, setCurveHistogram] = useState<number[] | null>(null);
-  const [curveLut, setCurveLut] = useState<number[] | null>(null);
   const [curveFocus, setCurveFocus] = useState<number | null>(null);
+  // Per-channel curves: `curvePoints`/`curveNodes` are the channel being
+  // edited; the other channels' lists wait in `curveStore` and are
+  // swapped in when the Channel select changes.
+  const [curveChannel, setCurveChannel] = useState<LevelsChannel>("rgb");
+  const [curveStore, setCurveStore] = useState<
+    Record<LevelsChannel, { points: number[]; nodes: [number, number][] }>
+  >({
+    rgb: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+    red: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+    green: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+    blue: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+  });
+  const [curveLuts, setCurveLuts] = useState<Partial<Record<LevelsChannel, number[]>>>({});
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
@@ -1678,15 +1690,42 @@ export default function App() {
     setCurvePoints((points) => points.map((p, i) => (i === index ? value : p)));
   }, []);
 
+  /** Every channel's point list, with the channel being edited taken from
+   * the live state rather than the store. */
+  const curveLists = useCallback((): Record<LevelsChannel, [number, number][]> => {
+    const listFor = (channel: LevelsChannel): [number, number][] => {
+      const entry =
+        channel === curveChannel
+          ? { points: curvePoints, nodes: curveNodes }
+          : curveStore[channel];
+      return curvesPointMode
+        ? entry.nodes
+        : IDENTITY_CURVE.map((input, i) => [input, entry.points[i] ?? input]);
+    };
+    return { rgb: listFor("rgb"), red: listFor("red"), green: listFor("green"), blue: listFor("blue") };
+  }, [curveChannel, curvePoints, curveNodes, curveStore, curvesPointMode]);
+
   const applyCurves = useCallback(async () => {
     if (selectedId === null) return;
-    if (curvesPointMode) {
-      await runCommand("curves_points", { id: selectedId, points: curveNodes });
-    } else {
-      await runCommand("curves", { id: selectedId, points: curvePoints });
-    }
+    await runCommand("curves_channels", { id: selectedId, ...curveLists() });
     setShowCurvesDialog(false);
-  }, [runCommand, selectedId, curvePoints, curvesPointMode, curveNodes]);
+  }, [runCommand, selectedId, curveLists]);
+
+  /** Switch the channel being edited, parking the current one in the store. */
+  const selectCurveChannel = useCallback(
+    (channel: LevelsChannel) => {
+      if (channel === curveChannel) return;
+      setCurveStore((store) => ({
+        ...store,
+        [curveChannel]: { points: curvePoints, nodes: curveNodes },
+      }));
+      setCurvePoints(curveStore[channel].points);
+      setCurveNodes(curveStore[channel].nodes);
+      setCurveFocus(null);
+      setCurveChannel(channel);
+    },
+    [curveChannel, curvePoints, curveNodes, curveStore],
+  );
 
   const openCurvesDialog = useCallback(() => {
     if (selectedId === null) return;
@@ -1703,16 +1742,19 @@ export default function App() {
       .catch(() => setCurveHistogram(null));
   }, [selectedId]);
 
-  // Keep the drawn curve in step with whichever point list is live.
+  // Keep the drawn curves in step with every channel's point list.
   useEffect(() => {
     if (!showCurvesDialog) return;
-    const points: [number, number][] = curvesPointMode
-      ? curveNodes
-      : IDENTITY_CURVE.map((input, i) => [input, curvePoints[i] ?? input]);
-    void invoke<number[]>("curves_lookup", { points })
-      .then(setCurveLut)
-      .catch(() => setCurveLut(null));
-  }, [showCurvesDialog, curvesPointMode, curveNodes, curvePoints]);
+    const lists = curveLists();
+    const channels: LevelsChannel[] = ["rgb", "red", "green", "blue"];
+    void Promise.all(
+      channels.map((channel) => invoke<number[]>("curves_lookup", { points: lists[channel] })),
+    )
+      .then((luts) =>
+        setCurveLuts(Object.fromEntries(channels.map((channel, i) => [channel, luts[i]]))),
+      )
+      .catch(() => setCurveLuts({}));
+  }, [showCurvesDialog, curveLists]);
 
   const setCurveNode = useCallback((index: number, axis: 0 | 1, value: number) => {
     const clamped = Math.max(0, Math.min(255, Math.round(value)));
@@ -9694,6 +9736,18 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Curves</h2>
+            <label className="control">
+              <span className="control__label">Channel</span>
+              <select
+                value={curveChannel}
+                onChange={(event) => selectCurveChannel(event.target.value as LevelsChannel)}
+              >
+                <option value="rgb">RGB</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+              </select>
+            </label>
             {(() => {
               const focusPoint: [number, number] | null =
                 curveFocus === null
@@ -9752,12 +9806,34 @@ export default function App() {
                       />
                     </>
                   )}
-                  {curveLut && (
+                  {(["red", "green", "blue", "rgb"] as LevelsChannel[])
+                    .filter((channel) => channel !== curveChannel)
+                    .map((channel) => {
+                      const lut = curveLuts[channel];
+                      const colors = { rgb: "#e6e8ea", red: "#e5484d", green: "#46a758", blue: "#3e63dd" };
+                      return lut ? (
+                        <polyline
+                          key={channel}
+                          fill="none"
+                          stroke={colors[channel]}
+                          strokeOpacity={0.6}
+                          strokeWidth={1}
+                          points={lut.map((out, input) => `${input},${255 - out}`).join(" ")}
+                        />
+                      ) : null;
+                    })}
+                  {curveLuts[curveChannel] && (
                     <polyline
                       fill="none"
-                      stroke="#e6e8ea"
+                      stroke={
+                        { rgb: "#e6e8ea", red: "#e5484d", green: "#46a758", blue: "#3e63dd" }[
+                          curveChannel
+                        ]
+                      }
                       strokeWidth={2}
-                      points={curveLut.map((out, input) => `${input},${255 - out}`).join(" ")}
+                      points={(curveLuts[curveChannel] ?? [])
+                        .map((out, input) => `${input},${255 - out}`)
+                        .join(" ")}
                     />
                   )}
                 </svg>
@@ -9840,6 +9916,12 @@ export default function App() {
                     [0, 0],
                     [255, 255],
                   ]);
+                  setCurveStore({
+                    rgb: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+                    red: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+                    green: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+                    blue: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+                  });
                 }}
               >
                 Reset

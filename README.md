@@ -12316,6 +12316,55 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1250 Rust tests total** (1245 → 1250, 1243 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 202 — Curves per channel, with channel overlays
+
+`Document::curves_channels(id, rgb, red, green, blue)` lifts the
+"always the RGB composite" scope cut Curves shipped with: one point
+list for the composite and one each for Red, Green, and Blue, all
+applied together. As in Photoshop the channel curve runs first and
+the composite second — a red value `v` becomes `rgb[red[v]]` — so a
+red curve that halves and a composite that doubles are not the
+identity. Every list goes through `curve_lookup` before any pixel
+changes, so a bad list in any channel errors with the layer intact,
+and identity channel lists make this exactly `curves_points`. The
+Curves dialog gains a **Channel** select: the sliders and the Point-
+mode list edit the chosen channel while the other channels' lists
+wait in a store and are swapped in on switching; Apply sends all four
+lists through a `curves_channels` command, and Reset clears every
+channel. The graph now fetches all four lookup tables and draws every
+channel's curve in its colour — Photoshop's Show Channel Overlays —
+with the active channel's on top, thicker.
+
+**Verified two ways.** Five new `document.rs` tests, every byte
+hand-computed from the lookup tables. Four identity lists leave `[10,
+64, 128]` and `[60, 200, 100]` untouched. The steep `(0, 0)`→`(128,
+255)`→`(255, 255)` list on red alone maps `10 → 20` and `60 → 120`
+while green and blue keep their values; on blue alone it maps `128 →
+255` and `100 → 199`. Red halved (`(0, 0)`→`(255, 128)`, so `200 →
+100.4 → 100`) and then the steep composite (`100 → 199`) gives
+`[199, 255, 255]` on a `[200, 200, 200]` pixel — the other order would
+have given `128` — proving the channel-then-composite order. The five
+fixed inputs on the composite with identity channels are byte-
+identical to `curves_points` on every pixel. A one-point green list
+errors with the pixels intact, as do an unknown and a locked layer.
+All five passed on the first run once a test constant was renamed:
+`IDENTITY_CURVE` already existed in the test module for the five-
+slider form, and the compiler caught the clash before any test ran.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The channel switching was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1255 Rust tests total** (1250 → 1255, 1248 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

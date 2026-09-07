@@ -3273,6 +3273,22 @@ fn curves(state: State<'_, AppState>, id: LayerId, points: [u8; 5]) -> Result<Sn
     edit_checkpointed(&state, |document| document.curves(id, points))
 }
 
+/// Image > Adjustments > Curves with per-channel curves: the RGB composite
+/// list plus one list each for Red, Green, and Blue, on layer `id`.
+#[tauri::command]
+fn curves_channels(
+    state: State<'_, AppState>,
+    id: LayerId,
+    rgb: Vec<(u8, u8)>,
+    red: Vec<(u8, u8)>,
+    green: Vec<(u8, u8)>,
+    blue: Vec<(u8, u8)>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.curves_channels(id, &rgb, &red, &green, &blue)
+    })
+}
+
 /// The Curves dialog's graph: the 256-entry lookup table `points` describe.
 /// Read-only; needs no document.
 #[tauri::command]
@@ -3935,6 +3951,7 @@ pub fn run() {
             curves,
             curves_points,
             curves_lookup,
+            curves_channels,
             levels_black_point,
             levels_white_point,
             levels_gray_point,

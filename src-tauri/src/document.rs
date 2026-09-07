@@ -11865,6 +11865,40 @@ impl Document {
         self.curves_points(id, &nodes)
     }
 
+    /// [`Self::curves_points`] with Photoshop's Channel dropdown filled in:
+    /// one point list for the RGB composite and one each for Red, Green,
+    /// and Blue, all applied together. As in Photoshop the channel curve
+    /// runs first and the composite curve second — a channel value `v`
+    /// becomes `rgb[red[v]]` for red, and so on — so a red curve that halves
+    /// and a composite that doubles are not the identity. An identity list
+    /// (`[(0, 0), (255, 255)]`) for a channel leaves it to the composite
+    /// alone, which makes this exactly `curves_points` when the three
+    /// channel lists are identities. Every list is validated by
+    /// [`curve_lookup`] before any pixel changes.
+    pub fn curves_channels(
+        &mut self,
+        id: LayerId,
+        rgb: &[(u8, u8)],
+        red: &[(u8, u8)],
+        green: &[(u8, u8)],
+        blue: &[(u8, u8)],
+    ) -> Result<Option<Rect>, String> {
+        let master = curve_lookup(rgb)?;
+        let (red, green, blue) = (
+            curve_lookup(red)?,
+            curve_lookup(green)?,
+            curve_lookup(blue)?,
+        );
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            [
+                master[red[r as usize] as usize],
+                master[green[g as usize] as usize],
+                master[blue[b as usize] as usize],
+                a,
+            ]
+        })
+    }
+
     /// [`Self::curves`] in Photoshop's Point mode: the curve is defined by
     /// any number (at least two) of `(input, output)` control points at
     /// arbitrary input positions, sorted by input here so a caller can
@@ -22631,6 +22665,113 @@ mod tests {
         assert!(curve_lookup(&[(0, 0)]).is_err());
         assert!(curve_lookup(&[(0, 0), (0, 255)]).is_err());
         assert!(curve_lookup(&[(0, 0), (255, 255), (255, 0)]).is_err());
+    }
+
+    const IDENTITY_POINTS: [(u8, u8); 2] = [(0, 0), (255, 255)];
+
+    #[test]
+    fn curves_channels_all_identities_is_a_no_op() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_channels(
+            id,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [60, 200, 100, 128]);
+    }
+
+    #[test]
+    fn curves_channels_touch_only_their_own_channel() {
+        // The steep (0,0)-(128,255)-(255,255) curve on red alone: 10 → 20
+        // and 60 → 120 while green and blue keep their values.
+        let steep = [(0, 0), (128, 255), (255, 255)];
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_channels(
+            id,
+            &IDENTITY_POINTS,
+            &steep,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [20, 64, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [120, 200, 100, 128]);
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_channels(
+            id,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+            &steep,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [60, 200, 199, 128]);
+    }
+
+    #[test]
+    fn curves_channels_run_the_channel_curve_before_the_composite() {
+        // Red halved (200 → 100.4 → 100) and then the composite's steep
+        // curve (100 → 199); the other order would give 255 → 128.
+        let halve = [(0, 0), (255, 128)];
+        let steep = [(0, 0), (128, 255), (255, 255)];
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[200, 200, 200, 255], 1, 1).unwrap();
+        doc.curves_channels(id, &steep, &halve, &IDENTITY_POINTS, &IDENTITY_POINTS)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [199, 255, 255, 255]);
+    }
+
+    #[test]
+    fn curves_channels_with_identity_channels_is_curves_points() {
+        let points = [(0, 0), (64, 100), (128, 128), (192, 192), (255, 255)];
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_channels(
+            id,
+            &points,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+            &IDENTITY_POINTS,
+        )
+        .unwrap();
+        let (mut plain, plain_id) = curves_points_fixture();
+        plain.curves_points(plain_id, &points).unwrap();
+        for x in 0..4 {
+            assert_eq!(pixel(&doc, id, x, 0), pixel(&plain, plain_id, x, 0));
+        }
+    }
+
+    #[test]
+    fn curves_channels_validate_every_list_before_changing_pixels() {
+        let (mut doc, id) = curves_points_fixture();
+        let steep = [(0, 0), (128, 255), (255, 255)];
+        assert!(doc
+            .curves_channels(id, &steep, &IDENTITY_POINTS, &[(0, 0)], &IDENTITY_POINTS)
+            .is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+        assert!(doc
+            .curves_channels(
+                id + 1,
+                &steep,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .curves_channels(
+                id,
+                &steep,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .is_err());
     }
 
     #[test]
