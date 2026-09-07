@@ -1357,6 +1357,20 @@ fn warp_mesh(
     document.warp_mesh(id, style, bend, horizontal, vertical)
 }
 
+/// Cylindrical Transform Warp on layer `id`: an arc of `angle` degrees
+/// viewed at `tilt` degrees.
+#[tauri::command]
+fn cylindrical_warp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    angle: f32,
+    tilt: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.cylindrical_warp(id, angle, tilt)
+    })
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -4761,6 +4775,7 @@ pub fn run() {
             perspective_auto,
             warp,
             warp_mesh,
+            cylindrical_warp,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

@@ -431,6 +431,10 @@ export default function App() {
   const [warpMesh, setWarpMesh] = useState<WarpMesh | null>(null);
   const [warpDrag, setWarpDrag] = useState<number | null>(null);
   const warpSvgRef = useRef<SVGSVGElement | null>(null);
+  // Cylindrical Transform Warp: the arc the layer wraps and the viewing tilt.
+  const [showCylinderDialog, setShowCylinderDialog] = useState(false);
+  const [cylinderAngle, setCylinderAngle] = useState(120);
+  const [cylinderTilt, setCylinderTilt] = useState(0);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1906,6 +1910,17 @@ export default function App() {
     await runCommand("warp", { id: selectedId, mesh: warpMesh });
     setShowWarpDialog(false);
   }, [runCommand, selectedId, warpMesh]);
+
+  const openCylinderDialog = useCallback(() => {
+    setShowWarpDialog(false);
+    setShowCylinderDialog(true);
+  }, []);
+
+  const applyCylinderWarp = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("cylindrical_warp", { id: selectedId, angle: cylinderAngle, tilt: cylinderTilt });
+    setShowCylinderDialog(false);
+  }, [runCommand, selectedId, cylinderAngle, cylinderTilt]);
 
   // The mesh's iso-curves at u, v ∈ {0, ⅓, ⅔, 1}: each is itself a cubic
   // Bézier whose control points are the Bernstein blend of the grid's.
@@ -5326,6 +5341,14 @@ export default function App() {
             title="Edit > Transform > Warp: bend the layer through a 4×4 mesh or a Warp Style"
           >
             Warp…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openCylinderDialog}
+            disabled={busy || !canPaint}
+            title="Cylindrical Transform Warp: wrap the layer around a cylinder"
+          >
+            Cylinder Warp…
           </button>
           <button
             className="button button--quiet"
@@ -10861,10 +10884,57 @@ export default function App() {
               >
                 Reset
               </button>
+              <button className="button button--quiet" onClick={openCylinderDialog} title="Cylindrical Transform Warp">
+                Cylinder…
+              </button>
               <button className="button button--quiet" onClick={() => setShowWarpDialog(false)} title="Cancel">
                 Cancel
               </button>
               <button className="button" onClick={applyWarp} disabled={busy || !warpMesh} title="Commit Warp">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCylinderDialog && (
+        <div className="modal-overlay" onClick={() => setShowCylinderDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Cylindrical Transform Warp" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Cylindrical Transform Warp</h2>
+            <p className="modal__hint">
+              Wraps the layer&apos;s bounds around a vertical cylinder. Arc is how much of
+              the cylinder the layer covers (180° is a full half-cylinder, its sides
+              compressed to nothing); Tilt views it from above or below, bowing the top
+              and bottom edges.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Arc (°)</span>
+              <input
+                type="range"
+                min={1}
+                max={180}
+                value={cylinderAngle}
+                onChange={(event) => setCylinderAngle(Number(event.target.value))}
+              />
+              <span className="control__value">{cylinderAngle}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Tilt (°)</span>
+              <input
+                type="range"
+                min={-89}
+                max={89}
+                value={cylinderTilt}
+                onChange={(event) => setCylinderTilt(Number(event.target.value))}
+              />
+              <span className="control__value">{cylinderTilt}</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowCylinderDialog(false)} title="Cancel">
+                Cancel
+              </button>
+              <button className="button" onClick={applyCylinderWarp} disabled={busy} title="Commit the cylinder warp">
                 OK
               </button>
             </div>

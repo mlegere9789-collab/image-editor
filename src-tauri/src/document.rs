@@ -17264,6 +17264,76 @@ impl Document {
         })
     }
 
+    /// Cylindrical Transform Warp (Edit > Transform > Warp's Cylinder):
+    /// wraps layer `id`'s opaque bounds around a vertical cylinder seen
+    /// orthographically from the front. The bounds' pixel-index width
+    /// `w` becomes an arc of `angle` degrees (`0 < angle ≤ 180`) whose
+    /// chord still spans the bounds — radius `R = (w / 2) / sin(angle /
+    /// 2)` — so a pixel at horizontal fraction `t` of the bounds sits at
+    /// angle `θ = (t − ½)·angle` and lands at `x = cx + R·sin θ`; a shallow
+    /// arc is the identity and 180° the full half-cylinder, its sides
+    /// compressed to nothing. `tilt` degrees (`−89..=89`) views the
+    /// cylinder from above (positive) or below: rows are squashed by
+    /// `cos tilt` about the bounds' centre and a pixel at angle `θ` rises
+    /// by `R·(1 − cos θ)·sin tilt`, so the top and bottom edges bow into
+    /// the ellipses a tilted cylinder shows. Inverse-mapped per pixel with
+    /// the Transform family's nearest-neighbour resampling; pixels beyond
+    /// the cylinder's silhouette or reading off the canvas are
+    /// transparent, and the selection confines it. Errors for an arc or
+    /// tilt out of range or non-finite, a layer with no opaque pixels or
+    /// under two pixels wide or tall, or a locked or unknown layer. Not
+    /// recorded for Transform Again.
+    pub fn cylindrical_warp(
+        &mut self,
+        id: LayerId,
+        angle: f32,
+        tilt: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(angle.is_finite() && angle > 0.0 && angle <= 180.0) {
+            return Err("The cylinder's arc must be over 0 and at most 180 degrees.".to_string());
+        }
+        if !(tilt.is_finite() && tilt.abs() <= 89.0) {
+            return Err("The cylinder's tilt must be between −89 and 89 degrees.".to_string());
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to warp.".to_string())?;
+        if bounds.x1 - bounds.x0 < 2 || bounds.y1 - bounds.y0 < 2 {
+            return Err("Warp needs a layer at least two pixels wide and tall.".to_string());
+        }
+        let x0 = bounds.x0 as f64;
+        let w = (bounds.x1 - bounds.x0 - 1) as f64;
+        let h = (bounds.y1 - bounds.y0 - 1) as f64;
+        let (cx, cy) = (x0 + w / 2.0, bounds.y0 as f64 + h / 2.0);
+        let arc = (angle as f64).to_radians();
+        let radius = (w / 2.0) / (arc / 2.0).sin();
+        let (sin_tilt, cos_tilt) = (tilt as f64).to_radians().sin_cos();
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let q = (col as f64 - cx) / radius;
+            if q.abs() > 1.0 {
+                return [0; CHANNELS];
+            }
+            let theta = q.asin();
+            let t = 0.5 + theta / arc;
+            let sx = (x0 + t * w).round() as i64;
+            let lift = radius * (1.0 - theta.cos()) * sin_tilt;
+            let sy = (cy + (row as f64 + lift - cy) / cos_tilt).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Edit > Transform > Perspective: [`Self::distort`] with the corners
     /// moved in mirrored pairs, the way Photoshop's own Perspective drags
     /// one corner and slides its neighbour on the same edge the opposite
@@ -42924,6 +42994,122 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .warp(id, &identity_mesh_4x4())
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn ramped_9x2() -> (Document, LayerId) {
+        let mut doc = Document::new(9, 2).unwrap();
+        let mut pixels = Vec::new();
+        for n in 0..18u8 {
+            pixels.extend([(n % 9 + 1) * 10 + (n / 9) * 100, 0, 0, 255]);
+        }
+        let id = doc.add_layer("ramp", &pixels, 9, 2).unwrap();
+        (doc, id)
+    }
+
+    fn reds_of(doc: &Document, id: LayerId, y: u32) -> Vec<u8> {
+        (0..doc.width()).map(|x| pixel(doc, id, x, y)[0]).collect()
+    }
+
+    #[test]
+    fn cylindrical_warp_at_180_degrees_wraps_a_nine_wide_row() {
+        // R = 4: column x reads t = ½ + asin((x − 4) / 4) / π of the span, so
+        // 0, 1.84 → 2, 2.67 → 3, 3.36 → 3, 4, 4.64 → 5, 5.33 → 5, 6.16 → 6, 8.
+        let (mut doc, id) = ramped_9x2();
+        doc.cylindrical_warp(id, 180.0, 0.0).unwrap();
+        assert_eq!(
+            reds_of(&doc, id, 0),
+            vec![10, 30, 40, 40, 50, 60, 60, 70, 90]
+        );
+        assert_eq!(
+            reds_of(&doc, id, 1),
+            vec![110, 130, 140, 140, 150, 160, 160, 170, 190]
+        );
+    }
+
+    #[test]
+    fn cylindrical_warp_of_a_shallow_arc_is_the_identity() {
+        let (mut doc, id) = ramped_9x2();
+        let before = doc.layers()[0].pixels.clone();
+        doc.cylindrical_warp(id, 1.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        // Even a quarter turn moves no nine-wide pixel past a rounding edge.
+        doc.cylindrical_warp(id, 90.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn cylindrical_warp_tilt_lifts_the_sides_and_squashes_the_rows() {
+        // 5×5 grey ramp (10 per pixel), arc 180 (R = 2), tilt 30: the side
+        // columns sit a full R·sin 30° = 1 lower on the cylinder and every
+        // row is read 1/cos 30° apart, so column 0 reads rows 1, 2, 3, 4
+        // and then runs off; the centre column reads its own rows.
+        let (mut doc, id) = grey_ramp_square(5, 10);
+        doc.cylindrical_warp(id, 180.0, 30.0).unwrap();
+        let grey = |x: u32, y: u32| pixel(&doc, id, x, y);
+        assert_eq!(grey(0, 0)[0], 50);
+        assert_eq!(grey(0, 3)[0], 200);
+        assert_eq!(grey(0, 4), [0, 0, 0, 0]);
+        assert_eq!(grey(4, 0)[0], 90);
+        assert_eq!(grey(4, 4), [0, 0, 0, 0]);
+        // Column 1 reads source column 1 (t = ⅓ → 1.33) at its own rows.
+        for y in 0..5u32 {
+            assert_eq!(grey(1, y)[0], (y * 50 + 10) as u8);
+            assert_eq!(grey(2, y)[0], (y * 50 + 20) as u8);
+            assert_eq!(grey(3, y)[0], (y * 50 + 30) as u8);
+        }
+    }
+
+    #[test]
+    fn cylindrical_warp_is_confined_to_the_selection() {
+        let (mut doc, id) = ramped_9x2();
+        doc.select_rectangle(0.0, 0.0, 4.0, 2.0).unwrap();
+        doc.cylindrical_warp(id, 180.0, 0.0).unwrap();
+        assert_eq!(
+            reds_of(&doc, id, 0),
+            vec![10, 30, 40, 40, 50, 60, 70, 80, 90]
+        );
+        assert_eq!(
+            reds_of(&doc, id, 1),
+            vec![110, 130, 140, 140, 150, 160, 170, 180, 190]
+        );
+    }
+
+    #[test]
+    fn cylindrical_warp_refuses_a_bad_arc_tilt_or_layer() {
+        let (mut doc, id) = ramped_9x2();
+        let before = doc.layers()[0].pixels.clone();
+        for angle in [0.0, 180.5, -30.0, f32::NAN] {
+            assert!(doc
+                .cylindrical_warp(id, angle, 0.0)
+                .unwrap_err()
+                .contains("arc"));
+        }
+        for tilt in [90.0, -90.0, f32::INFINITY] {
+            assert!(doc
+                .cylindrical_warp(id, 180.0, tilt)
+                .unwrap_err()
+                .contains("tilt"));
+        }
+        assert!(doc.cylindrical_warp(999, 180.0, 0.0).is_err());
+        let empty = doc.add_layer("empty", &[0; 72], 9, 2).unwrap();
+        assert!(doc
+            .cylindrical_warp(empty, 180.0, 0.0)
+            .unwrap_err()
+            .contains("opaque"));
+        let mut thin = [0u8; 72];
+        thin[3] = 255;
+        thin[39] = 255;
+        let column = doc.add_layer("thin", &thin, 9, 2).unwrap();
+        assert!(doc
+            .cylindrical_warp(column, 180.0, 0.0)
+            .unwrap_err()
+            .contains("two pixels"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .cylindrical_warp(id, 180.0, 0.0)
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);

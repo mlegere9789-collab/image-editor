@@ -14499,6 +14499,62 @@ run build`) is fully green.
 **1460 Rust tests total** (1455 → 1460, 1453 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 244 — Cylindrical Transform Warp
+
+Photoshop's Cylinder warp, the newest Warp preset, is its own mapping
+rather than a control-point placement, so it lands as one:
+`cylindrical_warp(id, angle, tilt)` wraps layer `id`'s opaque bounds
+around a vertical cylinder seen orthographically from the front. The
+bounds' pixel-index width `w` becomes an arc of `angle` degrees (`0 <
+angle ≤ 180`) whose chord still spans the bounds — radius `R = (w / 2)
+/ sin(angle / 2)` — so a pixel at horizontal fraction `t` sits at angle
+`θ = (t − ½)·angle` and lands at `x = cx + R·sin θ`: a shallow arc is
+the identity, 180° the full half-cylinder with its sides compressed to
+nothing. `tilt` (`−89..=89`) views the cylinder from above or below:
+rows are squashed by `cos tilt` about the bounds' centre and a pixel at
+angle `θ` rises by `R·(1 − cos θ)·sin tilt`, so the top and bottom
+edges bow into the ellipses a tilted cylinder shows. Every pixel is
+inverse-mapped — `θ = asin((x − cx) / R)`, then the row back through
+the lift and the squash — with the Transform family's
+nearest-neighbour resampling; pixels beyond the cylinder's silhouette
+or reading off the canvas are transparent, and the selection confines
+it. Out-of-range or non-finite values, a layer with no opaque pixels
+or under two pixels wide or tall, and a locked or unknown layer are
+refused. A **Cylinder Warp…** button and a **Cylinder…** button in the
+Warp dialog open a dialog with Arc and Tilt sliders. Perspective
+projection and the cylinder's shading are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every mapping
+traced by hand and cross-checked by an independent Python port. On a
+nine-wide ramp at 180° (`R = 4`) column `x` reads fraction `½ +
+asin((x − 4) / 4) / π` of the span — `0, 1.84, 2.67, 3.36, 4, 4.64,
+5.33, 6.16, 8` — so both rows become `10 30 40 40 50 60 60 70 90` and
+`110 … 190` in the same pattern. A 1° arc, and even a 90° one on nine
+pixels, moves nothing past a rounding edge and is byte-identical. On a
+5×5 grey ramp at 180° with a 30° tilt (`R = 2`, lift `1` at the sides,
+rows read `1 / cos 30°` apart) column `0` reads rows `1`–`4` (`50`,
+`200` at row `3`) and runs off at the bottom, column `4` likewise
+(`90`, transparent at row `4`), and columns `1`–`3` read their own
+rows. With the left four columns selected only they change (`10 30 40
+40` then `50 60 70 80 90` untouched). Arcs of `0`, `180.5`, `−30`, and
+NaN, tilts of `±90` and infinity, an unknown, empty, one-column, and
+locked layer are refused with the ramp untouched. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and ninety-one:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1465 Rust tests total** (1460 → 1465, 1458 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
