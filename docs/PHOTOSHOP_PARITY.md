@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 444.**
+**618 distinct capabilities tracked. Currently shipped: 448.**
 
 ## PART I — EVERY TOOL
 
@@ -273,14 +273,14 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Anti-aliasing (`Selection.anti_alias` / `set_anti_alias`: an unfeathered edge's coverage is supersampled 4×4 within each pixel, so an ellipse edge takes paint, fills, cuts, and gradients in proportion to the pixel it covers; the Elliptical Marquee's Anti-alias checkbox, on by default; a feather supersedes it — see README Phase 239)
 - [x] Feather — Selection Tool Option (the marquee tools' Feather field, applied to each new marquee through `feather_selection` — see README Phase 238)
 - [x] Select and Mask — Refine Edge (the dialog itself, `Select and Mask…`, applying the four refinements together — see README Phase 240)
-- [ ] Select and Mask — Edge Detection
-- [ ] Select and Mask — Radius
-- [ ] Select and Mask — Smart Radius
+- [x] Select and Mask — Edge Detection (`edge_detect_selection`, every pixel whose window holds both sides re-decided by colour — coverage `d_out / (d_in + d_out)` against the window's selected and unselected mean colours — into a soft-mask selection whose bytes drive coverage — see README Phase 249)
+- [x] Select and Mask — Radius (the `(2·radius + 1)²` window Edge Detection looks across, `0..=250`, `0` leaving the edge alone — see README Phase 249)
+- [x] Select and Mask — Smart Radius (where the two means differ by 128 or more in luma only pixels within one of the edge are re-decided, so a crisp edge stays hard — see README Phase 249)
 - [x] Select and Mask — Smooth (`RefineEdge.smooth`, Select > Modify > Smooth's rounding when above zero — see README Phase 240)
 - [x] Select and Mask — Feather (`RefineEdge.feather`, the selection's feather radius — see README Phase 240)
 - [x] Select and Mask — Contrast (`Selection.contrast`: coverage pulled away from a half by `1 / (1 − contrast/100)`, `100` a hard threshold — see README Phase 240)
 - [x] Select and Mask — Shift Edge (`Selection.shift_edge`: the percentage added to every pixel the edge reaches, clamped, before Contrast — see README Phase 240)
-- [ ] Select and Mask — Decontaminate Colors
+- [x] Select and Mask — Decontaminate Colors (`decontaminate_colors`, partly covered pixels pulled Amount percent toward the mean colour of the fully covered pixels within five, applied to the New Layer outputs — see README Phase 249)
 - [x] Select and Mask — Output Settings (the dialog's Output To select and its OK — see README Phase 240)
 - [x] Select and Mask — Output To (`SelectAndMaskOutput`: Selection, Layer Mask from `coverage_mask`, New Layer with alpha scaled by coverage, or New Layer with Layer Mask — see README Phase 240)
 - [x] Select > Modify > Expand

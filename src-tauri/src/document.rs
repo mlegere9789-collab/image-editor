@@ -1601,6 +1601,10 @@ pub struct SelectionMask {
     pub width: u32,
     pub height: u32,
     pub bits: Vec<bool>,
+    /// Select and Mask's soft edge, when the mask came from Edge Detection:
+    /// each pixel's coverage as a byte, `bits` being its `128`-and-up
+    /// reading. `None` for a hard mask. See [`Selection::coverage`].
+    pub soft: Option<Vec<u8>>,
 }
 
 impl SelectionMask {
@@ -2287,6 +2291,21 @@ impl Selection {
     /// [`Self::coverage`] before Select and Mask's Contrast and Shift Edge.
     fn raw_coverage(&self, px: f32, py: f32) -> f32 {
         if self.feather == 0 {
+            // Edge Detection's soft mask: the stored coverage, inverted
+            // with the selection, off the canvas nothing.
+            if let (SelectionShape::Mask, Some(mask)) = (self.shape, &self.mask) {
+                if let Some(soft) = &mask.soft {
+                    let (x, y) = (px.floor(), py.floor());
+                    let inside =
+                        x >= 0.0 && y >= 0.0 && (x as u32) < mask.width && (y as u32) < mask.height;
+                    let c = if inside {
+                        to_unit(soft[(y as u32 * mask.width + x as u32) as usize])
+                    } else {
+                        0.0
+                    };
+                    return if self.inverted { 1.0 - c } else { c };
+                }
+            }
             if self.anti_alias {
                 // 4×4 sub-samples across the pixel square `[px − ½, px + ½)`.
                 let mut hits = 0u32;
@@ -2400,6 +2419,7 @@ fn mask_selection(width: u32, height: u32, bits: Vec<bool>) -> Result<Selection,
         width,
         height,
         bits,
+        soft: None,
     };
     let Some(bounds) = mask.bounds() else {
         return Err("The selection brush touched no pixels.".to_string());
@@ -3934,6 +3954,7 @@ impl Document {
             width,
             height,
             bits,
+            soft: None,
         };
         let bounds = mask
             .bounds()
@@ -5018,6 +5039,7 @@ impl Document {
             width: self.width,
             height: self.height,
             bits,
+            soft: None,
         };
         let Some(bounds) = mask.bounds() else {
             return Err("No pixels are within range of that colour.".to_string());
@@ -5143,9 +5165,9 @@ impl Document {
     /// Select > Modify > Smooth, when above zero), Feather, Contrast, and
     /// Shift Edge set on the current selection. Every value is checked
     /// first — Feather `0..=250`, Contrast `0..=100`, Shift Edge
-    /// `-100..=100` — and nothing is selected errors. Edge Detection's
-    /// Radius and Smart Radius, and Decontaminate Colors, are documented
-    /// scope cuts.
+    /// `-100..=100` — and nothing is selected errors. Edge Detection is
+    /// [`Self::edge_detect_selection`] and Decontaminate Colors
+    /// [`Self::decontaminate_colors`].
     pub fn refine_selection(&mut self, refine: &RefineEdge) -> Result<(), String> {
         if refine.feather > 250 {
             return Err("Feather must be between 0 and 250 pixels.".to_string());
@@ -5186,6 +5208,214 @@ impl Document {
         Ok(mask)
     }
 
+    /// Installs a canvas-sized soft-mask selection: `soft` is each pixel's
+    /// coverage as a byte, its `128`-and-up reading the hard selection
+    /// every hit test and Select > Modify command sees. Errors for the
+    /// wrong number of bytes or a mask that selects nothing.
+    pub fn set_soft_mask_selection(&mut self, soft: Vec<u8>) -> Result<(), String> {
+        let count = self.width as usize * self.height as usize;
+        if soft.len() != count {
+            return Err(format!(
+                "A mask needs one byte per pixel ({count}), not {}.",
+                soft.len()
+            ));
+        }
+        let bits: Vec<bool> = soft.iter().map(|&v| v >= 128).collect();
+        let mask = SelectionMask {
+            width: self.width,
+            height: self.height,
+            bits,
+            soft: Some(soft),
+        };
+        let Some(bounds) = mask.bounds() else {
+            return Err("The mask selects nothing.".to_string());
+        };
+        self.selection = Some(Selection {
+            shape: SelectionShape::Mask,
+            bounds,
+            inverted: false,
+            border: None,
+            feather: 0,
+            anti_alias: false,
+            contrast: 0,
+            shift_edge: 0,
+            mask: Some(Arc::new(mask)),
+        });
+        Ok(())
+    }
+
+    /// Select and Mask > Edge Detection on layer `id`: rebuilds the
+    /// selection's edge from the picture. Every pixel whose
+    /// `(2·radius + 1)²` window holds both selected and unselected pixels
+    /// is re-decided by colour: with `in` and `out` the mean colours of
+    /// the window's selected and unselected pixels, its coverage becomes
+    /// `d_out / (d_in + d_out)`, the share of its RGB distance to the
+    /// outside mean — `1` when it matches the inside, `0` the outside —
+    /// and the selection becomes a soft mask carrying those bytes
+    /// ([`Self::set_soft_mask_selection`]); pixels whose window sees only
+    /// one side keep their hard value, as does one equidistant from both
+    /// at distance zero. Smart Radius keeps a crisp edge hard: where the
+    /// two means differ by `128` or more in luma, only pixels within one
+    /// pixel of the edge (a selected pixel with an unselected 4-neighbour,
+    /// or vice versa) are re-decided. Radius `0` changes nothing. Errors
+    /// for a radius over `250`, an unknown layer, or no selection.
+    pub fn edge_detect_selection(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        smart: bool,
+    ) -> Result<(), String> {
+        if radius > 250 {
+            return Err("Edge Detection's Radius must be between 0 and 250 pixels.".to_string());
+        }
+        self.layer(id)?;
+        let bits = self.selected_bits()?;
+        if radius == 0 {
+            return Ok(());
+        }
+        let (w, h) = (self.width as i64, self.height as i64);
+        let at = |x: i64, y: i64| (y * w + x) as usize;
+        let boundary: Vec<bool> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let hard = bits[at(x, y)];
+                [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    nx >= 0 && ny >= 0 && nx < w && ny < h && bits[at(nx, ny)] != hard
+                })
+            })
+            .collect();
+        let pixels = &self.layer(id)?.pixels;
+        let r = radius as i64;
+        let luma = |m: [f32; 3]| 0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2];
+        let distance = |a: [f32; 3], b: [f32; 3]| {
+            let mut sum = 0.0f32;
+            for c in 0..3 {
+                let d = a[c] - b[c];
+                sum += d * d;
+            }
+            sum.sqrt()
+        };
+        let mut soft = Vec::with_capacity(bits.len());
+        for y in 0..h {
+            for x in 0..w {
+                let hard = bits[at(x, y)];
+                let hard_byte = if hard { 255 } else { 0 };
+                let (mut sum_in, mut sum_out) = ([0u32; 3], [0u32; 3]);
+                let (mut n_in, mut n_out) = (0u32, 0u32);
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (sx, sy) = (x + dx, y + dy);
+                        if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                            continue;
+                        }
+                        let base = at(sx, sy) * CHANNELS;
+                        let (sum, n) = if bits[at(sx, sy)] {
+                            (&mut sum_in, &mut n_in)
+                        } else {
+                            (&mut sum_out, &mut n_out)
+                        };
+                        for c in 0..3 {
+                            sum[c] += pixels[base + c] as u32;
+                        }
+                        *n += 1;
+                    }
+                }
+                if n_in == 0 || n_out == 0 {
+                    soft.push(hard_byte);
+                    continue;
+                }
+                let mean_in = sum_in.map(|s| s as f32 / n_in as f32);
+                let mean_out = sum_out.map(|s| s as f32 / n_out as f32);
+                if smart && (luma(mean_in) - luma(mean_out)).abs() >= 128.0 {
+                    let near = (-1..=1).any(|dy| {
+                        (-1..=1).any(|dx| {
+                            let (nx, ny) = (x + dx, y + dy);
+                            nx >= 0 && ny >= 0 && nx < w && ny < h && boundary[at(nx, ny)]
+                        })
+                    });
+                    if !near {
+                        soft.push(hard_byte);
+                        continue;
+                    }
+                }
+                let base = at(x, y) * CHANNELS;
+                let own = [
+                    pixels[base] as f32,
+                    pixels[base + 1] as f32,
+                    pixels[base + 2] as f32,
+                ];
+                let (d_in, d_out) = (distance(own, mean_in), distance(own, mean_out));
+                if d_in + d_out == 0.0 {
+                    soft.push(hard_byte);
+                    continue;
+                }
+                soft.push(to_byte(d_out / (d_in + d_out)));
+            }
+        }
+        self.set_soft_mask_selection(soft)
+    }
+
+    /// Select and Mask > Decontaminate Colors on layer `id`: every pixel
+    /// the selection covers partly (coverage strictly between `0` and `1`)
+    /// has its colour pulled `amount` percent toward the mean colour of
+    /// the fully covered pixels within five pixels of it — the colour
+    /// fringe a soft edge picks up from its background replaced by the
+    /// subject's own — and is left alone when no fully covered pixel is
+    /// that near. Alpha and the selection are untouched. Errors for an
+    /// amount over `100`, no selection, or a locked or unknown layer.
+    pub fn decontaminate_colors(&mut self, id: LayerId, amount: u8) -> Result<(), String> {
+        if amount > 100 {
+            return Err(
+                "Decontaminate Colors' Amount must be between 0 and 100 percent.".to_string(),
+            );
+        }
+        let coverage: Vec<f32> = self.coverage_mask()?.into_iter().map(to_unit).collect();
+        let (w, h) = (self.width as i64, self.height as i64);
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        let t = amount as f32 / 100.0;
+        for y in 0..h {
+            for x in 0..w {
+                let idx = (y * w + x) as usize;
+                let c = coverage[idx];
+                if c <= 0.0 || c >= 1.0 {
+                    continue;
+                }
+                let (mut sum, mut n) = ([0u32; 3], 0u32);
+                for dy in -5..=5 {
+                    for dx in -5..=5 {
+                        let (sx, sy) = (x + dx, y + dy);
+                        if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                            continue;
+                        }
+                        let j = (sy * w + sx) as usize;
+                        if coverage[j] >= 1.0 {
+                            for ch in 0..3 {
+                                sum[ch] += source[j * CHANNELS + ch] as u32;
+                            }
+                            n += 1;
+                        }
+                    }
+                }
+                if n == 0 {
+                    continue;
+                }
+                let base = idx * CHANNELS;
+                for ch in 0..3 {
+                    let own = source[base + ch] as f32;
+                    let mean = sum[ch] as f32 / n as f32;
+                    layer.pixels[base + ch] =
+                        (own + (mean - own) * t).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Select and Mask > Output To for layer `id`: Selection leaves the
     /// refined selection as it is; Layer Mask gives the layer the
     /// coverage as a soft mask; New Layer adds a copy of the layer above
@@ -5196,6 +5426,18 @@ impl Document {
         &mut self,
         id: LayerId,
         output: SelectAndMaskOutput,
+    ) -> Result<Option<LayerId>, String> {
+        self.select_and_mask_output_with(id, output, 0)
+    }
+
+    /// [`Self::select_and_mask_output`] with Decontaminate Colors at
+    /// `decontaminate` percent applied to the new layer (before its alpha
+    /// is scaled) for the New Layer outputs; `0` skips it.
+    pub fn select_and_mask_output_with(
+        &mut self,
+        id: LayerId,
+        output: SelectAndMaskOutput,
+        decontaminate: u8,
     ) -> Result<Option<LayerId>, String> {
         self.layer(id)?;
         match output {
@@ -5208,6 +5450,9 @@ impl Document {
             SelectAndMaskOutput::NewLayer => {
                 let mask = self.coverage_mask()?;
                 let copy = self.duplicate_layer(id)?;
+                if decontaminate > 0 {
+                    self.decontaminate_colors(copy, decontaminate)?;
+                }
                 let layer = self.layer_mut(copy)?;
                 for (px, &m) in layer.pixels.chunks_exact_mut(CHANNELS).zip(mask.iter()) {
                     px[3] = to_byte(to_unit(px[3]) * to_unit(m));
@@ -5217,6 +5462,9 @@ impl Document {
             SelectAndMaskOutput::NewLayerWithMask => {
                 let mask = self.coverage_mask()?;
                 let copy = self.duplicate_layer(id)?;
+                if decontaminate > 0 {
+                    self.decontaminate_colors(copy, decontaminate)?;
+                }
                 self.set_layer_mask(copy, mask)?;
                 Ok(Some(copy))
             }
@@ -17438,6 +17686,7 @@ impl Document {
             width,
             height,
             bits: bits.clone(),
+            soft: None,
         }
         .bounds()
         .expect("selected_bits guarantees a pixel");
@@ -17479,6 +17728,7 @@ impl Document {
             width: self.width,
             height: self.height,
             bits: bits.clone(),
+            soft: None,
         }
         .bounds()
         .expect("selected_bits guarantees a pixel");
@@ -44567,5 +44817,129 @@ mod tests {
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn strip(pixels: &[[u8; 3]]) -> (Document, LayerId) {
+        let mut doc = Document::new(pixels.len() as u32, 1).unwrap();
+        let bytes: Vec<u8> = pixels
+            .iter()
+            .flat_map(|p| [p[0], p[1], p[2], 255])
+            .collect();
+        let id = doc
+            .add_layer("strip", &bytes, pixels.len() as u32, 1)
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn edge_detection_decides_the_band_by_colour_against_both_sides() {
+        // Red, red, purple, blue with the left two selected: within Radius
+        // 1 of the edge, purple is 90.2 from the outside mean and 180.3
+        // from the inside's red, so it takes 90.2 / 270.5 = a third of a
+        // pixel; the pixels whose window sees only one side keep their
+        // hard value.
+        let (mut doc, id) = strip(&[[255, 0, 0], [255, 0, 0], [128, 0, 128], [0, 0, 255]]);
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.edge_detect_selection(id, 1, false).unwrap();
+        assert_eq!(doc.coverage_mask().unwrap(), vec![255, 255, 85, 0]);
+        // Coverage drives every consumer: the hard reading is 128 and up.
+        assert!(doc.selection().unwrap().contains(1.5, 0.5));
+        assert!(!doc.selection().unwrap().contains(2.5, 0.5));
+        assert_eq!(doc.selection().unwrap().coverage(2.5, 0.5), 85.0 / 255.0);
+        // Radius 2 reaches the blue pixel too: 90.2 / (360.6 + 90.2) = 0.2.
+        let (mut doc, id) = strip(&[[255, 0, 0], [255, 0, 0], [128, 0, 128], [0, 0, 255]]);
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.edge_detect_selection(id, 2, false).unwrap();
+        assert_eq!(doc.coverage_mask().unwrap(), vec![255, 255, 85, 51]);
+    }
+
+    #[test]
+    fn edge_detection_softens_a_grey_ramp_by_its_place_between_the_means() {
+        let g = |v: u8| [v, v, v];
+        let (mut doc, id) = strip(&[g(255), g(200), g(150), g(100), g(50), g(0)]);
+        doc.select_rectangle(0.0, 0.0, 3.0, 1.0).unwrap();
+        doc.edge_detect_selection(id, 2, false).unwrap();
+        // 200: 1.67 from the inside mean 201.67, 100 from the outside's 100
+        // → 0.984; 150: 51.67 / 75 → 0.592; 100: 75 / 50 → 0.4.
+        assert_eq!(doc.coverage_mask().unwrap(), vec![255, 251, 151, 102, 0, 0]);
+        // Radius 0 changes nothing; a soft mask survives a fill's coverage.
+        let before = doc.coverage_mask().unwrap();
+        doc.edge_detect_selection(id, 0, false).unwrap();
+        assert_eq!(doc.coverage_mask().unwrap(), before);
+    }
+
+    #[test]
+    fn smart_radius_keeps_a_crisp_edge_hard_beyond_one_pixel() {
+        // Grey 128 then two whites against three blacks, Radius 3: the
+        // grey pixel two steps from the edge would take 128 / 212.67 of a
+        // pixel, but the edge is crisp (inside 212.67 vs outside 0), so
+        // Smart Radius leaves it fully selected and only the neighbours
+        // of the edge are recomputed.
+        let g = |v: u8| [v, v, v];
+        let picture = [g(128), g(255), g(255), g(0), g(0), g(0)];
+        let (mut plain, id) = strip(&picture);
+        plain.select_rectangle(0.0, 0.0, 3.0, 1.0).unwrap();
+        plain.edge_detect_selection(id, 3, false).unwrap();
+        assert_eq!(plain.coverage_mask().unwrap(), vec![153, 219, 219, 0, 0, 0]);
+        let (mut smart, id) = strip(&picture);
+        smart.select_rectangle(0.0, 0.0, 3.0, 1.0).unwrap();
+        smart.edge_detect_selection(id, 3, true).unwrap();
+        assert_eq!(smart.coverage_mask().unwrap(), vec![255, 219, 219, 0, 0, 0]);
+    }
+
+    #[test]
+    fn decontaminate_colors_pulls_edge_pixels_toward_the_selected_colour() {
+        let (mut doc, id) = strip(&[[255, 0, 0], [128, 0, 128], [0, 0, 255]]);
+        doc.set_soft_mask_selection(vec![255, 128, 0]).unwrap();
+        assert_eq!(doc.coverage_mask().unwrap(), vec![255, 128, 0]);
+        let mut half = doc.clone();
+        half.decontaminate_colors(id, 50).unwrap();
+        assert_eq!(pixel(&half, id, 1, 0), [192, 0, 64, 255]);
+        assert_eq!(pixel(&half, id, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&half, id, 2, 0), [0, 0, 255, 255]);
+        // Output to a new layer with Decontaminate 100: the copy's edge
+        // pixel is red at half alpha and the original is untouched.
+        let copy = doc
+            .select_and_mask_output_with(id, SelectAndMaskOutput::NewLayer, 100)
+            .unwrap()
+            .unwrap();
+        assert_eq!(pixel(&doc, copy, 1, 0), [255, 0, 0, 128]);
+        assert_eq!(pixel(&doc, copy, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, copy, 2, 0), [0, 0, 255, 0]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 0, 128, 255]);
+        assert!(doc
+            .decontaminate_colors(id, 101)
+            .unwrap_err()
+            .contains("Amount"));
+        assert!(doc.set_soft_mask_selection(vec![0, 0, 0]).is_err());
+        assert!(doc.set_soft_mask_selection(vec![255, 255]).is_err());
+    }
+
+    #[test]
+    fn edge_detection_refuses_bad_input_and_needs_a_selection() {
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 0, 255]]);
+        assert!(doc
+            .edge_detect_selection(id, 1, false)
+            .unwrap_err()
+            .contains("selected"));
+        assert!(doc
+            .decontaminate_colors(id, 50)
+            .unwrap_err()
+            .contains("selected"));
+        doc.select_all().unwrap();
+        assert!(doc
+            .edge_detect_selection(id, 251, false)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc.edge_detect_selection(999, 1, false).is_err());
+        assert!(doc.decontaminate_colors(999, 50).is_err());
+        // A selection with no edge inside the canvas stays hard everywhere.
+        doc.edge_detect_selection(id, 2, false).unwrap();
+        assert_eq!(doc.coverage_mask().unwrap(), vec![255, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .decontaminate_colors(id, 50)
+            .unwrap_err()
+            .contains("locked"));
     }
 }

@@ -14813,6 +14813,74 @@ by hand instead. Every other layer of this project's quality bar
 **1485 Rust tests total** (1480 → 1485, 1478 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 249 — Select and Mask's Edge Detection and Decontaminate Colors
+
+Select and Mask's last four rows land, and with them the project's
+first truly soft selection. A `SelectionMask` may now carry `soft`
+bytes — each pixel's coverage — beside its hard bits (the `128`-and-up
+reading every hit test and Select > Modify command sees), installed by
+`set_soft_mask_selection`, and `Selection::coverage` reads those bytes
+straight, inverted with the selection, so fills, paint, cuts,
+gradients, layer masks, and Select and Mask's own outputs all take the
+soft edge. `edge_detect_selection(id, radius, smart)` is Edge
+Detection: every pixel whose `(2·radius + 1)²` window holds both
+selected and unselected pixels is re-decided by colour — with `in` and
+`out` the window's mean selected and unselected colours, its coverage
+becomes `d_out / (d_in + d_out)`, the share of its RGB distance to the
+outside mean, `1` when it matches the inside and `0` the outside —
+while a pixel whose window sees only one side keeps its hard value.
+Smart Radius keeps a crisp edge hard: where the two means differ by
+`128` or more in luma, only pixels within one pixel of the edge (a
+selected pixel with an unselected 4-neighbour, or vice versa) are
+re-decided. Radius `0` changes nothing. `decontaminate_colors(id,
+amount)` is Decontaminate Colors: every partly covered pixel has its
+colour pulled `amount` percent toward the mean colour of the fully
+covered pixels within five pixels of it, the fringe a soft edge picks
+up from its background replaced by the subject's own; alpha and the
+selection are untouched. `select_and_mask_output_with` applies it to
+the New Layer outputs' copy before its alpha is scaled. The Select and
+Mask dialog gains an Edge Detection Radius slider and Smart Radius,
+and a Decontaminate Colors checkbox with its Amount for the New Layer
+outputs. Photoshop's Refine Edge Brush and Show Edge / Onion Skin views
+are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every mean and
+distance traced by hand and cross-checked in `f32` by an independent
+Python script. Red, red, purple, blue with the left two selected at
+Radius `1`: purple is `90.2` from the outside mean `(64, 0, 191.5)` and
+`180.3` from the inside's red, so it takes `90.2 / 270.5`, a third of
+a pixel (`85`), the hard reading of `1.5` stays selected and `2.5`
+not, and Radius `2` reaches the blue pixel too (`90.2 / 450.8 = 0.2`,
+`51`). A grey ramp `255 200 150 100 50 0` with three selected at
+Radius `2` softens to `255 251 151 102 0 0` — `200` sits `1.67` from
+the inside mean `201.67` and `100` from the outside's; Radius `0`
+leaves it. Grey `128` and two whites against three blacks at Radius
+`3`: without Smart Radius the grey pixel, two steps from the edge,
+takes `128 / 212.67` (`153`); with it the edge is crisp (`212.67`
+against `0`) so the grey stays `255` and only the edge's neighbours are
+re-decided (`219`). A soft mask `255 128 0` over red, purple, blue:
+Decontaminate `50` pulls the purple halfway to red (`192, 0, 64`) and
+leaves the ends, and Output To New Layer at `100` yields a copy whose
+edge pixel is red at alpha `128`, the original untouched; Amount
+`101`, an all-zero mask, and a short mask are refused. No selection,
+Radius `251`, an unknown layer, and a locked layer are refused, and a
+selection with no edge inside the canvas stays hard. All five passed
+on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-six: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1490 Rust tests total** (1485 → 1490, 1483 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

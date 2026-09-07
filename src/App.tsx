@@ -329,6 +329,11 @@ export default function App() {
   const [showSelectAndMask, setShowSelectAndMask] = useState(false);
   const [refine, setRefine] = useState<RefineEdge>({ smooth: 0, feather: 0, contrast: 0, shiftEdge: 0 });
   const [selectAndMaskOutput, setSelectAndMaskOutput] = useState<SelectAndMaskOutput>("selection");
+  // Select and Mask > Edge Detection and Decontaminate Colors.
+  const [edgeRadius, setEdgeRadius] = useState(0);
+  const [smartRadius, setSmartRadius] = useState(false);
+  const [decontaminate, setDecontaminate] = useState(false);
+  const [decontaminateAmount, setDecontaminateAmount] = useState(100);
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
@@ -1278,12 +1283,19 @@ export default function App() {
   }, [document]);
 
   const applySelectAndMask = useCallback(async () => {
+    if (edgeRadius > 0 && selectedId !== null) {
+      await runCommand("edge_detect_selection", { id: selectedId, radius: edgeRadius, smart: smartRadius });
+    }
     await runCommand("refine_selection", { refine });
     if (selectAndMaskOutput !== "selection" && selectedId !== null) {
-      await runCommand("select_and_mask_output", { id: selectedId, output: selectAndMaskOutput });
+      await runCommand("select_and_mask_output", {
+        id: selectedId,
+        output: selectAndMaskOutput,
+        decontaminate: decontaminate ? decontaminateAmount : 0,
+      });
     }
     setShowSelectAndMask(false);
-  }, [runCommand, refine, selectAndMaskOutput, selectedId]);
+  }, [runCommand, refine, selectAndMaskOutput, selectedId, edgeRadius, smartRadius, decontaminate, decontaminateAmount]);
 
   const applyThreshold = useCallback(async () => {
     if (selectedId === null) return;
@@ -10127,9 +10139,32 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Select and Mask</h2>
             <p className="modal__hint">
-              Global Refinements on the current selection, then where the result goes. Edge
-              Detection and Decontaminate Colors are not offered.
+              Edge Detection re-decides the selection&apos;s edge from the picture, the Global
+              Refinements soften it, then the result goes to its output.
             </p>
+            <label className="control">
+              <span className="control__label">
+                Edge Detection Radius (px)
+                <span className="control__value">{edgeRadius}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={250}
+                value={edgeRadius}
+                disabled={selectedId === null}
+                onChange={(event) => setEdgeRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={smartRadius}
+                disabled={selectedId === null}
+                onChange={(event) => setSmartRadius(event.target.checked)}
+              />
+              <span className="control__label">Smart Radius (keep crisp edges hard)</span>
+            </label>
             {(
               [
                 ["smooth", "Smooth (px)", 0, 100],
@@ -10163,6 +10198,24 @@ export default function App() {
                 <option value="newLayer">New Layer</option>
                 <option value="newLayerWithMask">New Layer with Layer Mask</option>
               </select>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={decontaminate}
+                disabled={selectAndMaskOutput === "selection" || selectAndMaskOutput === "layerMask"}
+                onChange={(event) => setDecontaminate(event.target.checked)}
+              />
+              <span className="control__label">Decontaminate Colors</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={decontaminateAmount}
+                disabled={!decontaminate}
+                onChange={(event) => setDecontaminateAmount(Number(event.target.value))}
+              />
+              <span className="control__value">{decontaminateAmount}%</span>
             </label>
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowSelectAndMask(false)}>

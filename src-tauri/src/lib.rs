@@ -794,15 +794,44 @@ fn refine_selection(
     })
 }
 
-/// Select and Mask > Output To on layer `id`.
+/// Select and Mask > Edge Detection on layer `id`: Radius and Smart Radius.
+#[tauri::command]
+fn edge_detect_selection(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    smart: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.edge_detect_selection(id, radius, smart)?;
+        Ok(None)
+    })
+}
+
+/// Select and Mask > Decontaminate Colors on layer `id` in place.
+#[tauri::command]
+fn decontaminate_colors(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.decontaminate_colors(id, amount)?;
+        Ok(None)
+    })
+}
+
+/// Select and Mask > Output To on layer `id`, with Decontaminate Colors at
+/// `decontaminate` percent for the New Layer outputs.
 #[tauri::command]
 fn select_and_mask_output(
     state: State<'_, AppState>,
     id: LayerId,
     output: document::SelectAndMaskOutput,
+    decontaminate: u8,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.select_and_mask_output(id, output)?;
+        document.select_and_mask_output_with(id, output, decontaminate)?;
         Ok(Some(Rect {
             x0: 0,
             y0: 0,
@@ -5212,6 +5241,8 @@ pub fn run() {
             feather_selection,
             set_anti_alias,
             refine_selection,
+            edge_detect_selection,
+            decontaminate_colors,
             select_and_mask_output,
             color_range_bits,
             grow_selection,
