@@ -15000,6 +15000,65 @@ by hand instead. Every other layer of this project's quality bar
 **1500 Rust tests total** (1495 → 1500, 1493 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 252 — Camera Raw's Optics and Targeted Adjustment Tool
+
+Two more Camera Raw rows. `camera_raw_optics(id, distortion,
+vignette)` is the Optics panel's two sliders (`−100..=100` each): with
+the canvas centre at pixel index `((w − 1) / 2, (h − 1) / 2)` and every
+offset from it normalised by the larger half-span, so `r = 1` at the
+middle of the longer edges, Distortion inverse-maps each pixel to `c +
+(p − c) · (1 + distortion/100 · r²)`, nearest-neighbour and
+transparent off the canvas — positive reading from farther out,
+negative from nearer in — and Vignette then scales each colour channel
+by `1 + vignette/100 · r²`, clamped, alpha untouched; a neutral value
+skips its stage and the selection confines both.
+`targeted_adjustment(id, x, y, mode, amount)` is the Targeted
+Adjustment Tool: the pixel under the pointer decides what a drag of
+`amount` moves. In Parametric Curve mode its standard-weighted luma
+picks the tonal band — Shadows below `64`, Darks below `128`, Lights
+below `192`, Highlights above — and that band's slider moves through
+`parametric_curve`; in Hue, Saturation, and Luminance modes its hue
+picks the Color Mixer range, the nearest of the eight centres, and
+that range's slider moves through `color_mixer`. An exact composition
+either way. The Camera Raw dialog gains an Optics row with the two
+sliders and Apply optics, and a Targeted Adjustment row with the mode,
+Pixel X / Y, Amount, and Apply. Lens profiles, Chromatic Aberration's
+per-channel scaling, the vignette's midpoint / roundness / feather,
+and on-canvas dragging are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every value
+traced by hand (all exact in `f32`) and the compositions checked
+byte for byte. Greys `30`, `100`, `150`, and `200` under a `40` drag
+in Parametric Curve mode are byte-identical to `parametric_curve` with
+Shadows, Darks, Lights, and Highlights at `40` respectively, each
+moving the grey. A red pixel under a `−100` Saturation drag is
+byte-identical to the Reds range desaturated (`128, 128, 128`, the
+green pixel untouched); the green `(0, 200, 40)`, hue `132`, routes
+Hue `60` and Luminance `−50` to the Greens range; a grey pixel has no
+colour to target and a point off the canvas is refused. On the row
+`10 20 30 40 50` Distortion `50` reads the ends from off the canvas
+(`r = 1 → 5` and `−1`, transparent) and the next pixels from `3.125 →
+3` and `0.875 → 1` (`0 20 30 40 0`), `−50` pulls the ends in to `20 20
+30 40 40`, and `0, 0` is the identity. On flat `200` Vignette `−100`
+gives `0 150 200 150 0` and `+50` gives `255 225 200 225 255`, alpha
+kept, and a two-pixel selection confines it. Distortion `101`,
+Vignette `−101`, an unknown layer, and a locked layer are refused
+with the row untouched. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1505 Rust tests total** (1500 → 1505, 1498 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

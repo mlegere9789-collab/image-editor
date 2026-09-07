@@ -274,6 +274,10 @@ export type RetouchSpot = {
   opacity: number;
 };
 
+/** Mirrors `TargetedMode` in src-tauri/src/document.rs: Camera Raw's
+ * Targeted Adjustment Tool. */
+export type TargetedMode = "parametricCurve" | "hue" | "saturation" | "luminance";
+
 /** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
  * draws (vertices, where the pins move them, triangles as indices). */

@@ -4788,6 +4788,35 @@ fn camera_raw_retouch(
     edit_checkpointed(&state, |document| document.camera_raw_retouch(id, &spot))
 }
 
+/// Camera Raw Filter's Targeted Adjustment Tool: a drag at `(x, y)` on
+/// layer `id` moving `mode`'s slider by `amount`.
+#[tauri::command]
+fn targeted_adjustment(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    mode: document::TargetedMode,
+    amount: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.targeted_adjustment(id, x, y, mode, amount)
+    })
+}
+
+/// Camera Raw Filter > Optics: Distortion and Vignette on layer `id`.
+#[tauri::command]
+fn camera_raw_optics(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distortion: i32,
+    vignette: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.camera_raw_optics(id, distortion, vignette)
+    })
+}
+
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
 fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
@@ -5224,6 +5253,8 @@ pub fn run() {
             camera_raw_filter,
             camera_raw_masked,
             camera_raw_retouch,
+            targeted_adjustment,
+            camera_raw_optics,
             rotate,
             scale,
             skew,

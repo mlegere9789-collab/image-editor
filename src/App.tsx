@@ -41,6 +41,7 @@ import type {
   CameraRawMask,
   RetouchMode,
   RetouchSpot,
+  TargetedMode,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -599,6 +600,12 @@ export default function App() {
     feather: 50,
     opacity: 100,
   });
+  // Camera Raw Filter > Optics and the Targeted Adjustment Tool.
+  const [opticsDistortion, setOpticsDistortion] = useState(0);
+  const [opticsVignette, setOpticsVignette] = useState(0);
+  const [targetedMode, setTargetedMode] = useState<TargetedMode>("parametricCurve");
+  const [targetedPoint, setTargetedPoint] = useState<[number, number]>([0, 0]);
+  const [targetedAmount, setTargetedAmount] = useState(0);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
     tint: 0,
@@ -1575,6 +1582,22 @@ export default function App() {
       spot: { ...retouch, source: retouch.mode === "remove" ? null : retouch.source },
     });
   }, [runCommand, selectedId, retouch]);
+
+  const applyOptics = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_optics", { id: selectedId, distortion: opticsDistortion, vignette: opticsVignette });
+  }, [runCommand, selectedId, opticsDistortion, opticsVignette]);
+
+  const applyTargetedAdjustment = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("targeted_adjustment", {
+      id: selectedId,
+      x: Math.max(0, Math.round(targetedPoint[0])),
+      y: Math.max(0, Math.round(targetedPoint[1])),
+      mode: targetedMode,
+      amount: targetedAmount,
+    });
+  }, [runCommand, selectedId, targetedPoint, targetedMode, targetedAmount]);
 
   const applyRotate = useCallback(async () => {
     if (selectedId === null) return;
@@ -9291,6 +9314,54 @@ export default function App() {
                 value={cameraRaw.defringe}
                 onChange={(event) => setCameraRawSlider("defringe", Number(event.target.value))}
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Optics</span>
+              <span className="control__label">Distortion</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={opticsDistortion}
+                onChange={(event) => setOpticsDistortion(Number(event.target.value))}
+              />
+              <span className="control__value">{opticsDistortion}</span>
+              <span className="control__label">Vignette</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={opticsVignette}
+                onChange={(event) => setOpticsVignette(Number(event.target.value))}
+              />
+              <span className="control__value">{opticsVignette}</span>
+              <button className="button button--quiet" onClick={() => void applyOptics()} disabled={busy} title="Apply Optics now">
+                Apply optics
+              </button>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Targeted Adjustment</span>
+              <select value={targetedMode} onChange={(event) => setTargetedMode(event.target.value as TargetedMode)}>
+                <option value="parametricCurve">Parametric Curve</option>
+                <option value="hue">Hue</option>
+                <option value="saturation">Saturation</option>
+                <option value="luminance">Luminance</option>
+              </select>
+              <span className="control__label">Pixel X / Y</span>
+              <input type="number" min={0} value={targetedPoint[0]} onChange={(event) => setTargetedPoint((p) => [Number(event.target.value), p[1]])} />
+              <input type="number" min={0} value={targetedPoint[1]} onChange={(event) => setTargetedPoint((p) => [p[0], Number(event.target.value)])} />
+              <span className="control__label">Amount</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={targetedAmount}
+                onChange={(event) => setTargetedAmount(Number(event.target.value))}
+              />
+              <span className="control__value">{targetedAmount}</span>
+              <button className="button button--quiet" onClick={() => void applyTargetedAdjustment()} disabled={busy} title="Adjust the band or hue range under that pixel">
+                Apply
+              </button>
             </label>
             <label className="control control--row">
               <span className="control__label">Retouch</span>

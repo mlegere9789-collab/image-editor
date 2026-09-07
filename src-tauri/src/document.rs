@@ -930,6 +930,21 @@ pub struct RetouchSpot {
     pub opacity: u8,
 }
 
+/// Camera Raw's Targeted Adjustment Tool: what a drag on the picture
+/// adjusts — see [`Document::targeted_adjustment`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TargetedMode {
+    /// The Parametric Curve slider of the tonal band under the pointer.
+    ParametricCurve,
+    /// The Color Mixer's Hue for the hue range under the pointer.
+    Hue,
+    /// The Color Mixer's Saturation for that range.
+    Saturation,
+    /// The Color Mixer's Luminance for that range.
+    Luminance,
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -17492,6 +17507,137 @@ impl Document {
                     },
                 });
             }
+        }
+        Ok(touched)
+    }
+
+    /// Camera Raw Filter's Targeted Adjustment Tool on layer `id`: a drag
+    /// on the picture at pixel `(x, y)` moved by `amount`. In Parametric
+    /// Curve mode the pixel's standard-weighted luma picks the tonal band
+    /// — Shadows below `64`, Darks below `128`, Lights below `192`,
+    /// Highlights above — and that band's slider is moved by `amount`
+    /// through [`Self::parametric_curve`], the others left at zero. In
+    /// Hue, Saturation, and Luminance modes the pixel's hue picks the
+    /// Color Mixer range (the nearest of its eight centres) and that
+    /// range's slider is moved by `amount` through [`Self::color_mixer`]. An
+    /// exact composition either way. Errors for a point off the canvas, a
+    /// grey pixel in the three colour modes, or a locked or unknown layer.
+    pub fn targeted_adjustment(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        mode: TargetedMode,
+        amount: i32,
+    ) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        if x >= self.width || y >= self.height {
+            return Err("The targeted point must lie on the canvas.".to_string());
+        }
+        let base = (y as usize * self.width as usize + x as usize) * CHANNELS;
+        let [r, g, b] = [
+            layer.pixels[base],
+            layer.pixels[base + 1],
+            layer.pixels[base + 2],
+        ];
+        match mode {
+            TargetedMode::ParametricCurve => {
+                let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                let band = ((luma / 64.0) as usize).min(3);
+                let mut sliders = [0i32; 4];
+                // Highlights, Lights, Darks, Shadows: band 3 is Highlights.
+                sliders[3 - band] = amount;
+                self.parametric_curve(id, sliders[0], sliders[1], sliders[2], sliders[3])
+            }
+            TargetedMode::Hue | TargetedMode::Saturation | TargetedMode::Luminance => {
+                let (h, s, _) = rgb_to_hsl(r, g, b);
+                if s <= 0.0 {
+                    return Err("The targeted pixel has no colour to adjust.".to_string());
+                }
+                let range = color_mixer_range(h) as u8;
+                match mode {
+                    TargetedMode::Hue => self.color_mixer(id, range, amount, 0, 0),
+                    TargetedMode::Saturation => self.color_mixer(id, range, 0, amount, 0),
+                    _ => self.color_mixer(id, range, 0, 0, amount),
+                }
+            }
+        }
+    }
+
+    /// Camera Raw Filter > Optics: lens Distortion and Vignette
+    /// (`−100..=100` each) on layer `id`. With the canvas centre `c` at
+    /// pixel index `((w − 1) / 2, (h − 1) / 2)` and every offset from it
+    /// normalised by the larger half-span, so `r = 1` at the middle of the
+    /// longer edges, Distortion inverse-maps each pixel to `c + (p − c) ·
+    /// (1 + distortion/100 · r²)`, nearest-neighbour, transparent off the
+    /// canvas — positive reading from farther out, negative from nearer
+    /// in — and Vignette then scales each colour channel by `1 +
+    /// vignette/100 · r²`, clamped, alpha untouched. A neutral value skips
+    /// its stage, so `0, 0` is the identity; the selection confines both.
+    /// Photoshop's lens-profile corrections, Chromatic Aberration's
+    /// per-channel scaling, and the Vignette's midpoint / roundness /
+    /// feather are documented scope cuts. Errors for a value out of
+    /// range or a locked or unknown layer.
+    pub fn camera_raw_optics(
+        &mut self,
+        id: LayerId,
+        distortion: i32,
+        vignette: i32,
+    ) -> Result<Option<Rect>, String> {
+        if !(-100..=100).contains(&distortion) {
+            return Err("Optics' Distortion must be between −100 and 100.".to_string());
+        }
+        if !(-100..=100).contains(&vignette) {
+            return Err("Optics' Vignette must be between −100 and 100.".to_string());
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let span = cx.max(cy).max(0.5);
+        let radius_at = move |col: u32, row: u32| {
+            let (nx, ny) = ((col as f32 - cx) / span, (row as f32 - cy) / span);
+            nx * nx + ny * ny
+        };
+        let mut touched = Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        });
+        if distortion != 0 {
+            let k = distortion as f32 / 100.0;
+            touched = self.filter_pixels(id, move |pixels, row, col| {
+                let scale = 1.0 + k * radius_at(col, row);
+                let sx = (cx + (col as f32 - cx) * scale).round() as i64;
+                let sy = (cy + (row as f32 - cy) * scale).round() as i64;
+                if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                    return [0; CHANNELS];
+                }
+                let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                out.copy_from_slice(&pixels[base..base + CHANNELS]);
+                out
+            })?;
+        }
+        if vignette != 0 {
+            let v = vignette as f32 / 100.0;
+            touched = self.filter_pixels(id, move |pixels, row, col| {
+                let factor = (1.0 + v * radius_at(col, row)).max(0.0);
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    out[c] = (pixels[base + c] as f32 * factor).round().clamp(0.0, 255.0) as u8;
+                }
+                out[3] = pixels[base + 3];
+                out
+            })?;
         }
         Ok(touched)
     }
@@ -45638,6 +45784,128 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.0, 0, 100))
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn targeted_adjustment_picks_the_curve_band_under_the_pointer() {
+        for (grey, band) in [(30u8, 3usize), (100, 2), (150, 1), (200, 0)] {
+            let (mut doc, id) = grey_pixels_4x4([grey; 16]);
+            doc.targeted_adjustment(id, 1, 1, TargetedMode::ParametricCurve, 40)
+                .unwrap();
+            let (mut plain, id_b) = grey_pixels_4x4([grey; 16]);
+            let mut sliders = [0i32; 4];
+            sliders[band] = 40;
+            plain
+                .parametric_curve(id_b, sliders[0], sliders[1], sliders[2], sliders[3])
+                .unwrap();
+            assert_eq!(
+                doc.layers()[0].pixels,
+                plain.layers()[0].pixels,
+                "grey {grey}"
+            );
+            assert_ne!(pixel(&doc, id, 0, 0)[0], grey, "grey {grey} moved");
+        }
+    }
+
+    #[test]
+    fn targeted_adjustment_picks_the_mixer_range_under_the_pointer() {
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        doc.targeted_adjustment(id, 0, 0, TargetedMode::Saturation, -100)
+            .unwrap();
+        let (mut plain, id_b) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        plain.color_mixer(id_b, 0, 0, -100, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 200, 40, 255]);
+        // Hue and Luminance route the same way: the green pixel is a Green
+        // (hue 132 → centre 120).
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        doc.targeted_adjustment(id, 1, 0, TargetedMode::Hue, 60)
+            .unwrap();
+        let (mut plain, id_b) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        plain.color_mixer(id_b, 3, 60, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        doc.targeted_adjustment(id, 1, 0, TargetedMode::Luminance, -50)
+            .unwrap();
+        let (mut plain, id_b) = strip(&[[255, 0, 0], [0, 200, 40], [120, 120, 120]]);
+        plain.color_mixer(id_b, 3, 0, 0, -50).unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        // A grey has no hue to target; a point off the canvas is refused.
+        assert!(doc
+            .targeted_adjustment(id, 2, 0, TargetedMode::Hue, 10)
+            .unwrap_err()
+            .contains("colour"));
+        assert!(doc
+            .targeted_adjustment(id, 3, 0, TargetedMode::Hue, 10)
+            .unwrap_err()
+            .contains("canvas"));
+        assert!(doc
+            .targeted_adjustment(999, 0, 0, TargetedMode::Hue, 10)
+            .is_err());
+    }
+
+    #[test]
+    fn camera_raw_optics_distortion_moves_samples_by_the_cube_of_their_radius() {
+        // Five wide: centre 2, half-span 2. Distortion +50 reads x = 2 +
+        // (x − 2)·(1 + 0.5·r²): the ends read off the canvas (r = 1 →
+        // 5 and −1), the next pixels in read 3.125 → 3 and 0.875 → 1.
+        let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
+        doc.camera_raw_optics(id, 50, 0).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![0, 20, 30, 40, 0]);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
+        assert_eq!(pixel(&doc, id, 1, 0)[3], 255);
+        // −50 pulls the ends in: 2 ± 2·0.5 = 3 and 1, 2 ± 0.875 → 3 and 1.
+        let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
+        doc.camera_raw_optics(id, -50, 0).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![20, 20, 30, 40, 40]);
+        // Neutral settings are the identity.
+        let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
+        doc.camera_raw_optics(id, 0, 0).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 40, 50]);
+    }
+
+    #[test]
+    fn camera_raw_optics_vignette_scales_by_one_plus_amount_times_radius_squared() {
+        let (mut doc, id) = row_5([200; 5]);
+        doc.camera_raw_optics(id, 0, -100).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![0, 150, 200, 150, 0]);
+        let (mut doc, id) = row_5([200; 5]);
+        doc.camera_raw_optics(id, 0, 50).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![255, 225, 200, 225, 255]);
+        // Alpha is untouched by the vignette, and the selection confines
+        // both corrections.
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
+        let (mut doc, id) = row_5([200; 5]);
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.camera_raw_optics(id, 0, -100).unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![0, 150, 200, 200, 200]);
+    }
+
+    #[test]
+    fn camera_raw_optics_refuses_bad_amounts_and_layers() {
+        let (mut doc, id) = row_5([10, 20, 30, 40, 50]);
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .camera_raw_optics(id, 101, 0)
+            .unwrap_err()
+            .contains("Distortion"));
+        assert!(doc
+            .camera_raw_optics(id, 0, -101)
+            .unwrap_err()
+            .contains("Vignette"));
+        assert!(doc.camera_raw_optics(999, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .camera_raw_optics(id, 10, 0)
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .targeted_adjustment(id, 0, 0, TargetedMode::ParametricCurve, 10)
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);
