@@ -34,7 +34,17 @@ export type LayerView = {
   clipped: boolean;
   /** Whether the layer carries a layer mask. */
   hasMask: boolean;
+  /** The live adjustment of an adjustment layer; `null` for a pixel layer. */
+  adjustment: Adjustment | null;
 };
+
+/** Mirrors `Adjustment` in src-tauri/src/document.rs (serde internally
+ * tagged by `kind`). */
+export type Adjustment =
+  | { kind: "invert" }
+  | { kind: "brightnessContrast"; brightness: number; contrast: number }
+  | { kind: "threshold"; level: number }
+  | { kind: "posterize"; levels: number };
 
 /** Mirrors `MaskSource` in src-tauri/src/document.rs. */
 export type MaskSource = "revealAll" | "hideAll" | "revealSelection" | "hideSelection";

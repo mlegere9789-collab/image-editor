@@ -179,6 +179,12 @@ export default function LayerPanel({
                     ▣
                   </span>
                 )}
+                {layer.adjustment && (
+                  <span className="layer__meta" title={`Adjustment layer: ${layer.adjustment.kind}`}>
+                    {" "}
+                    ◐
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>

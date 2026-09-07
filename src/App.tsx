@@ -5,6 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import LayerPanel from "./LayerPanel";
 import type {
+  Adjustment,
   BlendMode,
   BlendModeInfo,
   DocumentView,
@@ -514,6 +515,13 @@ export default function App() {
   // makes the clicked pixel black or white and disarms.
   // Guides dialog: New Guide's orientation and position, Guide Layout's grid.
   const [showGuidesDialog, setShowGuidesDialog] = useState(false);
+  // Adjustment layer dialog: the kind and its parameters.
+  const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
+  const [adjustmentKind, setAdjustmentKind] = useState<Adjustment["kind"]>("invert");
+  const [adjustmentBrightness, setAdjustmentBrightness] = useState(0);
+  const [adjustmentContrast, setAdjustmentContrast] = useState(0);
+  const [adjustmentLevel, setAdjustmentLevel] = useState(128);
+  const [adjustmentLevels, setAdjustmentLevels] = useState(4);
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
@@ -1703,6 +1711,36 @@ export default function App() {
     });
     setShowLevelsDialog(false);
   }, [runCommand, selectedId, levelsClipShadows, levelsClipHighlights]);
+
+  /** The adjustment the dialog currently describes. */
+  const currentAdjustment = useCallback((): Adjustment => {
+    switch (adjustmentKind) {
+      case "brightnessContrast":
+        return {
+          kind: "brightnessContrast",
+          brightness: adjustmentBrightness,
+          contrast: adjustmentContrast,
+        };
+      case "threshold":
+        return { kind: "threshold", level: adjustmentLevel };
+      case "posterize":
+        return { kind: "posterize", levels: adjustmentLevels };
+      default:
+        return { kind: "invert" };
+    }
+  }, [adjustmentKind, adjustmentBrightness, adjustmentContrast, adjustmentLevel, adjustmentLevels]);
+
+  const addAdjustmentLayer = useCallback(async () => {
+    const adjustment = currentAdjustment();
+    await runCommand("add_adjustment_layer", { name: `${adjustment.kind} adjustment`, adjustment });
+    setShowAdjustmentDialog(false);
+  }, [runCommand, currentAdjustment]);
+
+  const retuneAdjustmentLayer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("set_adjustment", { id: selectedId, adjustment: currentAdjustment() });
+    setShowAdjustmentDialog(false);
+  }, [runCommand, selectedId, currentAdjustment]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -4979,6 +5017,14 @@ export default function App() {
             title="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
           >
             Vector Mask
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowAdjustmentDialog(true)}
+            disabled={busy || !hasDocument}
+            title="Layer > New Adjustment Layer: a live Invert, Brightness/Contrast, Threshold, or Posterize over everything beneath it"
+          >
+            Adjustment Layer…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -10108,6 +10154,113 @@ export default function App() {
         </div>
       )}
 
+      {showAdjustmentDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAdjustmentDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Adjustment Layer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Adjustment Layer</h2>
+            <label className="control">
+              <span className="control__label">Adjustment</span>
+              <select
+                value={adjustmentKind}
+                onChange={(event) => setAdjustmentKind(event.target.value as Adjustment["kind"])}
+              >
+                <option value="invert">Invert</option>
+                <option value="brightnessContrast">Brightness/Contrast</option>
+                <option value="threshold">Threshold</option>
+                <option value="posterize">Posterize</option>
+              </select>
+            </label>
+            {adjustmentKind === "brightnessContrast" && (
+              <>
+                <label className="control">
+                  <span className="control__label">
+                    Brightness
+                    <span className="control__value">{adjustmentBrightness}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-150}
+                    max={150}
+                    value={adjustmentBrightness}
+                    onChange={(event) => setAdjustmentBrightness(Number(event.target.value))}
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Contrast
+                    <span className="control__value">{adjustmentContrast}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={adjustmentContrast}
+                    onChange={(event) => setAdjustmentContrast(Number(event.target.value))}
+                  />
+                </label>
+              </>
+            )}
+            {adjustmentKind === "threshold" && (
+              <label className="control">
+                <span className="control__label">
+                  Level
+                  <span className="control__value">{adjustmentLevel}</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={255}
+                  value={adjustmentLevel}
+                  onChange={(event) => setAdjustmentLevel(Number(event.target.value))}
+                />
+              </label>
+            )}
+            {adjustmentKind === "posterize" && (
+              <label className="control">
+                <span className="control__label">
+                  Levels
+                  <span className="control__value">{adjustmentLevels}</span>
+                </span>
+                <input
+                  type="range"
+                  min={2}
+                  max={32}
+                  value={adjustmentLevels}
+                  onChange={(event) => setAdjustmentLevels(Number(event.target.value))}
+                />
+              </label>
+            )}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAdjustmentDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={retuneAdjustmentLayer}
+                disabled={busy || !layers.find((l) => l.id === selectedId)?.adjustment}
+                title="Re-tune the selected adjustment layer to these settings"
+              >
+                Update Selected
+              </button>
+              <button className="button" onClick={addAdjustmentLayer} disabled={busy}>
+                Add Layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showGuidesDialog && document && (
         <div
           className="modal-overlay"

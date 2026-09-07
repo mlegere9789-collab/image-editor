@@ -2617,6 +2617,43 @@ fn add_vector_mask(
     })
 }
 
+/// Layer > New Adjustment Layer: a live `adjustment` over everything
+/// beneath it, as a new top layer.
+#[tauri::command]
+fn add_adjustment_layer(
+    state: State<'_, AppState>,
+    name: String,
+    adjustment: document::Adjustment,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_adjustment_layer(name, adjustment)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Re-tune adjustment layer `id`.
+#[tauri::command]
+fn set_adjustment(
+    state: State<'_, AppState>,
+    id: LayerId,
+    adjustment: document::Adjustment,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_adjustment(id, adjustment)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Layer > Layer Mask > Apply (`apply` true) or Delete for layer `id`.
 #[tauri::command]
 fn remove_layer_mask(
@@ -4176,6 +4213,8 @@ pub fn run() {
             set_layer_linked,
             set_layer_clipped,
             add_layer_mask,
+            add_adjustment_layer,
+            set_adjustment,
             add_vector_mask,
             remove_layer_mask,
             rasterize_layer,

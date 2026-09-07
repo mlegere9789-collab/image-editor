@@ -44,6 +44,10 @@ pub struct Layer {
     /// layer's alpha at composite time (`255` shows, `0` hides), or `None`
     /// for an unmasked layer.
     pub mask: Option<Vec<u8>>,
+    /// An adjustment layer: instead of its own pixels, this adjustment is
+    /// applied live to everything composited beneath it, at the layer's
+    /// opacity, through its mask and clipping like any other layer.
+    pub adjustment: Option<Adjustment>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -62,6 +66,8 @@ pub struct LayerView {
     pub clipped: bool,
     /// Whether the layer carries a layer mask.
     pub has_mask: bool,
+    /// The live adjustment of an adjustment layer; `None` for a pixel layer.
+    pub adjustment: Option<Adjustment>,
 }
 
 impl Layer {
@@ -76,6 +82,7 @@ impl Layer {
             linked: self.linked,
             clipped: self.clipped,
             has_mask: self.mask.is_some(),
+            adjustment: self.adjustment,
         }
     }
 
@@ -175,6 +182,68 @@ pub enum MaskSource {
     RevealSelection,
     /// Black inside the selection, white outside.
     HideSelection,
+}
+
+/// What an adjustment layer does to everything beneath it — the four
+/// Image > Adjustments this project can express as a pure per-pixel
+/// function, kept live on the layer instead of baked into pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Adjustment {
+    Invert,
+    BrightnessContrast { brightness: i32, contrast: i32 },
+    Threshold { level: u8 },
+    Posterize { levels: u8 },
+}
+
+impl Adjustment {
+    /// Photoshop's dialog bounds: a threshold level of `1..=255`, at least
+    /// two posterize levels.
+    pub fn validate(self) -> Result<(), String> {
+        match self {
+            Adjustment::Threshold { level: 0 } => {
+                Err("Threshold level must be between 1 and 255.".to_string())
+            }
+            Adjustment::Posterize { levels } if levels < 2 => {
+                Err("Posterize levels must be at least 2.".to_string())
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// One pixel's RGB through `adjustment` — byte for byte the formula the
+/// destructive command of the same name applies, which now calls this
+/// too: Invert is `255 − v`; Brightness/Contrast the legacy `factor ×
+/// (v − 128) + 128 + brightness`, clamped; Threshold pure white where the
+/// BT.601 luma rounds to at least `level`, else black; Posterize each
+/// channel snapped to the nearest of `levels` steps across `0..=255`.
+pub fn apply_adjustment(adjustment: Adjustment, [r, g, b]: [u8; 3]) -> [u8; 3] {
+    match adjustment {
+        Adjustment::Invert => [255 - r, 255 - g, 255 - b],
+        Adjustment::BrightnessContrast {
+            brightness,
+            contrast,
+        } => {
+            let brightness = brightness.clamp(-255, 255) as f32;
+            let contrast = contrast.clamp(-255, 255) as f32;
+            let factor = 259.0 * (contrast + 255.0) / (255.0 * (259.0 - contrast));
+            let apply = |v: u8| -> u8 {
+                (factor * (v as f32 - 128.0) + 128.0 + brightness).clamp(0.0, 255.0) as u8
+            };
+            [apply(r), apply(g), apply(b)]
+        }
+        Adjustment::Threshold { level } => {
+            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+            let value = if luma.round() >= level as f32 { 255 } else { 0 };
+            [value, value, value]
+        }
+        Adjustment::Posterize { levels } => {
+            let step = 255.0 / (levels as f32 - 1.0);
+            let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
+            [quantize(r), quantize(g), quantize(b)]
+        }
+    }
 }
 
 /// Which way a [`Guide`] runs.
@@ -3108,6 +3177,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         });
         Ok(id)
@@ -3145,6 +3215,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         });
         id
@@ -3205,6 +3276,34 @@ impl Document {
     /// moves with every other linked layer under [`Self::move_pixels`].
     pub fn set_linked(&mut self, id: LayerId, linked: bool) -> Result<(), String> {
         self.layer_mut(id)?.linked = linked;
+        Ok(())
+    }
+
+    /// Layer > New Adjustment Layer: adds a new top layer carrying
+    /// `adjustment`, applied live to everything beneath it. Its own pixel
+    /// buffer is fully transparent and never composited. Errors for an
+    /// out-of-range adjustment.
+    pub fn add_adjustment_layer(
+        &mut self,
+        name: impl Into<String>,
+        adjustment: Adjustment,
+    ) -> Result<LayerId, String> {
+        adjustment.validate()?;
+        let pixels = vec![0u8; self.buffer_len()];
+        let id = self.push_pixel_layer(name, pixels);
+        self.layer_mut(id)?.adjustment = Some(adjustment);
+        Ok(id)
+    }
+
+    /// Re-tunes adjustment layer `id`'s adjustment — the Properties panel
+    /// of a live adjustment. Errors for a pixel layer or a bad adjustment.
+    pub fn set_adjustment(&mut self, id: LayerId, adjustment: Adjustment) -> Result<(), String> {
+        adjustment.validate()?;
+        let layer = self.layer_mut(id)?;
+        if layer.adjustment.is_none() {
+            return Err("That is not an adjustment layer.".to_string());
+        }
+        layer.adjustment = Some(adjustment);
         Ok(())
     }
 
@@ -4378,6 +4477,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         });
         id
@@ -8479,6 +8579,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         });
 
@@ -8519,6 +8620,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         }];
         Ok(id)
@@ -8559,6 +8661,7 @@ impl Document {
             linked: false,
             clipped: false,
             mask: None,
+            adjustment: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -9326,7 +9429,17 @@ impl Document {
     /// leaving alpha untouched — the same "flip every channel" transform
     /// Photoshop's own Invert applies, with no intermediate curve.
     pub fn invert_colors(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
-        self.adjust_layer_pixels(id, |[r, g, b, a]| [255 - r, 255 - g, 255 - b, a])
+        self.adjust_with(id, Adjustment::Invert)
+    }
+
+    /// One of the [`Adjustment`]s applied destructively to layer `id`'s own
+    /// pixels — the shared body of the four destructive commands.
+    fn adjust_with(&mut self, id: LayerId, adjustment: Adjustment) -> Result<Option<Rect>, String> {
+        adjustment.validate()?;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let [r, g, b] = apply_adjustment(adjustment, [r, g, b]);
+            [r, g, b, a]
+        })
     }
 
     /// Image > Adjustments > Threshold: converts a layer to pure black or
@@ -9337,14 +9450,7 @@ impl Document {
     /// range Photoshop's own dialog allows (a level of 0 would make every
     /// pixel white unconditionally, which isn't a meaningful threshold).
     pub fn threshold(&mut self, id: LayerId, level: u8) -> Result<Option<Rect>, String> {
-        if level == 0 {
-            return Err("Threshold level must be between 1 and 255.".to_string());
-        }
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            let value = if luma.round() >= level as f32 { 255 } else { 0 };
-            [value, value, value, a]
-        })
+        self.adjust_with(id, Adjustment::Threshold { level })
     }
 
     /// Image > Adjustments > Posterize: quantizes each RGB channel
@@ -9359,14 +9465,7 @@ impl Document {
     /// which isn't what Photoshop's own dialog (minimum 2) considers a
     /// meaningful posterize.
     pub fn posterize(&mut self, id: LayerId, levels: u8) -> Result<Option<Rect>, String> {
-        if levels < 2 {
-            return Err("Posterize levels must be at least 2.".to_string());
-        }
-        let step = 255.0 / (levels as f32 - 1.0);
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
-            [quantize(r), quantize(g), quantize(b), a]
-        })
+        self.adjust_with(id, Adjustment::Posterize { levels })
     }
 
     /// Image > Adjustments > Brightness/Contrast: a flat per-channel
@@ -9386,15 +9485,13 @@ impl Document {
         brightness: i32,
         contrast: i32,
     ) -> Result<Option<Rect>, String> {
-        let brightness = brightness.clamp(-255, 255) as f32;
-        let contrast = contrast.clamp(-255, 255) as f32;
-        let factor = 259.0 * (contrast + 255.0) / (255.0 * (259.0 - contrast));
-        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let apply = |v: u8| -> u8 {
-                (factor * (v as f32 - 128.0) + 128.0 + brightness).clamp(0.0, 255.0) as u8
-            };
-            [apply(r), apply(g), apply(b), a]
-        })
+        self.adjust_with(
+            id,
+            Adjustment::BrightnessContrast {
+                brightness,
+                contrast,
+            },
+        )
     }
 
     /// Filter Gallery > Brush Strokes > Sumi-e: widens dark ink strokes by
@@ -25567,6 +25664,139 @@ mod tests {
             .add_vector_mask(id, &[(f32::NAN, 1.0), (2.0, 1.0), (2.0, 2.0)], true)
             .is_err());
         assert!(!doc.view().layers[0].has_mask);
+    }
+
+    /// A 1×1 document with an opaque [200, 100, 50] pixel layer.
+    fn base_pixel() -> (Document, LayerId) {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("base", &[200, 100, 50, 255], 1, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn an_adjustment_layer_reshapes_what_lies_beneath_it() {
+        let (mut doc, _base) = base_pixel();
+        let adj = doc
+            .add_adjustment_layer("invert", Adjustment::Invert)
+            .unwrap();
+        assert_eq!(composite_at(&doc, 0), [55, 155, 205, 255]);
+        assert_eq!(doc.view().layers[1].adjustment, Some(Adjustment::Invert));
+        assert!(doc.view().layers[0].adjustment.is_none());
+        // Its own pixels are transparent and never composited.
+        assert_eq!(pixel(&doc, adj, 0, 0), [0, 0, 0, 0]);
+        // Nothing beneath it: nothing to adjust.
+        let mut empty = Document::new(1, 1).unwrap();
+        empty
+            .add_adjustment_layer("invert", Adjustment::Invert)
+            .unwrap();
+        assert_eq!(
+            crate::composite::composite_pixel(&empty, 0, 0),
+            [0, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn adjustment_layers_match_their_destructive_commands() {
+        // Brightness +30 at zero contrast adds 30; Posterize 2 snaps to
+        // 255/0/0; Threshold 100 makes luma 124.2 white.
+        for (adjustment, expected) in [
+            (
+                Adjustment::BrightnessContrast {
+                    brightness: 30,
+                    contrast: 0,
+                },
+                [230, 130, 80],
+            ),
+            (Adjustment::Posterize { levels: 2 }, [255, 0, 0]),
+            (Adjustment::Threshold { level: 100 }, [255, 255, 255]),
+        ] {
+            let (mut doc, base) = base_pixel();
+            doc.add_adjustment_layer("adj", adjustment).unwrap();
+            let live = composite_at(&doc, 0);
+            let (mut baked, baked_id) = base_pixel();
+            match adjustment {
+                Adjustment::BrightnessContrast {
+                    brightness,
+                    contrast,
+                } => baked
+                    .brightness_contrast(baked_id, brightness, contrast)
+                    .unwrap(),
+                Adjustment::Posterize { levels } => baked.posterize(baked_id, levels).unwrap(),
+                Adjustment::Threshold { level } => baked.threshold(baked_id, level).unwrap(),
+                Adjustment::Invert => baked.invert_colors(baked_id).unwrap(),
+            };
+            assert_eq!(&live[..3], expected, "{adjustment:?}");
+            assert_eq!(live, composite_at(&baked, 0), "{adjustment:?}");
+            let _ = base;
+        }
+    }
+
+    #[test]
+    fn an_adjustment_layers_opacity_is_its_strength() {
+        // Python f32 model: red inverted to cyan at 50% is [128, 128, 128].
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("base", &[255, 0, 0, 255], 1, 1).unwrap();
+        let adj = doc
+            .add_adjustment_layer("invert", Adjustment::Invert)
+            .unwrap();
+        doc.set_opacity(adj, 0.5).unwrap();
+        assert_eq!(composite_at(&doc, 0), [128, 128, 128, 255]);
+        doc.set_opacity(adj, 0.0).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn an_adjustment_layer_obeys_its_mask_visibility_and_clipping() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let base = doc
+            .add_layer("base", &[255, 0, 0, 255, 255, 0, 0, 0], 2, 1)
+            .unwrap();
+        let adj = doc
+            .add_adjustment_layer("invert", Adjustment::Invert)
+            .unwrap();
+        doc.set_layer_mask(adj, vec![255, 0]).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 255, 255]);
+        doc.set_layer_mask(adj, vec![0, 255]).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+        doc.remove_layer_mask(adj, false).unwrap();
+        doc.set_visible(adj, false).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+        doc.set_visible(adj, true).unwrap();
+        // Clipped to the base, it only acts where the base has pixels — and
+        // the transparent second pixel stays transparent regardless.
+        doc.set_clipped(adj, true).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 255, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 0, 0, 0]);
+        let _ = base;
+    }
+
+    #[test]
+    fn adjustment_layers_validate_and_can_be_retuned() {
+        let (mut doc, base) = base_pixel();
+        assert!(doc
+            .add_adjustment_layer("t", Adjustment::Threshold { level: 0 })
+            .is_err());
+        assert!(doc
+            .add_adjustment_layer("p", Adjustment::Posterize { levels: 1 })
+            .is_err());
+        assert_eq!(doc.view().layers.len(), 1);
+        let adj = doc
+            .add_adjustment_layer(
+                "bc",
+                Adjustment::BrightnessContrast {
+                    brightness: 0,
+                    contrast: 0,
+                },
+            )
+            .unwrap();
+        assert_eq!(composite_at(&doc, 0), [200, 100, 50, 255]);
+        doc.set_adjustment(adj, Adjustment::Invert).unwrap();
+        assert_eq!(composite_at(&doc, 0), [55, 155, 205, 255]);
+        assert!(doc.set_adjustment(base, Adjustment::Invert).is_err());
+        assert!(doc
+            .set_adjustment(adj, Adjustment::Posterize { levels: 0 })
+            .is_err());
+        assert_eq!(doc.view().layers[1].adjustment, Some(Adjustment::Invert));
     }
 
     #[test]

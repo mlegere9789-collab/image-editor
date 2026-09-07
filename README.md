@@ -13214,6 +13214,61 @@ by hand instead. Every other layer of this project's quality bar
 **1340 Rust tests total** (1335 → 1340, 1333 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 220 — Adjustment layers
+
+The document gains its first non-destructive layer kind. An
+`Adjustment` is one of Invert, Brightness/Contrast, Threshold, or
+Posterize with its parameters, and `apply_adjustment(adjustment, rgb)`
+is the pure per-pixel function behind it — the very formulas the four
+destructive commands used, which now call it too, so a live layer and
+a baked command agree byte for byte by construction. A layer carrying
+an `adjustment` (`add_adjustment_layer(name, adjustment)`, re-tuned by
+`set_adjustment`) has a fully transparent pixel buffer that is never
+composited; instead the compositor, on reaching it, reshapes the
+backdrop's colour by the adjustment and blends the result in at the
+layer's *strength* — its opacity, through its mask, and through a
+clipping base's transparency, exactly as a pixel layer's alpha would
+be scaled — leaving the backdrop's alpha alone, so an adjustment over
+nothing does nothing. Threshold and Posterize keep their dialog
+bounds. The layer view carries `adjustment`, the panel shows a badge,
+and an **Adjustment Layer…** dialog picks the kind and parameters and
+either adds a new layer or re-tunes the selected adjustment layer
+through `add_adjustment_layer` and `set_adjustment` commands. The
+remaining Image > Adjustments as live layers, and Photoshop's
+Properties panel, are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests through
+`composite_pixel`, the blended value first computed in Python
+emulating `f32`. An Invert layer over `[200, 100, 50]` composites
+`[55, 155, 205]`, its own pixels are transparent, and over an empty
+document it composites nothing. Brightness `+30` at zero contrast,
+Posterize `2`, and Threshold `100` as live layers give `[230, 130,
+80]`, `[255, 0, 0]`, and white (luma `124.2`), each byte-identical to
+the destructive command on the same pixel. An Invert layer at `50%`
+opacity over pure red gives `[128, 128, 128]`, and at `0%` leaves the
+red. A `[255, 0]` mask confines the inversion to the first pixel, a
+`[0, 255]` mask lifts it, hiding the layer lifts it, and clipping it to
+a base that is red at one pixel and transparent at the other inverts
+only the first and leaves the second transparent. Threshold `0` and
+Posterize `1` are refused with no layer added, a Brightness/Contrast
+layer at zero is a no-op, re-tuning it to Invert inverts, and
+re-tuning a pixel layer or to a bad adjustment errors. All five passed
+on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1345 Rust tests total** (1340 → 1345, 1338 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

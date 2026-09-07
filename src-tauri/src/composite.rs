@@ -143,6 +143,35 @@ fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32
     // Non-premultiplied RGBA, starting fully transparent.
     let mut backdrop = [0f32; 4];
     for (index, layer) in layers.iter().enumerate() {
+        // An adjustment layer has no pixels of its own: it reshapes the
+        // backdrop's colour by its strength — opacity, through its mask and
+        // clipping like any other layer — and leaves the alpha alone.
+        if let Some(adjustment) = layer.adjustment {
+            let mut strength = layer.opacity;
+            if let Some(mask) = &layer.mask {
+                strength *= to_unit(mask[base / CHANNELS]);
+            }
+            if layer.clipped {
+                if let Some(clip_base) = layers[..index].iter().rev().find(|l| !l.clipped) {
+                    strength *= to_unit(clip_base.pixels[base + 3]);
+                }
+            }
+            if strength <= 0.0 || backdrop[3] <= 0.0 {
+                continue;
+            }
+            let adjusted = crate::document::apply_adjustment(
+                adjustment,
+                [
+                    to_byte(backdrop[0]),
+                    to_byte(backdrop[1]),
+                    to_byte(backdrop[2]),
+                ],
+            );
+            for (slot, &value) in backdrop.iter_mut().zip(adjusted.iter()) {
+                *slot += (to_unit(value) - *slot) * strength;
+            }
+            continue;
+        }
         let mut source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
         // A layer mask multiplies straight into the alpha.
         if let Some(mask) = &layer.mask {

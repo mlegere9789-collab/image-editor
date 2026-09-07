@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 327.**
+**618 distinct capabilities tracked. Currently shipped: 328.**
 
 ## PART I — EVERY TOOL
 
@@ -94,7 +94,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] GROUP (`group_layers` / `ungroup`, named groups of layer ids over the flat stack — visibility, locking, and moving applied to every member at once, a removed layer leaving its group, an empty group dissolving — drawn as a header row in the layer panel; nesting and group-level opacity or blend modes are documented scope cuts — see README Phase 216)
 - [ ] TEXT LAYER
 - [ ] SHAPE LAYER
-- [ ] ADJUSTMENT LAYER
+- [x] ADJUSTMENT LAYER (`add_adjustment_layer` / `set_adjustment`, a layer carrying a live Invert, Brightness/Contrast, Threshold, or Posterize applied at composite time to everything beneath it at the layer's opacity, through its mask and clipping, byte-identical to the destructive command via a shared `apply_adjustment`; the other adjustment kinds as live layers are a documented scope cut — see README Phase 220)
 - [ ] FILL LAYER
 - [ ] SMART OBJECT
 - [x] LAYER MASK (`add_layer_mask` / `set_layer_mask` / `remove_layer_mask`, a document-sized 8-bit mask per layer multiplied into its alpha at composite time, started as Reveal All, Hide All, Reveal Selection, or Hide Selection, applied or deleted, turned and cropped with the document; painting directly on the mask and mask density/feather are documented scope cuts — see README Phase 218)
