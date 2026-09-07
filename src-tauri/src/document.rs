@@ -8844,6 +8844,38 @@ impl Document {
         })
     }
 
+    /// Edit > Apply Image's Preview checkbox: `target`'s pixels as
+    /// [`Self::apply_image_with`] would leave them for these exact
+    /// arguments, without applying anything to the document itself. Runs
+    /// the real `apply_image_with` on a clone and returns that clone's
+    /// resulting layer, so the preview can never drift from what OK
+    /// actually applies; errors exactly as `apply_image_with` does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_image_preview(
+        &self,
+        target: LayerId,
+        source: Option<LayerId>,
+        channel: ApplyChannel,
+        blend: ApplyBlend,
+        mask: Option<ApplyMask>,
+        opacity: u8,
+        invert: bool,
+        preserve_transparency: bool,
+    ) -> Result<Vec<u8>, String> {
+        let mut preview = self.clone();
+        preview.apply_image_with(
+            target,
+            source,
+            channel,
+            blend,
+            mask,
+            opacity,
+            invert,
+            preserve_transparency,
+        )?;
+        Ok(preview.layer(target)?.pixels.clone())
+    }
+
     /// Edit > Copy Merged: like [`Self::copy`], but captures what is
     /// actually on screen — every visible layer composited together with
     /// its opacity and blend mode, exactly as the canvas shows them — within
@@ -49771,5 +49803,210 @@ mod tests {
         doc.add_artboard("B", rect).unwrap();
         doc.rotate_document_90(true);
         assert!(doc.artboards().is_empty());
+    }
+
+    #[test]
+    fn apply_image_preview_matches_a_real_apply_and_does_not_mutate_the_document() {
+        let (doc, base, target) = apply_image_fixture();
+        let before = doc.view();
+        let preview = doc
+            .apply_image_preview(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Multiply,
+                },
+                None,
+                100,
+                false,
+                false,
+            )
+            .unwrap();
+        // The document itself is untouched by the preview.
+        assert_eq!(doc.view(), before);
+
+        let mut applied = doc.clone();
+        applied
+            .apply_image_with(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Multiply,
+                },
+                None,
+                100,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(preview, applied.layer(target).unwrap().pixels);
+    }
+
+    #[test]
+    fn apply_image_preview_propagates_errors_like_apply_image_with() {
+        let (doc, base, target) = apply_image_fixture();
+        let bad_opacity = doc
+            .apply_image_preview(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                None,
+                101,
+                false,
+                false,
+            )
+            .unwrap_err();
+        assert!(bad_opacity.contains("Opacity"), "{bad_opacity}");
+        let bad_target = doc
+            .apply_image_preview(
+                999,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                None,
+                100,
+                false,
+                false,
+            )
+            .unwrap_err();
+        assert!(
+            bad_target.contains("layer") || bad_target.contains("Layer"),
+            "{bad_target}"
+        );
+        let bad_source = doc
+            .apply_image_preview(
+                target,
+                Some(999),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                None,
+                100,
+                false,
+                false,
+            )
+            .unwrap_err();
+        assert!(
+            bad_source.contains("layer") || bad_source.contains("Layer"),
+            "{bad_source}"
+        );
+    }
+
+    #[test]
+    fn apply_image_preview_is_repeatable_and_a_real_apply_afterward_still_matches() {
+        let (mut doc, base, target) = apply_image_fixture();
+        let args = (
+            target,
+            Some(base),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            None,
+            50,
+            false,
+            false,
+        );
+        let first = doc
+            .apply_image_preview(
+                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            )
+            .unwrap();
+        let second = doc
+            .apply_image_preview(
+                args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+            )
+            .unwrap();
+        assert_eq!(first, second);
+        doc.apply_image_with(
+            args.0, args.1, args.2, args.3, args.4, args.5, args.6, args.7,
+        )
+        .unwrap();
+        assert_eq!(doc.layer(target).unwrap().pixels, first);
+    }
+
+    #[test]
+    fn apply_image_preview_passes_through_invert_and_preserve_transparency() {
+        let (doc, base, target) = apply_image_fixture();
+        let preview = doc
+            .apply_image_preview(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                None,
+                100,
+                true,
+                true,
+            )
+            .unwrap();
+        let mut applied = doc.clone();
+        applied
+            .apply_image_with(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                None,
+                100,
+                true,
+                true,
+            )
+            .unwrap();
+        assert_eq!(preview, applied.layer(target).unwrap().pixels);
+        // Preserve Transparency kept the originally-transparent corner clear.
+        assert_eq!(&applied.layer(target).unwrap().pixels[0..4], &[0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn apply_image_preview_passes_through_a_mask() {
+        let (doc, base, target) = apply_image_fixture();
+        let mask = ApplyMask {
+            source: Some(base),
+            channel: ApplyChannel::Rgb,
+            invert: false,
+        };
+        let preview = doc
+            .apply_image_preview(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                Some(mask),
+                100,
+                false,
+                false,
+            )
+            .unwrap();
+        let mut applied = doc.clone();
+        applied
+            .apply_image_with(
+                target,
+                Some(base),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                Some(mask),
+                100,
+                false,
+                false,
+            )
+            .unwrap();
+        assert_eq!(preview, applied.layer(target).unwrap().pixels);
     }
 }

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 486.**
+**618 distinct capabilities tracked. Currently shipped: 487.**
 
 ## PART I — EVERY TOOL
 
@@ -374,7 +374,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Apply Image — Mask Channel (`channel`: Red, Green, or Blue reads that byte, RGB the BT.601 luma rounded, Photoshop's Gray — see README Phase 224)
 - [x] Apply Image — Transparency Mask (`channel: Transparency` reads the mask image's alpha — see README Phase 224)
 - [x] Apply Image — Mask Invert (`invert` uses `255 − value` — see README Phase 224)
-- [ ] Apply Image — Preview
+- [x] Apply Image — Preview (`apply_image_preview`, a read-only clone-and-apply of the dialog's exact settings — `apply_image_with` run on a throwaway clone of the document, its resulting layer returned without ever touching the real one — drawn into a thumbnail canvas in the dialog itself, the same pattern Color Range's own Selection Preview already uses; see README Phase 263)
 - [x] Spot Channel (`SpotChannel { name, color, solidity, pixels }` on the document, an ink density per pixel overprinted on the composite view in panel order by `spot_preview` — a transparent pixel is white paper — see README Phase 246)
 - [x] New Spot Channel (`new_spot_channel(name, color, solidity)`, inked in full wherever the selection covers a pixel centre, `Spot Color N` when unnamed — see README Phase 246)
 - [x] Spot Channel Color (`SpotChannel.color`, set by New Spot Channel and Spot Channel Options (`set_spot_channel`) — see README Phase 246)

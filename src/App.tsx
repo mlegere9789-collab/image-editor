@@ -661,6 +661,9 @@ export default function App() {
   const [colorRangePreview, setColorRangePreview] = useState<"none" | "grayscale">("none");
   const [colorRangeSampling, setColorRangeSampling] = useState(false);
   const colorRangePreviewCanvas = useRef<HTMLCanvasElement | null>(null);
+  // Apply Image's Preview checkbox.
+  const [applyImageShowPreview, setApplyImageShowPreview] = useState(false);
+  const applyImagePreviewCanvas = useRef<HTMLCanvasElement | null>(null);
   const [showGeometryDialog, setShowGeometryDialog] = useState(false);
   const [geometry, setGeometry] = useState({
     vertical: 0,
@@ -1753,8 +1756,9 @@ export default function App() {
     setShowApplyImageDialog(true);
   }, [document, selectedId]);
 
-  const applyApplyImage = useCallback(async () => {
-    if (selectedId === null) return;
+  /** The dialog's settings as `apply_image`'s (and its Preview's) own
+   * parameters, `target` left for the caller to add. */
+  const currentApplyImageParams = useCallback(() => {
     const blend: ApplyBlend =
       applyImageArithmetic === "mode"
         ? { kind: "mode", mode: applyImageBlend }
@@ -1766,8 +1770,7 @@ export default function App() {
           invert: applyImageMaskInvert,
         }
       : null;
-    await runCommand("apply_image", {
-      target: selectedId,
+    return {
       source: applyImageSource === "merged" ? null : applyImageSource,
       channel: applyImageChannel,
       blend,
@@ -1775,11 +1778,8 @@ export default function App() {
       opacity: Math.round(applyImageOpacity),
       invert: applyImageInvert,
       preserveTransparency: applyImagePreserve,
-    });
-    setShowApplyImageDialog(false);
+    };
   }, [
-    runCommand,
-    selectedId,
     applyImageSource,
     applyImageChannel,
     applyImageMasked,
@@ -1794,6 +1794,35 @@ export default function App() {
     applyImageInvert,
     applyImagePreserve,
   ]);
+
+  const applyApplyImage = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("apply_image", { target: selectedId, ...currentApplyImageParams() });
+    setShowApplyImageDialog(false);
+  }, [runCommand, selectedId, currentApplyImageParams]);
+
+  /** Apply Image's Preview checkbox: draws what OK would apply into the
+   * dialog's own canvas, without touching the document. */
+  const refreshApplyImagePreview = useCallback(async () => {
+    if (selectedId === null || !document) return;
+    const canvas = applyImagePreviewCanvas.current;
+    if (!canvas) return;
+    try {
+      const pixels = await invoke<number[]>("apply_image_preview", {
+        target: selectedId,
+        ...currentApplyImageParams(),
+      });
+      canvas.width = document.width;
+      canvas.height = document.height;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      const image = context.createImageData(document.width, document.height);
+      image.data.set(pixels);
+      context.putImageData(image, 0, 0);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [selectedId, document, currentApplyImageParams]);
 
   const applyTransformSelection = useCallback(async () => {
     await runCommand("transform_selection", transformSelection);
@@ -11075,6 +11104,34 @@ export default function App() {
                   <span className="control__label">Invert Mask</span>
                 </label>
               </>
+            )}
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={applyImageShowPreview}
+                onChange={(event) => {
+                  setApplyImageShowPreview(event.target.checked);
+                  if (event.target.checked) void refreshApplyImagePreview();
+                }}
+              />
+              <span className="control__label">Preview</span>
+              {applyImageShowPreview && (
+                <button
+                  className="button button--quiet"
+                  onClick={() => void refreshApplyImagePreview()}
+                  disabled={busy}
+                  title="Redraw the preview for the current settings"
+                >
+                  Refresh
+                </button>
+              )}
+            </label>
+            {applyImageShowPreview && (
+              <canvas
+                ref={applyImagePreviewCanvas}
+                className="color-range-preview"
+                aria-label="Apply Image preview: the result of applying these settings"
+              />
             )}
             <div className="modal__actions">
               <button

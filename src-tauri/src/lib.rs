@@ -1341,6 +1341,35 @@ fn apply_image(
     })
 }
 
+/// Apply Image's Preview checkbox: `target`'s pixels as `apply_image`
+/// would leave them. Read-only, like [`color_range_bits`].
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn apply_image_preview(
+    state: State<'_, AppState>,
+    target: LayerId,
+    source: Option<LayerId>,
+    channel: document::ApplyChannel,
+    blend: document::ApplyBlend,
+    mask: Option<document::ApplyMask>,
+    opacity: u8,
+    invert: bool,
+    preserve_transparency: bool,
+) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.apply_image_preview(
+        target,
+        source,
+        channel,
+        blend,
+        mask,
+        opacity,
+        invert,
+        preserve_transparency,
+    )
+}
+
 /// Image > Calculations: blend two single-channel sources into a grey sent
 /// to a new document (which replaces the open one, with a fresh history,
 /// as opening a file does), a new alpha channel, or the selection.
@@ -5690,6 +5719,7 @@ pub fn run() {
             copy,
             copy_merged,
             apply_image,
+            apply_image_preview,
             calculations,
             load_channel,
             add_channel,

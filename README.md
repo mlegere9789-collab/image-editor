@@ -15723,6 +15723,64 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1555 Rust tests total** (1550 → 1555, 1548 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 263 — Apply Image's Preview checkbox
+
+Not a new adjustment: a way to see one before committing to it.
+`apply_image_preview` is the read-only counterpart to
+`apply_image_with`, sharing every line of its actual blend math instead
+of reimplementing it — it clones the whole `Document` (already `Clone`,
+used elsewhere for undo-adjacent snapshots), runs the real
+`apply_image_with` on that throwaway clone with the caller's exact
+arguments, and returns the clone's resulting layer pixels. The original
+document is never touched, and the preview can never drift from what OK
+would actually apply, because it *is* what OK would actually apply,
+just thrown away afterward. This is the same shape Color Range's own
+Selection Preview already established — `color_range_bits` is a
+read-only sibling of the selection command it previews for, drawn into
+a small canvas inside that dialog — so Apply Image's Preview reuses the
+identical frontend pattern: a checkbox with a Refresh button, and a
+`<canvas>` (the same `color-range-preview` CSS class) painted from the
+returned RGBA bytes via `ImageData`. The Apply Image dialog's own
+parameter-building logic was pulled out into one
+`currentApplyImageParams` callback so the real Apply button and the
+Preview's Refresh button build the exact same object instead of two
+copies that could drift apart.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the
+existing `apply_image_fixture` (a ramped 3×3 source layer and a mostly-
+opaque-red target with one transparent and one half-transparent corner)
+already built for Apply Image's own test suite. Rather than re-deriving
+new blend arithmetic — Apply Image's own math was already hand- and
+Python-verified when it shipped in Phases 159 and 224 — these tests
+verify the property specific to a preview command: that it is
+byte-identical to a real apply and never mutates anything. A Multiply
+preview matches a real `apply_image_with` call's resulting pixels
+exactly, and the document's own `view()` is unchanged after the preview
+runs; bad opacity, an unknown target layer, and an unknown source layer
+are all refused with the same wording `apply_image_with` itself uses;
+calling the preview twice gives identical results both times, and a
+real apply afterward still matches; Invert and Preserve Transparency
+both pass through correctly (the originally-transparent corner stays
+clear); and an explicit mask passes through and matches a real masked
+apply too. All five passed on the first run — no hand-computed
+floating-point value is asserted here, since the property under test is
+equality between two runs of the same already-verified function, not a
+new derivation.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and ten: this session's
+Xvfb instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's new checkbox and canvas were reviewed by hand
+instead. Every other layer of this project's quality bar (hand-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1560 Rust tests total** (1555 → 1560, 1553 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
