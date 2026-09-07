@@ -21206,6 +21206,82 @@ impl Document {
         })
     }
 
+    /// Read-only: layer `id`'s own stored pixels, RGBA8 — used by
+    /// Liquify's Reconstruct tool to capture an "original" to blend back
+    /// toward before any Liquify tool runs.
+    pub fn layer_pixels(&self, id: LayerId) -> Result<Vec<u8>, String> {
+        Ok(self.layer(id)?.pixels.clone())
+    }
+
+    /// Filter > Liquify's Reconstruct Tool: blends layer `id`'s current
+    /// pixels back toward `original` (that same layer's own pixels,
+    /// captured with [`Self::layer_pixels`] before any Liquify tool ran)
+    /// within a circular brush of `radius` centred at `(cx, cy)`, by
+    /// `amount` percent scaled by the same falloff
+    /// [`Self::liquify_radial`]'s tools share,
+    /// `f(d) = 1 − (d / radius)²`. Every channel — colour and alpha
+    /// alike, since Liquify's other tools move alpha along with colour
+    /// too — moves `(amount / 100) · f(d)` of the way from its current
+    /// byte to `original`'s own byte at that same pixel: Amount 100 at
+    /// the very centre restores the original outright, fading to no
+    /// change at the edge. `original` must be exactly
+    /// `width × height × 4` bytes for this document; a wrong length is
+    /// refused rather than silently misreading it. Errors for a
+    /// non-positive or non-finite radius, a non-finite centre, an amount
+    /// outside `0..=100`, a mismatched `original` length, or a locked
+    /// layer.
+    pub fn liquify_reconstruct(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        amount: f32,
+        original: &[u8],
+    ) -> Result<Option<Rect>, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if !(cx.is_finite() && cy.is_finite()) {
+            return Err("The centre must be finite coordinates.".to_string());
+        }
+        if !(0.0..=100.0).contains(&amount) {
+            return Err("Amount must be 0..=100.".to_string());
+        }
+        let expected_len = self.width as usize * self.height as usize * CHANNELS;
+        if original.len() != expected_len {
+            return Err(format!(
+                "The original snapshot must be {expected_len} bytes for this {}×{} canvas.",
+                self.width, self.height
+            ));
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let doc_width = self.width as usize;
+        let amount_unit = amount / 100.0;
+        let original = original.to_vec();
+        self.filter_pixels(id, move |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d >= radius {
+                return out;
+            }
+            let falloff = 1.0 - (d / radius) * (d / radius);
+            let t = amount_unit * falloff;
+            for (channel, slot) in out.iter_mut().enumerate() {
+                let current = *slot as f32;
+                let target = original[base + channel] as f32;
+                *slot = (current + (target - current) * t).round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Puppet Warp's mesh bounds: layer `id`'s opaque bounds grown by
     /// `expansion` pixels on every side and clipped to the canvas.
     fn puppet_bounds(&self, id: LayerId, expansion: u32) -> Result<Rect, String> {
@@ -50728,6 +50804,89 @@ mod tests {
             .contains("push"));
         assert!(doc
             .liquify_forward_warp(999, 10.0, 10.0, 10.0, 1.0, 1.0)
+            .is_err());
+    }
+
+    #[test]
+    fn liquify_reconstruct_blends_toward_the_original_by_amount_times_falloff() {
+        // Destination (13, 14), offset (3, 4) from centre (10, 10):
+        // d = 5, falloff = 1 - (5/10)^2 = 0.75. Amount 100 gives
+        // t = 1.0*0.75 = 0.75: current (200, 100, 50, 255) blended
+        // 75% toward original (0, 0, 0, 255) lands on
+        // (50, 25, 12.5 -> 13, 255) -- independently confirmed in
+        // Python emulating Rust f32 and round-half-away-from-zero.
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let mut original = solid(21, 21, [128, 128, 128, 255]);
+        let base = (14 * 21 + 13) * CHANNELS;
+        original[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 255]);
+        doc.liquify_reconstruct(id, 10.0, 10.0, 10.0, 100.0, &original)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [50, 25, 13, 255]);
+    }
+
+    #[test]
+    fn liquify_reconstruct_scales_by_amount_as_well_as_falloff() {
+        // Same falloff (0.75) but Amount 50 gives t = 0.5*0.75 = 0.375:
+        // (200, 100, 50, 255) blended toward (40, 20, 10, 255) lands
+        // exactly on (140, 70, 35, 255), no rounding ambiguity.
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let mut original = solid(21, 21, [128, 128, 128, 255]);
+        let base = (14 * 21 + 13) * CHANNELS;
+        original[base..base + CHANNELS].copy_from_slice(&[40, 20, 10, 255]);
+        doc.liquify_reconstruct(id, 10.0, 10.0, 10.0, 50.0, &original)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [140, 70, 35, 255]);
+    }
+
+    #[test]
+    fn liquify_reconstruct_leaves_pixels_outside_the_radius_untouched() {
+        let (mut doc, id) = liquify_fixture(0, 0, [200, 100, 50, 255]);
+        let mut original = solid(21, 21, [128, 128, 128, 255]);
+        let base = 0;
+        original[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 255]);
+        doc.liquify_reconstruct(id, 10.0, 10.0, 10.0, 100.0, &original)
+            .unwrap();
+        // (0, 0) is distance sqrt(200) ≈ 14.1 from the centre, past the
+        // radius of 10, so it keeps its own marker colour untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 100, 50, 255]);
+    }
+
+    #[test]
+    fn liquify_reconstruct_is_confined_to_the_active_selection() {
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let mut original = solid(21, 21, [128, 128, 128, 255]);
+        let base = (14 * 21 + 13) * CHANNELS;
+        original[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 255]);
+        // A selection that excludes (13, 14) leaves it untouched even
+        // though it is well within the brush radius.
+        doc.select_rectangle(0.0, 0.0, 5.0, 5.0).unwrap();
+        doc.liquify_reconstruct(id, 10.0, 10.0, 10.0, 100.0, &original)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [200, 100, 50, 255]);
+    }
+
+    #[test]
+    fn liquify_reconstruct_validates_its_arguments() {
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let original = solid(21, 21, [128, 128, 128, 255]);
+        assert!(doc
+            .liquify_reconstruct(id, 10.0, 10.0, 0.0, 50.0, &original)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_reconstruct(id, f32::NAN, 10.0, 10.0, 50.0, &original)
+            .unwrap_err()
+            .contains("centre"));
+        assert!(doc
+            .liquify_reconstruct(id, 10.0, 10.0, 10.0, 101.0, &original)
+            .unwrap_err()
+            .contains("Amount"));
+        assert!(doc
+            .liquify_reconstruct(id, 10.0, 10.0, 10.0, 50.0, &original[..original.len() - 4])
+            .unwrap_err()
+            .contains("bytes"));
+        assert!(doc
+            .liquify_reconstruct(999, 10.0, 10.0, 10.0, 50.0, &original)
             .is_err());
     }
 }

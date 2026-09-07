@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 498.**
+**618 distinct capabilities tracked. Currently shipped: 499.**
 
 ## PART I — EVERY TOOL
 
@@ -534,7 +534,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Pucker Tool (`liquify_radial(id, LiquifyTool::Pucker, cx, cy, radius, strength)`, pixels pulled toward the brush centre — the source offset rescaled outward by `1 + (strength/100)·(1 − (d/radius)²)`, strongest at the centre and zero at the edge — see README Phase 266)
 - [x] Bloat Tool (the same `liquify_radial` with `LiquifyTool::Bloat`: the source offset rescaled inward instead, `1 − (strength/100)·(1 − (d/radius)²)`, magnifying the centre — see README Phase 266)
 - [x] Twirl Tool (the same `liquify_radial` with `LiquifyTool::Twirl`: the offset from centre rotated by `−strength°·(1 − (d/radius)²)`, a negative strength twirling the other way, Photoshop's Twirl Counter Clockwise on the same tool — see README Phase 266)
-- [ ] Reconstruct Tool
+- [x] Reconstruct Tool (`liquify_reconstruct(id, cx, cy, radius, amount, original)` / `layer_pixels`: the layer's own pixels, captured with `layer_pixels` when the Liquify dialog opens, blended back in by `amount` percent scaled by the shared falloff — Amount 100 at the very centre restores the original outright. `original` is a frontend-held snapshot rather than document-side session state, a documented simplification — see README Phase 269)
 - [ ] Freeze Mask Tool
 - [ ] Thaw Mask Tool
 - [ ] Liquify Mesh

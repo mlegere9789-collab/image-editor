@@ -1526,6 +1526,36 @@ fn liquify_forward_warp(
     })
 }
 
+/// Liquify's Reconstruct Tool: captures layer `id`'s own pixels before
+/// any Liquify tool has touched them, for `liquify_reconstruct` to blend
+/// back toward. Read-only, like [`color_range_bits`].
+#[tauri::command]
+fn layer_pixels(state: State<'_, AppState>, id: LayerId) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.layer_pixels(id)
+}
+
+/// Filter > Liquify's Reconstruct Tool on layer `id`: blends its pixels
+/// back toward `original` (from `layer_pixels`, captured before any
+/// Liquify tool ran) within a brush of `radius` centred at `(cx, cy)`,
+/// by `amount` percent.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn liquify_reconstruct(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    amount: f32,
+    original: Vec<u8>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.liquify_reconstruct(id, cx, cy, radius, amount, &original)
+    })
+}
+
 /// Edit > Puppet Warp on layer `id` with its mode, density, expansion,
 /// and pins.
 #[tauri::command]
@@ -5819,6 +5849,8 @@ pub fn run() {
             cylindrical_warp,
             liquify_radial,
             liquify_forward_warp,
+            layer_pixels,
+            liquify_reconstruct,
             puppet_warp,
             puppet_mesh,
             convert_to_indexed,

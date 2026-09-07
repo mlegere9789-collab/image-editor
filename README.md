@@ -16105,6 +16105,67 @@ green.
 **1585 Rust tests total** (1580 → 1585, 1578 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 269 — Liquify's Reconstruct Tool
+
+The fifth of Liquify's nine sub-tools, and the one that finally needed
+something the other four didn't: a memory of what the layer looked
+like before any of them ran. Photoshop's own Liquify keeps that
+"original" for the whole life of the dialog session so Reconstruct can
+always brush distortion back out, no matter how many other tools ran
+in between. This project's document model has no notion of a Liquify
+session, so rather than inventing new document-side state, the
+original is a plain frontend snapshot: a new read-only
+`layer_pixels(id)` command returns the selected layer's current bytes,
+captured once via `invoke` the moment the Liquify dialog opens (before
+any tool has touched it) and held in a ref for the rest of that
+session — a documented simplification in place of true document-level
+session state. `liquify_reconstruct(id, cx, cy, radius, amount,
+original)` then blends the layer's *current* pixels back toward that
+captured `original`, colour and alpha alike, within the same circular
+brush and falloff every other Liquify tool already shares,
+`f(d) = 1 − (d / radius)²`: each channel moves `(amount / 100) · f(d)`
+of the way from its current byte to `original`'s own byte at that
+pixel, so Amount 100 at the very centre restores the original outright
+and fades to no change at the edge. `original` must be exactly
+`width × height × 4` bytes for the document it is used on — a
+mismatched length (the classic sign of a stale snapshot from before a
+resize) is refused outright rather than silently reading past the end
+or misaligning channels. Reconstruct joins Twirl, Pucker, Bloat, and
+Forward Warp as a fifth Tool option in the same "Liquify…" dialog.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+21×21 grey-canvas fixture the other four Liquify tools' tests already
+built. Destination `(13, 14)` (offset `(3, 4)` from centre `(10, 10)`,
+distance `5`, falloff `0.75`) with Amount 100 blends current
+`(200, 100, 50, 255)` `75%` toward original `(0, 0, 0, 255)`, landing
+on `(50, 25, 13, 255)` — the blue channel's `12.5` rounding up under
+round-half-away-from-zero — hand-derived and independently confirmed
+in a Python script computing the same `f32` arithmetic; Amount 50 at
+the same falloff blends `37.5%` toward a different original, landing
+exactly on `(140, 70, 35, 255)` with no rounding ambiguity at all. A
+third test confirms a pixel past the radius keeps its own colour
+regardless of how different `original` is there. A fourth confirms
+selection confinement, matching every other Liquify tool's own test. A
+fifth exercises every error path: a zero or negative radius, a
+non-finite centre, an amount outside `0..=100`, an `original` buffer
+four bytes short of the expected length, and an unknown layer id. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and sixteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Liquify dialog's new Reconstruct option was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1590 Rust tests total** (1585 → 1590, 1583 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

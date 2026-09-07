@@ -531,11 +531,16 @@ export default function App() {
   const [cylinderTilt, setCylinderTilt] = useState(0);
   // Filter > Liquify's Twirl, Pucker, Bloat, and Forward Warp tools: brush centre, radius, strength/push.
   const [showLiquifyDialog, setShowLiquifyDialog] = useState(false);
-  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool | "forward">("twirl");
+  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool | "forward" | "reconstruct">("twirl");
   const [liquifyCenter, setLiquifyCenter] = useState<[number, number]>([0, 0]);
   const [liquifyRadius, setLiquifyRadius] = useState(50);
   const [liquifyStrength, setLiquifyStrength] = useState(50);
   const [liquifyPush, setLiquifyPush] = useState<[number, number]>([20, 0]);
+  const [liquifyAmount, setLiquifyAmount] = useState(50);
+  // Reconstruct's "original": the layer's pixels captured with layer_pixels
+  // before any Liquify tool has run, so Reconstruct has something to blend
+  // back toward.
+  const liquifyOriginal = useRef<number[] | null>(null);
   // Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration.
   const [showLensCorrectionDialog, setShowLensCorrectionDialog] = useState(false);
   const [lensDistortion, setLensDistortion] = useState(0);
@@ -2229,14 +2234,32 @@ export default function App() {
     setShowCylinderDialog(false);
   }, [runCommand, selectedId, cylinderAngle, cylinderTilt]);
 
-  const openLiquifyDialog = useCallback(() => {
+  const openLiquifyDialog = useCallback(async () => {
     if (document) setLiquifyCenter([Math.round(document.width / 2), Math.round(document.height / 2)]);
     setShowLiquifyDialog(true);
-  }, [document]);
+    // Reconstruct always blends back toward the layer as it was when this
+    // dialog opened, the same "session baseline" Photoshop's own
+    // Reconstruct reverts toward, whatever tools ran on it since.
+    liquifyOriginal.current = selectedId === null ? null : await invoke<number[]>("layer_pixels", { id: selectedId });
+  }, [document, selectedId]);
 
   const applyLiquify = useCallback(async () => {
     if (selectedId === null) return;
     const [cx, cy] = liquifyCenter;
+    if (liquifyTool === "reconstruct") {
+      if (liquifyOriginal.current === null) {
+        liquifyOriginal.current = await invoke<number[]>("layer_pixels", { id: selectedId });
+      }
+      await runCommand("liquify_reconstruct", {
+        id: selectedId,
+        cx,
+        cy,
+        radius: liquifyRadius,
+        amount: liquifyAmount,
+        original: liquifyOriginal.current,
+      });
+      return;
+    }
     if (liquifyTool === "forward") {
       const [dx, dy] = liquifyPush;
       await runCommand("liquify_forward_warp", { id: selectedId, cx, cy, radius: liquifyRadius, dx, dy });
@@ -2250,7 +2273,7 @@ export default function App() {
       radius: liquifyRadius,
       strength: liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
     });
-  }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength, liquifyPush]);
+  }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength, liquifyPush, liquifyAmount]);
 
   const applyLensCorrection = useCallback(async () => {
     if (selectedId === null) return;
@@ -6188,9 +6211,9 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={openLiquifyDialog}
+            onClick={() => void openLiquifyDialog()}
             disabled={busy || !canPaint}
-            title="Filter > Liquify: Twirl, Pucker, and Bloat over a circular brush"
+            title="Filter > Liquify: Twirl, Pucker, Bloat, Forward Warp, and Reconstruct over a circular brush"
           >
             Liquify…
           </button>
@@ -12670,26 +12693,28 @@ export default function App() {
           <div className="modal" role="dialog" aria-label="Liquify" onClick={(event) => event.stopPropagation()}>
             <h2 className="modal__heading">Filter &gt; Liquify</h2>
             <p className="modal__hint">
-              Twirl rotates, Pucker pinches in, Bloat pushes out, and Forward Warp pushes by
-              (Push X, Push Y), all over a circular brush centred at (Centre X, Centre Y)
-              with a falloff strongest in the middle and zero at the Radius. Apply
-              repeatedly at different centres to build up an effect; Freeze/Thaw Mask,
-              Reconstruct, and Face-Aware Liquify are documented scope cuts.
+              Twirl rotates, Pucker pinches in, Bloat pushes out, Forward Warp pushes by
+              (Push X, Push Y), and Reconstruct blends back toward the layer as it was when
+              this dialog opened, by Amount — all over a circular brush centred at (Centre
+              X, Centre Y) with a falloff strongest in the middle and zero at the Radius.
+              Apply repeatedly at different centres to build up an effect; Freeze/Thaw Mask
+              and Face-Aware Liquify are documented scope cuts.
             </p>
             <label className="control control--row">
               <span className="control__label">Tool</span>
               <select
                 value={liquifyTool}
                 onChange={(event) => {
-                  const next = event.target.value as LiquifyTool | "forward";
+                  const next = event.target.value as LiquifyTool | "forward" | "reconstruct";
                   setLiquifyTool(next);
-                  if (next !== "twirl" && next !== "forward") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
+                  if (next === "pucker" || next === "bloat") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
                 }}
               >
                 <option value="twirl">Twirl</option>
                 <option value="pucker">Pucker</option>
                 <option value="bloat">Bloat</option>
                 <option value="forward">Forward Warp</option>
+                <option value="reconstruct">Reconstruct</option>
               </select>
             </label>
             <label className="control control--row">
@@ -12729,6 +12754,18 @@ export default function App() {
                   value={liquifyPush[1]}
                   onChange={(event) => setLiquifyPush(([x]) => [x, Number(event.target.value)])}
                 />
+              </label>
+            ) : liquifyTool === "reconstruct" ? (
+              <label className="control control--row">
+                <span className="control__label">Amount</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={liquifyAmount}
+                  onChange={(event) => setLiquifyAmount(Number(event.target.value))}
+                />
+                <span className="control__value">{liquifyAmount}</span>
               </label>
             ) : (
               <label className="control control--row">
