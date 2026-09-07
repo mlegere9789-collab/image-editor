@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 325.**
+**618 distinct capabilities tracked. Currently shipped: 326.**
 
 ## PART I — EVERY TOOL
 
@@ -97,7 +97,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] ADJUSTMENT LAYER
 - [ ] FILL LAYER
 - [ ] SMART OBJECT
-- [ ] LAYER MASK
+- [x] LAYER MASK (`add_layer_mask` / `set_layer_mask` / `remove_layer_mask`, a document-sized 8-bit mask per layer multiplied into its alpha at composite time, started as Reveal All, Hide All, Reveal Selection, or Hide Selection, applied or deleted, turned and cropped with the document; painting directly on the mask and mask density/feather are documented scope cuts — see README Phase 218)
 - [ ] VECTOR MASK
 - [x] CLIPPING MASK (`set_clipped`, a clipped layer composites only where its base — the nearest unclipped layer below — has pixels, its alpha scaled by the base's transparency, and is hidden with a hidden base; stacked clipped layers share one base; the bottom layer cannot be clipped — see README Phase 217)
 - [x] LINK LAYERS (`set_linked`, a link flag per layer — one link set per document, as Photoshop's original linking — so the Move tool moves every linked layer together, whole or within the selection, refusing if any of them is locked — see README Phase 213)

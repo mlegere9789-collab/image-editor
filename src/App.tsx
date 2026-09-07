@@ -4913,6 +4913,50 @@ export default function App() {
             Group Layers
           </button>
           <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("add_layer_mask", {
+                id: selectedId,
+                source: hasSelection ? "revealSelection" : "revealAll",
+              })
+            }
+            disabled={busy || !canPaint}
+            title="Layer > Layer Mask: reveal the selection (or all, with nothing selected)"
+          >
+            Add Mask
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("add_layer_mask", { id: selectedId, source: "hideAll" })
+            }
+            disabled={busy || !canPaint}
+            title="Layer > Layer Mask > Hide All"
+          >
+            Hide All Mask
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("remove_layer_mask", { id: selectedId, apply: true })
+            }
+            disabled={busy || !canPaint || !layers.find((l) => l.id === selectedId)?.hasMask}
+            title="Layer > Layer Mask > Apply: bake the mask into the layer's transparency"
+          >
+            Apply Mask
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null && void runCommand("remove_layer_mask", { id: selectedId, apply: false })
+            }
+            disabled={busy || !canPaint || !layers.find((l) => l.id === selectedId)?.hasMask}
+            title="Layer > Layer Mask > Delete"
+          >
+            Delete Mask
+          </button>
+          <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
             disabled={!hasDocument}
             aria-pressed={tool === "selectionBrush"}

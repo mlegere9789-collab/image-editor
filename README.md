@@ -13115,6 +13115,59 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1330 Rust tests total** (1325 → 1330, 1323 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 218 — Layer masks
+
+Every `Layer` gains an optional `mask`: a document-sized 8-bit buffer
+multiplied straight into the layer's alpha at composite time, `255`
+showing and `0` hiding, before opacity and any clipping mask apply.
+`add_layer_mask(id, source)` starts one from Photoshop's four menu
+entries — Reveal All (white), Hide All (black), Reveal Selection
+(white inside the selection, black outside), Hide Selection (the
+reverse) — replacing any mask the layer had; `set_layer_mask` installs
+a supplied buffer, the way a painted or imported mask will arrive, and
+insists on one byte per document pixel; `remove_layer_mask(id, apply)`
+deletes the mask, or with `apply` first multiplies it into the layer's
+own alpha so the picture keeps looking the same, refusing a locked
+layer. Masks turn with a document rotation and are cropped with a
+crop, by the same index mapping as the pixels. The layer view carries
+`hasMask`, the panel shows a mask badge beside a masked layer's name,
+and four toolbar buttons — **Add Mask** (reveal the selection, or all
+with nothing selected), **Hide All Mask**, **Apply Mask**, **Delete
+Mask** — go through `add_layer_mask` and `remove_layer_mask`
+commands. Painting directly on the mask, mask density and feather, and
+the mask's channel view are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests through
+`composite_pixel`, the grey values first computed in Python emulating
+`f32`. On the clipping fixture, Reveal All leaves the green layer
+showing everywhere and Hide All hides it, revealing the red base at
+the first pixel and nothing at the second. With the first pixel
+selected, Reveal Selection shows green there and nothing beside it,
+Hide Selection the reverse, and with nothing selected the selection
+variants error. A grey `128` mask takes opaque green to alpha `128`
+and alpha `200` to `100`; a `64` mask at `50%` opacity gives `32`; a
+three-byte mask on a two-pixel layer errors. Applying a `[128, 0]`
+mask bakes alphas `128` and `0` into the pixels and removes the mask,
+deleting a later all-black mask leaves them as they are, removing a
+mask that is not there errors, and a locked layer refuses to apply
+with its mask kept. A `3×2` layer masked to show only `(2, 0)` shows
+only `(1, 2)` after a clockwise rotation and only `(0, 1)` after a
+crop to `(1, 1)–(2, 3)`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The buttons and badge were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1335 Rust tests total** (1330 → 1335, 1328 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

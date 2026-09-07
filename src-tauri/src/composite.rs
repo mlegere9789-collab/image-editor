@@ -144,6 +144,10 @@ fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32
     let mut backdrop = [0f32; 4];
     for (index, layer) in layers.iter().enumerate() {
         let mut source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
+        // A layer mask multiplies straight into the alpha.
+        if let Some(mask) = &layer.mask {
+            source_alpha *= to_unit(mask[base / CHANNELS]);
+        }
         // A clipping mask: a clipped layer shows only where its base — the
         // nearest unclipped layer below it — has pixels, its alpha scaled
         // by the base's own transparency (not the base's opacity).

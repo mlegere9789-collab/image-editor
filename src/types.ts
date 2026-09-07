@@ -32,7 +32,12 @@ export type LayerView = {
   linked: boolean;
   /** Layer > Create Clipping Mask: shows only where the layer below has pixels. */
   clipped: boolean;
+  /** Whether the layer carries a layer mask. */
+  hasMask: boolean;
 };
+
+/** Mirrors `MaskSource` in src-tauri/src/document.rs. */
+export type MaskSource = "revealAll" | "hideAll" | "revealSelection" | "hideSelection";
 
 /** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase).
  * `RoundedRectangle` is a struct variant, so serde's default external

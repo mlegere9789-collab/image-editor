@@ -2578,6 +2578,43 @@ fn group_at(state: State<'_, AppState>, x: u32, y: u32) -> Result<Option<usize>,
     Ok(document.group_at(x, y))
 }
 
+/// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
+/// Selection for layer `id`.
+#[tauri::command]
+fn add_layer_mask(
+    state: State<'_, AppState>,
+    id: LayerId,
+    source: document::MaskSource,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_layer_mask(id, source)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Layer > Layer Mask > Apply (`apply` true) or Delete for layer `id`.
+#[tauri::command]
+fn remove_layer_mask(
+    state: State<'_, AppState>,
+    id: LayerId,
+    apply: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.remove_layer_mask(id, apply)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// View > New Guide.
 #[tauri::command]
 fn add_guide(
@@ -4118,6 +4155,8 @@ pub fn run() {
             set_layer_locked,
             set_layer_linked,
             set_layer_clipped,
+            add_layer_mask,
+            remove_layer_mask,
             rasterize_layer,
             flip_layer_horizontal,
             flip_layer_vertical,

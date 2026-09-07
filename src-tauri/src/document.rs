@@ -40,6 +40,10 @@ pub struct Layer {
     /// nearest unclipped layer below it (its base) has pixels, its alpha
     /// scaled by the base's transparency; a hidden base hides it too.
     pub clipped: bool,
+    /// Layer > Layer Mask: a document-sized 8-bit mask multiplied into the
+    /// layer's alpha at composite time (`255` shows, `0` hides), or `None`
+    /// for an unmasked layer.
+    pub mask: Option<Vec<u8>>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -56,6 +60,8 @@ pub struct LayerView {
     pub locked: bool,
     pub linked: bool,
     pub clipped: bool,
+    /// Whether the layer carries a layer mask.
+    pub has_mask: bool,
 }
 
 impl Layer {
@@ -69,6 +75,7 @@ impl Layer {
             locked: self.locked,
             linked: self.linked,
             clipped: self.clipped,
+            has_mask: self.mask.is_some(),
         }
     }
 
@@ -154,6 +161,20 @@ pub struct LayerGroup {
     pub name: String,
     /// Bottom to top, in stack order.
     pub members: Vec<LayerId>,
+}
+
+/// What Layer > Layer Mask starts a new mask from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MaskSource {
+    /// A white mask: everything shows.
+    RevealAll,
+    /// A black mask: everything is hidden.
+    HideAll,
+    /// White inside the selection, black outside.
+    RevealSelection,
+    /// Black inside the selection, white outside.
+    HideSelection,
 }
 
 /// Which way a [`Guide`] runs.
@@ -3086,6 +3107,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         });
         Ok(id)
@@ -3122,6 +3144,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         });
         id
@@ -3183,6 +3206,68 @@ impl Document {
     pub fn set_linked(&mut self, id: LayerId, linked: bool) -> Result<(), String> {
         self.layer_mut(id)?.linked = linked;
         Ok(())
+    }
+
+    /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
+    /// Selection: gives layer `id` a mask built from `source`, replacing
+    /// any mask it had. The selection variants need a selection.
+    pub fn add_layer_mask(&mut self, id: LayerId, source: MaskSource) -> Result<(), String> {
+        let count = self.width as usize * self.height as usize;
+        let mask = match source {
+            MaskSource::RevealAll => vec![255u8; count],
+            MaskSource::HideAll => vec![0u8; count],
+            MaskSource::RevealSelection | MaskSource::HideSelection => {
+                let bits = self.selected_bits()?;
+                let inside = if source == MaskSource::RevealSelection {
+                    255
+                } else {
+                    0
+                };
+                bits.iter()
+                    .map(|&b| if b { inside } else { 255 - inside })
+                    .collect()
+            }
+        };
+        self.layer_mut(id)?.mask = Some(mask);
+        Ok(())
+    }
+
+    /// Replaces layer `id`'s mask with `mask`, a document-sized 8-bit
+    /// buffer — the way a painted or imported mask arrives.
+    pub fn set_layer_mask(&mut self, id: LayerId, mask: Vec<u8>) -> Result<(), String> {
+        if mask.len() != self.width as usize * self.height as usize {
+            return Err("A layer mask must have one byte per document pixel.".to_string());
+        }
+        self.layer_mut(id)?.mask = Some(mask);
+        Ok(())
+    }
+
+    /// Layer > Layer Mask > Delete (`apply` false) or Apply (`apply` true,
+    /// which first multiplies the mask into the layer's own alpha so the
+    /// picture keeps looking the same). Errors when the layer has no mask,
+    /// or is locked when applying.
+    pub fn remove_layer_mask(&mut self, id: LayerId, apply: bool) -> Result<Option<Rect>, String> {
+        let everything = Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        };
+        let layer = self.layer_mut(id)?;
+        let Some(mask) = layer.mask.take() else {
+            return Err("That layer has no layer mask.".to_string());
+        };
+        if !apply {
+            return Ok(None);
+        }
+        if layer.locked {
+            layer.mask = Some(mask);
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for (px, &m) in layer.pixels.chunks_exact_mut(CHANNELS).zip(mask.iter()) {
+            px[3] = to_byte(to_unit(px[3]) * to_unit(m));
+        }
+        Ok(Some(everything))
     }
 
     /// Layer > Create Clipping Mask / Release Clipping Mask for layer
@@ -3359,6 +3444,21 @@ impl Document {
                 }
             }
             layer.pixels = rotated;
+            if let Some(mask) = &layer.mask {
+                let mut rotated_mask = vec![0u8; new_width as usize * new_height as usize];
+                for new_y in 0..new_height {
+                    for new_x in 0..new_width {
+                        let (old_x, old_y) = if clockwise {
+                            (new_y, old_height - 1 - new_x)
+                        } else {
+                            (old_width - 1 - new_y, new_x)
+                        };
+                        rotated_mask[(new_y * new_width + new_x) as usize] =
+                            mask[(old_y * old_width + old_x) as usize];
+                    }
+                }
+                layer.mask = Some(rotated_mask);
+            }
         }
         self.width = new_width;
         self.height = new_height;
@@ -3418,6 +3518,14 @@ impl Document {
                 cropped.extend_from_slice(&layer.pixels[start..end]);
             }
             layer.pixels = cropped;
+            if let Some(mask) = &layer.mask {
+                let mut cropped_mask = Vec::with_capacity(new_width as usize * new_height as usize);
+                for y in rect.y0..rect.y1 {
+                    let start = y as usize * old_width + rect.x0 as usize;
+                    cropped_mask.extend_from_slice(&mask[start..start + new_width as usize]);
+                }
+                layer.mask = Some(cropped_mask);
+            }
         }
         self.width = new_width;
         self.height = new_height;
@@ -4224,6 +4332,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         });
         id
@@ -8324,6 +8433,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         });
 
@@ -8363,6 +8473,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         }];
         Ok(id)
@@ -8402,6 +8513,7 @@ impl Document {
             locked: false,
             linked: false,
             clipped: false,
+            mask: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -25212,6 +25324,101 @@ mod tests {
         assert!(doc.set_clipped(base, true).is_err());
         assert!(!doc.view().layers[0].clipped);
         assert!(doc.set_clipped(base + 100, true).is_err());
+    }
+
+    #[test]
+    fn reveal_all_and_hide_all_masks_show_and_hide_the_layer() {
+        let (mut doc, _base, top) = clip_pair();
+        doc.add_layer_mask(top, MaskSource::RevealAll).unwrap();
+        assert!(doc.view().layers[1].has_mask);
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 255]);
+        doc.add_layer_mask(top, MaskSource::HideAll).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn selection_masks_follow_the_selection() {
+        let (mut doc, _base, top) = clip_pair();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.add_layer_mask(top, MaskSource::RevealSelection)
+            .unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 0, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 0, 0, 0]);
+        doc.add_layer_mask(top, MaskSource::HideSelection).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 255]);
+        doc.deselect();
+        assert!(doc
+            .add_layer_mask(top, MaskSource::RevealSelection)
+            .is_err());
+    }
+
+    #[test]
+    fn a_grey_mask_scales_the_alpha() {
+        // Python f32 model: 255 × 128/255 → 128; 200 × 128/255 → 100; at
+        // 50% opacity 255 × 0.5 × 64/255 → 32.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 255, 0, 255, 0, 255, 0, 200], 2, 1)
+            .unwrap();
+        doc.set_layer_mask(id, vec![128, 128]).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 0, 128]);
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 100]);
+        doc.set_layer_mask(id, vec![64, 64]).unwrap();
+        doc.set_opacity(id, 0.5).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 0, 32]);
+        assert!(doc.set_layer_mask(id, vec![1, 2, 3]).is_err());
+    }
+
+    #[test]
+    fn applying_a_mask_bakes_it_and_deleting_discards_it() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 255, 0, 255, 0, 255, 0, 200], 2, 1)
+            .unwrap();
+        doc.set_layer_mask(id, vec![128, 0]).unwrap();
+        doc.remove_layer_mask(id, true).unwrap();
+        assert!(!doc.view().layers[0].has_mask);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 128]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 0]);
+        doc.set_layer_mask(id, vec![0, 0]).unwrap();
+        doc.remove_layer_mask(id, false).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 128]);
+        assert!(doc.remove_layer_mask(id, false).is_err());
+        doc.set_layer_mask(id, vec![0, 0]).unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.remove_layer_mask(id, true).is_err());
+        assert!(doc.view().layers[0].has_mask);
+    }
+
+    #[test]
+    fn masks_turn_and_crop_with_the_document() {
+        // A 3×2 layer masked to show only (2, 0); clockwise the canvas is
+        // 2×3 and that pixel lands at (1, 2) — the mask must follow.
+        let mut doc = Document::new(3, 2).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 2, [0, 255, 0, 255]), 3, 2)
+            .unwrap();
+        doc.set_layer_mask(id, vec![0, 0, 255, 0, 0, 0]).unwrap();
+        doc.rotate_document_90(true);
+        assert_eq!(
+            crate::composite::composite_pixel(&doc, 1, 2),
+            [0, 255, 0, 255]
+        );
+        assert_eq!(crate::composite::composite_pixel(&doc, 0, 0), [0, 0, 0, 0]);
+        doc.crop(Rect {
+            x0: 1,
+            y0: 1,
+            x1: 2,
+            y1: 3,
+        })
+        .unwrap();
+        assert_eq!(
+            crate::composite::composite_pixel(&doc, 0, 1),
+            [0, 255, 0, 255]
+        );
+        assert_eq!(crate::composite::composite_pixel(&doc, 0, 0), [0, 0, 0, 0]);
     }
 
     #[test]

@@ -173,6 +173,12 @@ export default function LayerPanel({
               />
               <span className="layer__name" title={layer.name}>
                 {layer.name}
+                {layer.hasMask && (
+                  <span className="layer__meta" title="Has a layer mask">
+                    {" "}
+                    ▣
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>
