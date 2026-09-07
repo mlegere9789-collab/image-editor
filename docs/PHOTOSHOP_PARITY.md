@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 321.**
+**618 distinct capabilities tracked. Currently shipped: 322.**
 
 ## PART I — EVERY TOOL
 
@@ -197,7 +197,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Define Brush Preset
 - [x] Paint Symmetry (`stroke_symmetric`, every Brush, Eraser, and Pattern Stamp stroke repeated mirrored about the canvas's vertical centre line, horizontal centre line, or both — Photoshop's Vertical, Horizontal, and Dual Axis — chosen from a Symmetry drop-down in the tool options; Circular, Spiral, Mandala, and Radial are documented scope cuts — see README Phase 170)
 - [x] Layer Comps (`save_layer_comp` / `apply_layer_comp` / `delete_layer_comp`, named snapshots of every layer's visibility, opacity, and blend mode stored on the document — undoable, listed in the view, restored by name with since-deleted layers skipped and since-added layers left alone; Photoshop's position and layer-style capture are documented scope cuts — see README Phase 171)
-- [ ] Smart Guides
+- [x] Smart Guides (`snap_move`, a Move tool drop snapped so an edge of what is moved lands on a guide, another visible layer's opaque edge, or the canvas edge when within 8 px, each axis independently; centre snapping and the pink alignment lines are documented scope cuts — see README Phase 215)
 - [x] Guide Layout (`guide_layout`, the interior boundaries of an equal columns × rows split added as guides; gutters, margins, and per-column widths are documented scope cuts — see README Phase 212)
 - [x] New Guide (`add_guide` / `remove_guide` / `clear_guides`, horizontal or vertical guides on pixel boundaries kept on the document, drawn over the canvas, turned by document rotation and carried through a crop; a click on a guide removes it; snapping is a documented scope cut — see README Phase 212)
 - [ ] Lock Workspace

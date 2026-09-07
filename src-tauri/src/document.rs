@@ -1569,6 +1569,68 @@ impl Document {
         Ok(Some(Rect { x0, y0, x1, y1 }))
     }
 
+    /// Smart Guides: snaps a Move tool offset `(dx, dy)` for layer `id` so
+    /// that an edge of what is being moved — the active selection's
+    /// bounding box, or the layer's own opaque bounds — lands exactly on a
+    /// guide, on an edge of another visible layer's opaque bounds, or on
+    /// the canvas edge, whenever it would otherwise come within
+    /// `threshold` pixels of one. Each axis snaps independently to the
+    /// smallest correction; on a tie the leading edge (left or top) wins.
+    /// Photoshop also snaps centres and shows the pink alignment lines;
+    /// both are documented scope cuts. Read-only. An empty layer, or no
+    /// threshold, returns the offset unchanged; an unknown layer errors.
+    pub fn snap_move(
+        &self,
+        id: LayerId,
+        dx: i32,
+        dy: i32,
+        threshold: u32,
+    ) -> Result<(i32, i32), String> {
+        let moving = match &self.selection {
+            Some(selection) => Some(selection.bounds),
+            None => self.layer_bounds(id)?,
+        };
+        let Some(moving) = moving else {
+            return Ok((dx, dy));
+        };
+        if threshold == 0 {
+            return Ok((dx, dy));
+        }
+        let mut xs: Vec<i64> = vec![0, self.width as i64];
+        let mut ys: Vec<i64> = vec![0, self.height as i64];
+        for guide in &self.guides {
+            match guide.orientation {
+                GuideOrientation::Vertical => xs.push(guide.position as i64),
+                GuideOrientation::Horizontal => ys.push(guide.position as i64),
+            }
+        }
+        for layer in self.layers.iter().filter(|l| l.visible && l.id != id) {
+            if let Some(bounds) = self.layer_bounds(layer.id)? {
+                xs.extend([bounds.x0 as i64, bounds.x1 as i64]);
+                ys.extend([bounds.y0 as i64, bounds.y1 as i64]);
+            }
+        }
+        let snap = |offset: i32, lo: u32, hi: u32, targets: &[i64]| -> i32 {
+            let edges = [lo as i64 + offset as i64, hi as i64 + offset as i64];
+            let mut best: Option<i64> = None;
+            for edge in edges {
+                for &target in targets {
+                    let correction = target - edge;
+                    if correction.abs() <= threshold as i64
+                        && best.map_or(true, |b: i64| correction.abs() < b.abs())
+                    {
+                        best = Some(correction);
+                    }
+                }
+            }
+            offset + best.unwrap_or(0) as i32
+        };
+        Ok((
+            snap(dx, moving.x0, moving.x1, &xs),
+            snap(dy, moving.y0, moving.y1, &ys),
+        ))
+    }
+
     /// The Object Selection tool in Rectangle mode: drag a box and the
     /// object inside it is selected. See [`Self::select_object_in_bits`]
     /// for how the object is found. The box is normalised and clipped to
@@ -24720,6 +24782,92 @@ mod tests {
     fn layer_bounds_errors_for_an_unknown_layer() {
         let (doc, [_, _, blue]) = three_dots();
         assert!(doc.layer_bounds(blue + 100).is_err());
+    }
+
+    /// A 10×10 canvas: a 2×2 opaque block at (1, 1) on the moving layer
+    /// and a 2×2 block at (6, 6) on another layer.
+    fn snap_scene() -> (Document, LayerId, LayerId) {
+        let mut doc = Document::new(10, 10).unwrap();
+        let block = |x0: usize, y0: usize| {
+            let mut pixels = solid(10, 10, [0, 0, 0, 0]);
+            for y in y0..y0 + 2 {
+                for x in x0..x0 + 2 {
+                    pixels[(y * 10 + x) * 4 + 3] = 255;
+                }
+            }
+            pixels
+        };
+        let mover = doc.add_layer("mover", &block(1, 1), 10, 10).unwrap();
+        let other = doc.add_layer("other", &block(6, 6), 10, 10).unwrap();
+        (doc, mover, other)
+    }
+
+    #[test]
+    fn smart_guides_snap_an_edge_onto_another_layers_edge() {
+        // The mover's right edge is at 3; dx = 2 puts it at 5, one short of
+        // the other block's left edge at 6, so the snap adds 1. dy = 0 keeps
+        // the top edge at 1 and the bottom at 3 — nothing within 2 of a
+        // target but the canvas top at 0 from the top edge (1 away): dy → −1.
+        let (doc, mover, _other) = snap_scene();
+        assert_eq!(doc.snap_move(mover, 2, 0, 2).unwrap(), (3, -1));
+        // dx = 10 puts the edges at 11 and 13: the right edge is 3 from the
+        // canvas edge at 10, out of reach, but the left edge is 1 from it,
+        // so the snap pulls the block back to dx = 9.
+        assert_eq!(doc.snap_move(mover, 10, 0, 2).unwrap(), (9, -1));
+        // dx = 20 puts both edges well past every target: no snap.
+        assert_eq!(doc.snap_move(mover, 20, 0, 2).unwrap().0, 20);
+    }
+
+    #[test]
+    fn smart_guides_snap_onto_guides_and_the_canvas_edge() {
+        let (mut doc, mover, _other) = snap_scene();
+        doc.add_guide(GuideOrientation::Vertical, 8).unwrap();
+        // dx = 4: edges at 5 and 7; the right edge is 1 from the guide at 8,
+        // the left edge 1 from the other block's edge at 6 — a tie, and the
+        // leading edge wins: dx → 5.
+        assert_eq!(doc.snap_move(mover, 4, 5, 1).unwrap().0, 5);
+        // dy = 5: edges at 6 and 8, the top exactly on the other block's
+        // top at 6 — already snapped, correction 0.
+        assert_eq!(doc.snap_move(mover, 4, 5, 1).unwrap().1, 5);
+        // dy = 6: top at 7 and bottom at 9 are each 1 from something — the
+        // other block's top at 6 and bottom at 8, and the canvas bottom at
+        // 10. The leading (top) edge's snap onto 6 wins the tie: dy → 5.
+        assert_eq!(doc.snap_move(mover, 0, 6, 1).unwrap().1, 5);
+        // dy = 7: top at 8 sits exactly on the other block's bottom edge,
+        // so the correction is 0 even though the bottom at 10 is on the
+        // canvas edge too.
+        assert_eq!(doc.snap_move(mover, 0, 7, 1).unwrap().1, 7);
+    }
+
+    #[test]
+    fn smart_guides_use_the_selection_bounds_when_there_is_one() {
+        let (mut doc, mover, _other) = snap_scene();
+        doc.select_rectangle(1.0, 1.0, 4.0, 4.0).unwrap();
+        // The selection's right edge is at 4; dx = 1 puts it at 5, one short
+        // of the other block at 6, while its left edge at 2 is out of reach
+        // of the canvas edge. Its top edge at 1 is one from the canvas top.
+        assert_eq!(doc.snap_move(mover, 1, 0, 1).unwrap(), (2, -1));
+    }
+
+    #[test]
+    fn smart_guides_ignore_hidden_layers_and_leave_the_offset_alone_otherwise() {
+        let (mut doc, mover, other) = snap_scene();
+        doc.set_visible(other, false).unwrap();
+        // With the other block hidden nothing sits near x = 5 or 6.
+        assert_eq!(doc.snap_move(mover, 2, 3, 1).unwrap(), (2, 3));
+        // A zero threshold never snaps.
+        doc.set_visible(other, true).unwrap();
+        assert_eq!(doc.snap_move(mover, 2, 0, 0).unwrap(), (2, 0));
+    }
+
+    #[test]
+    fn smart_guides_pass_through_empty_layers_and_reject_unknown_ones() {
+        let (mut doc, mover, _other) = snap_scene();
+        let empty = doc
+            .add_layer("empty", &solid(10, 10, [0, 0, 0, 0]), 10, 10)
+            .unwrap();
+        assert_eq!(doc.snap_move(empty, 2, 0, 3).unwrap(), (2, 0));
+        assert!(doc.snap_move(mover + 100, 1, 1, 1).is_err());
     }
 
     #[test]

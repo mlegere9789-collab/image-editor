@@ -359,6 +359,9 @@ export default function App() {
   // Move tool options: Auto-Select picks the layer under the pointer on
   // press; hovering shows the bounds of the layer under the pointer.
   const [moveAutoSelect, setMoveAutoSelect] = useState(false);
+  // Smart Guides: snap a Move drop onto guides, other layers' edges, and
+  // the canvas edge when it lands within this many pixels of one.
+  const [smartGuides, setSmartGuides] = useState(true);
   const [hoverBounds, setHoverBounds] = useState<{
     x0: number;
     y0: number;
@@ -3999,7 +4002,14 @@ export default function App() {
           if (dx !== 0 || dy !== 0) {
             const command =
               tool === "contentAwareMove" ? "content_aware_move" : isPatch ? "patch" : "move_pixels";
-            void runCommand(command, { id: selectedId, dx, dy });
+            if (isMove && smartGuides) {
+              const id = selectedId;
+              void invoke<[number, number]>("snap_move", { id, dx, dy, threshold: 8 })
+                .then(([sx, sy]) => runCommand(command, { id, dx: sx, dy: sy }))
+                .catch((err) => setError(String(err)));
+            } else {
+              void runCommand(command, { id: selectedId, dx, dy });
+            }
           }
         }
         return;
@@ -4146,6 +4156,7 @@ export default function App() {
       isObjectSelectLasso,
       magneticWidth,
       magneticContrast,
+      smartGuides,
       isSelectionBrush,
       brushSize,
       magicWandTolerance,
@@ -6392,6 +6403,17 @@ export default function App() {
                 onChange={(event) => setMoveAutoSelect(event.target.checked)}
               />
               Auto-Select
+            </label>
+          )}
+          {tool === "move" && (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={smartGuides}
+                disabled={!canPaint}
+                onChange={(event) => setSmartGuides(event.target.checked)}
+              />
+              Smart Guides
             </label>
           )}
           {tool === "magneticLasso" && (

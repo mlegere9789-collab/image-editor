@@ -12957,6 +12957,62 @@ hand instead. Every other layer of this project's quality bar
 **1315 Rust tests total** (1310 → 1315, 1308 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 215 — Smart Guides
+
+`Document::snap_move(id, dx, dy, threshold)` is Photoshop's Smart
+Guides for the Move tool: a read-only query that snaps a drop offset
+so an edge of what is being moved — the active selection's bounding
+box, or the layer's own opaque bounds — lands exactly on a guide, on
+an edge of another visible layer's opaque bounds, or on the canvas
+edge whenever it would otherwise come within `threshold` pixels of
+one. Each axis snaps independently to the smallest correction; on a
+tie the leading edge (left or top) wins, and an edge already on a
+target needs no correction. Hidden layers and the moving layer itself
+are not targets. Photoshop also snaps centres and draws the pink
+alignment lines; both are documented scope cuts. The Move tool's
+options bar gains a **Smart Guides** checkbox, on by default; with it
+on, a drop asks `snap_move` with an 8-pixel threshold and moves by the
+snapped offset (the Content-Aware Move and Patch drags are untouched).
+
+**Verified two ways.** Five new `document.rs` tests on a `10×10`
+canvas with a `2×2` block at `(1, 1)` on the moving layer and another
+at `(6, 6)` on a second layer, every correction worked out by hand
+from the edge lists. A drag of `(2, 0)` at threshold `2` puts the
+mover's right edge one short of the other block's left edge, so `dx`
+becomes `3`, while its top edge at `1` is one from the canvas top, so
+`dy` becomes `−1`; `dx = 10` puts the left edge one past the canvas
+edge and is pulled back to `9`; `dx = 20` is out of reach of
+everything. With a vertical guide at `8`, `dx = 4` leaves the right
+edge one from the guide and the left edge one from the other block —
+a tie the leading edge wins, `5`; `dy = 5` sits exactly on the other
+block's top, correction `0`; `dy = 6` has the top one from that block's
+top and the bottom one from its bottom and the canvas edge, and the
+leading edge's snap wins, `5`; `dy = 7` sits on the block's bottom.
+With a `(1, 1)–(4, 4)` selection, `(1, 0)` snaps to `(2, −1)` — the
+selection's right edge onto the block, its top onto the canvas. Hiding
+the other layer leaves `(2, 3)` alone, a zero threshold never snaps,
+an empty layer passes its offset through, and an unknown layer
+errors. Two of the five passed on the first run: three expectations
+each overlooked one nearer target the rule finds — the canvas edge
+next to a far-flung left edge, the other block's top edge tying with
+the canvas bottom, and the canvas edge next to a selection's left edge
+— and were corrected to what the documented rule gives, checked
+against the edge lists by hand.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and sixty-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drop wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1320 Rust tests total** (1315 → 1320, 1313 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

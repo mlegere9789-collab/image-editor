@@ -2483,6 +2483,21 @@ fn layer_bounds(state: State<'_, AppState>, id: LayerId) -> Result<Option<Rect>,
     document.layer_bounds(id)
 }
 
+/// Smart Guides: snap a Move tool offset for layer `id` onto guides, other
+/// layers' edges, and the canvas edge within `threshold` pixels. Read-only.
+#[tauri::command]
+fn snap_move(
+    state: State<'_, AppState>,
+    id: LayerId,
+    dx: i32,
+    dy: i32,
+    threshold: u32,
+) -> Result<(i32, i32), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.snap_move(id, dx, dy, threshold)
+}
+
 /// View > New Guide.
 #[tauri::command]
 fn add_guide(
@@ -4253,6 +4268,7 @@ pub fn run() {
             remove_background,
             mask_all_objects,
             layer_at,
+            snap_move,
             layer_bounds,
             add_guide,
             remove_guide,
