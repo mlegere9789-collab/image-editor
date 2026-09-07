@@ -738,6 +738,15 @@ fn color_range_bits(
     document.color_range_bits(id, &range)
 }
 
+/// Select > Modify > Feather: soften the selection's edge over `radius`.
+#[tauri::command]
+fn feather_selection(state: State<'_, AppState>, radius: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.feather_selection(radius)?;
+        Ok(None)
+    })
+}
+
 /// Select > Grow: extend the selection to adjacent pixels of layer `id`
 /// within `tolerance` of the colours already selected.
 #[tauri::command]
@@ -4884,6 +4893,7 @@ pub fn run() {
             select_magic_wand,
             select_color_range,
             select_color_range_with,
+            feather_selection,
             color_range_bits,
             grow_selection,
             select_similar,

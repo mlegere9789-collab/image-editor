@@ -104,13 +104,14 @@ const IDENTITY_CURVE = [0, 64, 128, 192, 255];
 
 /** Heading/label text for the Expand/Contract/Smooth/Border shared dialog. */
 const MODIFY_SELECTION_LABELS: Record<
-  "expand" | "contract" | "smooth" | "border",
+  "expand" | "contract" | "smooth" | "border" | "feather",
   { heading: string; control: string }
 > = {
   expand: { heading: "Expand selection", control: "Expand By (px)" },
   contract: { heading: "Contract selection", control: "Contract By (px)" },
   smooth: { heading: "Smooth selection", control: "Smooth Radius (px)" },
   border: { heading: "Border selection", control: "Border Width (px)" },
+  feather: { heading: "Feather selection", control: "Feather Radius (px)" },
 };
 
 /** `#rrggbb` to `[r, g, b]`, each `0..=255`. */
@@ -245,7 +246,9 @@ export default function App() {
 
   // Select > Modify > Expand/Contract/Smooth share one dialog: `null` means
   // closed, otherwise which of the three backend commands Apply should send.
-  const [modifyMode, setModifyMode] = useState<"expand" | "contract" | "smooth" | "border" | null>(
+  const [modifyMode, setModifyMode] = useState<
+    "expand" | "contract" | "smooth" | "border" | "feather" | null
+  >(
     null,
   );
   const [modifyAmount, setModifyAmount] = useState(4);
@@ -303,6 +306,8 @@ export default function App() {
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
+  // The marquee tools' Feather option: applied to each new marquee.
+  const [marqueeFeather, setMarqueeFeather] = useState(0);
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
@@ -1182,6 +1187,8 @@ export default function App() {
       await runCommand("smooth_selection", { radius: modifyAmount });
     } else if (modifyMode === "border") {
       await runCommand("border_selection", { width: modifyAmount });
+    } else if (modifyMode === "feather") {
+      await runCommand("feather_selection", { radius: modifyAmount });
     } else {
       const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
       await runCommand(command, { amount: modifyAmount });
@@ -4649,7 +4656,12 @@ export default function App() {
                   : event.altKey
                     ? "subtract"
                     : selectionMode;
-            void runCommand(command, { x0, y0, x1, y1, mode });
+            void runCommand(command, { x0, y0, x1, y1, mode }).then(() => {
+              if (marqueeFeather > 0) {
+                return runCommand("feather_selection", { radius: marqueeFeather });
+              }
+              return undefined;
+            });
           }
         }
         return;
@@ -4701,6 +4713,7 @@ export default function App() {
       isRectangle,
       document,
       tool,
+      marqueeFeather,
       selectionMode,
       runCommand,
       selectedId,
@@ -5237,6 +5250,14 @@ export default function App() {
             title="Select > Modify > Border"
           >
             Border…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setModifyMode("feather")}
+            disabled={busy || !hasSelection}
+            title="Select > Modify > Feather: soften the selection's edge for painting, filling, cutting, and gradients"
+          >
+            Feather…
           </button>
           <button
             className="button button--quiet"
@@ -7386,6 +7407,23 @@ export default function App() {
                 <option value="subtract">Subtract</option>
                 <option value="intersect">Intersect</option>
               </select>
+            </label>
+          )}
+          {isMarqueeTool && (
+            <label className="tools__slider" title="Feather: soften the edge of each new marquee by this many pixels">
+              Feather
+              <input
+                type="number"
+                min={0}
+                max={250}
+                step={1}
+                value={marqueeFeather}
+                disabled={!hasDocument}
+                onChange={(event) =>
+                  setMarqueeFeather(Math.max(0, Math.min(250, Math.round(Number(event.target.value)))))
+                }
+              />
+              px
             </label>
           )}
           {(tool === "magicWand" || tool === "magicEraser") && (

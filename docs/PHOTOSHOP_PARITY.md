@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 395.**
+**618 distinct capabilities tracked. Currently shipped: 397.**
 
 ## PART I — EVERY TOOL
 
@@ -83,7 +83,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] MODIFY > SMOOTH
 - [x] MODIFY > EXPAND
 - [x] MODIFY > CONTRACT
-- [ ] MODIFY > FEATHER
+- [x] MODIFY > FEATHER (`feather_selection(radius)` and `Selection::coverage`: the selection keeps its shape and gains a radius over which each pixel's coverage is the share of the (2r + 1)² pixel centres around it the hard selection holds — a box blur of the edge — which the Brush, Fill, Cut, and Gradient paths scale by; filters and adjustments still use the hard edge, a documented scope cut — see README Phase 238)
 - [x] GROW (`grow_selection`, extending the selection to every pixel 4-connected to it through pixels whose RGBA lies within the selection's own per-channel colour range widened by the Magic Wand's Tolerance — the Wand's contiguous fill seeded by every selected pixel at once, judged against a range; the result is a pixel-mask selection and repeating the command keeps growing — see README Phase 151)
 - [x] SIMILAR (`select_similar`, extending the selection to every pixel anywhere on the layer whose RGBA lies within the selection's own per-channel colour range widened by the Magic Wand's Tolerance — Grow without the adjacency requirement, as the Wand's non-contiguous mode is to its contiguous one; a pixel-mask selection — see README Phase 152)
 - [ ] SELECT AND MASK
@@ -271,7 +271,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Subtract from Selection (`SelectionMode::Subtract`, the new marquee removed from the current selection pixel by pixel; erroring when nothing is selected or nothing would remain; Alt while dragging — see README Phase 158)
 - [x] Intersect with Selection (`SelectionMode::Intersect`, only what both the current selection and the new marquee cover; erroring when nothing would remain, starting a new selection when nothing is selected; Shift+Alt while dragging — see README Phase 158)
 - [ ] Anti-aliasing
-- [ ] Feather — Selection Tool Option
+- [x] Feather — Selection Tool Option (the marquee tools' Feather field, applied to each new marquee through `feather_selection` — see README Phase 238)
 - [ ] Select and Mask — Refine Edge
 - [ ] Select and Mask — Edge Detection
 - [ ] Select and Mask — Radius

@@ -100,6 +100,8 @@ export type Selection = {
   /** Select > Modify > Border: when set, only a band this many pixels wide
    * hugging the inside of `shape`'s own edge is selected. */
   border: number | null;
+  /** Select > Modify > Feather: the edge's softening radius, 0 for hard. */
+  feather: number;
 };
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */

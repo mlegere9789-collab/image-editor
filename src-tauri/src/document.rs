@@ -1167,6 +1167,11 @@ pub struct Selection {
     /// draws the bounding box of a mask selection) — hence the serde skip.
     #[serde(skip)]
     pub mask: Option<Arc<SelectionMask>>,
+    /// Select > Modify > Feather (and the marquee tools' Feather option):
+    /// a radius in pixels over which the selection's edge is softened.
+    /// `0` is the hard edge. See [`Selection::coverage`].
+    #[serde(default)]
+    pub feather: u32,
 }
 
 /// How a new marquee combines with the selection already there — the four
@@ -1722,6 +1727,28 @@ impl Selection {
             .is_some_and(|inner| shape_contains(self.shape, inner, px, py));
         (in_shape && !in_border_hole) != self.inverted
     }
+
+    /// How much of the pixel centred at `(px, py)` the selection covers,
+    /// `0.0..=1.0`: with no feather, `1` inside and `0` outside; feathered
+    /// by `r`, the share of the `(2r + 1)²` pixel centres around it that
+    /// the hard selection holds — a box blur of the hard edge, which also
+    /// softens against the canvas edge, as Photoshop's feather does.
+    pub fn coverage(&self, px: f32, py: f32) -> f32 {
+        if self.feather == 0 {
+            return if self.contains(px, py) { 1.0 } else { 0.0 };
+        }
+        let r = self.feather as i64;
+        let mut hits = 0u32;
+        for dy in -r..=r {
+            for dx in -r..=r {
+                if self.contains(px + dx as f32, py + dy as f32) {
+                    hits += 1;
+                }
+            }
+        }
+        let n = (2 * r + 1) as f32;
+        hits as f32 / (n * n)
+    }
 }
 
 /// The subset of a [`Selection`] the UI needs to draw its outline.
@@ -1816,6 +1843,7 @@ fn mask_selection(width: u32, height: u32, bits: Vec<bool>) -> Result<Selection,
         bounds,
         inverted: false,
         border: None,
+        feather: 0,
         mask: Some(Arc::new(mask)),
     })
 }
@@ -3084,6 +3112,7 @@ impl Document {
                 bounds,
                 inverted: false,
                 border: None,
+                feather: 0,
                 mask: None,
             },
         )
@@ -3132,6 +3161,7 @@ impl Document {
                 bounds,
                 inverted: false,
                 border: None,
+                feather: 0,
                 mask: Some(Arc::new(mask)),
             },
         )
@@ -3694,6 +3724,7 @@ impl Document {
             },
             inverted: false,
             border: None,
+            feather: 0,
             mask: None,
         });
         Ok(())
@@ -4165,6 +4196,7 @@ impl Document {
             bounds,
             inverted: false,
             border: None,
+            feather: 0,
             mask: Some(Arc::new(mask)),
         });
         Ok(())
@@ -4251,6 +4283,26 @@ impl Document {
         }
         self.reject_mask_selection("Expand")?;
         self.resize_selection_bounds(amount as i64)
+    }
+
+    /// Select > Modify > Feather: softens the selection's edge over
+    /// `radius` pixels (`0..=250`, `0` restoring the hard edge). The
+    /// selection's shape is unchanged; painting, filling, cutting, and
+    /// gradients through it are scaled by [`Selection::coverage`], while
+    /// filters and adjustments still use the hard edge — a documented
+    /// scope cut. The radius replaces any earlier feather rather than
+    /// compounding with it. Errors when nothing is selected or the radius
+    /// is over 250.
+    pub fn feather_selection(&mut self, radius: u32) -> Result<(), String> {
+        if radius > 250 {
+            return Err("Feather Radius must be between 0 and 250 pixels.".to_string());
+        }
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        selection.feather = radius;
+        Ok(())
     }
 
     /// Select > Modify > Contract: shrink the selected region inward by
@@ -5391,12 +5443,25 @@ impl Document {
     /// selected — Photoshop's own "no selection means everything" rule for
     /// Edit > Copy and Edit > Cut.
     fn copy_bounds(&self) -> Rect {
-        self.selection.as_ref().map(|s| s.bounds).unwrap_or(Rect {
-            x0: 0,
-            y0: 0,
-            x1: self.width,
-            y1: self.height,
-        })
+        // A feathered selection reaches `feather` pixels past its hard
+        // bounds, so the box grows by that much, clamped to the canvas.
+        self.selection
+            .as_ref()
+            .map(|s| {
+                let r = s.feather;
+                Rect {
+                    x0: s.bounds.x0.saturating_sub(r),
+                    y0: s.bounds.y0.saturating_sub(r),
+                    x1: (s.bounds.x1 + r).min(self.width),
+                    y1: (s.bounds.y1 + r).min(self.height),
+                }
+            })
+            .unwrap_or(Rect {
+                x0: 0,
+                y0: 0,
+                x1: self.width,
+                y1: self.height,
+            })
     }
 
     /// `layer`'s pixels within `bounds`, masked by the active selection's
@@ -5625,14 +5690,24 @@ impl Document {
         }
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep = selection
+                let coverage = selection
                     .as_ref()
-                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
-                if !keep {
+                    .map_or(1.0, |s| s.coverage(col as f32 + 0.5, row as f32 + 0.5));
+                if coverage <= 0.0 {
                     continue;
                 }
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
-                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+                if coverage >= 1.0 {
+                    layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+                    continue;
+                }
+                // A feathered edge: each byte moves toward the colour by the
+                // coverage, so a clear fades alpha and a fill tints.
+                for (c, &target) in color.iter().enumerate() {
+                    let current = to_unit(layer.pixels[base + c]);
+                    layer.pixels[base + c] =
+                        to_byte(current * (1.0 - coverage) + to_unit(target) * coverage);
+                }
             }
         }
         Ok(())
@@ -10503,9 +10578,7 @@ impl Document {
                     // A soft 1px edge rather than a hard aliased circle.
                     let mut c = (radius - distance + 0.5).clamp(0.0, 1.0);
                     if let Some(selection) = &selection {
-                        if !selection.contains(cx, cy) {
-                            c = 0.0;
-                        }
+                        c *= selection.coverage(cx, cy);
                     }
                     let slot = &mut coverage[row * box_width + col];
                     if c > *slot {
@@ -11024,16 +11097,16 @@ impl Document {
         for py in 0..height {
             for px in 0..width {
                 let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
-                if let Some(selection) = &selection {
-                    if !selection.contains(cx, cy) {
-                        continue;
-                    }
+                let coverage = selection.as_ref().map_or(1.0, |s| s.coverage(cx, cy));
+                if coverage <= 0.0 {
+                    continue;
                 }
                 let t = (((cx - x0) * dx + (cy - y0) * dy) / len_sq).clamp(0.0, 1.0);
 
                 let base = (py as usize * width as usize + px as usize) * CHANNELS;
                 let dest_alpha = to_unit(layer.pixels[base + 3]);
-                let source_alpha = lerp(to_unit(start_color[3]), to_unit(end_color[3]), t);
+                let source_alpha =
+                    lerp(to_unit(start_color[3]), to_unit(end_color[3]), t) * coverage;
                 let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
                 for channel in 0..3 {
                     let cs = lerp(
@@ -39620,6 +39693,108 @@ mod tests {
         assert!(doc.transform_to_bounds(id, rect(0, 0, 2, 2)).is_err());
     }
 
+    fn feathered_5x5() -> Document {
+        let mut doc = Document::new(5, 5).unwrap();
+        doc.select_rectangle(1.0, 1.0, 4.0, 4.0).unwrap();
+        doc.feather_selection(1).unwrap();
+        doc
+    }
+
+    fn coverage_at(doc: &Document, x: u32, y: u32) -> f32 {
+        doc.selection()
+            .unwrap()
+            .coverage(x as f32 + 0.5, y as f32 + 0.5)
+    }
+
+    #[test]
+    fn feather_coverage_averages_the_hard_selection_over_the_radius() {
+        // A 3×3 rectangle at (1, 1) feathered by 1: each pixel's coverage is
+        // the share of the nine pixel centres around it that the hard
+        // selection holds — the middle 9/9, a corner of the rectangle 4/9,
+        // the canvas corner 1/9, an edge midpoint just outside 3/9, and one
+        // just inside 6/9.
+        let doc = feathered_5x5();
+        assert_eq!(doc.selection().unwrap().feather, 1);
+        assert_eq!(coverage_at(&doc, 2, 2), 1.0);
+        assert_eq!(coverage_at(&doc, 1, 1), 4.0 / 9.0);
+        assert_eq!(coverage_at(&doc, 0, 0), 1.0 / 9.0);
+        assert_eq!(coverage_at(&doc, 2, 0), 3.0 / 9.0);
+        assert_eq!(coverage_at(&doc, 2, 1), 6.0 / 9.0);
+        // Feather 0 is the hard selection: 1 inside, 0 outside.
+        let mut hard = Document::new(5, 5).unwrap();
+        hard.select_rectangle(1.0, 1.0, 4.0, 4.0).unwrap();
+        assert_eq!(coverage_at(&hard, 2, 2), 1.0);
+        assert_eq!(coverage_at(&hard, 0, 0), 0.0);
+    }
+
+    #[test]
+    fn a_brush_dab_through_a_feathered_edge_is_scaled_by_coverage() {
+        let mut doc = feathered_5x5();
+        let id = doc.add_layer("l", &[0; 100], 5, 5).unwrap();
+        let red = Stroke::Brush {
+            color: [255, 0, 0, 255],
+        };
+        for (x, y) in [(2u32, 2u32), (2, 0), (2, 1), (0, 0)] {
+            doc.stroke(id, &[(x as f32 + 0.5, y as f32 + 0.5)], 0.5, red)
+                .unwrap();
+        }
+        // Full inside; 3/9 → 85, 6/9 → 170, 1/9 → 28 at the edges.
+        assert_eq!(pixel(&doc, id, 2, 2), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 0, 0, 85]);
+        assert_eq!(pixel(&doc, id, 2, 1), [255, 0, 0, 170]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 28]);
+    }
+
+    #[test]
+    fn a_fill_through_a_feathered_edge_blends_by_coverage() {
+        // Blue over white: full inside, a ninth at the canvas corner
+        // (255 · 8/9 → 227 in red and green), untouched beyond the reach.
+        let mut doc = Document::new(7, 7).unwrap();
+        let id = doc.add_layer("l", &[255; 196], 7, 7).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        doc.feather_selection(1).unwrap();
+        doc.fill_selection(id, [0, 0, 255, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 3, 3), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [227, 227, 255, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        // Cutting through the feather scales alpha down by the coverage.
+        doc.cut(id).unwrap();
+        assert_eq!(pixel(&doc, id, 3, 3)[3], 0);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 227);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
+    }
+
+    #[test]
+    fn feather_follows_inverse_and_is_dropped_by_a_new_selection() {
+        let mut doc = feathered_5x5();
+        doc.invert_selection().unwrap();
+        assert_eq!(doc.selection().unwrap().feather, 1);
+        assert_eq!(coverage_at(&doc, 2, 2), 0.0);
+        assert_eq!(coverage_at(&doc, 0, 0), 8.0 / 9.0);
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        assert_eq!(doc.selection().unwrap().feather, 0);
+        assert_eq!(coverage_at(&doc, 0, 0), 1.0);
+        doc.feather_selection(2).unwrap();
+        assert_eq!(doc.selection().unwrap().feather, 2);
+        doc.feather_selection(0).unwrap();
+        assert_eq!(doc.selection().unwrap().feather, 0);
+    }
+
+    #[test]
+    fn feather_validates_and_reports_through_the_view() {
+        let mut doc = Document::new(3, 3).unwrap();
+        assert!(doc.feather_selection(1).is_err());
+        doc.select_all().unwrap();
+        assert!(doc.feather_selection(251).is_err());
+        assert_eq!(doc.view().selection.unwrap().feather, 0);
+        doc.feather_selection(3).unwrap();
+        assert_eq!(doc.view().selection.unwrap().feather, 3);
+        // Select All feathered by 3 on a 3×3: the centre sees 9 of 49.
+        assert_eq!(coverage_at(&doc, 1, 1), 9.0 / 49.0);
+        doc.deselect();
+        assert!(doc.selection().is_none());
+    }
+
     #[test]
     fn combining_honours_the_new_shape_and_the_old_selections_form() {
         // Select All minus the canvas-spanning ellipse on 4x4 leaves exactly
@@ -40849,6 +41024,7 @@ mod tests {
                 },
                 inverted: false,
                 border: None,
+                feather: 0,
                 mask: None,
             })
         );
@@ -40892,6 +41068,7 @@ mod tests {
                 },
                 inverted: false,
                 border: None,
+                feather: 0,
                 mask: None,
             })
         );

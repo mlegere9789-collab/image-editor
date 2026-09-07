@@ -14169,6 +14169,64 @@ by hand instead. Every other layer of this project's quality bar
 **1430 Rust tests total** (1425 → 1430, 1423 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 238 — Feather
+
+Selections gain a soft edge. `Selection` carries a `feather` radius
+(serde-defaulted to `0`, the hard edge every earlier selection has),
+and `Selection::coverage(px, py)` is how much of a pixel the selection
+holds: `1` or `0` unfeathered, and feathered by `r` the share of the
+`(2r + 1)²` pixel centres around it that the hard selection contains
+— a box blur of the edge, which also softens against the canvas edge
+as Photoshop's does. `feather_selection(radius)` sets the radius on
+the current selection (`0..=250`, `0` restoring the hard edge,
+replacing rather than compounding an earlier feather), erroring with
+nothing selected. Four paint paths now scale by coverage instead of
+asking a yes-or-no question: the Brush's per-pixel coverage is
+multiplied by it, Fill and Cut (`paint_region`) move each byte toward
+the target colour by it — so a clear fades alpha and a fill tints —
+and the Gradient tool multiplies its source alpha by it. Inverse
+inverts the coverage with the shape, and a new marquee starts hard
+again. Filters, adjustments, and the other selection readers still
+use the hard edge, a documented scope cut to be closed path by path.
+A **Feather…** entry joins the Modify group's dialog, and the marquee
+tools gain a Feather field applied to each new marquee. Anti-aliasing
+of the hard edge itself remains unshipped.
+
+**Verified two ways.** Five new `document.rs` tests, the coverage
+bytes first computed in Python emulating `f32`. A 3×3 rectangle at
+`(1, 1)` on a 5×5 canvas feathered by `1` gives coverage `9/9` at the
+middle, `4/9` at the rectangle's corner, `1/9` at the canvas corner,
+`3/9` just outside an edge midpoint and `6/9` just inside; unfeathered
+it is `1` inside and `0` out. Red brush dabs through that edge land at
+alpha `255`, `85`, `170`, and `28`. On a 7×7 canvas a blue fill
+through a feathered rectangle is pure blue inside, `[227, 227, 255]`
+at a ninth of coverage, and untouched beyond reach; Cut then leaves
+alpha `0`, `227`, and `255` at the same pixels — a case that first
+failed, since Fill and Cut only visited the selection's hard bounds
+and never reached the feathered ring outside them, so `copy_bounds`
+now grows by the feather radius. Inverse turns the
+middle's coverage to `0` and the canvas corner's to `8/9`, a new
+rectangle resets the feather, and `2` then `0` set and clear it. With
+nothing selected feathering errors, `251` errors, Select All feathered
+by `3` on a 3×3 gives the centre `9/49`, and Deselect clears
+everything. Four of the five passed on the first run; the fill test
+exposed the bounds gap above, which was a real bug in the new code,
+not in the expectation.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The controls were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1435 Rust tests total** (1430 → 1435, 1428 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
