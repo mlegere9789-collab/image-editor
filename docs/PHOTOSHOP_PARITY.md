@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 262.**
+**618 distinct capabilities tracked. Currently shipped: 263.**
 
 ## PART I — EVERY TOOL
 
@@ -59,7 +59,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] TRIANGLE TOOL
 - [ ] POLYGON TOOL
 - [ ] STAR TOOL
-- [ ] LINE TOOL
+- [x] LINE TOOL (`Document::draw_line`, Pixels mode: a straight line of a given weight painted by the pixel-centre rule — perpendicular distance at most half the weight and projection between the ends, so butt caps — in a flat colour, confined by the selection; arrowheads, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 189)
 - [ ] CUSTOM SHAPE TOOL
 - [ ] FRAME TOOL
 - [x] EYEDROPPER TOOL

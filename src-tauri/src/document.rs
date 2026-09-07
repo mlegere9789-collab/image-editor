@@ -2828,6 +2828,79 @@ impl Document {
         self.draw_shape(id, SelectionShape::Ellipse, x0, y0, x1, y1, fill, stroke)
     }
 
+    /// The Line tool in its Pixels mode: paints a straight line of
+    /// `weight` pixels from `(x0, y0)` to `(x1, y1)` onto layer `id` in a
+    /// flat `color`. A pixel is painted when its centre lies within the
+    /// line's rectangle — its perpendicular distance to the segment is at
+    /// most `weight / 2` *and* its projection falls between the two ends
+    /// (butt caps, as Photoshop draws them; a centre past either end is
+    /// left alone even when it is within `weight / 2` of the endpoint) —
+    /// the same hard pixel-centre rule the other shape tools use, so
+    /// Photoshop's Anti-alias option is a documented scope cut, as are its
+    /// arrowheads and its Shape and Path modes. Pixels are overwritten
+    /// outright and the active selection confines the paint. Returns the
+    /// segment's bounding box grown by `weight / 2` and clipped to the
+    /// canvas, or `None` — painting nothing — for a zero-length line or
+    /// one entirely off the canvas. Errors for a `weight` outside
+    /// `1..=250`, non-finite ends, or a locked or unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_line(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        weight: u32,
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&weight) {
+            return Err("Line weight must be between 1 and 250.".to_string());
+        }
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return Err("Line coordinates must be finite numbers.".to_string());
+        }
+        let (dx, dy) = (x1 - x0, y1 - y0);
+        let len_sq = dx * dx + dy * dy;
+        if len_sq <= f32::EPSILON {
+            return Ok(None);
+        }
+        let half = weight as f32 / 2.0;
+        let Ok(bounds) = normalize_selection_bounds(
+            x0.min(x1) - half,
+            y0.min(y1) - half,
+            x0.max(x1) + half,
+            y0.max(y1) + half,
+            self.width,
+            self.height,
+        ) else {
+            return Ok(None);
+        };
+        let selection = self.selection.clone();
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let length = len_sq.sqrt();
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
+                let along = ((px - x0) * dx + (py - y0) * dy) / len_sq;
+                let across = ((px - x0) * dy - (py - y0) * dx).abs() / length;
+                if !(0.0..=1.0).contains(&along)
+                    || across > half
+                    || selection.as_ref().is_some_and(|s| !s.contains(px, py))
+                {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// The pixel-mode shape tools' shared painter. The box is normalised
     /// and clipped to the canvas exactly as the marquee tools' is, and a
     /// pixel is inside `shape` when its centre is — the same `+0.5`
@@ -20780,6 +20853,136 @@ mod tests {
         assert!(doc
             .draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, Some(FILL), None)
             .is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn line_tool_paints_a_row_of_its_weight() {
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 1, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 2,
+                x1: 5,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".....", "FFFFF", ".....", "....."]
+        );
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 3, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 1,
+                x1: 5,
+                y1: 4
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", "FFFFF", "FFFFF", "FFFFF", "....."]
+        );
+    }
+
+    #[test]
+    fn line_tool_follows_a_diagonal() {
+        // Off-diagonal centres sit 1/√2 ≈ 0.707 from the line: outside a
+        // weight-1 line's half-width of 0.5, inside a weight-2 line's 1.0.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_line(id, 0.0, 0.0, 5.0, 5.0, 1, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["F....", ".F...", "..F..", "...F.", "....F"]
+        );
+        let (mut doc, id) = blank_5x5();
+        doc.draw_line(id, 0.0, 0.0, 5.0, 5.0, 2, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["FF...", "FFF..", ".FFF.", "..FFF", "...FF"]
+        );
+        // A shallow slant: (1, 1)'s centre is 0.447 from the line, inside.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_line(id, 0.5, 0.5, 4.5, 2.5, 1, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["FF...", ".FFF.", "...FF", ".....", "....."]
+        );
+    }
+
+    #[test]
+    fn line_tool_stops_at_its_ends() {
+        // Butt caps: (0, 2) and (4, 2) are within 0.5 of an endpoint but
+        // project past it, so they stay untouched; a reversed drag is the
+        // same line.
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_line(id, 1.0, 2.5, 4.0, 2.5, 1, FILL).unwrap();
+        // The dirty box grows by the half-weight along the line too, so
+        // it is one pixel wider than the painted run at each end.
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 2,
+                x1: 5,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".....", ".FFF.", ".....", "....."]
+        );
+        let (mut doc, id) = blank_5x5();
+        doc.draw_line(id, 2.5, 4.0, 2.5, 1.0, 1, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", "..F..", "..F..", "..F..", "....."]
+        );
+    }
+
+    #[test]
+    fn line_tool_respects_the_selection_and_clips_to_the_canvas() {
+        let (mut doc, id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        let dirty = doc.draw_line(id, -3.0, 2.5, 9.0, 2.5, 1, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 2,
+                x1: 5,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".....", "FF...", ".....", "....."]
+        );
+        // Entirely off the canvas: nothing to paint.
+        assert_eq!(
+            doc.draw_line(id, 0.0, 9.0, 5.0, 9.0, 1, FILL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn line_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 0, FILL).is_err());
+        assert!(doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 251, FILL).is_err());
+        assert!(doc.draw_line(id, f32::NAN, 2.5, 5.0, 2.5, 1, FILL).is_err());
+        assert_eq!(
+            doc.draw_line(id, 2.0, 2.0, 2.0, 2.0, 1, FILL).unwrap(),
+            None
+        );
+        assert!(doc.draw_line(id + 1, 0.0, 2.5, 5.0, 2.5, 1, FILL).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.draw_line(id, 0.0, 2.5, 5.0, 2.5, 1, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }
 

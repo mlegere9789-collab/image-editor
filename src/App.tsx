@@ -814,6 +814,8 @@ export default function App() {
   const [shapeStrokeWidth, setShapeStrokeWidth] = useState(0);
   const [shapeStrokeColor, setShapeStrokeColor] = useState("#000000");
   const [shapeRadius, setShapeRadius] = useState(0);
+  // Line tool: the line's weight in pixels; it is painted in the brush colour.
+  const [lineWeight, setLineWeight] = useState(1);
 
   // The gradient drag's live start point — a ref, not state, read directly
   // at pointerup the same way `marqueeStart` below is; the gradient itself
@@ -3107,7 +3109,7 @@ export default function App() {
   const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
   // The pixel-mode shape tools share one drag, preview, and options bar.
-  const isRectangle = tool === "rectangle" || tool === "ellipse";
+  const isRectangle = tool === "rectangle" || tool === "ellipse" || tool === "line";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3570,7 +3572,17 @@ export default function App() {
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
             const fill = shapeFill ? [r, g, b, 255] : null;
             const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
-            if (tool === "ellipse") {
+            if (tool === "line") {
+              void runCommand("draw_line", {
+                id: selectedId,
+                x0,
+                y0,
+                x1,
+                y1,
+                weight: lineWeight,
+                color: [r, g, b, 255],
+              });
+            } else if (tool === "ellipse") {
               void runCommand("draw_ellipse", { id: selectedId, x0, y0, x1, y1, fill, stroke });
             } else {
               void runCommand("draw_rectangle", {
@@ -3661,6 +3673,7 @@ export default function App() {
       shapeStrokeWidth,
       shapeStrokeColor,
       shapeRadius,
+      lineWeight,
     ],
   );
 
@@ -4372,6 +4385,15 @@ export default function App() {
             title="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
           >
             Ellipse
+          </button>
+          <button
+            className={`button button--quiet${tool === "line" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "line"}
+            onClick={() => setTool("line")}
+            title="Line: drag to paint a straight line of the chosen weight in the brush colour"
+          >
+            Line
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5631,6 +5653,20 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "line" && (
+            <label className="tools__slider">
+              Weight
+              <input
+                type="range"
+                min={1}
+                max={50}
+                value={lineWeight}
+                disabled={!canPaint}
+                onChange={(event) => setLineWeight(Number(event.target.value))}
+              />
+              {lineWeight}px
+            </label>
           )}
           {(tool === "rectangle" || tool === "ellipse") && (
             <>
@@ -14651,7 +14687,25 @@ export default function App() {
                   if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
                 }}
               />
-              {marqueePreview && (
+              {marqueePreview && tool === "line" && (
+                <svg
+                  className="lasso-preview"
+                  viewBox={`0 0 ${document.width} ${document.height}`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <line
+                    x1={marqueePreview.start[0]}
+                    y1={marqueePreview.start[1]}
+                    x2={marqueePreview.current[0]}
+                    y2={marqueePreview.current[1]}
+                    stroke="#fff"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
+              {marqueePreview && tool !== "line" && (
                 <div
                   className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
                   style={overlayStyle(

@@ -11633,6 +11633,70 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1185 Rust tests total** (1180 → 1185, 1178 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 189 — Line tool
+
+`Document::draw_line(id, x0, y0, x1, y1, weight, color)` is the Line
+tool in its Pixels mode: a straight line `weight` pixels wide from one
+drag end to the other, painted in a flat colour. A pixel is painted
+when its centre lies inside the line's rectangle — its perpendicular
+distance to the segment is at most `weight / 2` *and* its projection
+along the segment falls between the two ends. The second condition is
+what gives the line Photoshop's butt caps: a pixel centre within half
+the weight of an endpoint but past it is left alone, where the brush
+tools' round capsule would have painted it. It is the same hard
+pixel-centre rule the Rectangle and Ellipse tools use, so Photoshop's
+Anti-alias option is a documented scope cut, as are its arrowheads and
+its Shape and Path modes. Pixels are overwritten outright and the
+active selection confines the paint. The dirty box is the segment's
+bounding box grown by `weight / 2` on every side and clipped to the
+canvas; a zero-length line or one entirely off the canvas paints
+nothing and returns `None`, and a weight outside `1..=250`, a
+non-finite end, or a locked or unknown layer errors.
+
+A new **Line** tool button sits after Ellipse with a **Weight**
+slider; the drag shows a live one-pixel preview line (the Lasso's SVG
+overlay with a `<line>` in it) and paints at pointer-up through a
+`draw_line` command in the brush colour.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python model of the projection-and-distance
+rule. On a blank `5×5`, a weight-1 line along `y = 2.5` paints the
+middle row and a weight-3 line paints the middle three. Along the
+`(0, 0)`→`(5, 5)` diagonal, off-diagonal centres sit `1/√2 ≈ 0.707`
+from the line — outside weight 1's half-width of `0.5`, inside weight
+2's `1.0` — so weight 1 paints the five diagonal pixels and weight 2
+adds both neighbouring diagonals; a `(0.5, 0.5)`→`(4.5, 2.5)` slant
+paints `FF... / .FFF. / ...FF`, with `(1, 1)`'s centre `0.447` from the
+line. A weight-1 line from `x = 1` to `x = 4` paints only `(1, 2)`,
+`(2, 2)`, `(3, 2)` — `(0, 2)` and `(4, 2)` are `0.5` from an endpoint
+but project past it — and a reversed vertical drag paints the same
+three pixels as the forward one. A line from `x = −3` to `x = 9` with
+the two left columns selected paints only those two pixels of the
+middle row and reports the clipped `(0, 2)–(5, 3)` box; a line at
+`y = 9` returns `None`. Weight `0` and `251`, a `NaN` end, an unknown
+layer, and a locked layer all error with the pixels untouched, and a
+zero-length line returns `None`. Four of the five passed on the first
+run: every painted grid matched, but the end-cap test expected the
+dirty box of the `x = 1`→`4` line to be `(1, 2)–(4, 3)`, the painted
+run, whereas the box grows by the half-weight along the line as well as
+across it — `0.5` floors to `0`, `4.5` ceils to `5` — so it is
+`(0, 2)–(5, 3)`, one pixel wider than the run at each end, exactly as
+the doc comment states. The test now expects that.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-six: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1190 Rust tests total** (1185 → 1190, 1183 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

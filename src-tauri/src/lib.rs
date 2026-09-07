@@ -2197,6 +2197,24 @@ fn draw_ellipse(
     })
 }
 
+/// Line tool (Pixels mode): paint a straight line of a given weight.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn draw_line(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    weight: u32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_line(id, x0, y0, x1, y1, weight, color)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3683,6 +3701,7 @@ pub fn run() {
             remove_stroke,
             draw_rectangle,
             draw_ellipse,
+            draw_line,
             clone_stroke,
             set_history_source,
             history_stroke,

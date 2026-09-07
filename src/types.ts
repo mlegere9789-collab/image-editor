@@ -149,6 +149,7 @@ export type Tool =
   | "contentAwareMove"
   | "rectangle"
   | "ellipse"
+  | "line"
   | "historyBrush"
   | "magicWand"
   | "lasso"
