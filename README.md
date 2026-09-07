@@ -9941,6 +9941,57 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1015 Rust tests total** (1010 → 1015, 1008 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 155 — Edit > Copy Merged
+
+`copy_merged()` is Edit > Copy of what is actually on screen: every
+visible layer composited together with its opacity and blend mode,
+exactly as the canvas shows them, captured within the active
+selection's shape (or the whole canvas) into the same `Clipboard` that
+Copy fills, so Paste, Paste in Place, Paste Into, and Paste Outside all
+take it unchanged. It reuses the app's own `composite::flatten` — the
+single place the W3C source-over math lives, which the canvas view, Merge
+Visible, and Flatten Image already share — so the copied bytes are the
+displayed bytes by construction, not a second implementation of the
+blend. Hidden layers and layers at zero opacity contribute nothing; an
+all-hidden document errors, as Photoshop greys the command out. The
+selection-masked extraction that Copy used on one layer's pixels now
+takes any document-sized buffer (`extract(source, bounds)`), so the two
+commands share it. Copy Merged is read-only like Copy: nothing to
+checkpoint, no lock check. A new **Copy Merged** button sits beside
+Copy, with **Shift+Ctrl+C** bound to it (plain Ctrl+C still copies the
+selected layer alone).
+
+**Verified two ways.** Five new `document.rs` tests on a new
+`ramped_3x3_with_overlay` fixture — `ramped_3x3` plus a second layer
+holding one opaque pixel at `(0, 0)` and nothing else — with the one
+blended value cross-checked in Python emulating the composite's `f32`
+arithmetic. With an opaque `200` overlaid, Copy Merged's `3×3`
+clipboard (origin `(0, 0)–(3, 3)`) reads `200` at `(0, 0)` and the base's
+`20` and `90` at `(1, 0)` and `(2, 2)`; hiding the overlay puts the base's
+`10` back. An opaque `255` red at 50% layer opacity over the base's `10`
+gives `0.5 × 1.0 + 0.5 × 10/255 = 0.5196` → `133` at full alpha, the
+canvas's own bytes. A `(1, 1)–(3, 3)` rectangle yields a `2×2` clipboard
+at that origin holding exactly `50 60 / 80 90`, and the canvas-spanning
+ellipse on `ramped_4x4` drops exactly the corners (`(0, 0)` transparent,
+`(1, 0)` opaque `20`), as Copy's own tests established. Hiding the only
+layer errors with a message mentioning "visible". All five passed on the
+first run; Copy's and Cut's own tests run unchanged through the shared
+extraction.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and two: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's and shortcut's wiring was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1020 Rust tests total** (1015 → 1020, 1013 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

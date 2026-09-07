@@ -649,6 +649,17 @@ fn copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     snapshot(&state, document, None)
 }
 
+/// Edit > Copy Merged: capture the visible composite within the active
+/// selection into the clipboard. Read-only, like [`copy`].
+#[tauri::command]
+fn copy_merged(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    let clipboard = document.copy_merged()?;
+    *state.clipboard.lock().map_err(|_| POISONED.to_string())? = Some(clipboard);
+    snapshot(&state, document, None)
+}
+
 /// Edit > Cut: [`copy`], then clears the copied pixels from layer `id`.
 #[tauri::command]
 fn cut(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -3003,6 +3014,7 @@ pub fn run() {
             rotate_document_90,
             constrain_crop,
             copy,
+            copy_merged,
             cut,
             paste,
             paste_into,

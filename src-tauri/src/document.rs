@@ -1921,7 +1921,7 @@ impl Document {
     /// rectangle, a bordered ring, an inverted selection, ...) comes out
     /// fully transparent rather than copied, exactly as a paste of that
     /// same shape would look pasted onto an empty layer.
-    fn extract(&self, layer: &Layer, bounds: Rect) -> Clipboard {
+    fn extract(&self, source: &[u8], bounds: Rect) -> Clipboard {
         let width = bounds.x1 - bounds.x0;
         let height = bounds.y1 - bounds.y0;
         let doc_width = self.width as usize;
@@ -1939,7 +1939,7 @@ impl Document {
                 }
                 let src = (py as usize * doc_width + px as usize) * CHANNELS;
                 let dst = (row as usize * width as usize + col as usize) * CHANNELS;
-                pixels[dst..dst + CHANNELS].copy_from_slice(&layer.pixels[src..src + CHANNELS]);
+                pixels[dst..dst + CHANNELS].copy_from_slice(&source[src..src + CHANNELS]);
             }
         }
         Clipboard {
@@ -1959,7 +1959,23 @@ impl Document {
     pub fn copy(&self, id: LayerId) -> Result<Clipboard, String> {
         let layer = self.layer(id)?;
         let bounds = self.copy_bounds();
-        Ok(self.extract(layer, bounds))
+        Ok(self.extract(&layer.pixels, bounds))
+    }
+
+    /// Edit > Copy Merged: like [`Self::copy`], but captures what is
+    /// actually on screen — every visible layer composited together with
+    /// its opacity and blend mode, exactly as the canvas shows them — within
+    /// the active selection (or the whole canvas), rather than one layer's
+    /// own pixels. Hidden layers and layers at zero opacity contribute
+    /// nothing. Errors when no layer is visible, as Photoshop greys the
+    /// command out on an all-hidden document. Read-only, like Copy.
+    pub fn copy_merged(&self) -> Result<Clipboard, String> {
+        if !self.layers.iter().any(|layer| layer.contributes()) {
+            return Err("Copy Merged needs at least one visible layer.".to_string());
+        }
+        let composite = crate::composite::flatten(self);
+        let bounds = self.copy_bounds();
+        Ok(self.extract(&composite.pixels, bounds))
     }
 
     /// Edit > Cut: [`Self::copy`], then clears the copied pixels (to fully
@@ -25996,6 +26012,99 @@ mod tests {
         let err = doc.paste_outside(&clipboard, "outside").unwrap_err();
         assert!(err.contains("Paste Outside"), "{err}");
         assert_eq!(doc.layers().len(), 1);
+    }
+
+    /// ramped_3x3 with a second layer holding one opaque pixel, `top`, at
+    /// (0, 0) and nothing else.
+    fn ramped_3x3_with_overlay(top: [u8; 4]) -> (Document, LayerId) {
+        let (mut doc, _) = ramped_3x3();
+        let mut pixels = vec![0u8; 36];
+        pixels[..4].copy_from_slice(&top);
+        let over = doc.add_layer("over", &pixels, 3, 3).unwrap();
+        (doc, over)
+    }
+
+    fn clip_pixel(clipboard: &Clipboard, x: u32, y: u32) -> [u8; 4] {
+        let base = (y * clipboard.width + x) as usize * CHANNELS;
+        let mut px = [0u8; 4];
+        px.copy_from_slice(&clipboard.pixels[base..base + CHANNELS]);
+        px
+    }
+
+    #[test]
+    fn copy_merged_captures_the_visible_composite() {
+        // The overlay's opaque 200 covers the base's 10 at (0, 0); every
+        // other pixel shows the base through the overlay's transparency.
+        let (doc, _) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        let clipboard = doc.copy_merged().unwrap();
+        assert_eq!((clipboard.width, clipboard.height), (3, 3));
+        assert_eq!(
+            clipboard.origin,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert_eq!(clip_pixel(&clipboard, 0, 0), [200, 0, 0, 255]);
+        assert_eq!(clip_pixel(&clipboard, 1, 0), [20, 0, 0, 255]);
+        assert_eq!(clip_pixel(&clipboard, 2, 2), [90, 0, 0, 255]);
+    }
+
+    #[test]
+    fn copy_merged_skips_hidden_layers() {
+        let (mut doc, over) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        doc.set_visible(over, false).unwrap();
+        let clipboard = doc.copy_merged().unwrap();
+        assert_eq!(clip_pixel(&clipboard, 0, 0), [10, 0, 0, 255]);
+    }
+
+    #[test]
+    fn copy_merged_blends_layer_opacity() {
+        // Opaque 255 red at 50% layer opacity over the base's 10: Normal
+        // source-over gives 0.5 * 1.0 + 0.5 * 10/255 = 0.5196 -> 133, at
+        // full alpha, the same bytes the canvas shows.
+        let (mut doc, over) = ramped_3x3_with_overlay([255, 0, 0, 255]);
+        doc.set_opacity(over, 0.5).unwrap();
+        let clipboard = doc.copy_merged().unwrap();
+        assert_eq!(clip_pixel(&clipboard, 0, 0), [133, 0, 0, 255]);
+        assert_eq!(clip_pixel(&clipboard, 1, 0), [20, 0, 0, 255]);
+    }
+
+    #[test]
+    fn copy_merged_respects_the_selection_and_its_shape() {
+        let (mut doc, _) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        let clipboard = doc.copy_merged().unwrap();
+        assert_eq!((clipboard.width, clipboard.height), (2, 2));
+        assert_eq!(
+            clipboard.origin,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert_eq!(
+            clipboard.pixels,
+            vec![50, 0, 0, 255, 60, 0, 0, 255, 80, 0, 0, 255, 90, 0, 0, 255]
+        );
+        // The canvas-spanning ellipse on 4x4 drops exactly the corners.
+        let (mut doc, _) = ramped_4x4();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        let clipboard = doc.copy_merged().unwrap();
+        assert_eq!(clip_pixel(&clipboard, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(clip_pixel(&clipboard, 1, 0), [20, 0, 0, 255]);
+    }
+
+    #[test]
+    fn copy_merged_with_nothing_visible_is_an_error() {
+        let (mut doc, id) = ramped_3x3();
+        doc.set_visible(id, false).unwrap();
+        let err = doc.copy_merged().unwrap_err();
+        assert!(err.contains("visible"), "{err}");
     }
 
     #[test]

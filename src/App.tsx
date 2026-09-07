@@ -1542,6 +1542,11 @@ export default function App() {
     setCanPaste(true);
   }, [runCommand, selectedId]);
 
+  const copyMerged = useCallback(async () => {
+    await runCommand("copy_merged", {});
+    setCanPaste(true);
+  }, [runCommand]);
+
   const cutSelection = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("cut", { id: selectedId });
@@ -2700,9 +2705,12 @@ export default function App() {
       } else if (key === "i" && event.shiftKey) {
         event.preventDefault();
         if (hasSelection && !busy) invertSelection();
-      } else if (key === "c") {
+      } else if (key === "c" && !event.shiftKey) {
         event.preventDefault();
         if (selectedId !== null && !busy) void copySelection();
+      } else if (key === "c" && event.shiftKey) {
+        event.preventDefault();
+        if (document !== null && !busy) void copyMerged();
       } else if (key === "x") {
         event.preventDefault();
         if (selectedId !== null && !busy) void cutSelection();
@@ -2738,6 +2746,7 @@ export default function App() {
     invertSelection,
     selectedId,
     copySelection,
+    copyMerged,
     cutSelection,
     canPaste,
     pasteClipboard,
@@ -3222,6 +3231,14 @@ export default function App() {
             title="Edit > Copy"
           >
             Copy
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={copyMerged}
+            disabled={busy || !hasDocument}
+            title="Edit > Copy Merged (Shift+Ctrl+C: copies every visible layer composited, as shown on the canvas)"
+          >
+            Copy Merged
           </button>
           <button
             className="button button--quiet"

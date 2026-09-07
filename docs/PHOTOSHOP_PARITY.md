@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 216.**
+**618 distinct capabilities tracked. Currently shipped: 217.**
 
 ## PART I — EVERY TOOL
 
@@ -318,7 +318,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Move Selection
 - [ ] Transform Selection
 - [x] Copy
-- [ ] Copy Merged
+- [x] Copy Merged (`copy_merged`, Edit > Copy of the on-screen composite — every visible layer flattened with its opacity and blend mode — within the active selection's shape or the whole canvas; hidden layers contribute nothing and an all-hidden document errors — see README Phase 155)
 - [x] Cut
 - [x] Paste
 - [x] Paste Special > Paste in Place (identical to plain Paste in this app — see README Phase 18)
