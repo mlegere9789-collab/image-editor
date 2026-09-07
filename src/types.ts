@@ -104,7 +104,15 @@ export type Selection = {
   feather: number;
   /** The selection tools' Anti-alias option: a supersampled edge. */
   antiAlias: boolean;
+  /** Select and Mask > Contrast, 0–100. */
+  contrast: number;
+  /** Select and Mask > Shift Edge, −100..100. */
+  shiftEdge: number;
 };
+
+/** Mirrors `RefineEdge` / `SelectAndMaskOutput` in src-tauri/src/document.rs. */
+export type RefineEdge = { smooth: number; feather: number; contrast: number; shiftEdge: number };
+export type SelectAndMaskOutput = "selection" | "layerMask" | "newLayer" | "newLayerWithMask";
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */
 export type DocumentView = {

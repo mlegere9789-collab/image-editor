@@ -32,6 +32,8 @@ import type {
   Palette,
   Proof,
   ReferencePoint,
+  RefineEdge,
+  SelectAndMaskOutput,
   SelectionMode,
   SelectionShape,
   ShapeBlurKernel,
@@ -310,6 +312,10 @@ export default function App() {
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
   const [marqueeAntiAlias, setMarqueeAntiAlias] = useState(true);
+  // Select and Mask: the Global Refinements and Output To.
+  const [showSelectAndMask, setShowSelectAndMask] = useState(false);
+  const [refine, setRefine] = useState<RefineEdge>({ smooth: 0, feather: 0, contrast: 0, shiftEdge: 0 });
+  const [selectAndMaskOutput, setSelectAndMaskOutput] = useState<SelectAndMaskOutput>("selection");
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
@@ -1197,6 +1203,25 @@ export default function App() {
     }
     setModifyMode(null);
   }, [runCommand, modifyMode, modifyAmount]);
+
+  const openSelectAndMask = useCallback(() => {
+    const selection = document?.selection;
+    setRefine({
+      smooth: 0,
+      feather: selection?.feather ?? 0,
+      contrast: selection?.contrast ?? 0,
+      shiftEdge: selection?.shiftEdge ?? 0,
+    });
+    setShowSelectAndMask(true);
+  }, [document]);
+
+  const applySelectAndMask = useCallback(async () => {
+    await runCommand("refine_selection", { refine });
+    if (selectAndMaskOutput !== "selection" && selectedId !== null) {
+      await runCommand("select_and_mask_output", { id: selectedId, output: selectAndMaskOutput });
+    }
+    setShowSelectAndMask(false);
+  }, [runCommand, refine, selectAndMaskOutput, selectedId]);
 
   const applyThreshold = useCallback(async () => {
     if (selectedId === null) return;
@@ -5266,6 +5291,14 @@ export default function App() {
             title="Select > Modify > Feather: soften the selection's edge for painting, filling, cutting, and gradients"
           >
             Feather…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openSelectAndMask}
+            disabled={busy || !hasSelection}
+            title="Select > Select and Mask: Smooth, Feather, Contrast, Shift Edge, and Output To"
+          >
+            Select and Mask…
           </button>
           <button
             className="button button--quiet"
@@ -9617,6 +9650,69 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCalculations} disabled={busy}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSelectAndMask && (
+        <div className="modal-overlay" onClick={() => setShowSelectAndMask(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Select and Mask"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Select &gt; Select and Mask</h2>
+            <p className="modal__hint">
+              Global Refinements on the current selection, then where the result goes. Edge
+              Detection and Decontaminate Colors are not offered.
+            </p>
+            {(
+              [
+                ["smooth", "Smooth (px)", 0, 100],
+                ["feather", "Feather (px)", 0, 250],
+                ["contrast", "Contrast (%)", 0, 100],
+                ["shiftEdge", "Shift Edge (%)", -100, 100],
+              ] as const
+            ).map(([key, label, min, max]) => (
+              <label className="control" key={key}>
+                <span className="control__label">
+                  {label}
+                  <span className="control__value">{refine[key]}</span>
+                </span>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  value={refine[key]}
+                  onChange={(event) => setRefine((r) => ({ ...r, [key]: Number(event.target.value) }))}
+                />
+              </label>
+            ))}
+            <label className="control control--row">
+              <span className="control__label">Output To</span>
+              <select
+                value={selectAndMaskOutput}
+                onChange={(event) => setSelectAndMaskOutput(event.target.value as SelectAndMaskOutput)}
+              >
+                <option value="selection">Selection</option>
+                <option value="layerMask">Layer Mask</option>
+                <option value="newLayer">New Layer</option>
+                <option value="newLayerWithMask">New Layer with Layer Mask</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSelectAndMask(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applySelectAndMask}
+                disabled={busy || (selectAndMaskOutput !== "selection" && selectedId === null)}
+              >
                 OK
               </button>
             </div>

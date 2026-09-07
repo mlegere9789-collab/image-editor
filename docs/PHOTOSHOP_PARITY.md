@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 398.**
+**618 distinct capabilities tracked. Currently shipped: 406.**
 
 ## PART I — EVERY TOOL
 
@@ -86,7 +86,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] MODIFY > FEATHER (`feather_selection(radius)` and `Selection::coverage`: the selection keeps its shape and gains a radius over which each pixel's coverage is the share of the (2r + 1)² pixel centres around it the hard selection holds — a box blur of the edge — which the Brush, Fill, Cut, and Gradient paths scale by; filters and adjustments still use the hard edge, a documented scope cut — see README Phase 238)
 - [x] GROW (`grow_selection`, extending the selection to every pixel 4-connected to it through pixels whose RGBA lies within the selection's own per-channel colour range widened by the Magic Wand's Tolerance — the Wand's contiguous fill seeded by every selected pixel at once, judged against a range; the result is a pixel-mask selection and repeating the command keeps growing — see README Phase 151)
 - [x] SIMILAR (`select_similar`, extending the selection to every pixel anywhere on the layer whose RGBA lies within the selection's own per-channel colour range widened by the Magic Wand's Tolerance — Grow without the adjacency requirement, as the Wand's non-contiguous mode is to its contiguous one; a pixel-mask selection — see README Phase 152)
-- [ ] SELECT AND MASK
+- [x] SELECT AND MASK (`refine_selection(RefineEdge)` — Smooth, Feather, Contrast, Shift Edge on the selection's coverage — and `select_and_mask_output(id, output)`; Edge Detection's Radius and Smart Radius and Decontaminate Colors are documented scope cuts — see README Phase 240)
 
 ## PART III — EVERY MAJOR LAYER SYSTEM
 
@@ -272,17 +272,17 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Intersect with Selection (`SelectionMode::Intersect`, only what both the current selection and the new marquee cover; erroring when nothing would remain, starting a new selection when nothing is selected; Shift+Alt while dragging — see README Phase 158)
 - [x] Anti-aliasing (`Selection.anti_alias` / `set_anti_alias`: an unfeathered edge's coverage is supersampled 4×4 within each pixel, so an ellipse edge takes paint, fills, cuts, and gradients in proportion to the pixel it covers; the Elliptical Marquee's Anti-alias checkbox, on by default; a feather supersedes it — see README Phase 239)
 - [x] Feather — Selection Tool Option (the marquee tools' Feather field, applied to each new marquee through `feather_selection` — see README Phase 238)
-- [ ] Select and Mask — Refine Edge
+- [x] Select and Mask — Refine Edge (the dialog itself, `Select and Mask…`, applying the four refinements together — see README Phase 240)
 - [ ] Select and Mask — Edge Detection
 - [ ] Select and Mask — Radius
 - [ ] Select and Mask — Smart Radius
-- [ ] Select and Mask — Smooth
-- [ ] Select and Mask — Feather
-- [ ] Select and Mask — Contrast
-- [ ] Select and Mask — Shift Edge
+- [x] Select and Mask — Smooth (`RefineEdge.smooth`, Select > Modify > Smooth's rounding when above zero — see README Phase 240)
+- [x] Select and Mask — Feather (`RefineEdge.feather`, the selection's feather radius — see README Phase 240)
+- [x] Select and Mask — Contrast (`Selection.contrast`: coverage pulled away from a half by `1 / (1 − contrast/100)`, `100` a hard threshold — see README Phase 240)
+- [x] Select and Mask — Shift Edge (`Selection.shift_edge`: the percentage added to every pixel the edge reaches, clamped, before Contrast — see README Phase 240)
 - [ ] Select and Mask — Decontaminate Colors
-- [ ] Select and Mask — Output Settings
-- [ ] Select and Mask — Output To
+- [x] Select and Mask — Output Settings (the dialog's Output To select and its OK — see README Phase 240)
+- [x] Select and Mask — Output To (`SelectAndMaskOutput`: Selection, Layer Mask from `coverage_mask`, New Layer with alpha scaled by coverage, or New Layer with Layer Mask — see README Phase 240)
 - [x] Select > Modify > Expand
 - [x] Select > Modify > Contract
 - [x] Color Range — Sampled Colors (`ColorRange::Sampled { samples, … }` in `color_range_bits` / `select_color_range_with`: any number of sampled colours, a pixel matching when it is within Fuzziness of any of them; samples come from the colour picker or an on-image eyedropper that records the pixel — see README Phase 226)

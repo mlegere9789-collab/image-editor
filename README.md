@@ -14271,6 +14271,61 @@ by hand instead. Every other layer of this project's quality bar
 **1440 Rust tests total** (1435 → 1440, 1433 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 240 — Select and Mask
+
+Select > Select and Mask arrives as its Global Refinements and Output
+To. `Selection` gains `contrast` (`0..=100`) and `shift_edge`
+(`-100..=100`), and `coverage` now post-processes its raw feathered or
+anti-aliased value: Shift Edge adds its percentage to every pixel the
+edge reaches (a pixel the hard edge never reaches stays empty, so the
+selection cannot grow past its feather), then Contrast pulls coverage
+away from a half by `1 / (1 − contrast/100)`, `100` being a hard
+threshold there. `refine_selection(RefineEdge)` applies Smooth (as
+Select > Modify > Smooth, when above zero), Feather, Contrast, and
+Shift Edge together after checking every range and that something is
+selected. `coverage_mask()` renders the coverage of every pixel as
+mask bytes, and `select_and_mask_output(id, output)` sends the result
+where Output To says: Selection leaves it; Layer Mask gives the layer
+that soft mask; New Layer duplicates the layer with every pixel's
+alpha scaled by its coverage; New Layer with Layer Mask duplicates it
+carrying the mask. A **Select and Mask…** dialog carries the four
+sliders and the Output To select. Edge Detection's Radius and Smart
+Radius, Decontaminate Colors, and the view modes are documented scope
+cuts.
+
+**Verified two ways.** Five new `document.rs` tests on the feathered
+3×3 rectangle of Phase 238, the bytes first computed in Python
+emulating `f32`. Contrast `50` doubles each coverage's distance from
+a half — `4/9` and `6/9` become `0.389` and `0.833` while `0` and `1`
+stay — and Contrast `100` snaps them to `0` and `1`. Shift Edge `+50`
+adds a half to `4/9` and `1/9`, `−50` takes it from `4/9` (to `0`),
+`6/9`, and `1`, and a pixel the edge never reaches stays empty even at
+`+100`. With nothing selected refining errors; Feather `251`, Contrast
+`101`, and Shift Edge `±101` are refused leaving the selection as it
+was; and a full refinement rounds the rectangle by `2` and sets `3`,
+`40`, `−20`, all reported through the view. The coverage mask reads
+`28`, `113`, and `255` at the canvas corner, the rectangle's corner,
+and the middle; Output To Layer Mask installs exactly it, and the
+composite's alpha there is `113` and `255`. Output To New Layer copies
+alpha `200` as `89`, `22`, and `200` through the same coverages with
+the original untouched, New Layer with Layer Mask copies it whole with
+the mask, and Selection adds nothing. All five passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1445 Rust tests total** (1440 → 1445, 1438 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

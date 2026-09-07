@@ -738,6 +738,36 @@ fn color_range_bits(
     document.color_range_bits(id, &range)
 }
 
+/// Select and Mask: apply its Global Refinements to the current selection.
+#[tauri::command]
+fn refine_selection(
+    state: State<'_, AppState>,
+    refine: document::RefineEdge,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.refine_selection(&refine)?;
+        Ok(None)
+    })
+}
+
+/// Select and Mask > Output To on layer `id`.
+#[tauri::command]
+fn select_and_mask_output(
+    state: State<'_, AppState>,
+    id: LayerId,
+    output: document::SelectAndMaskOutput,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_and_mask_output(id, output)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// The selection tools' Anti-alias option on the current selection.
 #[tauri::command]
 fn set_anti_alias(state: State<'_, AppState>, on: bool) -> Result<Snapshot, String> {
@@ -4904,6 +4934,8 @@ pub fn run() {
             select_color_range_with,
             feather_selection,
             set_anti_alias,
+            refine_selection,
+            select_and_mask_output,
             color_range_bits,
             grow_selection,
             select_similar,

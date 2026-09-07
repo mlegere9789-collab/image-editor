@@ -1177,6 +1177,35 @@ pub struct Selection {
     /// at its centre. See [`Selection::coverage`].
     #[serde(default)]
     pub anti_alias: bool,
+    /// Select and Mask > Contrast (`0..=100`): steepens the soft edge —
+    /// see [`Selection::coverage`].
+    #[serde(default)]
+    pub contrast: u8,
+    /// Select and Mask > Shift Edge (`-100..=100` percent): moves the soft
+    /// edge outward (positive) or inward.
+    #[serde(default)]
+    pub shift_edge: i8,
+}
+
+/// Select and Mask's Global Refinements, applied together by
+/// [`Document::refine_selection`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RefineEdge {
+    pub smooth: u32,
+    pub feather: u32,
+    pub contrast: u8,
+    pub shift_edge: i8,
+}
+
+/// Select and Mask > Output To.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectAndMaskOutput {
+    Selection,
+    LayerMask,
+    NewLayer,
+    NewLayerWithMask,
 }
 
 /// How a new marquee combines with the selection already there — the four
@@ -1739,6 +1768,29 @@ impl Selection {
     /// the hard selection holds — a box blur of the hard edge, which also
     /// softens against the canvas edge, as Photoshop's feather does.
     pub fn coverage(&self, px: f32, py: f32) -> f32 {
+        let raw = self.raw_coverage(px, py);
+        if self.shift_edge == 0 && self.contrast == 0 {
+            return raw;
+        }
+        // Select and Mask's refinements: Shift Edge adds its percentage to
+        // every pixel the edge reaches (a pixel the hard edge never reaches
+        // stays empty), then Contrast pulls coverage away from a half —
+        // 100 being a hard threshold there.
+        let mut c = raw;
+        if self.shift_edge != 0 && raw > 0.0 {
+            c = (raw + f32::from(self.shift_edge) / 100.0).clamp(0.0, 1.0);
+        }
+        if self.contrast >= 100 {
+            return if c >= 0.5 { 1.0 } else { 0.0 };
+        }
+        if self.contrast > 0 {
+            c = (0.5 + (c - 0.5) / (1.0 - f32::from(self.contrast) / 100.0)).clamp(0.0, 1.0);
+        }
+        c
+    }
+
+    /// [`Self::coverage`] before Select and Mask's Contrast and Shift Edge.
+    fn raw_coverage(&self, px: f32, py: f32) -> f32 {
         if self.feather == 0 {
             if self.anti_alias {
                 // 4×4 sub-samples across the pixel square `[px − ½, px + ½)`.
@@ -1864,6 +1916,8 @@ fn mask_selection(width: u32, height: u32, bits: Vec<bool>) -> Result<Selection,
         border: None,
         feather: 0,
         anti_alias: false,
+        contrast: 0,
+        shift_edge: 0,
         mask: Some(Arc::new(mask)),
     })
 }
@@ -3134,6 +3188,8 @@ impl Document {
                 border: None,
                 feather: 0,
                 anti_alias: false,
+                contrast: 0,
+                shift_edge: 0,
                 mask: None,
             },
         )
@@ -3184,6 +3240,8 @@ impl Document {
                 border: None,
                 feather: 0,
                 anti_alias: false,
+                contrast: 0,
+                shift_edge: 0,
                 mask: Some(Arc::new(mask)),
             },
         )
@@ -3748,6 +3806,8 @@ impl Document {
             border: None,
             feather: 0,
             anti_alias: false,
+            contrast: 0,
+            shift_edge: 0,
             mask: None,
         });
         Ok(())
@@ -4221,6 +4281,8 @@ impl Document {
             border: None,
             feather: 0,
             anti_alias: false,
+            contrast: 0,
+            shift_edge: 0,
             mask: Some(Arc::new(mask)),
         });
         Ok(())
@@ -4327,6 +4389,90 @@ impl Document {
             .ok_or_else(|| "Nothing is selected.".to_string())?;
         selection.feather = radius;
         Ok(())
+    }
+
+    /// Select and Mask's Global Refinements applied together: Smooth (as
+    /// Select > Modify > Smooth, when above zero), Feather, Contrast, and
+    /// Shift Edge set on the current selection. Every value is checked
+    /// first — Feather `0..=250`, Contrast `0..=100`, Shift Edge
+    /// `-100..=100` — and nothing is selected errors. Edge Detection's
+    /// Radius and Smart Radius, and Decontaminate Colors, are documented
+    /// scope cuts.
+    pub fn refine_selection(&mut self, refine: &RefineEdge) -> Result<(), String> {
+        if refine.feather > 250 {
+            return Err("Feather must be between 0 and 250 pixels.".to_string());
+        }
+        if refine.contrast > 100 {
+            return Err("Contrast must be between 0 and 100 percent.".to_string());
+        }
+        if !(-100..=100).contains(&refine.shift_edge) {
+            return Err("Shift Edge must be between -100 and 100 percent.".to_string());
+        }
+        if self.selection.is_none() {
+            return Err("Nothing is selected.".to_string());
+        }
+        if refine.smooth > 0 {
+            self.smooth_selection(refine.smooth)?;
+        }
+        let selection = self.selection.as_mut().expect("checked above");
+        selection.feather = refine.feather;
+        selection.contrast = refine.contrast;
+        selection.shift_edge = refine.shift_edge;
+        Ok(())
+    }
+
+    /// The selection's coverage of every pixel as mask bytes, row-major —
+    /// what Select and Mask writes out as a soft layer mask. Errors when
+    /// nothing is selected.
+    pub fn coverage_mask(&self) -> Result<Vec<u8>, String> {
+        let selection = self
+            .selection
+            .as_ref()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        let mut mask = Vec::with_capacity(self.width as usize * self.height as usize);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                mask.push(to_byte(selection.coverage(x as f32 + 0.5, y as f32 + 0.5)));
+            }
+        }
+        Ok(mask)
+    }
+
+    /// Select and Mask > Output To for layer `id`: Selection leaves the
+    /// refined selection as it is; Layer Mask gives the layer the
+    /// coverage as a soft mask; New Layer adds a copy of the layer above
+    /// it with every pixel's alpha scaled by its coverage; New Layer with
+    /// Layer Mask adds a full copy carrying the coverage mask. Returns the
+    /// new layer's id when one is made. The selection stays either way.
+    pub fn select_and_mask_output(
+        &mut self,
+        id: LayerId,
+        output: SelectAndMaskOutput,
+    ) -> Result<Option<LayerId>, String> {
+        self.layer(id)?;
+        match output {
+            SelectAndMaskOutput::Selection => Ok(None),
+            SelectAndMaskOutput::LayerMask => {
+                let mask = self.coverage_mask()?;
+                self.set_layer_mask(id, mask)?;
+                Ok(None)
+            }
+            SelectAndMaskOutput::NewLayer => {
+                let mask = self.coverage_mask()?;
+                let copy = self.duplicate_layer(id)?;
+                let layer = self.layer_mut(copy)?;
+                for (px, &m) in layer.pixels.chunks_exact_mut(CHANNELS).zip(mask.iter()) {
+                    px[3] = to_byte(to_unit(px[3]) * to_unit(m));
+                }
+                Ok(Some(copy))
+            }
+            SelectAndMaskOutput::NewLayerWithMask => {
+                let mask = self.coverage_mask()?;
+                let copy = self.duplicate_layer(id)?;
+                self.set_layer_mask(copy, mask)?;
+                Ok(Some(copy))
+            }
+        }
     }
 
     /// The selection tools' Anti-alias option on the current selection:
@@ -39919,6 +40065,164 @@ mod tests {
         assert!(doc.set_anti_alias(true).is_err());
     }
 
+    fn refined(contrast: u8, shift_edge: i8) -> Document {
+        let mut doc = feathered_5x5();
+        doc.refine_selection(&RefineEdge {
+            smooth: 0,
+            feather: 1,
+            contrast,
+            shift_edge,
+        })
+        .unwrap();
+        doc
+    }
+
+    #[test]
+    fn select_and_mask_contrast_steepens_the_soft_edge() {
+        // Contrast 50 doubles each coverage's distance from a half; 100 is
+        // a hard threshold at a half.
+        let doc = refined(50, 0);
+        assert_eq!(coverage_at(&doc, 1, 1), 0.5 + (4.0 / 9.0 - 0.5) / 0.5);
+        assert_eq!(coverage_at(&doc, 2, 1), 0.5 + (6.0 / 9.0 - 0.5) / 0.5);
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        assert_eq!(coverage_at(&doc, 2, 2), 1.0);
+        let doc = refined(100, 0);
+        assert_eq!(coverage_at(&doc, 1, 1), 0.0);
+        assert_eq!(coverage_at(&doc, 2, 1), 1.0);
+        assert_eq!(coverage_at(&doc, 2, 2), 1.0);
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+    }
+
+    #[test]
+    fn select_and_mask_shift_edge_moves_the_soft_edge() {
+        // +50 adds a half to every covered pixel; −50 takes it away.
+        let doc = refined(0, 50);
+        assert_eq!(coverage_at(&doc, 1, 1), (4.0f32 / 9.0 + 0.5).min(1.0));
+        assert_eq!(coverage_at(&doc, 0, 0), 1.0 / 9.0 + 0.5);
+        assert_eq!(coverage_at(&doc, 2, 2), 1.0);
+        let doc = refined(0, -50);
+        assert_eq!(coverage_at(&doc, 1, 1), 0.0);
+        assert_eq!(coverage_at(&doc, 2, 1), 6.0 / 9.0 - 0.5);
+        assert_eq!(coverage_at(&doc, 2, 2), 0.5);
+        // A pixel the hard edge never reaches stays empty either way.
+        let mut doc = Document::new(7, 7).unwrap();
+        doc.select_rectangle(2.0, 2.0, 5.0, 5.0).unwrap();
+        doc.refine_selection(&RefineEdge {
+            smooth: 0,
+            feather: 1,
+            contrast: 0,
+            shift_edge: 100,
+        })
+        .unwrap();
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        assert_eq!(coverage_at(&doc, 1, 1), 1.0);
+    }
+
+    #[test]
+    fn refine_selection_sets_every_refinement_and_validates() {
+        let mut doc = Document::new(6, 6).unwrap();
+        assert!(doc
+            .refine_selection(&RefineEdge {
+                smooth: 0,
+                feather: 1,
+                contrast: 0,
+                shift_edge: 0
+            })
+            .is_err());
+        doc.select_rectangle(0.0, 0.0, 6.0, 6.0).unwrap();
+        for bad in [
+            RefineEdge {
+                smooth: 0,
+                feather: 251,
+                contrast: 0,
+                shift_edge: 0,
+            },
+            RefineEdge {
+                smooth: 0,
+                feather: 0,
+                contrast: 101,
+                shift_edge: 0,
+            },
+            RefineEdge {
+                smooth: 0,
+                feather: 0,
+                contrast: 0,
+                shift_edge: 101,
+            },
+            RefineEdge {
+                smooth: 0,
+                feather: 0,
+                contrast: 0,
+                shift_edge: -101,
+            },
+        ] {
+            assert!(doc.refine_selection(&bad).is_err());
+        }
+        let selection = doc.selection().unwrap();
+        assert_eq!(
+            (selection.feather, selection.contrast, selection.shift_edge),
+            (0, 0, 0)
+        );
+        doc.refine_selection(&RefineEdge {
+            smooth: 2,
+            feather: 3,
+            contrast: 40,
+            shift_edge: -20,
+        })
+        .unwrap();
+        let view = doc.view().selection.unwrap();
+        assert_eq!(view.shape, SelectionShape::RoundedRectangle { radius: 2 });
+        assert_eq!((view.feather, view.contrast, view.shift_edge), (3, 40, -20));
+    }
+
+    #[test]
+    fn output_to_layer_mask_bakes_the_coverage_into_a_soft_mask() {
+        let mut doc = feathered_5x5();
+        let id = doc.add_layer("l", &[255; 100], 5, 5).unwrap();
+        let mask = doc.coverage_mask().unwrap();
+        assert_eq!(mask[0], 28);
+        assert_eq!(mask[6], 113);
+        assert_eq!(mask[12], 255);
+        doc.select_and_mask_output(id, SelectAndMaskOutput::LayerMask)
+            .unwrap();
+        assert_eq!(doc.layers()[0].mask.as_deref(), Some(&mask[..]));
+        // The soft mask scales the composite's alpha: 255 · 4/9 → 113.
+        assert_eq!(crate::composite::composite_pixel(&doc, 1, 1)[3], 113);
+        assert_eq!(crate::composite::composite_pixel(&doc, 2, 2)[3], 255);
+        assert!(doc.selection().is_some());
+    }
+
+    #[test]
+    fn output_to_new_layers_copies_through_the_coverage() {
+        let mut doc = feathered_5x5();
+        let id = doc.add_layer("l", &[200; 100], 5, 5).unwrap();
+        let copy = doc
+            .select_and_mask_output(id, SelectAndMaskOutput::NewLayer)
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.view().layers.len(), 2);
+        assert_eq!(doc.layers()[1].id, copy);
+        // Alpha 200 through 4/9 → 89, through 1/9 → 22, full inside.
+        assert_eq!(pixel(&doc, copy, 1, 1), [200, 200, 200, 89]);
+        assert_eq!(pixel(&doc, copy, 0, 0), [200, 200, 200, 22]);
+        assert_eq!(pixel(&doc, copy, 2, 2), [200, 200, 200, 200]);
+        assert!(doc.layers()[1].mask.is_none());
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 200, 200, 200]);
+        let masked = doc
+            .select_and_mask_output(id, SelectAndMaskOutput::NewLayerWithMask)
+            .unwrap()
+            .unwrap();
+        assert_eq!(doc.view().layers.len(), 3);
+        assert_eq!(pixel(&doc, masked, 0, 0), [200, 200, 200, 200]);
+        assert_eq!(doc.layers()[1].mask.as_deref().map(|m| m[0]), Some(28));
+        assert_eq!(
+            doc.select_and_mask_output(id, SelectAndMaskOutput::Selection)
+                .unwrap(),
+            None
+        );
+        assert_eq!(doc.view().layers.len(), 3);
+    }
+
     #[test]
     fn combining_honours_the_new_shape_and_the_old_selections_form() {
         // Select All minus the canvas-spanning ellipse on 4x4 leaves exactly
@@ -41150,6 +41454,8 @@ mod tests {
                 border: None,
                 feather: 0,
                 anti_alias: false,
+                contrast: 0,
+                shift_edge: 0,
                 mask: None,
             })
         );
@@ -41195,6 +41501,8 @@ mod tests {
                 border: None,
                 feather: 0,
                 anti_alias: false,
+                contrast: 0,
+                shift_edge: 0,
                 mask: None,
             })
         );
