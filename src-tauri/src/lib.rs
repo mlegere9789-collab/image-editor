@@ -2597,6 +2597,21 @@ fn camera_raw_point_curve(
     })
 }
 
+/// Camera Raw Filter > Color Grading on layer `id`; each wheel is
+/// `[hue_degrees, saturation]`.
+#[tauri::command]
+fn color_grading(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shadows: [i32; 2],
+    midtones: [i32; 2],
+    highlights: [i32; 2],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.color_grading(id, shadows, midtones, highlights)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2849,6 +2864,7 @@ pub fn run() {
             rgb_levels,
             shadow_clipping,
             camera_raw_point_curve,
+            color_grading,
             select_rectangle,
             select_ellipse,
             select_all,

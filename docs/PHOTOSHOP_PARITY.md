@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 192.**
+**618 distinct capabilities tracked. Currently shipped: 193.**
 
 ## PART I — EVERY TOOL
 
@@ -632,7 +632,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Targeted Adjustment Tool
 - [ ] Color Mixer
 - [ ] Point Color
-- [ ] Color Grading
+- [x] Color Grading (`color_grading`, three `[hue, saturation]` wheels for shadows/midtones/highlights, each converted into `color_balance`'s own three per-channel sliders for that range via `tint = hsl_to_rgb(hue, 1, 0.5)`, `slider = round((tint/255 − 0.5) × 2 × saturation)`, then applied by Color Balance's own luma-weighted blend — an exact composition. Camera Raw's own per-wheel Luminance, Global wheel, and Blending/Balance are a documented scope cut — see README Phase 131)
 - [ ] Optics
 - [x] Defringe (`defringe`, desaturates pixels in proportion to a `sobel_at`-based edge-strength measured on a luma buffer, via `rgb_to_hsl`/`hsl_to_rgb`. Photoshop's own separate purple/green Amount+Hue sliders are a documented broadening rather than an invented narrow approximation, since defensible hue-range boundaries for each fringe colour would risk fabricating Photoshop's own exact thresholds — see README Phase 120)
 - [ ] Geometry

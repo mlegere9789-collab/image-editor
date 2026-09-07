@@ -9885,6 +9885,39 @@ impl Document {
     ) -> Result<Option<Rect>, String> {
         self.curves(id, points)
     }
+
+    /// Camera Raw Filter > Color Grading: tints a layer's shadows,
+    /// midtones, and highlights toward three independently chosen hues,
+    /// each by its own saturation — Camera Raw's three colour wheels,
+    /// reduced to a hue angle and a saturation per wheel. Built entirely
+    /// on [`Self::color_balance`]: each wheel's `(hue, saturation)` is
+    /// turned into the three per-channel Color Balance sliders for that
+    /// tonal range, and Color Balance's own luma-weighted blending does
+    /// the rest. The conversion is `tint = hsl_to_rgb(hue, 1.0, 0.5)` (the
+    /// fully saturated hue at mid lightness) and, per channel,
+    /// `slider = round((tint / 255 - 0.5) * 2 * saturation)`, so a pure
+    /// hue's own channel is pushed by `+saturation`, its opposite channels
+    /// by `-saturation`, and a secondary hue's middle channel lands in
+    /// between (hue `0` at saturation `50` is `(+50, -50, -50)`; hue `30`
+    /// is `(+50, 0, -50)`). `hue` wraps modulo `360` and `saturation` is
+    /// Camera Raw's own `0..=100`, clamped. Camera Raw's own per-wheel
+    /// Luminance sliders, Global wheel, and Blending/Balance controls are
+    /// a documented scope cut.
+    pub fn color_grading(
+        &mut self,
+        id: LayerId,
+        shadows: [i32; 2],
+        midtones: [i32; 2],
+        highlights: [i32; 2],
+    ) -> Result<Option<Rect>, String> {
+        let sliders = |[hue, saturation]: [i32; 2]| -> [i32; 3] {
+            let hue = hue.rem_euclid(360) as f32;
+            let saturation = saturation.clamp(0, 100) as f32;
+            let (r, g, b) = hsl_to_rgb(hue, 1.0, 0.5);
+            [r, g, b].map(|tint| ((tint as f32 / 255.0 - 0.5) * 2.0 * saturation).round() as i32)
+        };
+        self.color_balance(id, sliders(shadows), sliders(midtones), sliders(highlights))
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -23053,6 +23086,83 @@ mod tests {
         assert!(doc.camera_raw_point_curve(id, IDENTITY_CURVE).is_err());
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.camera_raw_point_curve(999, IDENTITY_CURVE).is_err());
+    }
+
+    #[test]
+    fn color_grading_tints_only_the_highlights_toward_a_highlight_hue() {
+        // Hue 0 at saturation 50 becomes sliders (+50, -50, -50). Grey 200
+        // has luma 200: highlight weight (200 - 128) / 127 = 0.566929,
+        // shadow weight 0, so the shift is +-28.35: (228, 172, 172). Grey
+        // 40 has no highlight weight at all and is untouched.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[200, 200, 200, 255, 40, 40, 40, 255], 2, 1)
+            .unwrap();
+        doc.color_grading(id, [0, 0], [0, 0], [0, 50]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [228, 172, 172, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [40, 40, 40, 255]);
+    }
+
+    #[test]
+    fn color_grading_tints_only_the_shadows_toward_a_shadow_hue() {
+        // Hue 240 at saturation 50 becomes (-50, -50, +50). Grey 40 has
+        // shadow weight (127 - 40) / 127 = 0.685039, so the shift is
+        // -+34.25: (6, 6, 74). Grey 200 has no shadow weight: untouched.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[40, 40, 40, 255, 200, 200, 200, 255], 2, 1)
+            .unwrap();
+        doc.color_grading(id, [240, 50], [0, 0], [0, 0]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [6, 6, 74, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn color_grading_midtones_apply_fully_at_luma_128() {
+        // Hue 120 at saturation 40 becomes (-40, +40, -40); grey 128 is
+        // pure midtone (weight exactly 1.0): (88, 168, 88).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.color_grading(id, [0, 0], [120, 40], [0, 0]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [88, 168, 88, 255]);
+    }
+
+    #[test]
+    fn color_grading_is_color_balance_with_hue_derived_sliders() {
+        // Hue 30 (orange) at saturation 50: tint (255, 128, 0) gives
+        // sliders (+50, 0, -50) -- the secondary channel lands at
+        // round((128/255 - 0.5) * 100) = 0. Hue 420 wraps to 60 (yellow):
+        // (+50, +50, -50).
+        let (mut via_grading, id_a) = ramped_3x3();
+        let (mut via_balance, id_b) = ramped_3x3();
+        via_grading
+            .color_grading(id_a, [420, 50], [240, 999], [30, 50])
+            .unwrap();
+        via_balance
+            .color_balance(id_b, [50, 50, -50], [-100, -100, 100], [50, 0, -50])
+            .unwrap();
+        assert_eq!(
+            via_grading.layers()[0].pixels,
+            via_balance.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn color_grading_is_confined_to_the_selection_and_propagates_errors() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[128, 128, 128, 255, 128, 128, 128, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.color_grading(id, [0, 0], [120, 40], [0, 0]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [88, 168, 88, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.color_grading(id, [0, 50], [0, 0], [0, 0]).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.color_grading(999, [0, 50], [0, 0], [0, 0]).is_err());
     }
 
     #[test]

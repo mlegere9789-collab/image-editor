@@ -8589,6 +8589,66 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **889 Rust tests total** (885 → 889, 882 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 131 — Camera Raw Filter > Color Grading
+
+`color_grading(id, shadows, midtones, highlights)` tints a layer's
+shadows, midtones, and highlights toward three independently chosen
+hues, each by its own saturation — Camera Raw's three colour wheels,
+reduced to a `[hue, saturation]` pair per wheel. It is built entirely
+on Phase 11's `color_balance`: each wheel's pair is turned into the
+three per-channel Color Balance sliders for that tonal range, and Color
+Balance's own luma-weighted blending (`shadow_weight = clamp((127 -
+luma) / 127, 0, 1)`, `highlight_weight = clamp((luma - 128) / 127, 0,
+1)`, midtones the remainder) does the rest, so no new blending math was
+written. The conversion is `tint = hsl_to_rgb(hue, 1.0, 0.5)` — the
+fully saturated hue at mid lightness — and, per channel, `slider =
+round((tint / 255 - 0.5) × 2 × saturation)`, so a pure hue's own channel
+is pushed by `+saturation`, its two opposite channels by `-saturation`,
+and a secondary hue's middle channel lands in between: hue `0` at
+saturation `50` is `(+50, -50, -50)`, hue `30` (orange, tint `(255,
+128, 0)`) is `(+50, 0, -50)` because `round((128/255 - 0.5) × 100) =
+0`. `hue` wraps modulo `360` and `saturation` is Camera Raw's own
+`0..=100`, clamped rather than erroring, matching `color_balance`'s own
+convention. Camera Raw's own per-wheel Luminance sliders, its fourth
+Global wheel, and its Blending and Balance controls are a documented
+scope cut. A new **Color Grading…** dialog exposes a hue and a
+saturation slider for each of the three ranges.
+
+**Verified two ways.** Five new `document.rs` tests. Highlights at hue
+`0`, saturation `50`, on grey `200` (luma `200`, highlight weight
+`(200 - 128) / 127 = 0.566929`, shadow weight `0`): shift `±28.35`,
+giving `(228, 172, 172)`, while grey `40` beside it has no highlight
+weight and stays untouched. Shadows at hue `240`, saturation `50`, on
+grey `40` (shadow weight `(127 - 40) / 127 = 0.685039`): shift `∓34.25`,
+giving `(6, 6, 74)`, while grey `200` stays untouched. Midtones at hue
+`120`, saturation `40`, on grey `128` (midtone weight exactly `1.0`):
+`(88, 168, 88)`. A fourth test confirms the composition is exact: hue
+`420` (wrapping to `60`, yellow), an out-of-range saturation `999`
+(clamping to `100`) at hue `240`, and hue `30` at `50` produce
+byte-for-byte the same `ramped_3x3` result as `color_balance` called
+directly with the hand-derived triples `(+50, +50, -50)`, `(-100,
+-100, +100)`, `(+50, 0, -50)`. A fifth confines the midtone tint to a
+one-pixel selection and confirms a locked/unknown layer errors. All
+five passed on the first run, the slider derivation and all three
+pixel results cross-checked against an independent Python script that
+reuses the existing `hsl_to_rgb` port and emulates `color_balance`'s
+own `f32` luma and weight arithmetic via `struct.pack`/`unpack`
+round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**894 Rust tests total** (889 → 894, 887 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

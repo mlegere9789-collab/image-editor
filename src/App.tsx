@@ -250,6 +250,12 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showColorGradingDialog, setShowColorGradingDialog] = useState(false);
+  const [colorGrading, setColorGrading] = useState<[number, number][]>([
+    [220, 0],
+    [40, 0],
+    [40, 0],
+  ]);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
   const [defringeAmount, setDefringeAmount] = useState(50);
 
@@ -933,6 +939,25 @@ export default function App() {
     await runCommand("camera_raw_point_curve", { id: selectedId, points: pointCurvePoints });
     setShowPointCurveDialog(false);
   }, [runCommand, selectedId, pointCurvePoints]);
+
+  const setColorGradingValue = useCallback((range: number, slot: 0 | 1, value: number) => {
+    setColorGrading((wheels) =>
+      wheels.map((wheel, i) =>
+        i === range ? ((slot === 0 ? [value, wheel[1]] : [wheel[0], value]) as [number, number]) : wheel,
+      ),
+    );
+  }, []);
+
+  const applyColorGrading = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("color_grading", {
+      id: selectedId,
+      shadows: colorGrading[0],
+      midtones: colorGrading[1],
+      highlights: colorGrading[2],
+    });
+    setShowColorGradingDialog(false);
+  }, [runCommand, selectedId, colorGrading]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3227,6 +3252,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowColorGradingDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Color Grading"
+          >
+            Color Grading…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5124,6 +5157,68 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPointCurve} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorGradingDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorGradingDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Grading"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Color Grading</h2>
+            {(["Shadows", "Midtones", "Highlights"] as const).map((name, range) => (
+              <div key={name}>
+                <label className="control">
+                  <span className="control__label">
+                    {name} hue
+                    <span className="control__value">{colorGrading[range][0]}°</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={colorGrading[range][0]}
+                    onChange={(event) =>
+                      setColorGradingValue(range, 0, Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    {name} saturation
+                    <span className="control__value">{colorGrading[range][1]}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={colorGrading[range][1]}
+                    onChange={(event) =>
+                      setColorGradingValue(range, 1, Number(event.target.value))
+                    }
+                  />
+                </label>
+              </div>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorGradingDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorGrading} disabled={busy}>
                 Apply
               </button>
             </div>
