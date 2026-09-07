@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 311.**
+**618 distinct capabilities tracked. Currently shipped: 315.**
 
 ## PART I — EVERY TOOL
 
@@ -300,7 +300,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Select People — Person Components
 - [ ] Select People — Hair Selection
 - [ ] Refine Hair
-- [ ] Mask All Objects
+- [x] Mask All Objects (`mask_all_objects`, every 4-connected foreground component against the canvas edge's background colour saved as a selection named Object 1, 2, … largest first, all selected together; Photoshop's per-object layer masks become saved selections in this maskless layer model — see README Phase 211)
 - [x] Object Selection — Rectangle Mode (`select_object_in_rect_with`, the region is a dragged box — see README Phase 209)
 - [x] Object Selection — Lasso Mode (`select_object_in_lasso_with`, the region is a freehand outline's polygon — see README Phase 209)
 - [x] Object Selection — Add (`SelectionMode::Add`, Shift while dragging — see README Phase 209)
@@ -439,9 +439,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Simulate Paper Color
 - [ ] Simulate Black Ink
 - [ ] Color & Vibrance
-- [ ] Solid Color Fill
-- [ ] Gradient Fill
-- [ ] Pattern Fill
+- [x] Solid Color Fill (duplicate of SOLID COLOR in PART VI, already shipped there — checked here for consistency)
+- [x] Gradient Fill (duplicate of GRADIENT in PART VI, already shipped there — checked here for consistency)
+- [x] Pattern Fill (duplicate of PATTERN in PART VI, already shipped there — checked here for consistency)
 - [x] Input Levels — Black Point (`levels` / `levels_on`'s `input_black`, shipped with LEVELS — checked here for consistency)
 - [x] Input Levels — Midtone/Gamma (`levels` / `levels_on`'s `gamma`, hundredths over Photoshop's 0.01–9.99, shipped with LEVELS — checked here for consistency)
 - [x] Input Levels — White Point (`levels` / `levels_on`'s `input_white`, shipped with LEVELS — checked here for consistency)

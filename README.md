@@ -12762,6 +12762,53 @@ by hand instead. Every other layer of this project's quality bar
 **1295 Rust tests total** (1290 → 1295, 1288 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 211 — Mask All Objects
+
+`Document::mask_all_objects(id, tolerance)` is Select > Mask All
+Objects. The Object Selection finder now returns *every* 4-connected
+foreground component on the whole canvas — against the canvas edge's
+most common colour, within the Tolerance — largest first (ties by
+first pixel), through a new `foreground_components` that the Object
+Selection tool and Select Subject take the first of. Each component is
+saved as a named selection `Object 1`, `Object 2`, … replacing any
+earlier selection of that name and leaving other saved selections
+alone, and the current selection becomes all of them together; the
+count is returned, and a layer with no object errors with nothing
+saved. Photoshop builds one layer mask per object inside a group;
+with no masks in this layer model, saved selections are the stand-in,
+so Load Selection reaches each object individually. A **Mask All
+Objects** button follows Remove Background. This phase also reconciles
+three checklist rows — Solid Color Fill, Gradient Fill, Pattern Fill —
+that duplicate the PART VI fill layers shipped long ago, in the
+wording the earlier duplicates use.
+
+**Verified two ways.** Five new `document.rs` tests on the Object
+Selection scene, whose components the Phase 209 Python model listed:
+the nine-pixel object, the `40` mark at `(5, 1)`, and the `200` speck
+at `(0, 6)`. At tolerance `0` three objects are saved in that order —
+`Object 1` loads as the `3×3`, `Object 2` as the mark (first in row
+order of the two singles), `Object 3` as the speck — and the selection
+afterwards is all three together. At tolerance `50` the mark is
+background, so two are saved and `Object 2` is the speck. A rectangle
+saved as `Object 1` and a `Keep me` selection saved beforehand are
+respectively replaced and kept, for four saved selections in all. A
+flat layer errors with nothing saved and nothing selected, as does an
+unknown layer. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+fifty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The button was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1300 Rust tests total** (1295 → 1300, 1293 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

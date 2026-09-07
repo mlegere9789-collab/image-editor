@@ -4799,6 +4799,17 @@ export default function App() {
             Remove Background
           </button>
           <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("mask_all_objects", { id: selectedId, tolerance: magicWandTolerance })
+            }
+            disabled={busy || !canPaint}
+            title="Mask All Objects: save every object on the layer as a selection named Object 1, 2, … and select them all"
+          >
+            Mask All Objects
+          </button>
+          <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
             disabled={!hasDocument}
             aria-pressed={tool === "selectionBrush"}

@@ -1561,6 +1561,66 @@ impl Document {
         region: Vec<bool>,
         tolerance: u8,
     ) -> Result<Vec<bool>, String> {
+        let components = self.foreground_components(id, region, tolerance)?;
+        let Some(best) = components.into_iter().next() else {
+            return Err("No object was found in that area.".to_string());
+        };
+        let mut bits = vec![false; self.width as usize * self.height as usize];
+        for idx in best {
+            bits[idx] = true;
+        }
+        Ok(bits)
+    }
+
+    /// Select > Mask All Objects: every object the finder can see on the
+    /// whole canvas of layer `id` — each 4-connected foreground component
+    /// against the canvas edge's background colour, within `tolerance` —
+    /// saved as a named selection `Object 1`, `Object 2`, … from largest
+    /// to smallest (ties by first pixel), replacing any earlier selections
+    /// of those names, with the current selection set to all of them
+    /// together. Photoshop builds one layer mask per object in a group;
+    /// with no masks in this layer model, saved selections are the
+    /// stand-in, and Save/Load Selection reaches each object. Returns how
+    /// many objects were saved; errors when none is found.
+    pub fn mask_all_objects(&mut self, id: LayerId, tolerance: u8) -> Result<usize, String> {
+        let (width, height) = (self.width, self.height);
+        let region = vec![true; width as usize * height as usize];
+        let components = self.foreground_components(id, region, tolerance)?;
+        if components.is_empty() {
+            return Err("No object was found on this layer.".to_string());
+        }
+        let mut all = vec![false; width as usize * height as usize];
+        for (n, component) in components.iter().enumerate() {
+            let mut bits = vec![false; width as usize * height as usize];
+            for &idx in component {
+                bits[idx] = true;
+                all[idx] = true;
+            }
+            let name = format!("Object {}", n + 1);
+            let selection = mask_selection(width, height, bits)?;
+            match self
+                .saved_selections
+                .iter_mut()
+                .find(|(saved, _)| *saved == name)
+            {
+                Some(slot) => slot.1 = selection,
+                None => self.saved_selections.push((name, selection)),
+            }
+        }
+        self.selection = Some(mask_selection(width, height, all)?);
+        Ok(components.len())
+    }
+
+    /// The Object Selection finder's components: within `region`, every
+    /// 4-connected group of pixels outside the border ring's most common
+    /// colour ± `tolerance`, largest first (ties by first pixel), as
+    /// pixel indices. Empty when nothing is foreground.
+    fn foreground_components(
+        &self,
+        id: LayerId,
+        region: Vec<bool>,
+        tolerance: u8,
+    ) -> Result<Vec<Vec<usize>>, String> {
         let (width, height) = (self.width, self.height);
         let layer = self.layer(id)?;
         let at = |x: u32, y: u32| -> usize { (y * width + x) as usize };
@@ -1610,9 +1670,9 @@ impl Document {
         let foreground: Vec<bool> = (0..region.len())
             .map(|idx| region[idx] && !is_background(idx))
             .collect();
-        // The largest 4-connected foreground component is the object.
+        // Every 4-connected foreground component, largest first.
         let mut seen = vec![false; foreground.len()];
-        let mut best: Vec<usize> = Vec::new();
+        let mut components: Vec<Vec<usize>> = Vec::new();
         for start in 0..foreground.len() {
             if !foreground[start] || seen[start] {
                 continue;
@@ -1631,18 +1691,10 @@ impl Document {
                     }
                 }
             }
-            if component.len() > best.len() {
-                best = component;
-            }
+            components.push(component);
         }
-        if best.is_empty() {
-            return Err("No object was found in that area.".to_string());
-        }
-        let mut bits = vec![false; foreground.len()];
-        for idx in best {
-            bits[idx] = true;
-        }
-        Ok(bits)
+        components.sort_by_key(|component| std::cmp::Reverse(component.len()));
+        Ok(components)
     }
 
     /// The Magnetic Lasso tool: a freehand `trail` whose points snap to
@@ -24089,6 +24141,73 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.remove_background(id, 0).is_err());
         assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn mask_all_objects_saves_every_object_largest_first() {
+        let (mut doc, id) = object_scene();
+        assert_eq!(doc.mask_all_objects(id, 0).unwrap(), 3);
+        assert_eq!(
+            doc.view().saved_selections,
+            vec![
+                "Object 1".to_string(),
+                "Object 2".to_string(),
+                "Object 3".to_string()
+            ]
+        );
+        doc.load_selection("Object 1").unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+        // The two single pixels in row order: the mark at (5, 1) first,
+        // then the speck at (0, 6).
+        doc.load_selection("Object 2").unwrap();
+        assert_eq!(selection_grid(&doc)[1], ".....#.");
+        doc.load_selection("Object 3").unwrap();
+        assert_eq!(selection_grid(&doc)[6], "#......");
+    }
+
+    #[test]
+    fn mask_all_objects_selects_all_of_them_together() {
+        let (mut doc, id) = object_scene();
+        doc.mask_all_objects(id, 0).unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".......", ".....#.", "..###..", "..###..", "..###..", ".......", "#......"]
+        );
+    }
+
+    #[test]
+    fn mask_all_objects_tolerance_drops_faint_objects() {
+        let (mut doc, id) = object_scene();
+        assert_eq!(doc.mask_all_objects(id, 50).unwrap(), 2);
+        assert_eq!(doc.view().saved_selections.len(), 2);
+        doc.load_selection("Object 2").unwrap();
+        assert_eq!(selection_grid(&doc)[6], "#......");
+    }
+
+    #[test]
+    fn mask_all_objects_replaces_earlier_object_selections() {
+        let (mut doc, id) = object_scene();
+        doc.mask_all_objects(id, 0).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.save_selection("Object 1").unwrap();
+        doc.save_selection("Keep me").unwrap();
+        assert_eq!(doc.mask_all_objects(id, 0).unwrap(), 3);
+        doc.load_selection("Object 1").unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+        assert_eq!(doc.view().saved_selections.len(), 4);
+    }
+
+    #[test]
+    fn mask_all_objects_errors_with_no_object() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let flat = doc
+            .add_layer("flat", &solid(3, 3, [90, 90, 90, 255]), 3, 3)
+            .unwrap();
+        assert!(doc.mask_all_objects(flat, 0).is_err());
+        assert!(doc.view().saved_selections.is_empty());
+        assert!(doc.selection().is_none());
+        let (mut doc, id) = object_scene();
+        assert!(doc.mask_all_objects(id + 1, 0).is_err());
     }
 
     #[test]

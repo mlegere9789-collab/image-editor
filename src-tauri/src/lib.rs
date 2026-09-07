@@ -508,6 +508,20 @@ fn select_subject(
     })
 }
 
+/// Select > Mask All Objects: every object on layer `id` saved as a named
+/// selection, all of them selected together.
+#[tauri::command]
+fn mask_all_objects(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.mask_all_objects(id, tolerance)?;
+        Ok(None)
+    })
+}
+
 /// Remove Background: keep the subject of layer `id`, clear the rest.
 #[tauri::command]
 fn remove_background(
@@ -4162,6 +4176,7 @@ pub fn run() {
             select_object_lasso,
             select_subject,
             remove_background,
+            mask_all_objects,
             quick_select,
             select_magic_wand,
             select_color_range,
