@@ -52,6 +52,9 @@ pub struct Layer {
     /// [`Document::set_fill`] can re-render them. The pixels are ordinary
     /// otherwise — paintable, movable, filterable like any other layer's.
     pub fill: Option<Fill>,
+    /// A text layer: the type its pixels were set from, so
+    /// [`Document::set_text`] can set it again.
+    pub text: Option<TextLayer>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -74,6 +77,8 @@ pub struct LayerView {
     pub adjustment: Option<Adjustment>,
     /// The recipe of a fill layer; `None` for any other layer.
     pub fill: Option<Fill>,
+    /// The type of a text layer; `None` for any other layer.
+    pub text: Option<TextLayer>,
 }
 
 impl Layer {
@@ -90,6 +95,7 @@ impl Layer {
             has_mask: self.mask.is_some(),
             adjustment: self.adjustment,
             fill: self.fill,
+            text: self.text.clone(),
         }
     }
 
@@ -943,6 +949,333 @@ pub enum TargetedMode {
     Saturation,
     /// The Color Mixer's Luminance for that range.
     Luminance,
+}
+
+/// A text layer's type — the Horizontal and Vertical Type tools' one
+/// line of settings: the text, the top-left corner of its first glyph in
+/// pixel-index coordinates, a whole-pixel `size` (`1..=64`, each face
+/// pixel drawn `size × size`), its colour with alpha, and whether it runs
+/// down instead of across. See [`Document::add_text_layer`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextLayer {
+    pub text: String,
+    pub x: i32,
+    pub y: i32,
+    pub size: u32,
+    pub color: [u8; 4],
+    pub vertical: bool,
+}
+
+/// The built-in face: a 5×7 bitmap glyph per character, each row a
+/// five-bit mask read left to right from its high bit. Letters are one
+/// case (lowercase draws the capital), digits and common punctuation are
+/// drawn, and any other character is a hollow box.
+pub fn glyph(ch: char) -> [u8; 7] {
+    const FACE: &[(char, [u8; 7])] = &[
+        (' ', [0, 0, 0, 0, 0, 0, 0]),
+        (
+            'A',
+            [
+                0b01110, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+            ],
+        ),
+        (
+            'B',
+            [
+                0b11110, 0b10001, 0b10001, 0b11110, 0b10001, 0b10001, 0b11110,
+            ],
+        ),
+        (
+            'C',
+            [
+                0b01110, 0b10001, 0b10000, 0b10000, 0b10000, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            'D',
+            [
+                0b11110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11110,
+            ],
+        ),
+        (
+            'E',
+            [
+                0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b11111,
+            ],
+        ),
+        (
+            'F',
+            [
+                0b11111, 0b10000, 0b10000, 0b11110, 0b10000, 0b10000, 0b10000,
+            ],
+        ),
+        (
+            'G',
+            [
+                0b01110, 0b10001, 0b10000, 0b10111, 0b10001, 0b10001, 0b01111,
+            ],
+        ),
+        (
+            'H',
+            [
+                0b10001, 0b10001, 0b10001, 0b11111, 0b10001, 0b10001, 0b10001,
+            ],
+        ),
+        (
+            'I',
+            [
+                0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+            ],
+        ),
+        (
+            'J',
+            [
+                0b00111, 0b00010, 0b00010, 0b00010, 0b00010, 0b10010, 0b01100,
+            ],
+        ),
+        (
+            'K',
+            [
+                0b10001, 0b10010, 0b10100, 0b11000, 0b10100, 0b10010, 0b10001,
+            ],
+        ),
+        (
+            'L',
+            [
+                0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b10000, 0b11111,
+            ],
+        ),
+        (
+            'M',
+            [
+                0b10001, 0b11011, 0b10101, 0b10101, 0b10001, 0b10001, 0b10001,
+            ],
+        ),
+        (
+            'N',
+            [
+                0b10001, 0b10001, 0b11001, 0b10101, 0b10011, 0b10001, 0b10001,
+            ],
+        ),
+        (
+            'O',
+            [
+                0b01110, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            'P',
+            [
+                0b11110, 0b10001, 0b10001, 0b11110, 0b10000, 0b10000, 0b10000,
+            ],
+        ),
+        (
+            'Q',
+            [
+                0b01110, 0b10001, 0b10001, 0b10001, 0b10101, 0b10010, 0b01101,
+            ],
+        ),
+        (
+            'R',
+            [
+                0b11110, 0b10001, 0b10001, 0b11110, 0b10100, 0b10010, 0b10001,
+            ],
+        ),
+        (
+            'S',
+            [
+                0b01111, 0b10000, 0b10000, 0b01110, 0b00001, 0b00001, 0b11110,
+            ],
+        ),
+        (
+            'T',
+            [
+                0b11111, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100,
+            ],
+        ),
+        (
+            'U',
+            [
+                0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            'V',
+            [
+                0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b01010, 0b00100,
+            ],
+        ),
+        (
+            'W',
+            [
+                0b10001, 0b10001, 0b10001, 0b10101, 0b10101, 0b10101, 0b01010,
+            ],
+        ),
+        (
+            'X',
+            [
+                0b10001, 0b10001, 0b01010, 0b00100, 0b01010, 0b10001, 0b10001,
+            ],
+        ),
+        (
+            'Y',
+            [
+                0b10001, 0b10001, 0b01010, 0b00100, 0b00100, 0b00100, 0b00100,
+            ],
+        ),
+        (
+            'Z',
+            [
+                0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0b11111,
+            ],
+        ),
+        (
+            '0',
+            [
+                0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            '1',
+            [
+                0b00100, 0b01100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110,
+            ],
+        ),
+        (
+            '2',
+            [
+                0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0b01000, 0b11111,
+            ],
+        ),
+        (
+            '3',
+            [
+                0b11111, 0b00010, 0b00100, 0b00010, 0b00001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            '4',
+            [
+                0b00010, 0b00110, 0b01010, 0b10010, 0b11111, 0b00010, 0b00010,
+            ],
+        ),
+        (
+            '5',
+            [
+                0b11111, 0b10000, 0b11110, 0b00001, 0b00001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            '6',
+            [
+                0b00110, 0b01000, 0b10000, 0b11110, 0b10001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            '7',
+            [
+                0b11111, 0b00001, 0b00010, 0b00100, 0b01000, 0b01000, 0b01000,
+            ],
+        ),
+        (
+            '8',
+            [
+                0b01110, 0b10001, 0b10001, 0b01110, 0b10001, 0b10001, 0b01110,
+            ],
+        ),
+        (
+            '9',
+            [
+                0b01110, 0b10001, 0b10001, 0b01111, 0b00001, 0b00010, 0b01100,
+            ],
+        ),
+        ('.', [0, 0, 0, 0, 0, 0b01100, 0b01100]),
+        (',', [0, 0, 0, 0, 0b01100, 0b00100, 0b01000]),
+        (':', [0, 0b01100, 0b01100, 0, 0b01100, 0b01100, 0]),
+        (';', [0, 0b01100, 0b01100, 0, 0b01100, 0b00100, 0b01000]),
+        (
+            '!',
+            [0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0, 0b00100],
+        ),
+        (
+            '?',
+            [0b01110, 0b10001, 0b00001, 0b00010, 0b00100, 0, 0b00100],
+        ),
+        ('\'', [0b00100, 0b00100, 0b01000, 0, 0, 0, 0]),
+        ('"', [0b01010, 0b01010, 0b01010, 0, 0, 0, 0]),
+        ('-', [0, 0, 0, 0b11111, 0, 0, 0]),
+        ('+', [0, 0b00100, 0b00100, 0b11111, 0b00100, 0b00100, 0]),
+        ('=', [0, 0, 0b11111, 0, 0b11111, 0, 0]),
+        ('/', [0, 0b00001, 0b00010, 0b00100, 0b01000, 0b10000, 0]),
+        (
+            '(',
+            [
+                0b00010, 0b00100, 0b01000, 0b01000, 0b01000, 0b00100, 0b00010,
+            ],
+        ),
+        (
+            ')',
+            [
+                0b01000, 0b00100, 0b00010, 0b00010, 0b00010, 0b00100, 0b01000,
+            ],
+        ),
+        (
+            '#',
+            [
+                0b01010, 0b01010, 0b11111, 0b01010, 0b11111, 0b01010, 0b01010,
+            ],
+        ),
+        (
+            '%',
+            [
+                0b11000, 0b11001, 0b00010, 0b00100, 0b01000, 0b10011, 0b00011,
+            ],
+        ),
+        (
+            '&',
+            [
+                0b01100, 0b10010, 0b10100, 0b01000, 0b10101, 0b10010, 0b01101,
+            ],
+        ),
+        ('*', [0, 0b00100, 0b10101, 0b01110, 0b10101, 0b00100, 0]),
+        (
+            '@',
+            [
+                0b01110, 0b10001, 0b00001, 0b01101, 0b10101, 0b10101, 0b01110,
+            ],
+        ),
+        ('_', [0, 0, 0, 0, 0, 0, 0b11111]),
+    ];
+    let key = ch.to_ascii_uppercase();
+    FACE.iter()
+        .find(|(c, _)| *c == key)
+        .map(|(_, rows)| *rows)
+        .unwrap_or([
+            0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111,
+        ])
+}
+
+/// The width and height in pixels of `text` as [`Document::add_text_layer`]
+/// draws it: horizontally each glyph is `5 · size` wide with a `size` gap
+/// and each line `7 · size` tall with a `size` gap; vertically each glyph
+/// is `7 · size` tall with a `size` gap and each column `5 · size` wide
+/// with a `size` gap.
+pub fn text_size(text: &TextLayer) -> (u32, u32) {
+    let size = text.size.max(1);
+    let lines: Vec<usize> = text
+        .text
+        .split('\n')
+        .map(|line| line.chars().count())
+        .collect();
+    let longest = lines.iter().copied().max().unwrap_or(0) as u32;
+    let count = lines.len() as u32;
+    let run = |glyphs: u32, glyph_len: u32| glyphs * (glyph_len + 1) * size - size;
+    if text.vertical {
+        (run(count, 5), run(longest, 7))
+    } else {
+        (run(longest, 5), run(count, 7))
+    }
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -6004,6 +6337,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         });
         Ok(id)
@@ -6043,6 +6377,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         });
         id
@@ -6229,6 +6564,91 @@ impl Document {
         let layer = self.layer_mut(id)?;
         layer.pixels = pixels;
         layer.fill = Some(fill);
+        Ok(())
+    }
+
+    /// The pixels a text layer's `text` draws: each character's [`glyph`]
+    /// at `size` pixels per face pixel, glyphs advancing `6 · size` across
+    /// (or `8 · size` down for vertical type), lines dropping `8 · size`
+    /// (or columns stepping `6 · size` right), every lit face pixel the
+    /// text's colour and everything else transparent, clipped to the
+    /// canvas. Errors for blank text or a size outside `1..=64`.
+    fn render_text(&self, text: &TextLayer) -> Result<Vec<u8>, String> {
+        if text.text.trim().is_empty() {
+            return Err("A text layer needs some text.".to_string());
+        }
+        if !(1..=64).contains(&text.size) {
+            return Err("Text Size must be between 1 and 64.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let mut pixels = vec![0u8; self.buffer_len()];
+        let size = text.size as i64;
+        for (line_index, line) in text.text.split('\n').enumerate() {
+            for (glyph_index, ch) in line.chars().enumerate() {
+                let (gx, gy) = if text.vertical {
+                    (
+                        text.x as i64 + line_index as i64 * 6 * size,
+                        text.y as i64 + glyph_index as i64 * 8 * size,
+                    )
+                } else {
+                    (
+                        text.x as i64 + glyph_index as i64 * 6 * size,
+                        text.y as i64 + line_index as i64 * 8 * size,
+                    )
+                };
+                for (row, bits) in glyph(ch).iter().enumerate() {
+                    for col in 0..5 {
+                        if bits & (0b10000 >> col) == 0 {
+                            continue;
+                        }
+                        for sy in 0..size {
+                            for sx in 0..size {
+                                let (px, py) =
+                                    (gx + col as i64 * size + sx, gy + row as i64 * size + sy);
+                                if px < 0 || py < 0 || px >= width || py >= height {
+                                    continue;
+                                }
+                                let base =
+                                    (py as usize * self.width as usize + px as usize) * CHANNELS;
+                                pixels[base..base + CHANNELS].copy_from_slice(&text.color);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(pixels)
+    }
+
+    /// The Horizontal and Vertical Type tools: a new top text layer named
+    /// `name` set from `text` — see [`Self::render_text`] for the face and
+    /// layout — remembering the type so [`Self::set_text`] can change it.
+    /// The pixels are ordinary otherwise: paintable, movable, filterable.
+    /// Returns the new layer's id.
+    pub fn add_text_layer(
+        &mut self,
+        name: impl Into<String>,
+        text: &TextLayer,
+    ) -> Result<LayerId, String> {
+        let pixels = self.render_text(text)?;
+        let id = self.push_pixel_layer(name, pixels);
+        self.layer_mut(id)?.text = Some(text.clone());
+        Ok(id)
+    }
+
+    /// Re-sets text layer `id` from `text`, drawing its pixels again from
+    /// scratch — paint on the layer is replaced, as editing type would —
+    /// with its name, opacity, blend mode, mask, link, clip, and lock all
+    /// kept. Errors for a layer that is not a text layer, or the errors of
+    /// [`Self::render_text`], leaving the layer untouched.
+    pub fn set_text(&mut self, id: LayerId, text: &TextLayer) -> Result<(), String> {
+        if self.layer(id)?.text.is_none() {
+            return Err("That is not a text layer.".to_string());
+        }
+        let pixels = self.render_text(text)?;
+        let layer = self.layer_mut(id)?;
+        layer.pixels = pixels;
+        layer.text = Some(text.clone());
         Ok(())
     }
 
@@ -7492,6 +7912,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         });
         id
@@ -11595,6 +12016,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         });
 
@@ -11637,6 +12059,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         }];
         Ok(id)
@@ -11679,6 +12102,7 @@ impl Document {
             mask: None,
             adjustment: None,
             fill: None,
+            text: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -45909,5 +46333,169 @@ mod tests {
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn text(text: &str, x: i32, y: i32, size: u32, vertical: bool) -> TextLayer {
+        TextLayer {
+            text: text.to_string(),
+            x,
+            y,
+            size,
+            color: [255, 0, 0, 255],
+            vertical,
+        }
+    }
+
+    fn lit(doc: &Document, id: LayerId) -> Vec<(u32, u32)> {
+        filled(doc, id)
+    }
+
+    #[test]
+    fn text_layer_renders_the_face_glyph_by_glyph() {
+        // "I" is 01110 / 00100 ×5 / 01110: ten lit pixels.
+        assert_eq!(
+            glyph('I'),
+            [0b01110, 0b00100, 0b00100, 0b00100, 0b00100, 0b00100, 0b01110]
+        );
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc
+            .add_text_layer("type", &text("I", 0, 0, 1, false))
+            .unwrap();
+        assert_eq!(
+            lit(&doc, id),
+            vec![
+                (1, 0),
+                (2, 0),
+                (3, 0),
+                (2, 1),
+                (2, 2),
+                (2, 3),
+                (2, 4),
+                (2, 5),
+                (1, 6),
+                (2, 6),
+                (3, 6)
+            ]
+        );
+        assert_eq!(pixel(&doc, id, 2, 3), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(doc.layers()[0].text.as_ref().unwrap().text, "I");
+        assert_eq!(doc.layers()[0].view().text.as_ref().unwrap().size, 1);
+        // Lowercase shares the uppercase glyph; an unknown character is a
+        // hollow box.
+        assert_eq!(glyph('i'), glyph('I'));
+        assert_eq!(
+            glyph('~'),
+            [0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111]
+        );
+    }
+
+    #[test]
+    fn text_layer_advances_six_columns_per_glyph_and_scales_by_size() {
+        let mut doc = Document::new(16, 16).unwrap();
+        let id = doc
+            .add_text_layer("type", &text("II", 1, 2, 1, false))
+            .unwrap();
+        let hits = lit(&doc, id);
+        // The first I's stem sits at column 3 (1 + 2), the second's at 9.
+        assert!(hits.contains(&(3, 5)));
+        assert!(hits.contains(&(9, 5)));
+        assert!(!hits.contains(&(6, 5)));
+        assert_eq!(hits.len(), 22);
+        // Size 2 doubles every pixel: the stem is columns 4–5, rows 2–15.
+        let mut big = Document::new(16, 16).unwrap();
+        let bid = big
+            .add_text_layer("type", &text("I", 0, 0, 2, false))
+            .unwrap();
+        let hits = lit(&big, bid);
+        assert_eq!(hits.len(), 44);
+        assert!(hits.contains(&(4, 2)) && hits.contains(&(5, 3)) && hits.contains(&(4, 11)));
+        assert!(!hits.contains(&(3, 2)) && !hits.contains(&(6, 3)));
+        assert_eq!(text_size(&text("II", 0, 0, 2, false)), (22, 14));
+        assert_eq!(text_size(&text("AB\nC", 0, 0, 1, false)), (11, 15));
+    }
+
+    #[test]
+    fn vertical_type_stacks_glyphs_eight_rows_apart_and_newlines_start_a_column() {
+        let mut doc = Document::new(16, 24).unwrap();
+        let id = doc
+            .add_text_layer("type", &text("II", 0, 0, 1, true))
+            .unwrap();
+        let hits = lit(&doc, id);
+        assert!(hits.contains(&(2, 3)));
+        assert!(hits.contains(&(2, 11)));
+        assert!(!hits.contains(&(2, 7)));
+        assert_eq!(hits.len(), 22);
+        assert_eq!(text_size(&text("II", 0, 0, 1, true)), (5, 15));
+        // A newline in vertical type starts the next column six to the right.
+        let mut two = Document::new(16, 24).unwrap();
+        let tid = two
+            .add_text_layer("type", &text("I\nI", 0, 0, 1, true))
+            .unwrap();
+        let hits = lit(&two, tid);
+        assert!(hits.contains(&(2, 3)));
+        assert!(hits.contains(&(8, 3)));
+        assert_eq!(text_size(&text("I\nI", 0, 0, 1, true)), (11, 7));
+        // Horizontal newlines drop eight rows.
+        let mut lines = Document::new(16, 24).unwrap();
+        let lid = lines
+            .add_text_layer("type", &text("I\nI", 0, 0, 1, false))
+            .unwrap();
+        let hits = lit(&lines, lid);
+        assert!(hits.contains(&(2, 3)) && hits.contains(&(2, 11)));
+    }
+
+    #[test]
+    fn set_text_re_renders_a_text_layer_and_keeps_it_editable() {
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc
+            .add_text_layer("type", &text("I", 0, 0, 1, false))
+            .unwrap();
+        let mut moved = text("I", 1, 0, 1, false);
+        moved.color = [0, 0, 255, 128];
+        doc.set_text(id, &moved).unwrap();
+        assert_eq!(pixel(&doc, id, 3, 3), [0, 0, 255, 128]);
+        assert_eq!(pixel(&doc, id, 2, 3), [0, 0, 0, 0]);
+        assert_eq!(doc.layers()[0].text.as_ref().unwrap().x, 1);
+        // Text painted past the canvas is clipped, not an error.
+        doc.set_text(id, &text("III", 5, 6, 1, false)).unwrap();
+        assert_eq!(lit(&doc, id), vec![(6, 6), (7, 6), (7, 7)]);
+        doc.set_text(id, &text("I", -2, -2, 1, false)).unwrap();
+        assert_eq!(
+            lit(&doc, id),
+            vec![(0, 0), (0, 1), (0, 2), (0, 3), (0, 4), (1, 4)]
+        );
+        let plain = doc.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+        assert!(doc
+            .set_text(plain, &text("I", 0, 0, 1, false))
+            .unwrap_err()
+            .contains("text layer"));
+    }
+
+    #[test]
+    fn text_layers_refuse_empty_text_and_a_zero_size() {
+        let mut doc = Document::new(8, 8).unwrap();
+        assert!(doc
+            .add_text_layer("type", &text("", 0, 0, 1, false))
+            .unwrap_err()
+            .contains("text"));
+        assert!(doc
+            .add_text_layer("type", &text("   ", 0, 0, 1, false))
+            .unwrap_err()
+            .contains("text"));
+        assert!(doc
+            .add_text_layer("type", &text("I", 0, 0, 0, false))
+            .unwrap_err()
+            .contains("Size"));
+        assert!(doc
+            .add_text_layer("type", &text("I", 0, 0, 65, false))
+            .unwrap_err()
+            .contains("Size"));
+        assert!(doc.layers().is_empty());
+        let id = doc
+            .add_text_layer("type", &text("I", 0, 0, 1, false))
+            .unwrap();
+        assert!(doc.set_text(id, &text("", 0, 0, 1, false)).is_err());
+        assert_eq!(lit(&doc, id).len(), 11);
     }
 }

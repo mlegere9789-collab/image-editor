@@ -3292,6 +3292,42 @@ fn set_adjustment(
     })
 }
 
+/// The Type tools: a new text layer set from `text`.
+#[tauri::command]
+fn add_text_layer(
+    state: State<'_, AppState>,
+    name: String,
+    text: document::TextLayer,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_text_layer(name, &text)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Edit text layer `id`'s type.
+#[tauri::command]
+fn set_text(
+    state: State<'_, AppState>,
+    id: LayerId,
+    text: document::TextLayer,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_text(id, &text)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
 /// rendered from `fill`.
 #[tauri::command]
@@ -5008,6 +5044,8 @@ pub fn run() {
             add_adjustment_layer,
             set_adjustment,
             add_fill_layer,
+            add_text_layer,
+            set_text,
             set_fill,
             add_vector_mask,
             remove_layer_mask,

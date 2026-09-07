@@ -38,6 +38,8 @@ export type LayerView = {
   adjustment: Adjustment | null;
   /** The recipe of a fill layer; `null` for any other layer. */
   fill: Fill | null;
+  /** The type of a text layer; `null` for any other layer. */
+  text: TextLayer | null;
 };
 
 /** Mirrors `ApplyChannel` in src-tauri/src/document.rs: Apply Image's
@@ -57,6 +59,16 @@ export type ApplyBlend =
   | { kind: "mode"; mode: BlendMode }
   | { kind: "add"; scale: number; offset: number }
   | { kind: "subtract"; scale: number; offset: number };
+
+/** Mirrors `TextLayer` in src-tauri/src/document.rs: a text layer's type. */
+export type TextLayer = {
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+  color: [number, number, number, number];
+  vertical: boolean;
+};
 
 /** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged
  * by `kind`): what a live fill layer paints. */

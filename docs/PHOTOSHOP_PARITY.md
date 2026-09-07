@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 457.**
+**618 distinct capabilities tracked. Currently shipped: 460.**
 
 ## PART I — EVERY TOOL
 
@@ -50,8 +50,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] ADD ANCHOR POINT TOOL
 - [ ] DELETE ANCHOR POINT TOOL
 - [ ] CONVERT POINT TOOL
-- [ ] HORIZONTAL TYPE TOOL
-- [ ] VERTICAL TYPE TOOL
+- [x] HORIZONTAL TYPE TOOL (`add_text_layer` / `set_text` with `vertical: false`: glyphs of the built-in 5×7 face advance `6 · size` across and lines drop `8 · size`, in the brush colour; a scalable outline font, kerning, and on-canvas typing are documented scope cuts — see README Phase 253)
+- [x] VERTICAL TYPE TOOL (the same with `vertical: true`: glyphs stack `8 · size` down and each new line starts a column `6 · size` to the right — see README Phase 253)
 - [ ] PATH SELECTION TOOL
 - [ ] DIRECT SELECTION TOOL
 - [x] RECTANGLE TOOL (`Document::draw_rectangle`, Pixels mode: an optionally rounded box painted by the pixel-centre rule with a flat fill and/or an inside stroke of a given width, clipped to the canvas and confined by the selection; Shape and Path modes, anti-aliasing, and Center/Outside stroke alignment are documented scope cuts — see README Phase 187)
@@ -92,7 +92,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 
 - [x] PIXEL LAYER (already true since Phase 1 — every `Layer` in this app *is* a document-sized RGBA8 pixel buffer; there is no other layer type yet to distinguish it from)
 - [x] GROUP (`group_layers` / `ungroup`, named groups of layer ids over the flat stack — visibility, locking, and moving applied to every member at once, a removed layer leaving its group, an empty group dissolving — drawn as a header row in the layer panel; nesting and group-level opacity or blend modes are documented scope cuts — see README Phase 216)
-- [ ] TEXT LAYER
+- [x] TEXT LAYER (`Layer.text: Option<TextLayer>`, the type a text layer was set from, kept so Edit selected in the Type dialog re-renders it — the text, position, size, colour, and direction — while the pixels stay ordinary — see README Phase 253)
 - [ ] SHAPE LAYER
 - [x] ADJUSTMENT LAYER (`add_adjustment_layer` / `set_adjustment`, a layer carrying a live Invert, Brightness/Contrast, Threshold, or Posterize applied at composite time to everything beneath it at the layer's opacity, through its mask and clipping, byte-identical to the destructive command via a shared `apply_adjustment`; the other adjustment kinds as live layers are a documented scope cut — see README Phase 220)
 - [x] FILL LAYER (`add_fill_layer` / `set_fill`, a layer tagged with a `Fill` recipe — Solid Color, top-left-to-bottom-right Gradient, or the defined Pattern — rendered over the whole canvas by the same math as the three baked generators and re-renderable from a new recipe with its name, opacity, mask, link, clip, and lock kept; Photoshop's gradient style/angle/scale and pattern scale options remain documented scope cuts — see README Phase 221)

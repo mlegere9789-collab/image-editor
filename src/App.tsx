@@ -32,6 +32,7 @@ import type {
   Palette,
   PerspectiveAuto,
   PerspectivePlane,
+  TextLayer,
   WarpMesh,
   WarpStyle,
   PuppetMesh,
@@ -746,6 +747,13 @@ export default function App() {
   // Fill layer dialog: which of the three live fills to add or re-tune.
   const [showFillLayerDialog, setShowFillLayerDialog] = useState(false);
   const [fillLayerKind, setFillLayerKind] = useState<Fill["kind"]>("solidColor");
+  // The Type tools: a text layer's type, new or edited.
+  const [showTypeDialog, setShowTypeDialog] = useState(false);
+  const [typeText, setTypeText] = useState("Type");
+  const [typeX, setTypeX] = useState(0);
+  const [typeY, setTypeY] = useState(0);
+  const [typeSize, setTypeSize] = useState(4);
+  const [typeVertical, setTypeVertical] = useState(false);
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
@@ -2529,6 +2537,36 @@ export default function App() {
     await runCommand("set_fill", { id: selectedId, fill: currentFill() });
     setShowFillLayerDialog(false);
   }, [runCommand, selectedId, currentFill]);
+
+  /** The type the dialog describes, in the brush colour. */
+  const currentText = useCallback((): TextLayer => {
+    const [r, g, b] = hexToRgb(brushColor);
+    return { text: typeText, x: typeX, y: typeY, size: typeSize, color: [r, g, b, 255], vertical: typeVertical };
+  }, [brushColor, typeText, typeX, typeY, typeSize, typeVertical]);
+
+  const openTypeDialog = useCallback(() => {
+    const existing = document?.layers.find((layer) => layer.id === selectedId)?.text ?? null;
+    if (existing) {
+      setTypeText(existing.text);
+      setTypeX(existing.x);
+      setTypeY(existing.y);
+      setTypeSize(existing.size);
+      setTypeVertical(existing.vertical);
+    }
+    setShowTypeDialog(true);
+  }, [document, selectedId]);
+
+  const addTextLayer = useCallback(async () => {
+    const text = currentText();
+    await runCommand("add_text_layer", { name: text.text.split("\n")[0].slice(0, 24) || "Type", text });
+    setShowTypeDialog(false);
+  }, [runCommand, currentText]);
+
+  const retuneTextLayer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("set_text", { id: selectedId, text: currentText() });
+    setShowTypeDialog(false);
+  }, [runCommand, selectedId, currentText]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -6145,6 +6183,14 @@ export default function App() {
             title="Layer > New Fill Layer as a live, re-tunable Solid Color, Gradient, or Pattern fill"
           >
             Fill Layer…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openTypeDialog}
+            disabled={busy || !hasDocument}
+            title="Horizontal / Vertical Type tool: a text layer in the built-in 5×7 face, in the brush colour"
+          >
+            Type…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -13294,6 +13340,49 @@ export default function App() {
           </div>
         </div>
       )}
+      {showTypeDialog && (
+        <div className="modal-overlay" onClick={() => setShowTypeDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Type" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Type</h2>
+            <p className="modal__hint">
+              A text layer in the built-in 5×7 face, in the brush colour. Lines drop below
+              (or, vertically, columns step right). Edit the selected text layer or add a new one.
+            </p>
+            <label className="control">
+              <span className="control__label">Text</span>
+              <textarea rows={3} value={typeText} onChange={(event) => setTypeText(event.target.value)} />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">X / Y</span>
+              <input type="number" value={typeX} onChange={(event) => setTypeX(Math.round(Number(event.target.value)))} />
+              <input type="number" value={typeY} onChange={(event) => setTypeY(Math.round(Number(event.target.value)))} />
+              <span className="control__label">Size</span>
+              <input type="number" min={1} max={64} value={typeSize} onChange={(event) => setTypeSize(Math.max(1, Math.round(Number(event.target.value))))} />
+              <label className="control control--row">
+                <input type="checkbox" checked={typeVertical} onChange={(event) => setTypeVertical(event.target.checked)} />
+                <span className="control__label">Vertical</span>
+              </label>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowTypeDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={retuneTextLayer}
+                disabled={busy || !(document?.layers.find((layer) => layer.id === selectedId)?.text)}
+                title="Set the selected text layer's type again"
+              >
+                Edit selected
+              </button>
+              <button className="button" onClick={addTextLayer} disabled={busy || typeText.trim() === ""}>
+                Add text layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showFillLayerDialog && (
         <div
           className="modal-overlay"

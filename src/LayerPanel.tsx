@@ -195,6 +195,12 @@ export default function LayerPanel({
                     ▨
                   </span>
                 )}
+                {layer.text && (
+                  <span className="layer__meta" title={`Text layer: ${layer.text.text}`}>
+                    {" "}
+                    T
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>

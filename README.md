@@ -15059,6 +15059,66 @@ by hand instead. Every other layer of this project's quality bar
 **1505 Rust tests total** (1500 → 1505, 1498 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 253 — Text layers and the Type tools
+
+Type arrives on a built-in bitmap face rather than a font engine. `glyph`
+holds a 5×7 glyph for every letter (one case: lowercase draws the
+capital), digit, and twenty-odd punctuation marks, each row a five-bit
+mask, with a hollow box for anything else; `text_size` gives a piece of
+type's extent. A `TextLayer` is the Type tools' settings — the text,
+the top-left of its first glyph, a whole-pixel `size` (`1..=64`, each
+face pixel drawn `size × size`), the colour with alpha, and whether it
+runs down instead of across — and `add_text_layer(name, text)` draws
+it onto a new top layer: horizontally glyphs advance `6 · size` and
+lines drop `8 · size`; vertically glyphs stack `8 · size` down and each
+new line starts a column `6 · size` to the right; every lit face pixel
+takes the colour, everything else is transparent, and type past the
+canvas is clipped. The layer remembers its type in `Layer.text`, which
+the Layers panel marks with a **T**, so `set_text` can set it again
+from scratch — the text layer of the checklist — while its name,
+opacity, blend mode, mask, link, clip, and lock stay and its pixels
+remain ordinary, paintable and filterable. A **Type…** dialog takes
+the text, X / Y, Size, and Vertical in the brush colour, with Add text
+layer and Edit selected. A scalable outline face, kerning, per-glyph
+styling, and on-canvas typing are documented scope cuts. Blank text
+and a size outside `1..=64` are refused.
+
+**Verified two ways.** Five new `document.rs` tests, every lit pixel
+traced by hand from the glyph masks. `I` is `01110 / 00100 × 5 /
+01110`, so at the origin it lights exactly the eleven pixels `(1,0)
+(2,0) (3,0) (2,1) … (2,5) (1,6) (2,6) (3,6)` in the text's colour with
+the rest transparent, the layer carries its type, `i` shares the
+glyph, and `~` is the box. Two `I`s at `(1, 2)` put the stems at
+columns `3` and `9` with column `6` dark (`22` pixels); at Size `2`
+one `I` lights `44` pixels with its stem on columns `4`–`5` and rows
+`2`–`15`; `text_size` gives `22 × 14` for two size-2 glyphs and `11 ×
+15` for `AB` over `C`. Vertical `II` stacks the stems at rows `3` and
+`11` with row `7` dark (`5 × 15`), a vertical newline starts a column
+at `8` (`11 × 7`), and a horizontal newline drops the second stem to
+row `11`. `set_text` moves and recolours the type (`(0, 0, 255, 128)`
+at the new stem, the old stem clear), keeps the layer's type, clips
+type past the right edge to three pixels and type past the top-left
+to six, and refuses a plain layer. Blank text, whitespace, Size `0`,
+and Size `65` are refused with no layer added, and a bad edit leaves
+the eleven pixels. Four of the five passed on the first run: the
+clipping expectation had missed the second row's stem pixel at
+`(7, 7)`, which the renderer rightly draws; the test was corrected,
+not the code.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog was reviewed by hand instead. Every other
+layer of this project's quality bar (hand-verified Rust tests, `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings`, `npm run build`) is
+fully green.
+
+**1510 Rust tests total** (1505 → 1510, 1503 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
