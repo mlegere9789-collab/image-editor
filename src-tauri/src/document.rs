@@ -11899,6 +11899,19 @@ impl Document {
         })
     }
 
+    /// [`Self::curves`] in Photoshop's Pencil mode: the curve is a raw
+    /// 256-entry `table` drawn freehand in the dialog rather than a point
+    /// list, applied to all three channels (Pencil mode on a single
+    /// channel is a documented scope cut). The table is used exactly as
+    /// given — it is the caller's smoothing, via [`smooth_curve_table`],
+    /// that rounds a jagged stroke off. Alpha untouched.
+    pub fn curves_table(&mut self, id: LayerId, table: &[u8; 256]) -> Result<Option<Rect>, String> {
+        let table = *table;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            [table[r as usize], table[g as usize], table[b as usize], a]
+        })
+    }
+
     /// The Curves dialog's Show Clipping readout: how many of layer `id`'s
     /// pixels — the active selection's, or the whole layer's — the given
     /// curves (the same four lists [`Self::curves_channels`] takes) would
@@ -13719,6 +13732,21 @@ pub fn curve_lookup(points: &[(u8, u8)]) -> Result<[u8; 256], String> {
         *out = (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8;
     }
     Ok(lut)
+}
+
+/// The Curves dialog's Smooth button for a Pencil-mode `table`: every
+/// entry becomes the rounded mean of itself and its two neighbours, the
+/// ends using themselves in place of the missing neighbour, so one press
+/// rounds a step off by a third of its height on each side and a
+/// straight line — the identity included — is left exactly as it was.
+pub fn smooth_curve_table(table: &[u8; 256]) -> [u8; 256] {
+    let mut out = [0u8; 256];
+    for (i, slot) in out.iter_mut().enumerate() {
+        let left = table[i.saturating_sub(1)] as u32;
+        let right = table[(i + 1).min(255)] as u32;
+        *slot = ((left + table[i] as u32 + right + 1) / 3).min(255) as u8;
+    }
+    out
 }
 
 /// The Sharpen tool's Protect Detail gate: a channel whose local contrast
@@ -22948,6 +22976,78 @@ mod tests {
                 &IDENTITY_POINTS
             )
             .is_err());
+    }
+
+    fn identity_table() -> [u8; 256] {
+        let mut table = [0u8; 256];
+        for (i, v) in table.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        table
+    }
+
+    #[test]
+    fn curves_table_identity_is_a_no_op_and_inversion_inverts() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_table(id, &identity_table()).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+        let mut inverted = identity_table();
+        inverted.reverse();
+        doc.curves_table(id, &inverted).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [245, 191, 127, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [195, 55, 155, 128]);
+    }
+
+    #[test]
+    fn curves_table_is_applied_as_drawn() {
+        // A jagged table: 100 at input 10, 0 everywhere else.
+        let mut table = [0u8; 256];
+        table[10] = 100;
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_table(id, &table).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn smooth_curve_table_rounds_a_step_and_keeps_a_line() {
+        let mut step = [0u8; 256];
+        for v in step[128..].iter_mut() {
+            *v = 255;
+        }
+        let smoothed = smooth_curve_table(&step);
+        // (0 + 0 + 255 + 1) / 3 = 85 and (0 + 255 + 255 + 1) / 3 = 170.
+        assert_eq!(
+            (smoothed[126], smoothed[127], smoothed[128], smoothed[129]),
+            (0, 85, 170, 255)
+        );
+        assert_eq!((smoothed[0], smoothed[255]), (0, 255));
+        assert_eq!(smooth_curve_table(&identity_table()), identity_table());
+        // A second press spreads the step further: 127 → (0 + 85 + 170 + 1) / 3 = 85.
+        let twice = smooth_curve_table(&smoothed);
+        assert_eq!(
+            (twice[126], twice[127], twice[128], twice[129]),
+            (28, 85, 170, 227)
+        );
+    }
+
+    #[test]
+    fn curves_table_respects_the_selection_and_alpha() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        let mut inverted = identity_table();
+        inverted.reverse();
+        doc.curves_table(id, &inverted).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [195, 55, 155, 128]);
+    }
+
+    #[test]
+    fn curves_table_propagates_errors() {
+        let (mut doc, id) = curves_points_fixture();
+        assert!(doc.curves_table(id + 1, &identity_table()).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.curves_table(id, &identity_table()).is_err());
     }
 
     #[test]

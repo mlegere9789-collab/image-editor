@@ -12408,6 +12408,51 @@ instead. Every other layer of this project's quality bar
 **1260 Rust tests total** (1255 → 1260, 1253 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 204 — Curves Pencil mode
+
+`Document::curves_table(id, table)` is Curves in Photoshop's Pencil
+mode: the curve is a raw 256-entry table drawn freehand rather than a
+point list, applied as given to all three channels (a Pencil curve on
+a single channel is a documented scope cut). The dialog's **Smooth**
+button is a pure `smooth_curve_table`: every entry becomes the rounded
+mean of itself and its two neighbours, the ends using themselves in
+place of the missing neighbour, so one press rounds a step off by a
+third of its height on each side while any straight line — the
+identity included — is left exactly as it was. The dialog gains a
+**Pencil mode** checkbox; while it is on, dragging across the graph
+sets the table at the pointer, filling the gap from the last sample
+with a straight run so a fast stroke stays continuous, the drawn
+table is shown in yellow, Smooth runs a `smooth_curve` command over
+it, Apply sends it through `curves_table`, and Reset restores the
+identity table. Both commands refuse a table that is not exactly 256
+entries.
+
+**Verified two ways.** Five new `document.rs` tests, every byte
+hand-computed. The identity table is a no-op and the reversed table
+inverts: `[10, 64, 128] → [245, 191, 127]` and `[60, 200, 100] → [195,
+55, 155]`, alpha kept. A jagged table with `100` at input `10` and `0`
+elsewhere is applied exactly as drawn. Smoothing a step from `0` to
+`255` at input `128` gives `0, 85, 170, 255` across inputs `126–129`
+(`(0 + 0 + 255 + 1) / 3` and `(0 + 255 + 255 + 1) / 3`) with the ends
+still `0` and `255`, the identity smooths to itself, and a second
+pass spreads the step to `28, 85, 170, 227`. A one-pixel selection
+confines the table, and an unknown or locked layer errors. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifty-one:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drawing handlers were reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1265 Rust tests total** (1260 → 1265, 1258 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

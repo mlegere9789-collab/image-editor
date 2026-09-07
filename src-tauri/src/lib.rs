@@ -3305,6 +3305,30 @@ fn curves_clipping(
     document.curves_clipping(id, &rgb, &red, &green, &blue)
 }
 
+/// Image > Adjustments > Curves in Pencil mode: a freehand 256-entry table
+/// applied to layer `id`.
+#[tauri::command]
+fn curves_table(
+    state: State<'_, AppState>,
+    id: LayerId,
+    table: Vec<u8>,
+) -> Result<Snapshot, String> {
+    let table: [u8; 256] = table
+        .try_into()
+        .map_err(|_| "A curve table needs exactly 256 entries.".to_string())?;
+    edit_checkpointed(&state, |document| document.curves_table(id, &table))
+}
+
+/// The Curves dialog's Smooth button: one smoothing pass over a Pencil-mode
+/// table. Read-only; needs no document.
+#[tauri::command]
+fn smooth_curve(table: Vec<u8>) -> Result<Vec<u8>, String> {
+    let table: [u8; 256] = table
+        .try_into()
+        .map_err(|_| "A curve table needs exactly 256 entries.".to_string())?;
+    Ok(document::smooth_curve_table(&table).to_vec())
+}
+
 /// The Curves dialog's graph: the 256-entry lookup table `points` describe.
 /// Read-only; needs no document.
 #[tauri::command]
@@ -3969,6 +3993,8 @@ pub fn run() {
             curves_lookup,
             curves_channels,
             curves_clipping,
+            curves_table,
+            smooth_curve,
             levels_black_point,
             levels_white_point,
             levels_gray_point,

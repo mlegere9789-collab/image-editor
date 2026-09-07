@@ -522,6 +522,12 @@ export default function App() {
   const [curveLuts, setCurveLuts] = useState<Partial<Record<LevelsChannel, number[]>>>({});
   // Show Clipping: how many pixels the current curves drive to black/white.
   const [curveShowClipping, setCurveShowClipping] = useState(false);
+  // Pencil mode: a freehand 256-entry table drawn on the graph.
+  const [curvesPencilMode, setCurvesPencilMode] = useState(false);
+  const [curveTable, setCurveTable] = useState<number[]>(() =>
+    Array.from({ length: 256 }, (_, i) => i),
+  );
+  const pencilLast = useRef<[number, number] | null>(null);
   const [curveClipping, setCurveClipping] = useState<[number, number] | null>(null);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
@@ -1710,9 +1716,45 @@ export default function App() {
 
   const applyCurves = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("curves_channels", { id: selectedId, ...curveLists() });
+    if (curvesPencilMode) {
+      await runCommand("curves_table", { id: selectedId, table: curveTable });
+    } else {
+      await runCommand("curves_channels", { id: selectedId, ...curveLists() });
+    }
     setShowCurvesDialog(false);
-  }, [runCommand, selectedId, curveLists]);
+  }, [runCommand, selectedId, curveLists, curvesPencilMode, curveTable]);
+
+  /** Pencil mode: set the table at the pointer, filling the gap from the
+   * last sample with a straight run so a fast stroke stays continuous. */
+  const pencilDraw = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    const input = Math.max(0, Math.min(255, Math.round(((event.clientX - box.left) / box.width) * 255)));
+    const output = Math.max(
+      0,
+      Math.min(255, Math.round(255 - ((event.clientY - box.top) / box.height) * 255)),
+    );
+    const last = pencilLast.current;
+    pencilLast.current = [input, output];
+    setCurveTable((table) => {
+      const next = [...table];
+      if (last === null || last[0] === input) {
+        next[input] = output;
+      } else {
+        const [x0, y0] = last;
+        const step = input > x0 ? 1 : -1;
+        for (let x = x0; x !== input + step; x += step) {
+          next[x] = Math.round(y0 + ((x - x0) / (input - x0)) * (output - y0));
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const smoothCurveTable = useCallback(() => {
+    void invoke<number[]>("smooth_curve", { table: curveTable })
+      .then(setCurveTable)
+      .catch((err) => setError(String(err)));
+  }, [curveTable]);
 
   /** Switch the channel being edited, parking the current one in the store. */
   const selectCurveChannel = useCallback(
@@ -9773,6 +9815,21 @@ export default function App() {
                   preserveAspectRatio="none"
                   role="img"
                   aria-label="Curves graph: histogram, baseline, and the curve"
+                  style={curvesPencilMode ? { cursor: "crosshair", touchAction: "none" } : undefined}
+                  onPointerDown={(event) => {
+                    if (!curvesPencilMode) return;
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    pencilLast.current = null;
+                    pencilDraw(event);
+                  }}
+                  onPointerMove={(event) => {
+                    if (!curvesPencilMode || !event.currentTarget.hasPointerCapture(event.pointerId))
+                      return;
+                    pencilDraw(event);
+                  }}
+                  onPointerUp={() => {
+                    pencilLast.current = null;
+                  }}
                 >
                   {curveHistogram && (
                     <path
@@ -9832,7 +9889,15 @@ export default function App() {
                         />
                       ) : null;
                     })}
-                  {curveLuts[curveChannel] && (
+                  {curvesPencilMode && (
+                    <polyline
+                      fill="none"
+                      stroke="#f5c400"
+                      strokeWidth={2}
+                      points={curveTable.map((out, input) => `${input},${255 - out}`).join(" ")}
+                    />
+                  )}
+                  {!curvesPencilMode && curveLuts[curveChannel] && (
                     <polyline
                       fill="none"
                       stroke={
@@ -9849,6 +9914,23 @@ export default function App() {
                 </svg>
               );
             })()}
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={curvesPencilMode}
+                onChange={(event) => setCurvesPencilMode(event.target.checked)}
+              />
+              Pencil mode
+              {curvesPencilMode && (
+                <button
+                  className="button button--quiet"
+                  onClick={smoothCurveTable}
+                  title="Smooth the drawn curve by one pass"
+                >
+                  Smooth
+                </button>
+              )}
+            </label>
             <label className="tools__slider">
               <input
                 type="checkbox"
@@ -9939,6 +10021,7 @@ export default function App() {
                     [0, 0],
                     [255, 255],
                   ]);
+                  setCurveTable(Array.from({ length: 256 }, (_, i) => i));
                   setCurveStore({
                     rgb: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
                     red: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
