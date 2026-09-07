@@ -2027,6 +2027,20 @@ impl Document {
         Ok(out)
     }
 
+    /// Camera Raw Filter > Shadow Clipping: how many of layer `id`'s
+    /// sampled pixels (the selection, or the whole layer) have each of R,
+    /// G, and B clipped to `0` — bin `0` of each channel of
+    /// [`Self::layer_histogram`], so the counts always agree with what
+    /// [`Self::histogram`] reports. Camera Raw's own indicator is the
+    /// triangle above the left end of its histogram, lit in the colour of
+    /// whichever channel clips; its blue on-canvas overlay of the clipped
+    /// pixels is a documented scope cut. Read-only; only an unknown layer
+    /// errors.
+    pub fn shadow_clipping(&self, id: LayerId) -> Result<[u32; 3], String> {
+        let (counts, _) = self.layer_histogram(id)?;
+        Ok([counts[0][0], counts[1][0], counts[2][0]])
+    }
+
     /// Image > Adjustments > Equalize: redistributes each channel's values
     /// so its histogram is as flat as possible — the darkest level present
     /// becomes 0, the brightest 255, and every level in between lands
@@ -22930,6 +22944,41 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert_eq!(doc.layer_pixel(id, 1, 1).unwrap(), [50, 0, 0, 255]);
         assert!(doc.layer_pixel(999, 1, 1).is_err());
+    }
+
+    #[test]
+    fn shadow_clipping_counts_pixels_at_zero_per_channel() {
+        // ramped_3x3 has no R at 0, but G and B are 0 in all nine pixels.
+        let (doc, id) = ramped_3x3();
+        assert_eq!(doc.shadow_clipping(id).unwrap(), [0, 9, 9]);
+        // (0, 0, 0) beside (10, 0, 0): one pixel clipped in R, both in G/B.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[0, 0, 0, 255, 10, 0, 0, 255], 2, 1)
+            .unwrap();
+        assert_eq!(doc.shadow_clipping(id).unwrap(), [1, 2, 2]);
+    }
+
+    #[test]
+    fn shadow_clipping_samples_only_the_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 0.0, 3.0, 3.0).unwrap();
+        assert_eq!(doc.shadow_clipping(id).unwrap(), [0, 3, 3]);
+    }
+
+    #[test]
+    fn shadow_clipping_agrees_with_the_histogram() {
+        let (doc, id) = depth_ramped_3x3();
+        let [r, g, b] = doc.histogram(id).unwrap();
+        assert_eq!(doc.shadow_clipping(id).unwrap(), [r[0], g[0], b[0]]);
+    }
+
+    #[test]
+    fn shadow_clipping_is_read_only_and_needs_a_known_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.set_locked(id, true).unwrap();
+        assert_eq!(doc.shadow_clipping(id).unwrap(), [0, 9, 9]);
+        assert!(doc.shadow_clipping(999).is_err());
     }
 
     #[test]

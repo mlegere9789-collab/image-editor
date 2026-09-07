@@ -2576,6 +2576,15 @@ fn rgb_levels(state: State<'_, AppState>, id: LayerId, x: u32, y: u32) -> Result
     document.layer_pixel(id, x, y)
 }
 
+/// Camera Raw Filter > Shadow Clipping: per-channel counts of layer `id`'s
+/// sampled pixels clipped to 0, over the selection (or whole layer).
+#[tauri::command]
+fn shadow_clipping(state: State<'_, AppState>, id: LayerId) -> Result<[u32; 3], String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.shadow_clipping(id)
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2826,6 +2835,7 @@ pub fn run() {
             camera_raw_saturation,
             histogram,
             rgb_levels,
+            shadow_clipping,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -242,7 +242,10 @@ export default function App() {
   const [clarityAmount, setClarityAmount] = useState(20);
   const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] = useState(false);
   const [cameraRawSaturation, setCameraRawSaturation] = useState(25);
-  const [histogramData, setHistogramData] = useState<number[][] | null>(null);
+  const [histogramData, setHistogramData] = useState<{
+    counts: number[][];
+    shadowClipping: [number, number, number];
+  } | null>(null);
   const [rgbLevels, setRgbLevels] = useState<[number, number, number, number] | null>(null);
   const lastLevelsPixel = useRef<string | null>(null);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
@@ -911,8 +914,11 @@ export default function App() {
 
   const openHistogramDialog = useCallback(() => {
     if (selectedId === null) return;
-    void invoke<number[][]>("histogram", { id: selectedId })
-      .then((counts) => setHistogramData(counts))
+    void Promise.all([
+      invoke<number[][]>("histogram", { id: selectedId }),
+      invoke<[number, number, number]>("shadow_clipping", { id: selectedId }),
+    ])
+      .then(([counts, shadowClipping]) => setHistogramData({ counts, shadowClipping }))
       .catch((err) => setError(String(err)));
   }, [selectedId]);
 
@@ -5003,7 +5009,7 @@ export default function App() {
               scaled to the tallest bin across all three channels.
             </p>
             {(() => {
-              const peak = Math.max(1, ...histogramData.flat());
+              const peak = Math.max(1, ...histogramData.counts.flat());
               const colors = ["#e5484d", "#46a758", "#3e63dd"];
               return (
                 <svg
@@ -5013,7 +5019,7 @@ export default function App() {
                   role="img"
                   aria-label="RGB histogram"
                 >
-                  {histogramData.map((counts, channel) => (
+                  {histogramData.counts.map((counts, channel) => (
                     <path
                       key={channel}
                       fill={colors[channel]}
@@ -5030,6 +5036,23 @@ export default function App() {
                 </svg>
               );
             })()}
+            <div
+              className="clipping"
+              title="Camera Raw Filter > Shadow Clipping: sampled pixels with that channel at 0"
+            >
+              <span className="control__label">Shadow clipping</span>
+              {(["R", "G", "B"] as const).map((name, channel) => {
+                const count = histogramData.shadowClipping[channel];
+                return (
+                  <span
+                    key={name}
+                    className={`clipping__channel${count > 0 ? " clipping__channel--lit" : ""}`}
+                  >
+                    {name} {count}
+                  </span>
+                );
+              })}
+            </div>
             <div className="modal__actions">
               <button className="button" onClick={() => setHistogramData(null)}>
                 Close

@@ -8497,6 +8497,54 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **881 Rust tests total** (877 → 881, 874 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 129 — Camera Raw Filter > Shadow Clipping
+
+`shadow_clipping(id)` completes the Camera Raw histogram panel's own
+trio of readouts: the per-channel count of sampled pixels whose value
+is clipped to `0`, over the active selection or the whole layer with
+none. It is nothing more than bin `0` of each channel of the shared
+`layer_histogram` helper Phase 127 factored out of `equalize` — the
+same sampling, so the counts are guaranteed to agree with what the
+histogram dialog is already drawing — and it inherits that helper's
+conventions: read-only (a locked layer is fine), only an unknown layer
+errors, every sampled pixel counts regardless of alpha. Camera Raw's
+own shadow-clipping indicator is the small triangle above the left end
+of its histogram, which lights in the colour of whichever channel is
+clipping (white when all three do); the Histogram dialog now shows the
+same information as three per-channel chips under the curves, each lit
+when its count is non-zero and showing the count itself, fetched
+alongside the histogram in one `Promise.all`. Camera Raw's own
+click-to-toggle blue overlay painting the clipped pixels onto the
+preview itself is a documented scope cut — it needs a compositing-time
+overlay rather than a read-only query — as is the matching highlight
+clipping indicator, which is not a separately tracked capability in
+`docs/PHOTOSHOP_PARITY.md` but would be bin `255` by the identical
+mechanism whenever it is wanted.
+
+**Verified two ways.** Four new `document.rs` tests on fixtures whose
+contents are written out literally. `ramped_3x3` has no R value at `0`
+but G and B at `0` in all nine pixels, so it reads `[0, 9, 9]`. A
+purpose-built two-pixel row — `(0, 0, 0, 255)` beside `(10, 0, 0,
+255)` — reads `[1, 2, 2]`: one pixel clipped in R, both in G and B.
+Selecting column `2` of `ramped_3x3` narrows the same counts to
+`[0, 3, 3]`. A locked layer still answers and an unknown layer errors.
+Every expected value is read directly off the fixture listing, so the
+second verification is again the listing itself.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's chip wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**885 Rust tests total** (881 → 885, 878 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
