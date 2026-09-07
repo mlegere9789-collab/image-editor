@@ -13328,6 +13328,58 @@ by hand instead. Every other layer of this project's quality bar
 **1350 Rust tests total** (1345 → 1350, 1343 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 222 — Apply Image > Add and Subtract
+
+Apply Image's Blending list grows the two arithmetic modes only it and
+Calculations offer. An `ApplyBlend` is `Mode { mode }` for any of the
+twelve layer blend modes, or `Add { scale, offset }` / `Subtract {
+scale, offset }`, and `apply_image_with(target, source, blend, opacity,
+invert, preserve_transparency)` is `apply_image` with that full list —
+the old signature now delegates to it as `Mode`. Its `blend(cb, cs)` is
+the layer mode's own formula, or Photoshop's channel arithmetic in unit
+terms: `(target + source) / scale + offset / 255` for Add and `(target
+− source) / scale + offset / 255` for Subtract, clamped to `0..=1`,
+with Scale in `1.0..=2.0` and Offset in `-255..=255` validated before
+any pixel changes. The arithmetic replaces only the blend-mode step, so
+alpha, opacity, Invert, and Preserve Transparency compose around it
+exactly as before: at full opacity over an opaque target the channel is
+the arithmetic result itself. The `apply_image` command now takes an
+`ApplyBlend`, and the Apply Image dialog's Blending select lists Add
+and Subtract after the twelve modes, showing Scale and Offset fields
+for them. Calculations, which shares the two modes, remains unshipped.
+
+**Verified two ways.** Five new `document.rs` tests on a 1×1 target
+`[100, 200, 30]` over a source `[50, 100, 240]`, each byte first
+computed in Python emulating `f32`. Add at scale `1` gives `[150, 255,
+255]` (two channels clamped) and at scale `2` gives `[75, 150, 135]`,
+the source untouched. Add at scale `1.5`, offset `−20` gives `[80,
+180, 160]`. Subtract gives `[50, 100, 0]`, with offset `128` `[178,
+228, 0]`, and at scale `2`, offset `64` `[89, 114, 0]`. Add at `50%`
+opacity lands halfway at `[125, 228, 143]` — the exact `142.5`
+rounded half away from zero — and over a transparent target the
+source shows through unchanged. Scale `0.5`, `2.5`, and `NaN` and
+offset `256` and `−256` are each refused with the target untouched,
+and `Mode { Multiply }` equals `apply_image` with Multiply, `[20, 78,
+28]`. Four of the five passed on the first run: the Add-at-50%
+expectation had been computed as `142` by a Python check that applied
+banker's rounding to the exact `142.5`; Rust's `round` goes half away
+from zero to `143`, and the expectation was corrected — the code was
+right.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1355 Rust tests total** (1350 → 1355, 1348 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

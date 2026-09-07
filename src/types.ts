@@ -40,6 +40,14 @@ export type LayerView = {
   fill: Fill | null;
 };
 
+/** Mirrors `ApplyBlend` in src-tauri/src/document.rs (serde internally
+ * tagged by `kind`): Apply Image's Blending list — a layer blend mode, or
+ * Add / Subtract with Scale (1–2) and Offset (−255..255). */
+export type ApplyBlend =
+  | { kind: "mode"; mode: BlendMode }
+  | { kind: "add"; scale: number; offset: number }
+  | { kind: "subtract"; scale: number; offset: number };
+
 /** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged
  * by `kind`): what a live fill layer paints. */
 export type Fill =

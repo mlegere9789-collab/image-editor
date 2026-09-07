@@ -6,6 +6,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import LayerPanel from "./LayerPanel";
 import type {
   Adjustment,
+  ApplyBlend,
   BlendMode,
   BlendModeInfo,
   DocumentView,
@@ -314,6 +315,11 @@ export default function App() {
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
+  // Apply Image's two arithmetic blends beyond the layer modes, with their
+  // Scale and Offset; "mode" means `applyImageBlend` applies.
+  const [applyImageArithmetic, setApplyImageArithmetic] = useState<ApplyBlend["kind"]>("mode");
+  const [applyImageScale, setApplyImageScale] = useState(1);
+  const [applyImageOffset, setApplyImageOffset] = useState(0);
   const [applyImageInvert, setApplyImageInvert] = useState(false);
   const [applyImagePreserve, setApplyImagePreserve] = useState(false);
   const [showTransformSelectionDialog, setShowTransformSelectionDialog] = useState(false);
@@ -1311,10 +1317,14 @@ export default function App() {
 
   const applyApplyImage = useCallback(async () => {
     if (selectedId === null) return;
+    const blend: ApplyBlend =
+      applyImageArithmetic === "mode"
+        ? { kind: "mode", mode: applyImageBlend }
+        : { kind: applyImageArithmetic, scale: applyImageScale, offset: applyImageOffset };
     await runCommand("apply_image", {
       target: selectedId,
       source: applyImageSource === "merged" ? null : applyImageSource,
-      blend: applyImageBlend,
+      blend,
       opacity: Math.round(applyImageOpacity),
       invert: applyImageInvert,
       preserveTransparency: applyImagePreserve,
@@ -1325,6 +1335,9 @@ export default function App() {
     selectedId,
     applyImageSource,
     applyImageBlend,
+    applyImageArithmetic,
+    applyImageScale,
+    applyImageOffset,
     applyImageOpacity,
     applyImageInvert,
     applyImagePreserve,
@@ -8416,16 +8429,58 @@ export default function App() {
             <label className="control control--row">
               <span className="control__label">Blending</span>
               <select
-                value={applyImageBlend}
-                onChange={(event) => setApplyImageBlend(event.target.value as BlendMode)}
+                value={applyImageArithmetic === "mode" ? applyImageBlend : applyImageArithmetic}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "add" || value === "subtract") {
+                    setApplyImageArithmetic(value);
+                  } else {
+                    setApplyImageArithmetic("mode");
+                    setApplyImageBlend(value as BlendMode);
+                  }
+                }}
               >
                 {blendModes.map((info) => (
                   <option key={info.mode} value={info.mode}>
                     {info.label}
                   </option>
                 ))}
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
               </select>
             </label>
+            {applyImageArithmetic !== "mode" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Scale</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={2}
+                    step={0.001}
+                    value={applyImageScale}
+                    onChange={(event) =>
+                      setApplyImageScale(Math.max(1, Math.min(2, Number(event.target.value))))
+                    }
+                  />
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Offset</span>
+                  <input
+                    type="number"
+                    min={-255}
+                    max={255}
+                    step={1}
+                    value={applyImageOffset}
+                    onChange={(event) =>
+                      setApplyImageOffset(
+                        Math.max(-255, Math.min(255, Math.round(Number(event.target.value)))),
+                      )
+                    }
+                  />
+                </label>
+              </>
+            )}
             <label className="control control--row">
               <span className="control__label">Opacity (%)</span>
               <input

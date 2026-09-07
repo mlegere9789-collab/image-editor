@@ -219,6 +219,56 @@ impl Adjustment {
     }
 }
 
+/// Apply Image's Blending list: any of the twelve layer blend modes, or
+/// the two channel-arithmetic modes only Apply Image and Calculations
+/// offer. Add and Subtract work in Photoshop's byte terms — `(target +
+/// source) / scale + offset` and `(target − source) / scale + offset`,
+/// clamped to `0..=255` — with `scale` in `1.0..=2.0` and `offset` in
+/// `-255..=255`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ApplyBlend {
+    Mode { mode: BlendMode },
+    Add { scale: f32, offset: i32 },
+    Subtract { scale: f32, offset: i32 },
+}
+
+impl ApplyBlend {
+    /// Photoshop's dialog bounds for the arithmetic modes.
+    pub fn validate(self) -> Result<(), String> {
+        match self {
+            ApplyBlend::Mode { .. } => Ok(()),
+            ApplyBlend::Add { scale, offset } | ApplyBlend::Subtract { scale, offset } => {
+                if !(1.0..=2.0).contains(&scale) {
+                    return Err(format!("Scale must be between 1 and 2, not {scale}."));
+                }
+                if !(-255..=255).contains(&offset) {
+                    return Err(format!(
+                        "Offset must be between -255 and 255, not {offset}."
+                    ));
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// The blended colour of one channel, backdrop `cb` (the target) and
+    /// source `cs` both in `0..=1`: the layer blend mode's own formula, or
+    /// the arithmetic in unit terms — `offset / 255` added after the
+    /// scaled sum or difference, then clamped.
+    pub fn blend(self, cb: f32, cs: f32) -> f32 {
+        match self {
+            ApplyBlend::Mode { mode } => mode.blend(cb, cs),
+            ApplyBlend::Add { scale, offset } => {
+                ((cb + cs) / scale + offset as f32 / 255.0).clamp(0.0, 1.0)
+            }
+            ApplyBlend::Subtract { scale, offset } => {
+                ((cb - cs) / scale + offset as f32 / 255.0).clamp(0.0, 1.0)
+            }
+        }
+    }
+}
+
 /// What a fill layer paints — Layer > New Fill Layer's three kinds, kept
 /// on the layer so the fill can be re-tuned after the fact instead of
 /// only baked once as [`Document::add_solid_color_layer`],
@@ -3974,9 +4024,36 @@ impl Document {
         invert: bool,
         preserve_transparency: bool,
     ) -> Result<Option<Rect>, String> {
+        self.apply_image_with(
+            target,
+            source,
+            ApplyBlend::Mode { mode: blend },
+            opacity,
+            invert,
+            preserve_transparency,
+        )
+    }
+
+    /// [`Self::apply_image`] with the full Blending list — a layer blend
+    /// mode, or Add / Subtract with their Scale and Offset. The arithmetic
+    /// replaces the blend-mode step only: alpha, opacity, Invert, and
+    /// Preserve Transparency compose around it exactly as before, so at
+    /// full opacity over an opaque target the channel is the arithmetic
+    /// result itself. Errors additionally for a scale outside `1..=2` or
+    /// an offset outside `-255..=255`.
+    pub fn apply_image_with(
+        &mut self,
+        target: LayerId,
+        source: Option<LayerId>,
+        blend: ApplyBlend,
+        opacity: u8,
+        invert: bool,
+        preserve_transparency: bool,
+    ) -> Result<Option<Rect>, String> {
         if opacity > 100 {
             return Err(format!("Opacity must be 0..=100 percent, not {opacity}."));
         }
+        blend.validate()?;
         let source_pixels = match source {
             Some(id) => self.layer(id)?.pixels.clone(),
             None => crate::composite::flatten(self).pixels,
@@ -35332,6 +35409,205 @@ mod tests {
         assert!(doc
             .apply_image(target, Some(base), BlendMode::Normal, 100, false, false)
             .is_err());
+    }
+
+    /// A 1×1 document: `target` [100, 200, 30] above `source` [50, 100, 240],
+    /// both opaque.
+    fn arithmetic_pair() -> (Document, LayerId, LayerId) {
+        let mut doc = Document::new(1, 1).unwrap();
+        let source = doc.add_layer("source", &[50, 100, 240, 255], 1, 1).unwrap();
+        let target = doc.add_layer("target", &[100, 200, 30, 255], 1, 1).unwrap();
+        (doc, source, target)
+    }
+
+    #[test]
+    fn apply_image_add_sums_the_target_and_source() {
+        // Scale 1: 150, 300 → 255, 270 → 255. Scale 2: 75, 150, 135.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Add {
+                scale: 1.0,
+                offset: 0,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [150, 255, 255, 255]);
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Add {
+                scale: 2.0,
+                offset: 0,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [75, 150, 135, 255]);
+        assert_eq!(pixel(&doc, source, 0, 0), [50, 100, 240, 255]);
+    }
+
+    #[test]
+    fn apply_image_add_scales_then_offsets() {
+        // (100 + 50) / 1.5 − 20 = 80; (200 + 100) / 1.5 − 20 = 180;
+        // (30 + 240) / 1.5 − 20 = 160.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Add {
+                scale: 1.5,
+                offset: -20,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [80, 180, 160, 255]);
+    }
+
+    #[test]
+    fn apply_image_subtract_takes_the_source_from_the_target() {
+        // 50, 100, −210 → 0; with offset 128: 178, 228, −82 → 0; scale 2
+        // offset 64: 89, 114, −41 → 0.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Subtract {
+                scale: 1.0,
+                offset: 0,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 0, 255]);
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Subtract {
+                scale: 1.0,
+                offset: 128,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [178, 228, 0, 255]);
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Subtract {
+                scale: 2.0,
+                offset: 64,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [89, 114, 0, 255]);
+    }
+
+    #[test]
+    fn apply_image_arithmetic_composes_with_opacity_and_transparency() {
+        // Add at 50%: halfway from the target to [150, 255, 255] →
+        // [125, 228, 143]: the last is exactly 142.5 in f32, rounded half
+        // away from zero.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Add {
+                scale: 1.0,
+                offset: 0,
+            },
+            50,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [125, 228, 143, 255]);
+        // Over a transparent target the source shows through unchanged.
+        let mut doc = Document::new(1, 1).unwrap();
+        let source = doc.add_layer("source", &[50, 100, 240, 255], 1, 1).unwrap();
+        let target = doc.add_layer("target", &[0, 0, 0, 0], 1, 1).unwrap();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Add {
+                scale: 1.0,
+                offset: 0,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
+    }
+
+    #[test]
+    fn apply_image_arithmetic_validates_and_mode_matches_apply_image() {
+        let (mut doc, source, target) = arithmetic_pair();
+        for blend in [
+            ApplyBlend::Add {
+                scale: 0.5,
+                offset: 0,
+            },
+            ApplyBlend::Add {
+                scale: 2.5,
+                offset: 0,
+            },
+            ApplyBlend::Subtract {
+                scale: f32::NAN,
+                offset: 0,
+            },
+            ApplyBlend::Subtract {
+                scale: 1.0,
+                offset: 256,
+            },
+            ApplyBlend::Add {
+                scale: 1.0,
+                offset: -256,
+            },
+        ] {
+            assert!(doc
+                .apply_image_with(target, Some(source), blend, 100, false, false)
+                .is_err());
+            assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 255]);
+        }
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyBlend::Mode {
+                mode: BlendMode::Multiply,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        let (mut other, source, target) = arithmetic_pair();
+        other
+            .apply_image(target, Some(source), BlendMode::Multiply, 100, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), pixel(&other, target, 0, 0));
+        // Multiply: 100·50/255 → 20, 200·100/255 → 78, 30·240/255 → 28.
+        assert_eq!(pixel(&doc, target, 0, 0), [20, 78, 28, 255]);
     }
 
     #[test]

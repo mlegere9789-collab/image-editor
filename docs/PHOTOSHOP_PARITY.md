@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 329.**
+**618 distinct capabilities tracked. Currently shipped: 330.**
 
 ## PART I — EVERY TOOL
 
@@ -348,8 +348,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Calculations — Source 2 Channel
 - [ ] Calculations — Source 2 Invert
 - [ ] Calculations — Blending
-- [ ] Add Blending Mode
-- [ ] Subtract Blending Mode
+- [x] Add Blending Mode (`ApplyBlend::Add { scale, offset }` in `apply_image_with`: per channel `(target + source) / scale + offset`, clamped, with scale `1..=2` and offset `-255..=255`, composing with opacity, Invert, and Preserve Transparency exactly as the layer blend modes do — see README Phase 222)
+- [x] Subtract Blending Mode (`ApplyBlend::Subtract { scale, offset }`: per channel `(target − source) / scale + offset`, clamped — see README Phase 222)
 - [ ] Calculations — Opacity
 - [ ] Calculations — Mask
 - [ ] Calculations — Mask Image

@@ -1029,19 +1029,20 @@ fn copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
 }
 
 /// Image > Apply Image: blend layer `source` (or the merged composite, with
-/// `None`) onto layer `target` with `blend` at `opacity` percent.
+/// `None`) onto layer `target` with `blend` — a layer blend mode, or Add /
+/// Subtract with Scale and Offset — at `opacity` percent.
 #[tauri::command]
 fn apply_image(
     state: State<'_, AppState>,
     target: LayerId,
     source: Option<LayerId>,
-    blend: BlendMode,
+    blend: document::ApplyBlend,
     opacity: u8,
     invert: bool,
     preserve_transparency: bool,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.apply_image(
+        document.apply_image_with(
             target,
             source,
             blend,
