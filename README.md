@@ -11276,6 +11276,49 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1150 Rust tests total** (1145 → 1150, 1143 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 182 — Spot Healing Brush tool
+
+`Stroke::SpotHeal` is the Spot Healing Brush in its Proximity Match
+type: no source point — each pixel the brush covers takes the mean of
+the pre-stroke pixels on the square ring two pixels out from it
+(Chebyshev distance exactly 2: sixteen samples, edge-clamped exactly as
+`box_blur_at` clamps, averaged through the same `average_samples` with
+truncating division), the surrounding and presumably unblemished
+pixels, mixed in by the brush's coverage. Alpha is untouched and fully
+transparent pixels are skipped. Reading the ring from the pre-stroke
+snapshot means a drag over a blemish replaces every pixel with its
+*original* surroundings, never with pixels the stroke has already
+rewritten. Photoshop's Content-Aware and Create Texture types and
+Sample All Layers are documented scope cuts. A new **Spot Healing**
+tool button sits beside the Healing Brush; it needs no source.
+
+**Verified two ways.** Five new `document.rs` tests, the ring-mean
+grid derived in Python with the same clamp-and-truncate rule and the
+one coverage-mixed byte emulated in `f32`. A `200` spot in the middle
+of solid `100` heals to `100`. Covering `ramped_3x3` entirely gives
+`[[40, 42, 45], [47, 50, 52], [55, 57, 60]]` — the centre's ring is the
+whole border, mean `50`. The `0.7929` edge coverage mixes `10` toward
+its ring mean `40` to `34`, and a corner-to-corner drag reproduces the
+one-dot row `47 50 52`, proving the snapshot read. On
+`depth_ramped_3x3` the transparent left column is untouched and the
+centre keeps its alpha `128` (and, by symmetry, its `50`). A one-pixel
+selection confines the stroke and a locked layer errors. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+twenty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1155 Rust tests total** (1150 → 1155, 1148 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

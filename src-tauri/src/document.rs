@@ -7043,6 +7043,7 @@ impl Document {
                 | Stroke::Clone { .. }
                 | Stroke::Smudge { .. }
                 | Stroke::Heal { .. }
+                | Stroke::SpotHeal
         )
         .then(|| layer.pixels.clone());
         // Color Replacement samples the colour to replace under the stroke's
@@ -7180,6 +7181,31 @@ impl Document {
                                 - i32::from(source_mean[channel]))
                             .clamp(0, 255) as u8;
                             *slot = to_byte(lerp(to_unit(*slot), to_unit(healed), c));
+                        }
+                        continue;
+                    }
+                    Stroke::SpotHeal => {
+                        if layer.pixels[base + 3] == 0 {
+                            continue;
+                        }
+                        let source = snapshot.as_ref().expect("taken above");
+                        let (cx, cy) = ((x0 + col as u32) as i64, (y0 + row as u32) as i64);
+                        let ring = (-2i64..=2).flat_map(|dy| {
+                            (-2i64..=2).filter_map(move |dx| {
+                                (dx.abs().max(dy.abs()) == 2).then_some((dx, dy))
+                            })
+                        });
+                        let samples = ring.map(|(dx, dy)| {
+                            (
+                                (cx + dx).clamp(0, width as i64 - 1) as usize,
+                                (cy + dy).clamp(0, height as i64 - 1) as usize,
+                            )
+                        });
+                        let mean = average_samples(source, width as usize, samples);
+                        for (slot, &target) in
+                            layer.pixels[base..base + 3].iter_mut().zip(mean.iter())
+                        {
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), c));
                         }
                         continue;
                     }
@@ -12627,6 +12653,15 @@ pub enum Stroke<'a> {
     /// paint nothing. Photoshop's Diffusion slider, Sample All Layers, and
     /// pattern sources are documented scope cuts.
     Heal { offset: (i32, i32) },
+    /// The Spot Healing Brush (Proximity Match): each covered pixel takes
+    /// the mean of the pre-stroke pixels on the square ring two pixels out
+    /// from it (Chebyshev distance exactly 2, sixteen samples, edge-clamped
+    /// like [`box_blur_at`]) — the surrounding, presumably unblemished,
+    /// pixels — mixed in by the brush's coverage; alpha is untouched and
+    /// fully transparent pixels are skipped. Photoshop's Content-Aware and
+    /// Create Texture types and Sample All Layers are documented scope
+    /// cuts.
+    SpotHeal,
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19837,6 +19872,71 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
         doc.set_locked(id, true).unwrap();
         assert!(doc.stroke(id, &[(1.0, 1.0)], 3.0, heal((1, 0))).is_err());
+    }
+
+    #[test]
+    fn spot_healing_brush_replaces_a_blemish_with_its_surroundings() {
+        // A 200 spot on solid 100: the ring two pixels out is all 100.
+        let mut pixels = solid(3, 3, [100, 0, 0, 255]);
+        pixels[(3 + 1) * 4] = 200;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 0, 0, 255]);
+    }
+
+    #[test]
+    fn spot_healing_brush_over_everything_matches_the_ring_means() {
+        // Edge-clamped ring means of ramped_3x3, sixteen samples each,
+        // truncated: [[40, 42, 45], [47, 50, 52], [55, 57, 60]].
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 42, 45], vec![47, 50, 52], vec![55, 57, 60]]
+        );
+    }
+
+    #[test]
+    fn spot_healing_brush_blends_by_coverage_and_reads_the_snapshot() {
+        // The 0.7929 edge coverage mixes 10 toward its ring mean 40: 34.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 34);
+        // A corner-to-corner drag equals the one-dot result: every ring is
+        // read from the untouched snapshot.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.0, 0.0), (3.0, 3.0)], 3.0, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![47, 50, 52]);
+    }
+
+    #[test]
+    fn spot_healing_brush_leaves_alpha_and_transparent_pixels_alone() {
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 1), [40, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 128);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+    }
+
+    #[test]
+    fn spot_healing_brush_respects_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 40);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::SpotHeal)
+            .is_err());
     }
 
     #[test]

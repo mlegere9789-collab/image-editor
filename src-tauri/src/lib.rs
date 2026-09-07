@@ -2100,6 +2100,21 @@ fn heal_stroke(
     })
 }
 
+/// Spot Healing Brush: replace pixels along `points` on layer `id` with
+/// the mean of their pre-stroke surroundings. See [`paint_stroke`] for
+/// `points` and checkpointing.
+#[tauri::command]
+fn spot_heal_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::SpotHeal)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3582,6 +3597,7 @@ pub fn run() {
             color_replace_stroke,
             background_erase_stroke,
             heal_stroke,
+            spot_heal_stroke,
             clone_stroke,
             set_history_source,
             history_stroke,

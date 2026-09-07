@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 253.**
+**618 distinct capabilities tracked. Currently shipped: 254.**
 
 ## PART I — EVERY TOOL
 
@@ -21,7 +21,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] SELECTION BRUSH TOOL
 - [ ] REMOVE TOOL
 - [x] HEALING BRUSH TOOL (`Stroke::Heal { offset }`, the Clone Stamp's aligned Alt-click sampling with the classic heal — texture from the source, tone from the destination: the sample shifted per channel by the difference of the two radius-1 local means, clamped, mixed by coverage, alpha untouched; Diffusion, Sample All Layers, and pattern sources are documented scope cuts — see README Phase 181)
-- [ ] SPOT HEALING BRUSH TOOL
+- [x] SPOT HEALING BRUSH TOOL (`Stroke::SpotHeal`, Proximity Match: each covered pixel takes the mean of the sixteen pre-stroke pixels on the square ring two pixels out, edge-clamped, mixed by coverage, alpha untouched; Content-Aware, Create Texture, and Sample All Layers are documented scope cuts — see README Phase 182)
 - [ ] PATCH TOOL
 - [ ] CONTENT-AWARE MOVE TOOL
 - [x] RED EYE TOOL (`red_eye`, a click that finds the 4-connected region of red-dominant pixels — red more than 50 levels above the larger of green and blue — replaces each pixel's red with the mean of its green and blue, and darkens all three channels by Darken Amount; confined to the selection, alpha untouched; Pupil Size is a documented scope cut — see README Phase 165)

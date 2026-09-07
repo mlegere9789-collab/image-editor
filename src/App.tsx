@@ -3042,6 +3042,8 @@ export default function App() {
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "spotHealingBrush") {
+        void runCommand("spot_heal_stroke", { id: selectedId, points, radius: brushSize });
       } else if (tool === "healingBrush") {
         void runCommand("heal_stroke", {
           id: selectedId,
@@ -4242,6 +4244,15 @@ export default function App() {
             title="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
           >
             Healing Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "spotHealingBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "spotHealingBrush"}
+            onClick={() => setTool("spotHealingBrush")}
+            title="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
+          >
+            Spot Healing
           </button>
           <button
             className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
@@ -5491,6 +5502,7 @@ export default function App() {
               tool === "redEye" ||
               tool === "cloneStamp" ||
               tool === "healingBrush" ||
+              tool === "spotHealingBrush" ||
               tool === "historyBrush" ||
               tool === "patternStamp"
             }
