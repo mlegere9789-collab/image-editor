@@ -42,6 +42,8 @@ export type LayerView = {
   text: TextLayer | null;
   /** The shape of a shape layer; `null` for any other layer. */
   shape: ShapeLayer | null;
+  /** A smart object's current transform; `null` for any other layer. */
+  smart: SmartTransform | null;
 };
 
 /** Mirrors `ApplyChannel` in src-tauri/src/document.rs: Apply Image's
@@ -86,6 +88,22 @@ export type ShapeLayer = {
   spec: ShapeSpec;
   fill: [number, number, number, number] | null;
   stroke: [[number, number, number, number], number] | null;
+};
+
+/** Mirrors `FreeTransform` in src-tauri/src/document.rs as a smart
+ * object's remembered transform. */
+export type SmartTransform = {
+  widthPercent: number;
+  heightPercent: number;
+  degrees: number;
+  skewHorizontal: number;
+  skewVertical: number;
+  offsetX: number;
+  offsetY: number;
+  reference: ReferencePoint | null;
+  position: [number, number] | null;
+  relative: boolean;
+  maintainAspect: boolean;
 };
 
 /** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged

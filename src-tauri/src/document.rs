@@ -58,6 +58,10 @@ pub struct Layer {
     /// A shape layer: the shape its pixels were drawn from, so
     /// [`Document::set_shape`] can draw it again.
     pub shape: Option<ShapeLayer>,
+    /// A smart object: the pixels it embeds and the transform they are
+    /// shown through, so [`Document::set_smart_transform`] can show them
+    /// through another without loss.
+    pub smart: Option<SmartObject>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -84,6 +88,8 @@ pub struct LayerView {
     pub text: Option<TextLayer>,
     /// The shape of a shape layer; `None` for any other layer.
     pub shape: Option<ShapeLayer>,
+    /// A smart object's current transform; `None` for any other layer.
+    pub smart: Option<FreeTransform>,
 }
 
 impl Layer {
@@ -102,6 +108,7 @@ impl Layer {
             fill: self.fill,
             text: self.text.clone(),
             shape: self.shape.clone(),
+            smart: self.smart.as_ref().map(|s| s.transform),
         }
     }
 
@@ -1345,6 +1352,15 @@ pub struct ShapeLayer {
     pub spec: ShapeSpec,
     pub fill: Option<[u8; 4]>,
     pub stroke: Option<([u8; 4], u32)>,
+}
+
+/// A smart object's embedded contents: the layer's pixels as they were
+/// when it was made (its source) and the [`FreeTransform`] they are shown
+/// through — see [`Document::convert_to_smart_object`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct SmartObject {
+    pub source: Vec<u8>,
+    pub transform: FreeTransform,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -6408,6 +6424,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         });
         Ok(id)
@@ -6449,6 +6466,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         });
         id
@@ -6832,6 +6850,137 @@ impl Document {
             return Err(err);
         }
         self.layer_mut(id)?.shape = Some(shape.clone());
+        Ok(())
+    }
+
+    /// Layer > Smart Objects > Convert to Smart Object: layer `id` embeds
+    /// its pixels as a source shown through the neutral transform, its
+    /// pixels unchanged. Errors for a layer that already is a smart
+    /// object, or an unknown one.
+    pub fn convert_to_smart_object(&mut self, id: LayerId) -> Result<(), String> {
+        let layer = self.layer_mut(id)?;
+        if layer.smart.is_some() {
+            return Err("That layer is already a smart object.".to_string());
+        }
+        layer.smart = Some(SmartObject {
+            source: layer.pixels.clone(),
+            transform: FreeTransform::default(),
+        });
+        Ok(())
+    }
+
+    /// Create Smart Object from Layers: the layers `ids` are composited
+    /// together — bottom to top, each at its own opacity and blend mode,
+    /// whether visible or not, as [`Self::merge_visible`] composites — into
+    /// one new layer named `Smart Object` that embeds the result as its
+    /// source, placed where the topmost of them stood, and the layers
+    /// themselves are removed. Returns the new layer's id. Errors for no
+    /// layers or an unknown one.
+    pub fn smart_object_from_layers(&mut self, ids: &[LayerId]) -> Result<LayerId, String> {
+        if ids.is_empty() {
+            return Err("A smart object needs at least one layer.".to_string());
+        }
+        let mut indices: Vec<usize> = ids
+            .iter()
+            .map(|&id| {
+                self.layers
+                    .iter()
+                    .position(|l| l.id == id)
+                    .ok_or_else(|| format!("No layer with id {id}."))
+            })
+            .collect::<Result<_, _>>()?;
+        indices.sort_unstable();
+        indices.dedup();
+        let pixels = crate::composite::flatten_subset(self, &indices).pixels;
+        let id = self.next_id;
+        self.next_id += 1;
+        let top = *indices.last().expect("at least one");
+        let smart = Layer {
+            id,
+            name: "Smart Object".to_string(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            linked: false,
+            clipped: false,
+            mask: None,
+            adjustment: None,
+            fill: None,
+            text: None,
+            shape: None,
+            smart: Some(SmartObject {
+                source: pixels.clone(),
+                transform: FreeTransform::default(),
+            }),
+            pixels,
+        };
+        self.layers.insert(top + 1, smart);
+        let old = std::mem::take(&mut self.layers);
+        self.layers = old
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, layer)| {
+                let removed = index <= top && indices.contains(&index);
+                (!removed).then_some(layer)
+            })
+            .collect();
+        Ok(id)
+    }
+
+    /// A smart object's transform: layer `id`'s pixels are restored from
+    /// its source and shown through `transform` by [`Self::free_transform`],
+    /// so every transform starts from the embedded pixels rather than the
+    /// last result — scaling down and back up returns the source exactly —
+    /// and the transform is remembered. A transform the tool refuses
+    /// leaves the pixels and the remembered transform as they were.
+    /// Errors for a layer that is not a smart object, or a locked or
+    /// unknown layer.
+    pub fn set_smart_transform(
+        &mut self,
+        id: LayerId,
+        transform: FreeTransform,
+    ) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let Some(smart) = layer.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        let before = layer.pixels.clone();
+        let source = smart.source.clone();
+        self.layer_mut(id)?.pixels = source;
+        match self.free_transform(id, transform) {
+            Ok(touched) => {
+                self.layer_mut(id)?
+                    .smart
+                    .as_mut()
+                    .expect("checked above")
+                    .transform = transform;
+                Ok(touched.or(Some(Rect {
+                    x0: 0,
+                    y0: 0,
+                    x1: self.width,
+                    y1: self.height,
+                })))
+            }
+            Err(err) => {
+                self.layer_mut(id)?.pixels = before;
+                Err(err)
+            }
+        }
+    }
+
+    /// Layer > Rasterize > Smart Object: layer `id` keeps the pixels it
+    /// shows and forgets its source and transform. Errors for a layer that
+    /// is not a smart object, or an unknown one.
+    pub fn rasterize_smart_object(&mut self, id: LayerId) -> Result<(), String> {
+        let layer = self.layer_mut(id)?;
+        if layer.smart.is_none() {
+            return Err("That layer is not a smart object.".to_string());
+        }
+        layer.smart = None;
         Ok(())
     }
 
@@ -8097,6 +8246,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         });
         id
@@ -12202,6 +12352,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         });
 
@@ -12246,6 +12397,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         }];
         Ok(id)
@@ -12290,6 +12442,7 @@ impl Document {
             fill: None,
             text: None,
             shape: None,
+            smart: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -46958,5 +47111,149 @@ mod tests {
             .draw_custom_shape(id, &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)], RED)
             .unwrap_err()
             .contains("locked"));
+    }
+
+    fn half() -> FreeTransform {
+        FreeTransform {
+            width_percent: 50.0,
+            height_percent: 50.0,
+            ..FreeTransform::default()
+        }
+    }
+
+    #[test]
+    fn convert_to_smart_object_keeps_the_pixels_and_embeds_them_as_the_source() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        doc.convert_to_smart_object(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(doc.layers()[0].smart.as_ref().unwrap().source, before);
+        assert_eq!(doc.layers()[0].view().smart, Some(FreeTransform::default()));
+        assert!(doc
+            .convert_to_smart_object(id)
+            .unwrap_err()
+            .contains("already"));
+        assert!(doc.convert_to_smart_object(999).is_err());
+    }
+
+    #[test]
+    fn smart_transform_re_renders_from_the_source_so_a_scale_is_undone_exactly() {
+        let (mut doc, id) = ramped_4x4();
+        let original = doc.layers()[0].pixels.clone();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.set_smart_transform(id, half()).unwrap();
+        let (mut plain, pid) = ramped_4x4();
+        plain.free_transform(pid, half()).unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        assert_eq!(doc.layers()[0].view().smart, Some(half()));
+        // Back to 100%: the original returns byte for byte, which a
+        // destructive scale of the shrunken pixels could never do.
+        doc.set_smart_transform(id, FreeTransform::default())
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, original);
+        let mut destructive = plain.clone();
+        destructive
+            .free_transform(
+                pid,
+                FreeTransform {
+                    width_percent: 200.0,
+                    height_percent: 200.0,
+                    ..FreeTransform::default()
+                },
+            )
+            .unwrap();
+        assert_ne!(destructive.layers()[0].pixels, original);
+        // A quarter turn from the source equals the plain transform.
+        let turn = FreeTransform {
+            degrees: 90.0,
+            ..FreeTransform::default()
+        };
+        doc.set_smart_transform(id, turn).unwrap();
+        let (mut turned, tid) = ramped_4x4();
+        turned.free_transform(tid, turn).unwrap();
+        assert_eq!(doc.layers()[0].pixels, turned.layers()[0].pixels);
+    }
+
+    #[test]
+    fn smart_object_from_layers_flattens_them_into_one_smart_layer_in_place() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let bottom = doc
+            .add_layer("bottom", &[255, 0, 0, 255, 255, 0, 0, 255], 2, 1)
+            .unwrap();
+        let middle = doc
+            .add_layer("middle", &[0, 0, 255, 255, 0, 0, 0, 0], 2, 1)
+            .unwrap();
+        let top = doc.add_layer("top", &[0; 8], 2, 1).unwrap();
+        let smart = doc.smart_object_from_layers(&[bottom, middle]).unwrap();
+        assert_eq!(doc.layers().len(), 2);
+        assert_eq!(doc.layers()[0].id, smart);
+        assert_eq!(doc.layers()[0].name, "Smart Object");
+        assert_eq!(doc.layers()[1].id, top);
+        assert_eq!(pixel(&doc, smart, 0, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, smart, 1, 0), [255, 0, 0, 255]);
+        assert_eq!(
+            doc.layers()[0].smart.as_ref().unwrap().source,
+            doc.layers()[0].pixels
+        );
+        // One layer wraps on its own; an unknown or empty list is refused.
+        let alone = doc.smart_object_from_layers(&[top]).unwrap();
+        assert_eq!(doc.layers().len(), 2);
+        assert!(doc.layers()[1].smart.is_some());
+        assert_eq!(doc.layers()[1].id, alone);
+        assert!(doc
+            .smart_object_from_layers(&[])
+            .unwrap_err()
+            .contains("layer"));
+        assert!(doc.smart_object_from_layers(&[999]).is_err());
+    }
+
+    #[test]
+    fn rasterize_smart_object_drops_the_source_and_keeps_the_pixels() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.set_smart_transform(id, half()).unwrap();
+        let shrunk = doc.layers()[0].pixels.clone();
+        doc.rasterize_smart_object(id).unwrap();
+        assert_eq!(doc.layers()[0].pixels, shrunk);
+        assert!(doc.layers()[0].smart.is_none());
+        assert!(doc.layers()[0].view().smart.is_none());
+        assert!(doc
+            .set_smart_transform(id, half())
+            .unwrap_err()
+            .contains("smart object"));
+        assert!(doc
+            .rasterize_smart_object(id)
+            .unwrap_err()
+            .contains("smart object"));
+    }
+
+    #[test]
+    fn smart_transforms_respect_locks_and_bad_transforms_leave_the_layer_alone() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.set_smart_transform(id, half()).unwrap();
+        let shrunk = doc.layers()[0].pixels.clone();
+        // A transform the plain tool refuses is refused here too, with the
+        // shrunken pixels and the remembered transform untouched.
+        assert!(doc
+            .set_smart_transform(
+                id,
+                FreeTransform {
+                    width_percent: 0.0,
+                    ..FreeTransform::default()
+                },
+            )
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, shrunk);
+        assert_eq!(doc.layers()[0].view().smart, Some(half()));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .set_smart_transform(id, FreeTransform::default())
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .set_smart_transform(999, FreeTransform::default())
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, shrunk);
     }
 }

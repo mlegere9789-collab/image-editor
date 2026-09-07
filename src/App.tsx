@@ -760,6 +760,9 @@ export default function App() {
   const [showShapeLayerDialog, setShowShapeLayerDialog] = useState(false);
   const [shapeKind, setShapeKind] = useState<ShapeSpec["kind"]>("rectangle");
   const [shapeBox, setShapeBox] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  // Smart Objects: the members to wrap and the transform to show through.
+  const [showSmartDialog, setShowSmartDialog] = useState(false);
+  const [smartMembers, setSmartMembers] = useState<number[]>([]);
   const [customPoints, setCustomPoints] = useState("0,0\n1,0\n0.5,1");
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
@@ -2642,6 +2645,44 @@ export default function App() {
     await runCommand("draw_custom_shape", { id: selectedId, points: parsedCustomPoints(), color: [r, g, b, 255] });
     setShowShapeLayerDialog(false);
   }, [runCommand, selectedId, brushColor, parsedCustomPoints]);
+
+  const openSmartDialog = useCallback(() => {
+    setSmartMembers(selectedId === null ? [] : [selectedId]);
+    setShowSmartDialog(true);
+  }, [selectedId]);
+
+  const convertToSmartObject = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("convert_to_smart_object", { id: selectedId });
+    setShowSmartDialog(false);
+  }, [runCommand, selectedId]);
+
+  const smartObjectFromLayers = useCallback(async () => {
+    if (smartMembers.length === 0) return;
+    await runCommand("smart_object_from_layers", { ids: smartMembers });
+    setShowSmartDialog(false);
+  }, [runCommand, smartMembers]);
+
+  const applySmartTransform = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("set_smart_transform", {
+      id: selectedId,
+      transform: {
+        ...freeTransform,
+        reference: ftReference,
+        position: ftUsePosition ? [ftX, ftY] : null,
+        relative: ftRelative,
+        maintainAspect: ftMaintainAspect,
+      },
+    });
+    setShowSmartDialog(false);
+  }, [runCommand, selectedId, freeTransform, ftReference, ftUsePosition, ftX, ftY, ftRelative, ftMaintainAspect]);
+
+  const rasterizeSmartObject = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("rasterize_smart_object", { id: selectedId });
+    setShowSmartDialog(false);
+  }, [runCommand, selectedId]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -6274,6 +6315,14 @@ export default function App() {
             title="Shape mode of the shape tools, and the Custom Shape tool: a live shape layer, or a custom polygon painted in place"
           >
             Shape Layer…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openSmartDialog}
+            disabled={busy || !hasDocument}
+            title="Layer > Smart Objects: convert, create from layers, transform from the source, rasterize"
+          >
+            Smart Object…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -13423,6 +13472,72 @@ export default function App() {
           </div>
         </div>
       )}
+      {showSmartDialog && (
+        <div className="modal-overlay" onClick={() => setShowSmartDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Smart Objects" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Layer &gt; Smart Objects</h2>
+            <p className="modal__hint">
+              A smart object keeps the pixels it was made from and shows them through a
+              transform, so scaling down and back up loses nothing. Tick the layers to wrap
+              together, or convert the selected layer alone; Smart Transform uses the Free
+              Transform dialog&apos;s values.
+            </p>
+            <div className="control">
+              <span className="control__label">Layers to wrap</span>
+              {(document?.layers ?? []).map((layer) => (
+                <label className="control control--row" key={layer.id}>
+                  <input
+                    type="checkbox"
+                    checked={smartMembers.includes(layer.id)}
+                    onChange={(event) =>
+                      setSmartMembers((members) =>
+                        event.target.checked ? [...members, layer.id] : members.filter((m) => m !== layer.id),
+                      )
+                    }
+                  />
+                  <span className="control__label">
+                    {layer.name}
+                    {layer.smart ? " (smart object)" : ""}
+                  </span>
+                </label>
+              ))}
+            </div>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSmartDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={convertToSmartObject}
+                disabled={busy || selectedId === null || !!document?.layers.find((l) => l.id === selectedId)?.smart}
+                title="Convert to Smart Object"
+              >
+                Convert selected
+              </button>
+              <button className="button button--quiet" onClick={smartObjectFromLayers} disabled={busy || smartMembers.length === 0} title="Create Smart Object from Layers">
+                Create from ticked
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={applySmartTransform}
+                disabled={busy || !document?.layers.find((l) => l.id === selectedId)?.smart}
+                title="Show the selected smart object through the Free Transform values, from its source"
+              >
+                Smart Transform
+              </button>
+              <button
+                className="button"
+                onClick={rasterizeSmartObject}
+                disabled={busy || !document?.layers.find((l) => l.id === selectedId)?.smart}
+                title="Rasterize the selected smart object"
+              >
+                Rasterize
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showShapeLayerDialog && (
         <div className="modal-overlay" onClick={() => setShowShapeLayerDialog(false)} role="presentation">
           <div className="modal" role="dialog" aria-label="Shape Layer" onClick={(event) => event.stopPropagation()}>

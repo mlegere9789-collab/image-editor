@@ -207,6 +207,12 @@ export default function LayerPanel({
                     ◇
                   </span>
                 )}
+                {layer.smart && (
+                  <span className="layer__meta" title="Smart object: transforms re-render from its embedded source">
+                    {" "}
+                    ▣
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>

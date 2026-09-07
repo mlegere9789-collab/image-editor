@@ -15177,6 +15177,63 @@ fully green.
 **1515 Rust tests total** (1510 → 1515, 1508 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 255 — Smart Objects
+
+Layer > Smart Objects lands as embedded pixels shown through a
+remembered transform. A `SmartObject` is a layer's source — its pixels
+as they were when it was made — and the `FreeTransform` they are shown
+through. `convert_to_smart_object(id)` embeds the layer's own pixels
+as that source under the neutral transform, changing nothing on
+screen; `smart_object_from_layers(ids)` composites the given layers
+bottom to top, each at its own opacity and blend mode whether visible
+or not (as Merge Visible composites), into one new layer named `Smart
+Object` placed where the topmost of them stood, embeds the result as
+its source, and removes the members. `set_smart_transform(id,
+transform)` is what makes the object smart: the layer's pixels are
+restored from the source and shown through the transform by
+`free_transform`, so every transform starts from the embedded pixels
+rather than the last result — scaling down and back up returns the
+source byte for byte — and the transform is remembered; a transform
+the tool refuses leaves the pixels and the remembered transform as
+they were. `rasterize_smart_object(id)` keeps the shown pixels and
+forgets the source. The Layers panel marks a smart object with **▣**,
+and a **Smart Object…** dialog offers Convert selected, Create from
+ticked (a checklist of the layers), Smart Transform (the Free
+Transform dialog's values, from the source), and Rasterize. Linked and
+external files, Smart Filters, editing the contents in their own
+document, and replacing contents are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every outcome
+checked byte for byte against the plain tools. Converting the 4×4 ramp
+keeps its pixels, embeds them as the source, and reports the neutral
+transform; converting twice and an unknown layer are refused. A smart
+transform to 50% is byte-identical to `free_transform` at 50%, going
+back to 100% returns the original ramp exactly where a destructive
+200% of the shrunken pixels does not, and a quarter turn from the
+source equals the plain turn. Wrapping a red layer and a half-covered
+blue one composites them (blue over red on the left, red on the
+right) into one `Smart Object` layer below the untouched top layer,
+with the source equal to the pixels; one layer wraps alone, and an
+empty or unknown list is refused. Rasterizing keeps the shrunken
+pixels, drops the source, and refuses further smart transforms or a
+second rasterize. A 0% transform is refused with the shrunken pixels
+and remembered transform untouched, and a locked or unknown layer is
+refused. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and two: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog was reviewed by hand instead. Every other
+layer of this project's quality bar (hand-verified Rust tests, `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings`, `npm run build`) is
+fully green.
+
+**1520 Rust tests total** (1515 → 1520, 1513 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

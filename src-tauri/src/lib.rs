@@ -3377,6 +3377,53 @@ fn draw_custom_shape(
     })
 }
 
+/// Layer > Smart Objects > Convert to Smart Object on layer `id`.
+#[tauri::command]
+fn convert_to_smart_object(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_to_smart_object(id)?;
+        Ok(None)
+    })
+}
+
+/// Create Smart Object from Layers `ids`.
+#[tauri::command]
+fn smart_object_from_layers(
+    state: State<'_, AppState>,
+    ids: Vec<LayerId>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.smart_object_from_layers(&ids)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Show smart object `id` through `transform`, from its source.
+#[tauri::command]
+fn set_smart_transform(
+    state: State<'_, AppState>,
+    id: LayerId,
+    transform: document::FreeTransform,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_smart_transform(id, transform)
+    })
+}
+
+/// Layer > Rasterize > Smart Object on layer `id`.
+#[tauri::command]
+fn rasterize_smart_object(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rasterize_smart_object(id)?;
+        Ok(None)
+    })
+}
+
 /// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
 /// rendered from `fill`.
 #[tauri::command]
@@ -5098,6 +5145,10 @@ pub fn run() {
             add_shape_layer,
             set_shape,
             draw_custom_shape,
+            convert_to_smart_object,
+            smart_object_from_layers,
+            set_smart_transform,
+            rasterize_smart_object,
             set_fill,
             add_vector_mask,
             remove_layer_mask,

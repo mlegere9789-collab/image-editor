@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 462.**
+**618 distinct capabilities tracked. Currently shipped: 465.**
 
 ## PART I — EVERY TOOL
 
@@ -96,7 +96,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] SHAPE LAYER (`Layer.shape: Option<ShapeLayer>` with `add_shape_layer` / `set_shape`: the shape tools' Shape mode, a new layer drawn by the tool's own painter over a clear canvas with the selection set aside, redrawable from its remembered shape and paint — see README Phase 254)
 - [x] ADJUSTMENT LAYER (`add_adjustment_layer` / `set_adjustment`, a layer carrying a live Invert, Brightness/Contrast, Threshold, or Posterize applied at composite time to everything beneath it at the layer's opacity, through its mask and clipping, byte-identical to the destructive command via a shared `apply_adjustment`; the other adjustment kinds as live layers are a documented scope cut — see README Phase 220)
 - [x] FILL LAYER (`add_fill_layer` / `set_fill`, a layer tagged with a `Fill` recipe — Solid Color, top-left-to-bottom-right Gradient, or the defined Pattern — rendered over the whole canvas by the same math as the three baked generators and re-renderable from a new recipe with its name, opacity, mask, link, clip, and lock kept; Photoshop's gradient style/angle/scale and pattern scale options remain documented scope cuts — see README Phase 221)
-- [ ] SMART OBJECT
+- [x] SMART OBJECT (`Layer.smart: Option<SmartObject { source, transform }>`: a layer that embeds its pixels and shows them through a remembered `FreeTransform`, `set_smart_transform` re-rendering from the source every time so transforms are lossless, `rasterize_smart_object` dropping the source; linked / external files, Smart Filters, and editing the contents in their own document are documented scope cuts — see README Phase 255)
 - [x] LAYER MASK (`add_layer_mask` / `set_layer_mask` / `remove_layer_mask`, a document-sized 8-bit mask per layer multiplied into its alpha at composite time, started as Reveal All, Hide All, Reveal Selection, or Hide Selection, applied or deleted, turned and cropped with the document; painting directly on the mask and mask density/feather are documented scope cuts — see README Phase 218)
 - [x] VECTOR MASK (`add_vector_mask`, a drawn path rasterised — pixel centres inside the polygon by the even-odd rule — into the layer's 8-bit mask, revealing or hiding the path's inside; keeping the path editable as vectors, and combining a vector mask with a separate pixel mask, are documented scope cuts — see README Phase 219)
 - [x] CLIPPING MASK (`set_clipped`, a clipped layer composites only where its base — the nearest unclipped layer below — has pixels, its alpha scaled by the base's transparency, and is hidden with a hidden base; stacked clipped layers share one base; the bottom layer cannot be clipped — see README Phase 217)
@@ -109,8 +109,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] DUPLICATE LAYER (Ctrl/Cmd+J — missing from the original ~500-item audit this checklist was extracted from; added here as its own tracked line, bumping the total from 590 to 591, rather than shipping it uncounted — see README Phase 21)
 - [x] NEW LAYER VIA COPY (Ctrl/Cmd+J with a selection — copies the selected pixels onto a new layer without touching the clipboard; also missing from the original audit, added as its own tracked line (591 → 592) — see README Phase 24)
 - [x] NEW LAYER VIA CUT (Ctrl/Cmd+Shift+J with a selection — the same, but the source pixels are removed; also missing from the original audit, added as its own tracked line (592 → 593) — see README Phase 24)
-- [ ] CONVERT TO SMART OBJECT
-- [ ] CREATE SMART OBJECT FROM LAYERS
+- [x] CONVERT TO SMART OBJECT (`convert_to_smart_object`, the layer's pixels embedded as its source under the neutral transform — see README Phase 255)
+- [x] CREATE SMART OBJECT FROM LAYERS (`smart_object_from_layers`, the layers composited bottom to top at their opacities and blend modes into one `Smart Object` layer placed where the topmost stood, the members removed — see README Phase 255)
 
 ## PART IV — LAYER STYLES
 
