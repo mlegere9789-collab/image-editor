@@ -5486,6 +5486,22 @@ fn camera_raw_optics(
     })
 }
 
+/// Filter > Lens Correction on layer `id`: Distortion, Vignette, and
+/// Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe.
+#[tauri::command]
+fn lens_correction(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distortion: i32,
+    vignette: i32,
+    red_cyan: i32,
+    blue_yellow: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lens_correction(id, distortion, vignette, red_cyan, blue_yellow)
+    })
+}
+
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
 fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
@@ -6009,6 +6025,7 @@ pub fn run() {
             camera_raw_retouch,
             targeted_adjustment,
             camera_raw_optics,
+            lens_correction,
             rotate,
             scale,
             skew,

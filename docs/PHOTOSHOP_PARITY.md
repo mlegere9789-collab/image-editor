@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 496.**
+**618 distinct capabilities tracked. Currently shipped: 497.**
 
 ## PART I — EVERY TOOL
 
@@ -539,7 +539,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Thaw Mask Tool
 - [ ] Liquify Mesh
 - [ ] Face-Aware Liquify
-- [ ] Lens Correction
+- [x] Lens Correction (`lens_correction(id, distortion, vignette, red_cyan, blue_yellow)`: Remove Distortion and Vignette Amount exactly as `camera_raw_optics` already applies them, plus Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe — Red and Blue each independently resampled through their own radial scale about the canvas centre, Green and Alpha left at the destination's own position. Auto lens-profile correction (Photoshop's built-in and online lens databases) is a documented scope cut, the same one `camera_raw_optics` already names — see README Phase 267)
 - [ ] Adaptive Wide Angle
 - [ ] Vanishing Point
 - [ ] Smart Filters

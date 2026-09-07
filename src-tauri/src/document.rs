@@ -19820,6 +19820,113 @@ impl Document {
         Ok(touched)
     }
 
+    /// Filter > Lens Correction: Remove Distortion and a Vignette exactly
+    /// as [`Self::camera_raw_optics`] applies them (the same radial
+    /// inverse map and per-channel scale, about the canvas centre), plus
+    /// Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow
+    /// Fringe — the red and blue channels each resampled through their
+    /// own radial scale, `1 + k·r²`, while green and alpha stay at the
+    /// destination's own position, so a lens's differential magnification
+    /// of wavelengths pulls a colour fringe back into register. A
+    /// channel whose shifted source falls outside the canvas keeps its
+    /// destination pixel's own byte rather than going transparent, since
+    /// the other channels of that same pixel are untouched and would
+    /// otherwise show through a zeroed one. Lens profiles are a
+    /// documented scope cut, the same as `camera_raw_optics`'s. Errors
+    /// for any of the four amounts outside `-100..=100`, or a locked
+    /// layer.
+    pub fn lens_correction(
+        &mut self,
+        id: LayerId,
+        distortion: i32,
+        vignette: i32,
+        red_cyan: i32,
+        blue_yellow: i32,
+    ) -> Result<Option<Rect>, String> {
+        for (name, amount) in [
+            ("Distortion", distortion),
+            ("Vignette", vignette),
+            ("the Red/Cyan fix", red_cyan),
+            ("the Blue/Yellow fix", blue_yellow),
+        ] {
+            if !(-100..=100).contains(&amount) {
+                return Err(format!(
+                    "Lens Correction's {name} must be between −100 and 100."
+                ));
+            }
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let span = cx.max(cy).max(0.5);
+        let radius_at = move |col: u32, row: u32| {
+            let (nx, ny) = ((col as f32 - cx) / span, (row as f32 - cy) / span);
+            nx * nx + ny * ny
+        };
+        let mut touched = Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        });
+        if distortion != 0 {
+            let k = distortion as f32 / 100.0;
+            touched = self.filter_pixels(id, move |pixels, row, col| {
+                let scale = 1.0 + k * radius_at(col, row);
+                let sx = (cx + (col as f32 - cx) * scale).round() as i64;
+                let sy = (cy + (row as f32 - cy) * scale).round() as i64;
+                if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                    return [0; CHANNELS];
+                }
+                let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                out.copy_from_slice(&pixels[base..base + CHANNELS]);
+                out
+            })?;
+        }
+        if vignette != 0 {
+            let v = vignette as f32 / 100.0;
+            touched = self.filter_pixels(id, move |pixels, row, col| {
+                let factor = (1.0 + v * radius_at(col, row)).max(0.0);
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    out[c] = (pixels[base + c] as f32 * factor).round().clamp(0.0, 255.0) as u8;
+                }
+                out[3] = pixels[base + 3];
+                out
+            })?;
+        }
+        if red_cyan != 0 || blue_yellow != 0 {
+            let kr = red_cyan as f32 / 100.0;
+            let kb = blue_yellow as f32 / 100.0;
+            touched = self.filter_pixels(id, move |pixels, row, col| {
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                out.copy_from_slice(&pixels[base..base + CHANNELS]);
+                let r2 = radius_at(col, row);
+                let sample_channel = |k: f32, channel: usize, own: u8| -> u8 {
+                    let scale = 1.0 + k * r2;
+                    let sx = (cx + (col as f32 - cx) * scale).round() as i64;
+                    let sy = (cy + (row as f32 - cy) * scale).round() as i64;
+                    if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                        return own;
+                    }
+                    let sbase = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                    pixels[sbase + channel]
+                };
+                out[0] = sample_channel(kr, 0, out[0]);
+                out[2] = sample_channel(kb, 2, out[2]);
+                out
+            })?;
+        }
+        Ok(touched)
+    }
+
     /// Edit > Transform > Rotate: rotates layer `id`'s pixels by
     /// `degrees` (positive clockwise on screen, Photoshop's own sign
     /// convention) about the canvas centre, `((width - 1) / 2,
@@ -50401,5 +50508,100 @@ mod tests {
         assert!(doc
             .liquify_radial(999, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 50.0)
             .is_err());
+    }
+
+    /// A `9x9` grey canvas (background `[100, 100, 100, 255]`, centre
+    /// `(4, 4)`) with a marker pixel at `(x, y)`.
+    fn lens_correction_fixture(x: u32, y: u32, rgba: [u8; 4]) -> (Document, LayerId) {
+        let mut doc = Document::new(9, 9).unwrap();
+        let mut pixels = solid(9, 9, [100, 100, 100, 255]);
+        let base = (y as usize * 9 + x as usize) * CHANNELS;
+        pixels[base..base + CHANNELS].copy_from_slice(&rgba);
+        let id = doc.add_layer("l", &pixels, 9, 9).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn lens_correction_fixes_red_cyan_fringe_by_resampling_only_red() {
+        // Centre (4, 4), span 4. Destination (6, 4): r² = ((6-4)/4)² =
+        // 0.25. Red/Cyan +100 (k = 1.0) gives scale 1.25, sourcing
+        // column round(4 + 2·1.25) = round(6.5) = 7, row 4 — the red
+        // marker's own red byte, 222 — independently confirmed in
+        // Python emulating Rust f32 and round-half-away-from-zero.
+        let mut doc = Document::new(9, 9).unwrap();
+        let mut pixels = solid(9, 9, [100, 100, 100, 255]);
+        let mark = |pixels: &mut Vec<u8>, x: usize, y: usize, rgba: [u8; 4]| {
+            let base = (y * 9 + x) * CHANNELS;
+            pixels[base..base + CHANNELS].copy_from_slice(&rgba);
+        };
+        mark(&mut pixels, 7, 4, [222, 50, 60, 255]);
+        mark(&mut pixels, 6, 4, [10, 20, 111, 255]);
+        let id = doc.add_layer("l", &pixels, 9, 9).unwrap();
+        doc.lens_correction(id, 0, 0, 100, -100).unwrap();
+        // Red comes from (7, 4) = 222; Blue's scale is 0.75, sourcing
+        // (round(4 + 2·0.75), 4) = (6, 4), i.e. itself, so Blue stays
+        // 111; Green and Alpha are the destination's own, unchanged.
+        assert_eq!(pixel(&doc, id, 6, 4), [222, 20, 111, 255]);
+    }
+
+    #[test]
+    fn lens_correction_keeps_a_channel_that_would_sample_outside_the_canvas() {
+        // Destination (8, 4): r² = 1.0. Red/Cyan +100 gives scale 2.0,
+        // sourcing column round(4 + 4·2.0) = 12 — outside the 9-wide
+        // canvas — so Red keeps its own byte, 77. Blue/Yellow −100
+        // gives scale 0.0, sourcing (round(4 + 4·0.0), 4) = (4, 4), the
+        // centre marker's blue byte, 3.
+        let (mut doc, id) = lens_correction_fixture(8, 4, [77, 88, 99, 255]);
+        let base = (4 * 9 + 4) * CHANNELS;
+        doc.layers[0].pixels[base..base + CHANNELS].copy_from_slice(&[1, 2, 3, 255]);
+        doc.lens_correction(id, 0, 0, 100, -100).unwrap();
+        assert_eq!(pixel(&doc, id, 8, 4), [77, 88, 3, 255]);
+    }
+
+    #[test]
+    fn lens_correction_distortion_and_vignette_match_camera_raw_optics() {
+        let (mut lens, id) = lens_correction_fixture(4, 4, [200, 150, 100, 255]);
+        let mut optics = lens.clone();
+        lens.lens_correction(id, 40, -30, 0, 0).unwrap();
+        optics.camera_raw_optics(id, 40, -30).unwrap();
+        assert_eq!(lens.layers()[0].pixels, optics.layers()[0].pixels);
+    }
+
+    #[test]
+    fn lens_correction_is_confined_to_the_active_selection() {
+        let mut doc = Document::new(9, 9).unwrap();
+        let mut pixels = solid(9, 9, [100, 100, 100, 255]);
+        let base = (4 * 9 + 7) * CHANNELS;
+        pixels[base..base + CHANNELS].copy_from_slice(&[222, 50, 60, 255]);
+        let id = doc.add_layer("l", &pixels, 9, 9).unwrap();
+        // A selection that excludes (6, 4) leaves it untouched even
+        // though Red/Cyan would otherwise resample it from (7, 4).
+        doc.select_rectangle(0.0, 0.0, 3.0, 3.0).unwrap();
+        doc.lens_correction(id, 0, 0, 100, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 6, 4), [100, 100, 100, 255]);
+    }
+
+    #[test]
+    fn lens_correction_validates_its_amounts_and_the_layer() {
+        let (mut doc, id) = lens_correction_fixture(4, 4, [200, 150, 100, 255]);
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .lens_correction(id, 101, 0, 0, 0)
+            .unwrap_err()
+            .contains("Distortion"));
+        assert!(doc
+            .lens_correction(id, 0, -101, 0, 0)
+            .unwrap_err()
+            .contains("Vignette"));
+        assert!(doc
+            .lens_correction(id, 0, 0, 101, 0)
+            .unwrap_err()
+            .contains("Red/Cyan"));
+        assert!(doc
+            .lens_correction(id, 0, 0, 0, -101)
+            .unwrap_err()
+            .contains("Blue/Yellow"));
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert!(doc.lens_correction(999, 0, 0, 0, 0).is_err());
     }
 }

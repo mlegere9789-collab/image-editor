@@ -535,6 +535,12 @@ export default function App() {
   const [liquifyCenter, setLiquifyCenter] = useState<[number, number]>([0, 0]);
   const [liquifyRadius, setLiquifyRadius] = useState(50);
   const [liquifyStrength, setLiquifyStrength] = useState(50);
+  // Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration.
+  const [showLensCorrectionDialog, setShowLensCorrectionDialog] = useState(false);
+  const [lensDistortion, setLensDistortion] = useState(0);
+  const [lensVignette, setLensVignette] = useState(0);
+  const [lensRedCyan, setLensRedCyan] = useState(0);
+  const [lensBlueYellow, setLensBlueYellow] = useState(0);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -2239,6 +2245,18 @@ export default function App() {
       strength: liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
     });
   }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength]);
+
+  const applyLensCorrection = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("lens_correction", {
+      id: selectedId,
+      distortion: lensDistortion,
+      vignette: lensVignette,
+      redCyan: lensRedCyan,
+      blueYellow: lensBlueYellow,
+    });
+    setShowLensCorrectionDialog(false);
+  }, [runCommand, selectedId, lensDistortion, lensVignette, lensRedCyan, lensBlueYellow]);
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -6169,6 +6187,14 @@ export default function App() {
             title="Filter > Liquify: Twirl, Pucker, and Bloat over a circular brush"
           >
             Liquify…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowLensCorrectionDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration"
+          >
+            Lens Correction…
           </button>
           <button
             className="button button--quiet"
@@ -12700,6 +12726,72 @@ export default function App() {
               </button>
               <button className="button" onClick={applyLiquify} disabled={busy || selectedId === null} title="Apply once at this centre">
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLensCorrectionDialog && (
+        <div className="modal-overlay" onClick={() => setShowLensCorrectionDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Lens Correction" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Filter &gt; Lens Correction</h2>
+            <p className="modal__hint">
+              Distortion and Vignette are the same radial correction Camera Raw&apos;s Optics
+              panel applies; Chromatic Aberration resamples Red and Blue independently to
+              pull a colour fringe back into register, leaving Green as the anchor. Lens
+              profiles are a documented scope cut.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Remove Distortion</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lensDistortion}
+                onChange={(event) => setLensDistortion(Number(event.target.value))}
+              />
+              <span className="control__value">{lensDistortion}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Vignette Amount</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lensVignette}
+                onChange={(event) => setLensVignette(Number(event.target.value))}
+              />
+              <span className="control__value">{lensVignette}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Fix Red/Cyan Fringe</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lensRedCyan}
+                onChange={(event) => setLensRedCyan(Number(event.target.value))}
+              />
+              <span className="control__value">{lensRedCyan}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Fix Blue/Yellow Fringe</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lensBlueYellow}
+                onChange={(event) => setLensBlueYellow(Number(event.target.value))}
+              />
+              <span className="control__value">{lensBlueYellow}</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowLensCorrectionDialog(false)} title="Cancel">
+                Cancel
+              </button>
+              <button className="button" onClick={applyLensCorrection} disabled={busy || selectedId === null} title="Apply Lens Correction">
+                OK
               </button>
             </div>
           </div>

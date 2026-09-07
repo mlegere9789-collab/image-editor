@@ -15987,6 +15987,74 @@ other layer of this project's quality bar (hand-verified Rust tests,
 **1575 Rust tests total** (1570 → 1575, 1568 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 267 — Lens Correction
+
+A second look at a deferral, right after Liquify's: Lens Correction's
+manual tab needs no lens profile database at all for its three main
+sliders, and two of the three — Remove Distortion and Vignette Amount
+— are exactly what `camera_raw_optics` already applies as Camera Raw's
+own Optics panel. `lens_correction(id, distortion, vignette, red_cyan,
+blue_yellow)` reuses that identical radial-inverse-map and per-channel
+scale for the first two, and adds the one genuinely new piece:
+Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe.
+A lens's differential magnification of wavelengths shows up as a
+colour fringe — red and blue drifting apart from green toward the edges
+of the frame — so the fix resamples the Red and Blue channels each
+through their own radial scale, `1 + k·r²`, while Green and Alpha stay
+at the destination's own position, pulling the fringe back into
+register. A channel whose shifted source falls outside the canvas
+keeps the destination pixel's own byte for that channel rather than
+going transparent, since the pixel's other channels are untouched and
+a zeroed one would show through as a stray dark fringe of its own. Lens
+profiles — Photoshop's built-in and online databases of specific lens
+models, and the Auto Correction they drive — are a documented scope
+cut, the same one `camera_raw_optics` already names.
+
+The frontend gains a "Lens Correction…" dialog with four sliders
+(Remove Distortion, Vignette Amount, Fix Red/Cyan Fringe, Fix
+Blue/Yellow Fringe), each `-100..100`, mirroring the Optics panel's own
+range.
+
+**Verified two ways.** Five new `document.rs` tests. On a 9×9 canvas
+centred at `(4, 4)`, destination `(6, 4)` (distance² `0.25` from
+centre) with Fix Red/Cyan `+100` sources its Red channel from `(7, 4)`
+exactly — hand-derived (`scale = 1.25`, `round(4 + 2·1.25) = 7`) and
+independently confirmed in a Python script computing the same radial
+math in `f32` with round-half-away-from-zero; Fix Blue/Yellow `−100`
+at the same destination sources Blue from `(6, 4)` itself (`scale =
+0.75`, rounds right back to the source column), so only Red visibly
+changes. A second test pushes a destination near the canvas edge,
+`(8, 4)`, where Fix Red/Cyan `+100` would source column `12` — off a
+9-wide canvas — confirming Red keeps its own original byte, while Fix
+Blue/Yellow `−100`'s scale of exactly `0.0` at that same pixel sources
+Blue from the canvas centre, `(4, 4)`, successfully. A third test
+proves the Distortion/Vignette reuse is exact, not just similar: the
+same starting document run once through `lens_correction` with only
+Distortion and Vignette set and once through `camera_raw_optics` with
+the same two numbers produces byte-for-byte identical layer pixels — no
+new distortion math was re-derived or re-verified, since it already was
+when Optics itself shipped in Phase 252. A fourth test confirms the
+active selection confines Chromatic Aberration exactly as it already
+does the other Transform-family tools. A fifth exercises all four
+amounts' `-100..=100` validation plus an unknown layer id, confirming a
+rejected call leaves the document's pixels untouched. All five passed
+on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and fourteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The new Lens Correction dialog was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1580 Rust tests total** (1575 → 1580, 1573 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
