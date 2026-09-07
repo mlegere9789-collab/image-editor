@@ -1803,6 +1803,22 @@ fn burn_stroke(
     })
 }
 
+/// Sponge tool: saturate (or desaturate) along `points` on layer `id` by
+/// `flow` percent. See [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn sponge_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    flow: u8,
+    saturate: bool,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Sponge { flow, saturate })
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -3193,6 +3209,7 @@ pub fn run() {
             erase_stroke,
             dodge_stroke,
             burn_stroke,
+            sponge_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,

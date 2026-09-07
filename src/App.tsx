@@ -257,6 +257,7 @@ export default function App() {
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
+  const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
@@ -2946,6 +2947,14 @@ export default function App() {
           radius: brushSize,
           exposure: Math.round(brushOpacity * 100),
         });
+      } else if (tool === "sponge") {
+        void runCommand("sponge_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          flow: Math.round(brushOpacity * 100),
+          saturate: spongeSaturate,
+        });
       } else if (tool === "patternStamp") {
         void runCommand("pattern_stamp_stroke", {
           id: selectedId,
@@ -2964,7 +2973,7 @@ export default function App() {
         });
       }
     },
-    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize],
+    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize, spongeSaturate],
   );
 
   const canPaint = document !== null && selectedId !== null;
@@ -3704,6 +3713,15 @@ export default function App() {
             title="Burn: paint to darken toward black (Flow sets the Exposure)"
           >
             Burn
+          </button>
+          <button
+            className={`button button--quiet${tool === "sponge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "sponge"}
+            onClick={() => setTool("sponge")}
+            title="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
+          >
+            Sponge
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4945,6 +4963,7 @@ export default function App() {
               tool === "magicEraser" ||
               tool === "dodge" ||
               tool === "burn" ||
+              tool === "sponge" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"
@@ -4959,6 +4978,20 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "sponge" && (
+            <label className="tools__slider">
+              Mode
+              <select
+                value={spongeSaturate ? "saturate" : "desaturate"}
+                disabled={!canPaint}
+                aria-label="Sponge mode"
+                onChange={(event) => setSpongeSaturate(event.target.value === "saturate")}
+              >
+                <option value="desaturate">Desaturate</option>
+                <option value="saturate">Saturate</option>
+              </select>
+            </label>
           )}
           {isMarqueeTool && (
             <label className="tools__slider">

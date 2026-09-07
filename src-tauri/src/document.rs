@@ -6621,6 +6621,27 @@ impl Document {
                         }
                         continue;
                     }
+                    Stroke::Sponge { flow, saturate } => {
+                        if layer.pixels[base + 3] == 0 {
+                            continue;
+                        }
+                        let amount = f32::from(flow) / 100.0 * c;
+                        let px = &mut layer.pixels[base..base + 3];
+                        let (h, s, l) = rgb_to_hsl(px[0], px[1], px[2]);
+                        // A grey has no hue to strengthen or weaken; without
+                        // this, saturating it would invent hue 0 (red).
+                        if s <= 0.0 {
+                            continue;
+                        }
+                        let s = if saturate {
+                            s + (1.0 - s) * amount
+                        } else {
+                            s * (1.0 - amount)
+                        };
+                        let (r, g, b) = hsl_to_rgb(h, s, l);
+                        px.copy_from_slice(&[r, g, b]);
+                        continue;
+                    }
                 };
                 if source_alpha <= 0.0 {
                     continue;
@@ -11708,6 +11729,13 @@ pub enum Stroke {
     /// leaving alpha alone and skipping fully transparent pixels. Midtones
     /// only, as for Dodge.
     Burn { exposure: u8 },
+    /// The Sponge tool: moves each covered pixel's HSL saturation by
+    /// `flow` percent scaled by the brush's coverage — toward full
+    /// saturation (`s + (1 − s) · flow · coverage`) when `saturate`, toward
+    /// grey (`s · (1 − flow · coverage)`) when not — keeping hue, lightness,
+    /// and alpha, and skipping fully transparent pixels. Photoshop's
+    /// Vibrance option is a documented scope cut.
+    Sponge { flow: u8, saturate: bool },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -17887,6 +17915,107 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 50 })
+            .is_err());
+    }
+
+    fn sponge(flow: u8, saturate: bool) -> Stroke {
+        Stroke::Sponge { flow, saturate }
+    }
+
+    #[test]
+    fn sponge_desaturates_toward_grey() {
+        // (200, 100, 100) is HSL (0, 0.476, 0.588): flow 100 drops it to
+        // the grey of its lightness, 150; flow 50 halves the saturation to
+        // 0.238 -> (175, 125, 125).
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(50, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [175, 125, 125, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn sponge_saturates_toward_full_saturation_keeping_hue() {
+        // Full saturation at lightness 0.588 is (255, 45, 45); flow 50 lands
+        // at s = 0.738 -> (228, 73, 73). A green keeps its hue: (45, 255, 45).
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(50, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [228, 73, 73, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [45, 255, 45, 255]);
+    }
+
+    #[test]
+    fn sponge_scales_with_the_brushs_soft_edge_coverage() {
+        // The 0.7929 edge coverage at flow 50 desaturates (200, 100, 100)
+        // to s = 0.476 * (1 - 0.396) -> (180, 120, 120).
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, sponge(50, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [180, 120, 120, 255]);
+    }
+
+    #[test]
+    fn sponge_leaves_greys_alpha_and_transparent_pixels_alone() {
+        // (0, 0) transparent, (1, 1) at alpha 128, (2, 2) grey.
+        let mut pixels = solid(3, 3, [200, 100, 100, 255]);
+        pixels[3] = 0;
+        pixels[(3 + 1) * 4 + 3] = 128;
+        pixels[32..36].copy_from_slice(&[150, 150, 150, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 100, 100, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 128]);
+        assert_eq!(pixel(&doc, id, 2, 2), [150, 150, 150, 255]);
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(0, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 128]);
+    }
+
+    #[test]
+    fn sponge_respects_the_selection_and_a_locked_layer() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 100, 100, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 150, 150, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [200, 100, 100, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, false))
             .is_err());
     }
 

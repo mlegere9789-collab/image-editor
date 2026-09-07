@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 233.**
+**618 distinct capabilities tracked. Currently shipped: 234.**
 
 ## PART I — EVERY TOOL
 
@@ -40,7 +40,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] ART HISTORY BRUSH TOOL
 - [x] DODGE TOOL (`Stroke::Dodge { exposure }`, a brush that lightens each covered pixel's colour toward white by Exposure × coverage, alpha untouched, transparent pixels skipped — Photoshop's Midtones range; Shadows/Highlights and Protect Tones are documented scope cuts — see README Phase 160)
 - [x] BURN TOOL (`Stroke::Burn { exposure }`, Dodge's mirror: a brush that darkens each covered pixel's colour toward black by Exposure × coverage, alpha untouched, transparent pixels skipped — Midtones only, Shadows/Highlights and Protect Tones documented scope cuts — see README Phase 161)
-- [ ] SPONGE TOOL
+- [x] SPONGE TOOL (`Stroke::Sponge { flow, saturate }`, a brush that moves each covered pixel's HSL saturation toward full (Saturate) or toward grey (Desaturate) by Flow × coverage, keeping hue, lightness, and alpha; Vibrance is a documented scope cut — see README Phase 162)
 - [ ] BLUR TOOL
 - [ ] SHARPEN TOOL
 - [ ] SMUDGE TOOL

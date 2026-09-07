@@ -100,6 +100,7 @@ export type Tool =
   | "magicEraser"
   | "dodge"
   | "burn"
+  | "sponge"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

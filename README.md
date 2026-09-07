@@ -10316,6 +10316,59 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1050 Rust tests total** (1045 → 1050, 1043 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 162 — Sponge tool
+
+`Stroke::Sponge { flow, saturate }` completes the toning trio: every
+pixel the brush covers has its HSL saturation moved by `flow` percent
+scaled by the brush's coverage — toward full saturation, `s + (1 − s) ·
+flow · coverage`, in Saturate mode, or toward grey, `s · (1 − flow ·
+coverage)`, in Desaturate mode — through the project's own `rgb_to_hsl`
+/ `hsl_to_rgb` pair, so hue and lightness are held exactly and only
+saturation moves. Alpha is left alone and fully transparent pixels are
+skipped, as for Dodge and Burn. One guard is this project's own: a grey
+pixel has zero saturation and therefore no hue, and pushing its
+saturation up would have invented hue 0 — red — out of nothing (the
+independent Python model of the HSL round trip showed exactly that
+before the guard was written), so greys are left untouched in both
+modes, which is also what Photoshop's Sponge does to them. Photoshop's
+Vibrance option is a documented scope cut. A **Sponge** tool button
+sits beside Burn with a Desaturate/Saturate Mode drop-down in the tool
+options while it is active; the Flow slider is its Flow.
+
+**Verified two ways.** Five new `document.rs` tests, every byte
+cross-checked in Python emulating the Rust `f32` HSL round trip
+(`rgb_to_hsl`, `hsl_to_rgb`, `to_unit`, `to_byte`, and the brush's
+coverage). `(200, 100, 100)` is HSL `(0°, 0.476, 0.588)`: Desaturate at
+flow 100 drops it to the grey of its lightness, `(150, 150, 150)`, and
+flow 50 halves the saturation to `(175, 125, 125)`. Saturate at flow
+100 reaches full saturation at that lightness, `(255, 45, 45)`, flow
+50 lands at `s = 0.738 → (228, 73, 73)`, and a green `(100, 200, 100)`
+keeps its hue on the way to `(45, 255, 45)`. The radius-1 edge coverage
+of `0.7929` at flow 50 desaturates to `(180, 120, 120)`. Saturating a
+layer whose `(2, 2)` is grey `150` leaves that pixel byte-identical, an
+alpha-128 pixel keeps its alpha while saturating, a transparent pixel
+is untouched, and flow 0 is an identity. A one-pixel selection confines
+the stroke, and a locked layer errors. Four of the five passed on the
+first run: the Saturate test had chained its flow-100 stroke onto the
+pixel the flow-50 stroke had already lifted, whose byte-rounded
+lightness differs by a hair from the original's, giving `(255, 46, 46)`
+rather than the `(255, 45, 45)` the model derives from the original —
+the test, not the code, was corrected to a fresh layer.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and nine: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1055 Rust tests total** (1050 → 1055, 1048 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
