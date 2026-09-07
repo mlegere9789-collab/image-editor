@@ -10317,6 +10317,110 @@ impl Document {
             .ok_or_else(|| "Nothing to transform again.".to_string())?;
         self.free_transform(id, transform)
     }
+
+    /// Edit > Transform > Distort: maps layer `id`'s four corners —
+    /// top-left, top-right, bottom-right, bottom-left, as `[x, y]` pixel
+    /// positions — onto `corners`, warping everything between them with
+    /// the projective transform (homography) those four correspondences
+    /// define, so straight lines stay straight and a trapezoid target
+    /// foreshortens like a plane seen at an angle. Inverse-mapped like
+    /// [`Self::rotate`]: the homography is solved from the destination
+    /// corners back to the source corners (`(0, 0)`, `(width - 1, 0)`,
+    /// `(width - 1, height - 1)`, `(0, height - 1)`) by Gaussian
+    /// elimination in `f64` ([`homography`]), then every output pixel
+    /// evaluates `(a·x + b·y + c, d·x + e·y + f) / (g·x + h·y + 1)`, rounds
+    /// half-away-from-zero, and reads that source pixel — transparent
+    /// wherever it falls off the canvas or the denominator vanishes.
+    /// Corners that are collinear or coincident have no homography and
+    /// error, as does a non-finite coordinate. Photoshop's own Distort is
+    /// dragged by handles and resamples bicubically; typed corners and
+    /// nearest-neighbour are the same documented scope cuts the rest of
+    /// the Transform family makes. Not recorded for [`Self::transform_again`],
+    /// which repeats [`FreeTransform`]s only.
+    pub fn distort(&mut self, id: LayerId, corners: [[f32; 2]; 4]) -> Result<Option<Rect>, String> {
+        if corners.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("Distort corners must be finite coordinates.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (w, h) = ((width - 1) as f64, (height - 1) as f64);
+        let destination = corners.map(|[x, y]| (x as f64, y as f64));
+        let source = [(0.0, 0.0), (w, 0.0), (w, h), (0.0, h)];
+        let [a, b, c, d, e, f, g, hh] = homography(destination, source)
+            .ok_or_else(|| "Distort corners must not be collinear or coincident.".to_string())?;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let (x, y) = (col as f64, row as f64);
+            let den = g * x + hh * y + 1.0;
+            if den.abs() < 1e-9 {
+                return [0; CHANNELS];
+            }
+            let sx = ((a * x + b * y + c) / den).round() as i64;
+            let sy = ((d * x + e * y + f) / den).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            out
+        })
+    }
+}
+
+/// The eight coefficients `[a, b, c, d, e, f, g, h]` of the projective map
+/// sending each `from[i]` to `to[i]`: `x' = (a·x + b·y + c) / (g·x + h·y +
+/// 1)`, `y' = (d·x + e·y + f) / (g·x + h·y + 1)`. Set up as the standard
+/// eight linear equations (two per correspondence) and solved by
+/// [`solve_8x8`]; `None` when the four points admit no such map (three or
+/// more collinear, or coincident).
+fn homography(from: [(f64, f64); 4], to: [(f64, f64); 4]) -> Option<[f64; 8]> {
+    let mut rows = [[0.0f64; 9]; 8];
+    for (i, (&(x, y), &(u, v))) in from.iter().zip(to.iter()).enumerate() {
+        rows[2 * i] = [x, y, 1.0, 0.0, 0.0, 0.0, -x * u, -y * u, u];
+        rows[2 * i + 1] = [0.0, 0.0, 0.0, x, y, 1.0, -x * v, -y * v, v];
+    }
+    solve_8x8(rows)
+}
+
+/// Gaussian elimination with partial pivoting on an augmented `8 × 9`
+/// system; `None` when a pivot is (numerically) zero, i.e. the system is
+/// singular.
+fn solve_8x8(mut m: [[f64; 9]; 8]) -> Option<[f64; 8]> {
+    const N: usize = 8;
+    for col in 0..N {
+        let mut pivot = col;
+        let mut best = m[col][col].abs();
+        for (r, row) in m.iter().enumerate().skip(col + 1) {
+            if row[col].abs() > best {
+                best = row[col].abs();
+                pivot = r;
+            }
+        }
+        if best < 1e-12 {
+            return None;
+        }
+        if pivot != col {
+            m.swap(col, pivot);
+        }
+        let pivot_row = m[col];
+        for row in m.iter_mut().skip(col + 1) {
+            let factor = row[col] / pivot_row[col];
+            if factor != 0.0 {
+                for (value, &pivot_value) in row.iter_mut().zip(pivot_row.iter()).skip(col) {
+                    *value -= factor * pivot_value;
+                }
+            }
+        }
+    }
+    let mut x = [0.0f64; N];
+    for r in (0..N).rev() {
+        let mut s = m[r][N];
+        for k in r + 1..N {
+            s -= m[r][k] * x[k];
+        }
+        x[r] = s / m[r][r];
+    }
+    Some(x)
 }
 
 /// Every value Edit > Free Transform applies at once — see
@@ -24479,6 +24583,114 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.transform_again(id).is_err());
         assert!(doc.transform_again(999).is_err());
+    }
+
+    #[test]
+    fn distort_with_the_canvas_corners_is_the_identity_and_reproduces_affine_cases() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.distort(id, [[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]])
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+
+        // Sending the corners one step clockwise is a 90 degree turn.
+        let (mut doc, id) = ramped_3x3();
+        doc.distort(id, [[2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]])
+            .unwrap();
+        let (mut turned, id_b) = ramped_3x3();
+        turned.rotate(id_b, 90.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, turned.layers()[0].pixels);
+
+        // Shifting every corner right by one is a move.
+        let (mut doc, id) = ramped_3x3();
+        doc.distort(id, [[1.0, 0.0], [3.0, 0.0], [3.0, 2.0], [1.0, 2.0]])
+            .unwrap();
+        let (mut moved, id_c) = ramped_3x3();
+        moved.translate(id_c, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, moved.layers()[0].pixels);
+    }
+
+    #[test]
+    fn distort_to_a_narrow_top_foreshortens_the_top_row() {
+        // Top corners pulled in to x = 0.5 and 1.5: only the middle output
+        // pixel of the top row lands inside the trapezoid, and it reads
+        // the source's own top-middle 20.
+        let (mut doc, id) = ramped_3x3();
+        doc.distort(id, [[0.5, 0.0], [1.5, 0.0], [2.0, 2.0], [0.0, 2.0]])
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 20, 0], vec![40, 50, 60], vec![70, 80, 90]]
+        );
+    }
+
+    #[test]
+    fn distort_is_projective_not_row_by_row() {
+        // 4x4 with the top edge inset by one pixel a side: the solved map
+        // from destination back to source is x -> 3x + y - 3, y -> 3y /
+        // (0.6667y + 1), so output (1, 0) reads (0, 0) = 10, (2, 0) reads
+        // (3, 0) = 40, (1, 1) reads (1, 1.8 -> 2) = 100, and the whole
+        // bottom half reads the source's bottom row -- rows compress
+        // toward the far edge exactly as a plane seen at an angle does.
+        let (mut doc, id) = ramped_4x4();
+        doc.distort(id, [[1.0, 0.0], [2.0, 0.0], [3.0, 3.0], [0.0, 3.0]])
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![0, 10, 40, 0],
+                vec![0, 100, 110, 0],
+                vec![130, 140, 150, 160],
+                vec![130, 140, 150, 160]
+            ]
+        );
+    }
+
+    #[test]
+    fn distort_keystone_with_a_tall_left_edge() {
+        let (mut doc, id) = ramped_4x4();
+        doc.distort(id, [[0.0, 0.0], [3.0, 1.0], [3.0, 2.0], [0.0, 3.0]])
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![10, 10, 0, 0],
+                vec![50, 50, 60, 40],
+                vec![90, 90, 100, 160],
+                vec![130, 130, 0, 0]
+            ]
+        );
+    }
+
+    #[test]
+    fn distort_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        doc.distort(id, [[2.0, 0.0], [2.0, 2.0], [0.0, 2.0], [0.0, 0.0]])
+            .unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 10);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]);
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]);
+    }
+
+    #[test]
+    fn distort_rejects_degenerate_corners_and_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        let collinear = [[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [1.0, 1.0]];
+        assert!(doc.distort(id, collinear).is_err());
+        let coincident = [[1.0, 1.0], [1.0, 1.0], [1.0, 1.0], [1.0, 1.0]];
+        assert!(doc.distort(id, coincident).is_err());
+        let nan = [[f32::NAN, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        assert!(doc.distort(id, nan).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        doc.set_locked(id, true).unwrap();
+        let square = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        assert!(doc.distort(id, square).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.distort(999, square).is_err());
     }
 
     #[test]

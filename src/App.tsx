@@ -255,6 +255,13 @@ export default function App() {
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
+  const [showDistortDialog, setShowDistortDialog] = useState(false);
+  const [distortCorners, setDistortCorners] = useState<number[][]>([
+    [0, 0],
+    [0, 0],
+    [0, 0],
+    [0, 0],
+  ]);
   const [showFreeTransformDialog, setShowFreeTransformDialog] = useState(false);
   const [freeTransform, setFreeTransform] = useState({
     widthPercent: 100,
@@ -1118,6 +1125,30 @@ export default function App() {
     await runCommand("free_transform", { id: selectedId, transform: freeTransform });
     setShowFreeTransformDialog(false);
   }, [runCommand, selectedId, freeTransform]);
+
+  const openDistortDialog = useCallback(() => {
+    const w = (document?.width ?? 1) - 1;
+    const h = (document?.height ?? 1) - 1;
+    setDistortCorners([
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ]);
+    setShowDistortDialog(true);
+  }, [document]);
+
+  const setDistortCorner = useCallback((corner: number, axis: 0 | 1, value: number) => {
+    setDistortCorners((corners) =>
+      corners.map((c, i) => (i === corner ? (axis === 0 ? [value, c[1]] : [c[0], value]) : c)),
+    );
+  }, []);
+
+  const applyDistort = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("distort", { id: selectedId, corners: distortCorners });
+    setShowDistortDialog(false);
+  }, [runCommand, selectedId, distortCorners]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3176,6 +3207,14 @@ export default function App() {
             title="Edit > Transform > Again (repeat the last transform on the selected layer)"
           >
             Transform Again
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openDistortDialog}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Distort (move the four corners; selected layer)"
+          >
+            Distort…
           </button>
         </div>
 
@@ -6054,6 +6093,60 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFreeTransform} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDistortDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDistortDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Distort"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Distort</h2>
+            <p className="modal__hint">
+              Where each corner of the layer should land, in pixels. Everything
+              between is warped projectively, so straight lines stay straight.
+            </p>
+            {(["Top-left", "Top-right", "Bottom-right", "Bottom-left"] as const).map(
+              (name, corner) => (
+                <label className="control control--row" key={name}>
+                  <span className="control__label">{name}</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    value={distortCorners[corner][0]}
+                    onChange={(event) => setDistortCorner(corner, 0, Number(event.target.value))}
+                  />
+                  <input
+                    type="number"
+                    step={0.5}
+                    value={distortCorners[corner][1]}
+                    onChange={(event) => setDistortCorner(corner, 1, Number(event.target.value))}
+                  />
+                </label>
+              ),
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={openDistortDialog}>
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDistortDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyDistort} disabled={busy}>
                 Apply
               </button>
             </div>

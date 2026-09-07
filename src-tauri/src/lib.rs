@@ -2719,6 +2719,17 @@ fn transform_again(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, 
     edit_checkpointed(&state, |document| document.transform_again(id))
 }
 
+/// Edit > Transform > Distort layer `id`: its four corners (TL, TR, BR,
+/// BL) land on `corners`.
+#[tauri::command]
+fn distort(
+    state: State<'_, AppState>,
+    id: LayerId,
+    corners: [[f32; 2]; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.distort(id, corners))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2981,6 +2992,7 @@ pub fn run() {
             skew,
             free_transform,
             transform_again,
+            distort,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -9169,6 +9169,70 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **942 Rust tests total** (937 → 942, 935 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 141 — Edit > Transform > Distort
+
+`distort(id, corners)` is the Transform family's first genuinely
+projective member. It maps the layer's four corners — top-left,
+top-right, bottom-right, bottom-left, given as `[x, y]` pixel positions
+— onto `corners`, warping everything between them with the projective
+transform (a homography) those four correspondences define, so
+straight lines stay straight and a trapezoid target foreshortens the
+way a plane seen at an angle does, with rows compressing toward the
+far edge rather than merely narrowing. It is inverse-mapped like
+`rotate`: the homography is solved from the destination corners back
+to the source corners (`(0, 0)`, `(width - 1, 0)`, `(width - 1, height -
+1)`, `(0, height - 1)`) as the standard eight linear equations, two per
+correspondence, by a new `solve_8x8` Gaussian elimination with partial
+pivoting in `f64`; then every output pixel evaluates `(a·x + b·y + c,
+d·x + e·y + f) / (g·x + h·y + 1)`, rounds half-away-from-zero, and
+reads that source pixel — transparent wherever it falls off the canvas
+or the denominator vanishes. Corners that are collinear or coincident
+admit no homography (a zero pivot) and error, as does a non-finite
+coordinate. Photoshop's own Distort is dragged by handles and resamples
+bicubically; typed corners and nearest-neighbour are the same
+documented scope cuts the rest of the family makes, and Distort is not
+recorded for Transform Again, which repeats `FreeTransform`s only. A
+new **Distort…** dialog opens with the four corners at the canvas
+corners and takes a new position for each.
+
+**Verified two ways.** Six new `document.rs` tests. The canvas's own
+corners are a byte-for-byte identity; sending the corners one step
+clockwise reproduces `rotate(90)` exactly, and shifting every corner
+right by one reproduces the Phase 139 move exactly — three affine
+special cases the general solver must recover, and does. Pulling the
+top corners of `ramped_3x3` in to `x = 0.5` and `1.5` leaves only the
+middle output pixel of the top row inside the trapezoid, reading the
+source's own top-middle `20`: `[[0, 20, 0], [40, 50, 60], [70, 80,
+90]]`. On `ramped_4x4` with the top edge inset one pixel a side, the
+solved destination-to-source map is `x → 3x + y - 3`, `y → 3y / (0.6667y
++ 1)`, so output `(1, 0)` reads `(0, 0) = 10`, `(2, 0)` reads `(3, 0) =
+40`, `(1, 1)` reads `(1, 1.8 → 2) = 100`, and the whole bottom half
+reads the source's bottom row — `[[0, 10, 40, 0], [0, 100, 110, 0],
+[130, 140, 150, 160], [130, 140, 150, 160]]`, the perspective
+compression a row-by-row scaling could never produce. A keystone with
+a tall left edge gives `[[10, 10, 0, 0], [50, 50, 60, 40], [90, 90, 100,
+160], [130, 130, 0, 0]]`. A one-pixel selection confines the rewrite;
+collinear corners, four coincident corners, a `NaN` coordinate, a locked
+layer, and an unknown layer all error. All six passed on the first run,
+every grid cross-checked against an independent Python implementation
+of the same eight-equation solve — written first, with the identical
+pivoting order, so its `f64` arithmetic is bit-for-bit the Rust
+solver's — and the same rounding rule.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-eight: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**948 Rust tests total** (942 → 948, 941 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
