@@ -3374,6 +3374,50 @@ fn apply_adjustment_preset(state: State<'_, AppState>, name: String) -> Result<S
     })
 }
 
+/// The Custom Shape tool's picker: saves the current work path by name.
+#[tauri::command]
+fn save_custom_shape_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_custom_shape_preset(&name)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_custom_shape_preset(
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_custom_shape_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// Places custom shape preset `name` as a new shape layer filling
+/// `(x0, y0)`-`(x1, y1)`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn place_custom_shape_preset(
+    state: State<'_, AppState>,
+    name: String,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.place_custom_shape_preset(&name, x0, y0, x1, y1, color)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// The Pen Tool: appends an anchor at `(x, y)` to the current path.
 #[tauri::command]
 fn pen_add_anchor(
@@ -5551,6 +5595,9 @@ pub fn run() {
             save_adjustment_preset,
             delete_adjustment_preset,
             apply_adjustment_preset,
+            save_custom_shape_preset,
+            delete_custom_shape_preset,
+            place_custom_shape_preset,
             set_text,
             add_shape_layer,
             set_shape,

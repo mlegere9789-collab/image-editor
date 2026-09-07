@@ -154,6 +154,8 @@ pub struct Document {
     gradient_presets: Vec<GradientPreset>,
     /// Edit > Adjustment Presets, in the order first saved.
     adjustment_presets: Vec<AdjustmentPreset>,
+    /// The Custom Shape tool's picker, in the order first saved.
+    custom_shape_presets: Vec<CustomShapePreset>,
     /// Select > Save Selection's named selections, in the order first
     /// saved — Photoshop stores these as alpha channels; here they are the
     /// selections themselves (a mask's bitmap shared through its `Arc`),
@@ -1440,6 +1442,16 @@ pub struct GradientPreset {
 pub struct AdjustmentPreset {
     pub name: String,
     pub adjustment: Adjustment,
+}
+
+/// The Custom Shape tool's picker: a named, closed [`Path`] saved from
+/// the Pen tool family's current work path, placed into a target
+/// rectangle as a new shape layer — see [`Document::place_custom_shape_preset`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomShapePreset {
+    pub name: String,
+    pub path: Path,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -3090,6 +3102,57 @@ fn wand_bits(
     bits
 }
 
+/// A point on the cubic Bézier through `p0`, `p1`, `p2`, `p3` at `t`.
+fn cubic_bezier_at(
+    p0: (f32, f32),
+    p1: (f32, f32),
+    p2: (f32, f32),
+    p3: (f32, f32),
+    t: f32,
+) -> (f32, f32) {
+    let mt = 1.0 - t;
+    let a = mt * mt * mt;
+    let b = 3.0 * mt * mt * t;
+    let c = 3.0 * mt * t * t;
+    let d = t * t * t;
+    (
+        a * p0.0 + b * p1.0 + c * p2.0 + d * p3.0,
+        a * p0.1 + b * p1.1 + c * p2.1 + d * p3.1,
+    )
+}
+
+/// The Custom Shape tool's flatten: `path` traced as a polygon, a segment
+/// with no handle on either end kept as the plain straight line between
+/// its two anchors, and one with a handle sampled at 8 points along its
+/// cubic Bézier (the anchors' own handle, or the anchor's point when a
+/// side has none, exactly as [`Document::add_anchor_point`] builds its
+/// control points). The closing edge of a closed path always lands back
+/// on the first anchor exactly, so that duplicate is dropped.
+fn flatten_path_to_polygon(path: &Path) -> Vec<(f32, f32)> {
+    const SAMPLES: usize = 8;
+    let n = path.anchors.len();
+    let seg_count = if path.closed { n } else { n - 1 };
+    let mut out = vec![path.anchors[0].point];
+    for i in 0..seg_count {
+        let a = path.anchors[i];
+        let b = path.anchors[(i + 1) % n];
+        if a.out_handle.is_none() && b.in_handle.is_none() {
+            out.push(b.point);
+        } else {
+            let p1 = a.out_handle.unwrap_or(a.point);
+            let p2 = b.in_handle.unwrap_or(b.point);
+            for step in 1..=SAMPLES {
+                let t = step as f32 / SAMPLES as f32;
+                out.push(cubic_bezier_at(a.point, p1, p2, b.point, t));
+            }
+        }
+    }
+    if path.closed {
+        out.pop();
+    }
+    out
+}
+
 /// Even-odd point-in-polygon: casts a ray from `(px, py)` toward +x and
 /// counts the polygon edges it crosses, each edge treated as half-open in
 /// `y` so a ray through a vertex is counted once, not twice.
@@ -3282,6 +3345,8 @@ pub struct DocumentView {
     pub gradient_presets: Vec<GradientPreset>,
     /// Adjustment Presets, in the order first saved.
     pub adjustment_presets: Vec<AdjustmentPreset>,
+    /// The Custom Shape tool's picker's names, in the order first saved.
+    pub custom_shape_presets: Vec<String>,
 }
 
 impl Document {
@@ -3304,6 +3369,7 @@ impl Document {
             pattern_presets: Vec::new(),
             gradient_presets: Vec::new(),
             adjustment_presets: Vec::new(),
+            custom_shape_presets: Vec::new(),
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
@@ -3372,6 +3438,11 @@ impl Document {
                 .collect(),
             gradient_presets: self.gradient_presets.clone(),
             adjustment_presets: self.adjustment_presets.clone(),
+            custom_shape_presets: self
+                .custom_shape_presets
+                .iter()
+                .map(|p| p.name.clone())
+                .collect(),
         }
     }
 
@@ -7916,6 +7987,111 @@ impl Document {
 
     pub fn adjustment_presets(&self) -> &[AdjustmentPreset] {
         &self.adjustment_presets
+    }
+
+    /// The Custom Shape tool's picker: saves (or, by name, overwrites) a
+    /// copy of the current work path. Errors for a blank name, no path,
+    /// or a path that is not closed — Photoshop's Custom Shape presets
+    /// are always closed subpaths.
+    pub fn save_custom_shape_preset(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A custom shape preset needs a name.".to_string());
+        }
+        let path = self
+            .current_path
+            .clone()
+            .ok_or_else(|| "Close a path first to save it as a custom shape preset.".to_string())?;
+        if !path.closed {
+            return Err("A custom shape preset needs a closed path.".to_string());
+        }
+        match self
+            .custom_shape_presets
+            .iter_mut()
+            .find(|p| p.name == name)
+        {
+            Some(preset) => preset.path = path,
+            None => self.custom_shape_presets.push(CustomShapePreset {
+                name: name.to_string(),
+                path,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Deletes the custom shape preset named `name`. Errors when there is
+    /// none.
+    pub fn delete_custom_shape_preset(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .custom_shape_presets
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| format!("No custom shape preset named \"{name}\"."))?;
+        self.custom_shape_presets.remove(index);
+        Ok(())
+    }
+
+    pub fn custom_shape_presets(&self) -> &[CustomShapePreset] {
+        &self.custom_shape_presets
+    }
+
+    /// The Custom Shape Tool: places preset `name` as a new shape layer
+    /// `name`d after it, its saved path flattened to a polygon (straight
+    /// segments kept straight; a segment with a handle on either end
+    /// sampled at 8 points along its cubic Bézier) and rescaled
+    /// independently on each axis from the flattened path's own bounding
+    /// box onto the target rectangle `(x0, y0)`-`(x1, y1)`, the same
+    /// bounding-box fit the Rectangle and Ellipse tools give their shapes.
+    /// Errors for an unknown preset name, non-finite target coordinates,
+    /// or a preset whose path has no area (every point on one line).
+    pub fn place_custom_shape_preset(
+        &mut self,
+        name: &str,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        color: [u8; 4],
+    ) -> Result<LayerId, String> {
+        if !(x0.is_finite() && y0.is_finite() && x1.is_finite() && y1.is_finite()) {
+            return Err("Custom shape placement needs finite coordinates.".to_string());
+        }
+        let preset = self
+            .custom_shape_presets
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| format!("No custom shape preset named \"{name}\"."))?;
+        let raw = flatten_path_to_polygon(&preset.path);
+        let (min_x, max_x) = raw
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(x, _)| {
+                (lo.min(x), hi.max(x))
+            });
+        let (min_y, max_y) = raw
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, y)| {
+                (lo.min(y), hi.max(y))
+            });
+        let (src_w, src_h) = (max_x - min_x, max_y - min_y);
+        if src_w <= 0.0 || src_h <= 0.0 {
+            return Err("That custom shape preset has no area to place.".to_string());
+        }
+        let (tx0, tx1) = (x0.min(x1), x0.max(x1));
+        let (ty0, ty1) = (y0.min(y1), y0.max(y1));
+        let scale_x = (tx1 - tx0) / src_w;
+        let scale_y = (ty1 - ty0) / src_h;
+        let points: Vec<(f32, f32)> = raw
+            .iter()
+            .map(|&(x, y)| (tx0 + (x - min_x) * scale_x, ty0 + (y - min_y) * scale_y))
+            .collect();
+        self.add_shape_layer(
+            name,
+            &ShapeLayer {
+                spec: ShapeSpec::Custom { points },
+                fill: Some(color),
+                stroke: None,
+            },
+        )
     }
 
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
@@ -49177,6 +49353,188 @@ mod tests {
         assert_eq!(doc.adjustment_presets()[0].adjustment, Adjustment::Invert);
         assert!(doc
             .delete_pattern_preset("Nope")
+            .unwrap_err()
+            .contains("preset"));
+    }
+
+    #[test]
+    fn custom_shape_presets_require_a_closed_path_and_overwrite_by_name() {
+        let mut doc = Document::new(20, 20).unwrap();
+        assert!(doc
+            .save_custom_shape_preset("Triangle")
+            .unwrap_err()
+            .contains("path"));
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 10.0), None).unwrap();
+        assert!(doc
+            .save_custom_shape_preset("Triangle")
+            .unwrap_err()
+            .contains("closed"));
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("Triangle").unwrap();
+        assert_eq!(doc.custom_shape_presets().len(), 1);
+        assert_eq!(doc.custom_shape_presets()[0].name, "Triangle");
+        doc.move_anchor(0, 100.0, 100.0).unwrap();
+        // The saved preset is a snapshot: moving the live path afterward
+        // does not touch it.
+        assert_eq!(
+            doc.custom_shape_presets()[0].path.anchors[0].point,
+            (0.0, 0.0)
+        );
+        // Saving "Triangle" again overwrites it in place.
+        doc.save_custom_shape_preset("Triangle").unwrap();
+        assert_eq!(doc.custom_shape_presets().len(), 1);
+        assert_eq!(
+            doc.custom_shape_presets()[0].path.anchors[0].point,
+            (100.0, 100.0)
+        );
+        assert!(doc
+            .save_custom_shape_preset("   ")
+            .unwrap_err()
+            .contains("name"));
+        doc.delete_custom_shape_preset("Triangle").unwrap();
+        assert!(doc.custom_shape_presets().is_empty());
+        assert!(doc
+            .delete_custom_shape_preset("Triangle")
+            .unwrap_err()
+            .contains("preset"));
+    }
+
+    #[test]
+    fn custom_shape_presets_place_a_straight_polygon_scaled_and_translated_to_fit() {
+        let mut doc = Document::new(50, 50).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((0.0, 10.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("RightTriangle").unwrap();
+        let id = doc
+            .place_custom_shape_preset("RightTriangle", 20.0, 20.0, 40.0, 30.0, [255, 0, 0, 255])
+            .unwrap();
+        let layer = doc.layers().iter().find(|l| l.id == id).unwrap();
+        let shape = layer.shape.as_ref().unwrap();
+        assert_eq!(
+            shape.spec,
+            ShapeSpec::Custom {
+                points: vec![(20.0, 20.0), (40.0, 20.0), (20.0, 30.0)]
+            }
+        );
+        assert_eq!(shape.fill, Some([255, 0, 0, 255]));
+        // (26.5, 23.5) — pixel (col 26, row 23) — sits inside the placed
+        // triangle near its centroid (26.667, 23.333): all three edge
+        // cross products (A->B, B->C, C->A) come out positive by hand.
+        let base = (23 * 50 + 26) * 4;
+        assert_eq!(&layer.pixels[base..base + 4], &[255, 0, 0, 255]);
+        assert!(doc
+            .place_custom_shape_preset("Nope", 0.0, 0.0, 10.0, 10.0, [0, 0, 0, 255])
+            .unwrap_err()
+            .contains("preset"));
+    }
+
+    #[test]
+    fn custom_shape_presets_flatten_a_curved_segment_by_sampling_its_bezier() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.current_path = Some(Path {
+            anchors: vec![
+                PathAnchor {
+                    point: (0.0, 0.0),
+                    in_handle: None,
+                    out_handle: Some((0.0, 10.0)),
+                },
+                PathAnchor {
+                    point: (10.0, 10.0),
+                    in_handle: Some((10.0, 0.0)),
+                    out_handle: None,
+                },
+                PathAnchor {
+                    point: (5.0, -5.0),
+                    in_handle: None,
+                    out_handle: None,
+                },
+            ],
+            closed: true,
+        });
+        doc.save_custom_shape_preset("Curve").unwrap();
+        // The preset's own bounding box is x: 0..10, y: -5..10 (the curve
+        // bulges below the straight edges), so placing it into that exact
+        // rectangle is an identity transform — the flattened points come
+        // back unscaled and untranslated.
+        let id = doc
+            .place_custom_shape_preset("Curve", 0.0, -5.0, 10.0, 10.0, [0, 255, 0, 255])
+            .unwrap();
+        let layer = doc.layers().iter().find(|l| l.id == id).unwrap();
+        let ShapeSpec::Custom { points } = &layer.shape.as_ref().unwrap().spec else {
+            panic!("expected a custom shape");
+        };
+        // A (start), 8 Bezier samples ending at B, then C — the closing
+        // C-to-A edge is straight and its landing back on A is dropped.
+        assert_eq!(points.len(), 10);
+        assert_eq!(points[0], (0.0, 0.0));
+        assert_eq!(points[1], (0.4296875, 2.890625));
+        assert_eq!(points[4], (5.0, 5.0));
+        assert_eq!(points[8], (10.0, 10.0));
+        assert_eq!(points[9], (5.0, -5.0));
+    }
+
+    #[test]
+    fn custom_shape_presets_are_exposed_on_the_document_view_and_survive_canvas_changes() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((0.0, 5.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("A").unwrap();
+        doc.clear_path();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((3.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((3.0, 3.0), None).unwrap();
+        doc.pen_add_anchor((0.0, 3.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("B").unwrap();
+        let view = doc.view();
+        assert_eq!(
+            view.custom_shape_presets,
+            vec!["A".to_string(), "B".to_string()]
+        );
+        // A 90-degree rotation clears the current path (position-bound)
+        // but not the saved presets, which travel with the document like
+        // every other preset kind.
+        doc.rotate_document_90(true);
+        assert!(doc.current_path().is_none());
+        assert_eq!(
+            doc.view().custom_shape_presets,
+            vec!["A".to_string(), "B".to_string()]
+        );
+        doc.delete_custom_shape_preset("A").unwrap();
+        assert_eq!(doc.custom_shape_presets().len(), 1);
+        assert_eq!(doc.custom_shape_presets()[0].name, "B");
+    }
+
+    #[test]
+    fn custom_shape_presets_placement_rejects_degenerate_targets_and_bad_names() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.pen_add_anchor((5.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 5.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 10.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("Line").unwrap();
+        assert!(doc
+            .place_custom_shape_preset("Line", 0.0, 0.0, 10.0, 10.0, [0, 0, 0, 255])
+            .unwrap_err()
+            .contains("area"));
+        doc.clear_path();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((0.0, 5.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("Triangle").unwrap();
+        assert!(doc
+            .place_custom_shape_preset("Triangle", f32::NAN, 0.0, 10.0, 10.0, [0, 0, 0, 255])
+            .unwrap_err()
+            .contains("finite"));
+        assert!(doc
+            .place_custom_shape_preset("Nope", 0.0, 0.0, 10.0, 10.0, [0, 0, 0, 255])
             .unwrap_err()
             .contains("preset"));
     }

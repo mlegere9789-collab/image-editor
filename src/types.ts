@@ -211,6 +211,8 @@ export type DocumentView = {
   gradientPresets: GradientPreset[];
   /** Adjustment Presets, in the order first saved. */
   adjustmentPresets: AdjustmentPreset[];
+  /** The Custom Shape tool's picker's names, in the order first saved. */
+  customShapePresets: string[];
 };
 
 /** Mirrors `GradientPreset` in src-tauri/src/document.rs. */

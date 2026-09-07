@@ -5729,7 +5729,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowPresetsDialog(true)}
           disabled={busy || !hasDocument}
-          title="Edit > Presets: save and reuse Gradient, Pattern, and Adjustment presets by name"
+          title="Edit > Presets: save and reuse Gradient, Pattern, Adjustment, and Custom Shape presets by name"
         >
           Presets…
         </button>
@@ -10681,6 +10681,58 @@ export default function App() {
               disabled={busy || presetName.trim() === ""}
             >
               Save Adjustment
+            </button>
+
+            <h3 className="modal__subheading">Custom Shapes</h3>
+            <p className="modal__hint">
+              Saves the current work path (Pen tools), which must be closed. Place fills
+              the box below, scaled to fit.
+            </p>
+            {document.customShapePresets.length === 0 ? (
+              <p className="modal__hint">No custom shapes saved yet.</p>
+            ) : (
+              document.customShapePresets.map((name) => (
+                <div className="control control--row" key={name}>
+                  <span className="control__label">{name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      const [r, g, b] = hexToRgb(brushColor);
+                      const [x0, y0, x1, y1] = shapeBox;
+                      void runCommand("place_custom_shape_preset", { name, x0, y0, x1, y1, color: [r, g, b, 255] });
+                    }}
+                    disabled={busy}
+                  >
+                    Place
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_custom_shape_preset", { name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <label className="control control--row">
+              <span className="control__label">Box (x0, y0, x1, y1)</span>
+              {shapeBox.map((v, i) => (
+                <input
+                  type="number"
+                  step={0.5}
+                  value={v}
+                  key={i}
+                  onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                />
+              ))}
+            </label>
+            <button
+              className="button"
+              onClick={() => void runCommand("save_custom_shape_preset", { name: presetName.trim() })}
+              disabled={busy || presetName.trim() === "" || !document.currentPath}
+            >
+              Save Shape
             </button>
 
             <div className="modal__actions">

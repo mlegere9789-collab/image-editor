@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 484.**
+**618 distinct capabilities tracked. Currently shipped: 485.**
 
 ## PART I — EVERY TOOL
 
@@ -192,7 +192,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Adjustment Presets (`save_adjustment_preset`/`delete_adjustment_preset`/`apply_adjustment_preset`, a named `Adjustment` saved on the document — overwritten in place when the name repeats, validated before saving — and applied by adding a new adjustment layer set to it; see README Phase 260)
 - [x] Gradient Presets (`save_gradient_preset`/`delete_gradient_preset`, a named two-colour start/end pair; Apply loads the colours into the Gradient tool's own foreground/end-colour fields. Photoshop's built-in swatch library and multi-stop gradients are documented scope cuts — see README Phase 260)
 - [x] Pattern Presets (`save_pattern_preset`/`load_pattern_preset`/`delete_pattern_preset`, the currently-defined pattern (Define Pattern, above) saved by name and reloaded as the current pattern; see README Phase 260)
-- [ ] Custom Shapes
+- [x] Custom Shapes (`save_custom_shape_preset`/`delete_custom_shape_preset`/`place_custom_shape_preset`, a named closed Pen-tool path saved to a picker and placed as a new shape layer, its path flattened to a polygon — straight segments kept straight, curved ones sampled 8 times along their cubic Bézier — and rescaled independently per axis onto a target box. Photoshop's built-in shape library (arrows, banners, animals, …) is a documented scope cut: only shapes drawn with this app's own Pen tools can be saved — see README Phase 261)
 - [x] Define Pattern (`define_pattern`, captures the selected layer's own pixels inside a plain rectangular selection — or the whole layer with none — as the document's one pattern, for pattern fills to tile; elliptical/rounded/inverted/bordered selections error as Photoshop's own greyed-out command would. Application-wide pattern presets are a documented scope cut: the pattern lives on the document and travels through undo — see README Phase 143)
 - [x] Define Brush Preset (`define_brush_tip`, the selected layer's opaque bounds captured as a tip of darkness-times-alpha coverages, and `tip_stroke`, which stamps it every Spacing pixels along the path and lays the brush colour at its coverage; tip scaling, angle, roundness, scatter, and texture are documented scope cuts — see README Phase 258)
 - [x] Paint Symmetry (`stroke_symmetric`, every Brush, Eraser, and Pattern Stamp stroke repeated mirrored about the canvas's vertical centre line, horizontal centre line, or both — Photoshop's Vertical, Horizontal, and Dual Axis — chosen from a Symmetry drop-down in the tool options; Circular, Spiral, Mandala, and Radial are documented scope cuts — see README Phase 170)

@@ -15576,6 +15576,80 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1545 Rust tests total** (1540 → 1545, 1538 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 261 — Custom Shapes
+
+A fourth preset bin, this one built on top of the Pen tool family instead
+of alongside it. A `CustomShapePreset { name, path }` saves a copy of
+the document's current work `Path` — `save_custom_shape_preset` requires
+it to be closed, the same requirement Photoshop's own Custom Shape
+picker places on a saved subpath, so a preset always encloses an area.
+Placing one (`place_custom_shape_preset`) is new machinery: a
+`flatten_path_to_polygon` helper walks the path's segments, keeping a
+segment with no handle on either end as the plain straight line between
+its anchors (matching `add_anchor_point`'s own straight-segment special
+case from Phase 259) and sampling a segment with a handle at 8 points
+along its cubic Bézier through a new `cubic_bezier_at` helper — the
+first appearance of an actual Bézier evaluation in `document.rs` itself,
+the Pen tool's own rendering having lived entirely in the frontend's SVG
+overlay until now. The flattened polygon's own bounding box is then
+rescaled independently on each axis onto the caller's target box —
+`(x1−x0)/width` and `(y1−y0)/height` — the same non-uniform
+bounding-box fit the Rectangle and Ellipse tools give their shapes, and
+the result becomes a new `ShapeSpec::Custom` shape layer through the
+existing `add_shape_layer`. Dragging a handle to make a segment curved
+after the point was already placed straight is unaffected — this reads
+whatever the current path already has, live. Photoshop's built-in
+library of shape categories (Arrows, Banners, Animals, Talk Bubbles, …)
+is a documented scope cut: only shapes this app's own Pen tools drew can
+be saved, since there is no vector-shape-file importer here. The
+Presets dialog gains a fourth section: saved shapes with Place and
+Delete, a shared Box (x0, y0, x1, y1) field the Shape Layer dialog
+itself already used, and a Save Shape button reading the current path.
+
+**Verified two ways.** Five new `document.rs` tests. Saving requires a
+path (error names "path") and a closed one specifically (error names
+"closed"); saving "Triangle" then moving the live path's first anchor to
+`(100, 100)` leaves the saved copy at its original `(0, 0)` — a
+snapshot, not a live reference — and re-saving under the same name then
+overwrites it in place at length 1, not 2. Placing a straight right
+triangle `(0,0)`-`(10,0)`-`(0,10)` into the box `(20,20)`-`(40,30)`
+gives the exact flattened points `(20,20)`, `(40,20)`, `(20,30)` — a
+2× x-scale, 1× y-scale, confirmed by also sampling the resulting
+layer's pixel at `(26.5, 23.5)`, near that triangle's centroid, by hand
+cross-product test against all three edges. A curved segment — anchor
+`(0,0)` with out-handle `(0,10)` into anchor `(10,10)` with in-handle
+`(10,0)`, closed by a third plain corner at `(5,-5)` — placed 1:1 into
+its own exact bounding box `(0,-5)`-`(10,10)` flattens to 10 points (the
+start anchor, 8 Bézier samples, the third anchor), with the midpoint
+sample landing exactly on `(5, 5)` by hand (`x(t)=10t²(3−2t)`,
+`y(t)=10t(3(1−t)²+t²)`, both closed-form expressions derived from the
+control points and independently confirmed for all 8 samples by a
+Python script emulating Rust `f32` arithmetic via
+`struct.pack`/`unpack` at every operation — the coordinates are all
+dyadic eighths, so every intermediate stays exactly representable and
+Python's own floats agree bit for bit). `DocumentView` exposes preset
+names; a 90-degree rotation clears the live current path (position-bound,
+same as before) but leaves saved custom shape presets untouched, since
+presets travel with the document like the other three kinds. A
+zero-area preset (three colinear anchors) is refused when placed (error
+names "area"), a non-finite target coordinate is refused (error names
+"finite"), and an unknown preset name is refused for both save-adjacent
+and place operations. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The dialog's new section was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1550 Rust tests total** (1545 → 1550, 1543 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
