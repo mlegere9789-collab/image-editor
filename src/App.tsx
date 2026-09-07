@@ -261,6 +261,8 @@ export default function App() {
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
+  const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
+  const [samplerReadouts, setSamplerReadouts] = useState<[number, number, number, number][]>([]);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
@@ -3029,6 +3031,35 @@ export default function App() {
 
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
+  const isColorSampler = tool === "colorSampler";
+
+  const placeColorSampler = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document) return;
+      const [fx, fy] = toDocPoint(event, document);
+      const x = Math.floor(fx);
+      const y = Math.floor(fy);
+      if (x < 0 || y < 0 || x >= document.width || y >= document.height) return;
+      // Photoshop caps samplers at ten; a click beyond that is ignored.
+      setColorSamplers((current) => (current.length >= 10 ? current : [...current, [x, y]]));
+    },
+    [document],
+  );
+
+  // Re-read every sampler after each edit (each snapshot is a fresh view)
+  // and whenever a sampler is placed or cleared.
+  useEffect(() => {
+    if (!document || colorSamplers.length === 0) {
+      setSamplerReadouts([]);
+      return;
+    }
+    const inside = colorSamplers.filter(
+      ([x, y]) => x < document.width && y < document.height,
+    );
+    void invoke<[number, number, number, number][]>("sample_points", { points: inside })
+      .then(setSamplerReadouts)
+      .catch(() => setSamplerReadouts([]));
+  }, [document, colorSamplers]);
 
   const redEyeAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3121,6 +3152,10 @@ export default function App() {
         rulerStart.current = toDocPoint(event, document);
         return;
       }
+      if (isColorSampler) {
+        placeColorSampler(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -3161,6 +3196,8 @@ export default function App() {
       isRedEye,
       redEyeAt,
       isRuler,
+      isColorSampler,
+      placeColorSampler,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3809,6 +3846,15 @@ export default function App() {
             title="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
           >
             Ruler
+          </button>
+          <button
+            className={`button button--quiet${tool === "colorSampler" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "colorSampler"}
+            onClick={() => setTool("colorSampler")}
+            title="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
+          >
+            Color Sampler
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -5068,6 +5114,16 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "colorSampler" && (
+            <button
+              className="button button--quiet"
+              onClick={() => setColorSamplers([])}
+              disabled={colorSamplers.length === 0}
+              title="Remove every color sampler"
+            >
+              Clear Samplers
+            </button>
           )}
           {tool === "sponge" && (
             <label className="tools__slider">
@@ -13887,6 +13943,15 @@ export default function App() {
                 {rulerReadout.distance.toFixed(1)} A {rulerReadout.angle.toFixed(1)}°
               </span>
             )}
+            {samplerReadouts.map((rgba, index) => (
+              <span
+                key={index}
+                className="statusbar__levels"
+                title={`Color Sampler #${index + 1} at (${colorSamplers[index]?.[0]}, ${colorSamplers[index]?.[1]}): composite RGBA`}
+              >
+                #{index + 1} R {rgba[0]} G {rgba[1]} B {rgba[2]} A {rgba[3]}
+              </span>
+            ))}
           </>
         ) : (
           <span className="statusbar__name">Ready</span>

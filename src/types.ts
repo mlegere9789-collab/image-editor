@@ -114,6 +114,7 @@ export type Tool =
   | "sharpen"
   | "redEye"
   | "ruler"
+  | "colorSampler"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

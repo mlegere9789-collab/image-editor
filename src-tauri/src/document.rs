@@ -3067,6 +3067,36 @@ impl Document {
         self.layer_histogram(id).map(|(counts, _)| counts)
     }
 
+    /// The Color Sampler tool: the composited RGBA8 value under each of
+    /// `points` — what the canvas shows there, every visible layer
+    /// flattened with its opacity and blend mode, exactly as the eyedropper
+    /// samples — in the order given, so a set of placed samplers can be
+    /// re-read after every edit. Photoshop allows up to ten samplers, and
+    /// so does this; more, or a point off the canvas, is an error. A fully
+    /// transparent spot reads `[0, 0, 0, 0]`, as [`crate::composite::flatten`]
+    /// writes it. Read-only; Photoshop's Current Layer sampling mode is a
+    /// documented scope cut ([`Self::layer_pixel`] already reads one layer).
+    pub fn sample_points(&self, points: &[(u32, u32)]) -> Result<Vec<[u8; 4]>, String> {
+        if points.len() > 10 {
+            return Err(format!(
+                "At most ten color samplers can be placed; {} were given.",
+                points.len()
+            ));
+        }
+        points
+            .iter()
+            .map(|&(x, y)| {
+                if x >= self.width || y >= self.height {
+                    return Err(format!(
+                        "({x}, {y}) is outside the {}×{} canvas.",
+                        self.width, self.height
+                    ));
+                }
+                Ok(crate::composite::composite_pixel(self, x, y))
+            })
+            .collect()
+    }
+
     /// Camera Raw Filter > RGB Levels: the RGBA8 value of layer `id`'s own
     /// pixel at `(x, y)` — the per-channel readout Camera Raw shows under
     /// its histogram for the pixel beneath the pointer. Unlike the
@@ -28410,6 +28440,64 @@ mod tests {
     fn ruler_rejects_non_finite_points() {
         assert!(measure(f32::NAN, 0.0, 1.0, 1.0).is_err());
         assert!(measure(0.0, 0.0, f32::INFINITY, 1.0).is_err());
+    }
+
+    #[test]
+    fn color_samplers_read_the_composite_in_order() {
+        // The opaque 200 overlay covers the base's 10 at (0, 0); (1, 1)
+        // shows the base's 50 through the overlay's transparency.
+        let (doc, _) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        let samples = doc.sample_points(&[(1, 1), (0, 0), (2, 2)]).unwrap();
+        assert_eq!(
+            samples,
+            vec![[50, 0, 0, 255], [200, 0, 0, 255], [90, 0, 0, 255]]
+        );
+        assert!(doc.sample_points(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn color_samplers_see_opacity_and_visibility() {
+        // 50% red over the base's 10 is 133, the value Copy Merged's test
+        // established; hiding the overlay reads the base's 10.
+        let (mut doc, over) = ramped_3x3_with_overlay([255, 0, 0, 255]);
+        doc.set_opacity(over, 0.5).unwrap();
+        assert_eq!(
+            doc.sample_points(&[(0, 0)]).unwrap(),
+            vec![[133, 0, 0, 255]]
+        );
+        doc.set_visible(over, false).unwrap();
+        assert_eq!(doc.sample_points(&[(0, 0)]).unwrap(), vec![[10, 0, 0, 255]]);
+    }
+
+    #[test]
+    fn color_samplers_read_transparency_as_zero() {
+        let (doc, _) = depth_ramped_3x3();
+        let samples = doc.sample_points(&[(0, 1), (1, 1)]).unwrap();
+        assert_eq!(samples, vec![[0, 0, 0, 0], [50, 0, 0, 128]]);
+    }
+
+    #[test]
+    fn color_samplers_match_the_flattened_image() {
+        let (doc, _) = ramped_3x3_with_overlay([200, 0, 0, 128]);
+        let flat = crate::composite::flatten(&doc).pixels;
+        let points: Vec<(u32, u32)> = (0..3).flat_map(|y| (0..3).map(move |x| (x, y))).collect();
+        let sampled: Vec<u8> = doc
+            .sample_points(&points)
+            .unwrap()
+            .into_iter()
+            .flatten()
+            .collect();
+        assert_eq!(sampled, flat);
+    }
+
+    #[test]
+    fn color_samplers_reject_off_canvas_points_and_more_than_ten() {
+        let (doc, _) = ramped_3x3();
+        assert!(doc.sample_points(&[(0, 0), (3, 0)]).is_err());
+        let eleven = vec![(0, 0); 11];
+        let err = doc.sample_points(&eleven).unwrap_err();
+        assert!(err.contains("ten"), "{err}");
+        assert!(doc.sample_points(&eleven[..10]).is_ok());
     }
 
     #[test]

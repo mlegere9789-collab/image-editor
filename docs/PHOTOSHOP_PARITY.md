@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 238.**
+**618 distinct capabilities tracked. Currently shipped: 239.**
 
 ## PART I — EVERY TOOL
 
@@ -63,7 +63,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] CUSTOM SHAPE TOOL
 - [ ] FRAME TOOL
 - [x] EYEDROPPER TOOL
-- [ ] COLOR SAMPLER TOOL
+- [x] COLOR SAMPLER TOOL (`sample_points` over a new `composite::composite_pixel`, up to ten placed sample points whose composited RGBA — every visible layer flattened with its opacity and blend mode — is re-read after every edit and shown in the status bar; Current Layer sampling and sample-size averaging are documented scope cuts — see README Phase 167)
 - [x] RULER TOOL (`measure` / `ruler_measure`, a drag whose width, height, straight-line distance, and angle — degrees counter-clockwise from horizontal, y up on screen, Photoshop's Info-panel convention — are read out in the status bar; Straighten Layer and the protractor's second leg are documented scope cuts — see README Phase 166)
 - [ ] NOTE TOOL
 - [ ] COUNT TOOL

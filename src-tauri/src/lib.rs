@@ -2892,6 +2892,18 @@ fn rgb_levels(state: State<'_, AppState>, id: LayerId, x: u32, y: u32) -> Result
     document.layer_pixel(id, x, y)
 }
 
+/// Color Sampler tool: the composited RGBA8 value under each of `points`,
+/// in order. Read-only.
+#[tauri::command]
+fn sample_points(
+    state: State<'_, AppState>,
+    points: Vec<(u32, u32)>,
+) -> Result<Vec<[u8; 4]>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.sample_points(&points)
+}
+
 /// Camera Raw Filter > Shadow Clipping: per-channel counts of layer `id`'s
 /// sampled pixels clipped to 0, over the selection (or whole layer).
 #[tauri::command]
@@ -3362,6 +3374,7 @@ pub fn run() {
             magic_erase,
             red_eye,
             ruler_measure,
+            sample_points,
             select_all,
             invert_selection,
             expand_selection,

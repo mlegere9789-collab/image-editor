@@ -10563,6 +10563,55 @@ instead. Every other layer of this project's quality bar
 **1075 Rust tests total** (1070 → 1075, 1068 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 167 — Color Sampler tool
+
+`sample_points(points)` returns the composited RGBA8 value under each
+of up to ten points, in order — what the canvas shows there, every
+visible layer flattened with its opacity and blend mode, exactly as the
+eyedropper samples. It rides on a new `composite::composite_pixel`,
+which runs the compositor's single per-pixel routine
+(`composite_layers_pixel`, the one place the W3C blend math lives) for
+one pixel instead of flattening the whole document per readout. More
+than ten points, or a point off the canvas, is an error; a fully
+transparent spot reads `[0, 0, 0, 0]` as `flatten` writes it. In the
+frontend a **Color Sampler** tool button places a sampler per click
+(clicks beyond ten are ignored, as Photoshop refuses an eleventh), a
+**Clear Samplers** button appears in the tool options while it is
+active, and the status bar lists every sampler as `#n R G B A`,
+re-read after every edit — each snapshot hands back a fresh document
+view, so keying the readout effect on it catches every change, the
+same trick the RGB Levels readout uses. Samplers live in the frontend
+(they are a viewing aid, not document state, so they neither undo nor
+save), and one placed beyond the canvas after a crop is simply dropped
+from the readout. Photoshop's Current Layer sampling mode and its
+sample-size averaging (3×3, 5×5, …) are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, with the one
+blended value cross-checked earlier in Copy Merged's Python emulation
+and the whole-image case checked against `flatten` itself. On
+`ramped_3x3_with_overlay` the points `(1, 1), (0, 0), (2, 2)` read
+`50, 200, 90` in that order and an empty list reads empty. The overlay
+at 50% layer opacity over the base's `10` reads `133`, and hidden reads
+`10`. On `depth_ramped_3x3` the transparent `(0, 1)` reads `[0, 0, 0,
+0]` and the centre reads `[50, 0, 0, 128]`. Sampling all nine points of
+a half-transparent overlay reproduces `flatten`'s bytes exactly. An
+off-canvas point errors, eleven points error mentioning "ten", and ten
+are accepted. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fourteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new tool's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1080 Rust tests total** (1075 → 1080, 1073 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

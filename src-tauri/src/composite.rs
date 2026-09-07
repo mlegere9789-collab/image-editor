@@ -116,6 +116,26 @@ pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
     }
 }
 
+/// The flattened RGBA8 value of the single pixel `(x, y)` — what
+/// [`flatten`] would write there — without flattening anything else. For
+/// point readouts (the Color Sampler) that would otherwise re-flatten the
+/// whole document per sample. `(x, y)` must be on the canvas.
+pub fn composite_pixel(document: &Document, x: u32, y: u32) -> [u8; 4] {
+    let layers = document.layers();
+    let rgba = composite_layers_pixel(
+        layers.iter().filter(|l| l.contributes()),
+        document.width(),
+        x,
+        y,
+    );
+    [
+        to_byte(rgba[0]),
+        to_byte(rgba[1]),
+        to_byte(rgba[2]),
+        to_byte(rgba[3]),
+    ]
+}
+
 /// Composite one pixel `(x, y)` from `layers`, applied in the given
 /// iteration order: non-premultiplied RGBA in `0.0..=1.0`. The single place
 /// the blend math lives, shared by [`flatten`] (every contributing layer),
