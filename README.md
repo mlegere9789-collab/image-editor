@@ -9372,6 +9372,63 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **963 Rust tests total** (959 → 963, 956 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 145 — Pattern Stamp tool
+
+The Pattern Stamp is the first new *tool* (as opposed to a menu
+command) in many phases, and it costs very little because the brush
+already does almost all the work. `Stroke` gains a third variant,
+`PatternStamp { opacity }`: `Document::stroke` builds the same
+soft-edged, selection-clipped coverage mask it builds for the Brush and
+Eraser, and then, instead of a single flat colour, each covered pixel
+takes the pattern pixel at `(x mod width, y mod height)` — tiles
+aligned to the canvas origin, Photoshop's default "Aligned" mode, so
+lifting the brush and stamping again continues the same tiling — with
+the pattern pixel's own alpha scaled by the tool's opacity (`0..=255`)
+and by the coverage, blended `source-over` exactly as the Brush is.
+The stamp reads the pattern Phase 143's `define_pattern` captured and
+errors before touching anything when none is defined. The match inside
+the stroke loop was reshaped so the Brush and the stamp share one
+blend: each arm now yields a `(colour, source_alpha)` pair and the
+Eraser arm `continue`s, so the source-over arithmetic exists once. A
+new **Pattern Stamp** tool button sits beside Brush and Eraser, enabled
+only once a pattern exists; the colour swatch is disabled for it, the
+opacity slider still applies, and pointer drags send
+`pattern_stamp_stroke` exactly as the Brush sends `paint_stroke`.
+Photoshop's own unaligned mode and Impressionist option are a
+documented scope cut.
+
+**Verified two ways.** Four new `document.rs` tests. A stamp centred
+on pixel `(1, 1)` with radius `3` covers every centre of a `3x3` layer
+fully — the farthest centre is `√2` away, so its coverage `3 - 1.414 +
+0.5` clamps to `1` — and painting onto a fully transparent layer with
+the Phase 144 `2x2` tile reproduces `[[20, 30, 20], [50, 60, 50], [20,
+30, 20]]` at alpha `255` exactly, since source-over onto transparency
+is the source. At opacity `128` the colour is kept and the alpha lands
+at `to_byte(128/255) = 128` (`(50, 0, 0, 128)` at the centre, `(90, 0,
+0, 128)` at the corner). With no pattern the stamp errors and paints
+nothing; with a one-pixel selection at the top-left only that pixel is
+painted (`(10, 0, 0, 255)`) and the rest stays transparent. A locked
+layer errors and is untouched. The Brush and Eraser's own pre-existing
+stroke tests guard the shared-blend refactor and all still pass. All
+four passed on the first run (clippy then asked for three `&vec![…]`
+fixture buffers to be plain array slices); the coverage arithmetic is
+the Brush's, verified when the Brush first shipped, and the pattern
+bytes are the fixture's.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**967 Rust tests total** (963 → 967, 960 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

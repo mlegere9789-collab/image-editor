@@ -5653,6 +5653,13 @@ impl Document {
         // Copied out before borrowing `self.layers` mutably below — `Selection`
         // is small (an enum plus four `u32`s), so this is cheap per call.
         let selection = self.selection;
+        // Likewise the pattern, only when a stamp stroke needs it.
+        let pattern = match stroke {
+            Stroke::PatternStamp { .. } => Some(self.pattern.clone().ok_or_else(|| {
+                "No pattern has been defined yet (Edit > Define Pattern).".to_string()
+            })?),
+            _ => None,
+        };
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -5716,33 +5723,40 @@ impl Document {
                     continue;
                 }
                 let base = ((y0 as usize + row) * width as usize + (x0 as usize + col)) * CHANNELS;
-                match stroke {
-                    Stroke::Brush { color } => {
-                        let source_alpha = to_unit(color[3]) * c;
-                        if source_alpha <= 0.0 {
-                            continue;
-                        }
-                        let dest_alpha = to_unit(layer.pixels[base + 3]);
-                        let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
-                        let dest = &mut layer.pixels[base..base + CHANNELS];
-                        for (channel, &source_byte) in color.iter().enumerate().take(3) {
-                            let cs = to_unit(source_byte);
-                            let cb = to_unit(dest[channel]);
-                            let out = if out_alpha > 0.0 {
-                                (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha))
-                                    / out_alpha
-                            } else {
-                                0.0
-                            };
-                            dest[channel] = to_byte(out);
-                        }
-                        dest[3] = to_byte(out_alpha);
+                let (color, source_alpha) = match stroke {
+                    Stroke::Brush { color } => (color, to_unit(color[3]) * c),
+                    Stroke::PatternStamp { opacity } => {
+                        let pattern = pattern.as_ref().expect("checked above");
+                        let px = (x0 as usize + col) % pattern.width as usize;
+                        let py = (y0 as usize + row) % pattern.height as usize;
+                        let src = (py * pattern.width as usize + px) * CHANNELS;
+                        let mut color = [0u8; CHANNELS];
+                        color.copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
+                        (color, to_unit(color[3]) * to_unit(opacity) * c)
                     }
                     Stroke::Eraser => {
                         let dest_alpha = to_unit(layer.pixels[base + 3]);
                         layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
+                        continue;
                     }
+                };
+                if source_alpha <= 0.0 {
+                    continue;
                 }
+                let dest_alpha = to_unit(layer.pixels[base + 3]);
+                let out_alpha = source_alpha + dest_alpha * (1.0 - source_alpha);
+                let dest = &mut layer.pixels[base..base + CHANNELS];
+                for (channel, &source_byte) in color.iter().enumerate().take(3) {
+                    let cs = to_unit(source_byte);
+                    let cb = to_unit(dest[channel]);
+                    let out = if out_alpha > 0.0 {
+                        (source_alpha * cs + dest_alpha * cb * (1.0 - source_alpha)) / out_alpha
+                    } else {
+                        0.0
+                    };
+                    dest[channel] = to_byte(out);
+                }
+                dest[3] = to_byte(out_alpha);
             }
         }
 
@@ -10713,6 +10727,14 @@ pub enum Stroke {
     /// fully transparent pixel's colour is invisible and not otherwise
     /// meaningful.
     Eraser,
+    /// The Pattern Stamp tool: paints the document's defined pattern
+    /// ([`Document::define_pattern`]) instead of a flat colour, each pixel
+    /// taking the pattern pixel at `(x mod width, y mod height)` — tiles
+    /// aligned to the canvas origin, Photoshop's default "Aligned" mode —
+    /// with the same `source-over` blend as [`Stroke::Brush`], the pattern
+    /// pixel's own alpha scaled by `opacity` (`0..=255`). Errors when no
+    /// pattern has been defined.
+    PatternStamp { opacity: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -25037,6 +25059,99 @@ mod tests {
         let err = doc.add_pattern_layer("fill").unwrap_err();
         assert!(err.contains("No pattern"), "{err}");
         assert_eq!(doc.layers().len(), 1);
+    }
+
+    #[test]
+    fn pattern_stamp_paints_the_aligned_pattern_at_full_coverage() {
+        // A stamp centred on pixel (1, 1) with radius 3 covers every 3x3
+        // pixel centre fully (the farthest is sqrt(2) away: coverage
+        // 3 - 1.414 + 0.5 clamps to 1), so painting onto a transparent
+        // layer reproduces the tiled 2x2 pattern exactly.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.deselect();
+        let target = doc.add_layer("stamp", &[0u8; 36], 3, 3).unwrap();
+        doc.stroke(
+            target,
+            &[(1.5, 1.5)],
+            3.0,
+            Stroke::PatternStamp { opacity: 255 },
+        )
+        .unwrap();
+        let p = &doc.layers()[1].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let grid: Vec<Vec<u8>> = (0..3)
+            .map(|y| (0..3).map(|x| p[idx(x, y)]).collect())
+            .collect();
+        assert_eq!(
+            grid,
+            vec![vec![20, 30, 20], vec![50, 60, 50], vec![20, 30, 20]]
+        );
+        assert!(p.chunks_exact(4).all(|px| px[3] == 255));
+    }
+
+    #[test]
+    fn pattern_stamp_opacity_scales_the_pattern_alpha() {
+        // Onto a transparent layer, a half-opacity stamp keeps the pattern
+        // colour and lands alpha 128 (to_byte(128/255)).
+        let (mut doc, id) = ramped_3x3();
+        doc.define_pattern(id).unwrap();
+        let target = doc.add_layer("stamp", &[0u8; 36], 3, 3).unwrap();
+        doc.stroke(
+            target,
+            &[(1.5, 1.5)],
+            3.0,
+            Stroke::PatternStamp { opacity: 128 },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 1, 1), [50, 0, 0, 128]);
+        assert_eq!(pixel(&doc, target, 2, 2), [90, 0, 0, 128]);
+    }
+
+    #[test]
+    fn pattern_stamp_is_confined_to_the_selection_and_needs_a_pattern() {
+        let (mut doc, id) = ramped_3x3();
+        let target = doc.add_layer("stamp", &[0u8; 36], 3, 3).unwrap();
+        // No pattern yet: the stamp errors and paints nothing.
+        assert!(doc
+            .stroke(
+                target,
+                &[(1.5, 1.5)],
+                3.0,
+                Stroke::PatternStamp { opacity: 255 }
+            )
+            .is_err());
+        assert_eq!(doc.layers()[1].pixels, vec![0u8; 36]);
+
+        doc.define_pattern(id).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(
+            target,
+            &[(1.5, 1.5)],
+            3.0,
+            Stroke::PatternStamp { opacity: 255 },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, target, 1, 1), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, target, 2, 2), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn pattern_stamp_respects_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.define_pattern(id).unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(
+                id,
+                &[(1.5, 1.5)],
+                3.0,
+                Stroke::PatternStamp { opacity: 255 }
+            )
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
     }
 
     #[test]

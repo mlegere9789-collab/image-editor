@@ -1589,6 +1589,22 @@ fn erase_stroke(
     })
 }
 
+/// Pattern Stamp tool: paint the defined pattern along `points` on layer
+/// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
+/// `points` and checkpointing.
+#[tauri::command]
+fn pattern_stamp_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    opacity: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::PatternStamp { opacity })
+    })
+}
+
 /// Paint Bucket: flood-fill from `(x, y)` on layer `id` with `color`. A
 /// whole, discrete action on its own (not one step of a longer gesture, the
 /// way a brush stroke is), so it checkpoints itself.
@@ -3025,6 +3041,7 @@ pub fn run() {
             perspective,
             define_pattern,
             add_pattern_layer,
+            pattern_stamp_stroke,
             select_rectangle,
             select_ellipse,
             select_all,

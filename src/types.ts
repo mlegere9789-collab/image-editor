@@ -89,6 +89,7 @@ export type MoveDirection = "up" | "down";
 export type Tool =
   | "brush"
   | "eraser"
+  | "patternStamp"
   | "selectRect"
   | "selectEllipse"
   | "selectRow"

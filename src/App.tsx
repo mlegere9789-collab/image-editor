@@ -2795,6 +2795,13 @@ export default function App() {
       if (selectedId === null) return;
       if (tool === "eraser") {
         void runCommand("erase_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "patternStamp") {
+        void runCommand("pattern_stamp_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          opacity: Math.round(brushOpacity * 255),
+        });
       } else {
         const [r, g, b] = hexToRgb(brushColor);
         const alpha = Math.round(brushOpacity * 255);
@@ -3374,6 +3381,15 @@ export default function App() {
             onClick={() => setTool("eraser")}
           >
             Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
+            disabled={!canPaint || !(document?.hasPattern ?? false)}
+            aria-pressed={tool === "patternStamp"}
+            onClick={() => setTool("patternStamp")}
+            title="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
+          >
+            Pattern Stamp
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -4582,7 +4598,7 @@ export default function App() {
             type="color"
             className="tools__color"
             value={brushColor}
-            disabled={!canPaint || tool === "eraser"}
+            disabled={!canPaint || tool === "eraser" || tool === "patternStamp"}
             aria-label="Brush color"
             onChange={(event) => setBrushColor(event.target.value)}
           />
