@@ -8,6 +8,7 @@ import type {
   BlendMode,
   BlendModeInfo,
   DocumentView,
+  GuideOrientation,
   HistoryState,
   LevelsChannel,
   Measurement,
@@ -494,6 +495,12 @@ export default function App() {
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
   // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
   // makes the clicked pixel black or white and disarms.
+  // Guides dialog: New Guide's orientation and position, Guide Layout's grid.
+  const [showGuidesDialog, setShowGuidesDialog] = useState(false);
+  const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
+  const [guidePosition, setGuidePosition] = useState(0);
+  const [guideColumns, setGuideColumns] = useState(3);
+  const [guideRows, setGuideRows] = useState(2);
   const [levelsEyedropper, setLevelsEyedropper] = useState<"black" | "gray" | "white" | null>(
     null,
   );
@@ -4808,6 +4815,14 @@ export default function App() {
             title="Mask All Objects: save every object on the layer as a selection named Object 1, 2, … and select them all"
           >
             Mask All Objects
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGuidesDialog(true)}
+            disabled={busy || !hasDocument}
+            title="View > New Guide / New Guide Layout / Clear Guides"
+          >
+            Guides…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -9904,6 +9919,94 @@ export default function App() {
         </div>
       )}
 
+      {showGuidesDialog && document && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGuidesDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Guides"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Guides</h2>
+            <p className="modal__section">New Guide</p>
+            <label className="control">
+              <span className="control__label">Orientation</span>
+              <select
+                value={guideOrientation}
+                onChange={(event) => setGuideOrientation(event.target.value as GuideOrientation)}
+              >
+                <option value="horizontal">Horizontal</option>
+                <option value="vertical">Vertical</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">Position (px)</span>
+              <input
+                type="number"
+                min={0}
+                max={guideOrientation === "vertical" ? document.width : document.height}
+                value={guidePosition}
+                onChange={(event) => setGuidePosition(Math.max(0, Math.round(Number(event.target.value))))}
+              />
+            </label>
+            <button
+              className="button button--quiet"
+              onClick={() =>
+                void runCommand("add_guide", { orientation: guideOrientation, position: guidePosition })
+              }
+              disabled={busy}
+            >
+              Add Guide
+            </button>
+            <p className="modal__section">New Guide Layout</p>
+            <div className="control control--row">
+              <label className="control">
+                <span className="control__label">Columns</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={guideColumns}
+                  onChange={(event) => setGuideColumns(Math.max(0, Math.round(Number(event.target.value))))}
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Rows</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={guideRows}
+                  onChange={(event) => setGuideRows(Math.max(0, Math.round(Number(event.target.value))))}
+                />
+              </label>
+            </div>
+            <button
+              className="button button--quiet"
+              onClick={() => void runCommand("guide_layout", { columns: guideColumns, rows: guideRows })}
+              disabled={busy}
+            >
+              Add Layout
+            </button>
+            <div className="modal__actions">
+              <button
+                className="button button--danger"
+                onClick={() => void runCommand("clear_guides", {})}
+                disabled={busy || document.guides.length === 0}
+              >
+                Clear Guides
+              </button>
+              <button className="button" onClick={() => setShowGuidesDialog(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showLevelsDialog && (
         <div
           className="modal-overlay"
@@ -15845,6 +15948,24 @@ export default function App() {
                   )}
                 />
               )}
+              {document.guides.map((guide) => (
+                <div
+                  key={`${guide.orientation}-${guide.position}`}
+                  className={`guide-line guide-line--${guide.orientation}`}
+                  style={
+                    guide.orientation === "vertical"
+                      ? { left: `${(guide.position / document.width) * 100}%` }
+                      : { top: `${(guide.position / document.height) * 100}%` }
+                  }
+                  title={`${guide.orientation} guide at ${guide.position}px (click to remove)`}
+                  onClick={() =>
+                    void runCommand("remove_guide", {
+                      orientation: guide.orientation,
+                      position: guide.position,
+                    })
+                  }
+                />
+              ))}
               {document.countMarks.map(([x, y], index) => (
                 <span
                   key={index}

@@ -537,6 +537,27 @@ body {
   pointer-events: none;
 }
 
+.guide-line {
+  position: absolute;
+  background: #22d3ee;
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.guide-line--vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+
+.guide-line--horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+
 .note-mark {
   position: absolute;
   transform: translate(-50%, -50%);

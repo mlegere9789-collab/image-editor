@@ -2453,6 +2453,50 @@ fn draw_triangle(
     })
 }
 
+/// View > New Guide.
+#[tauri::command]
+fn add_guide(
+    state: State<'_, AppState>,
+    orientation: document::GuideOrientation,
+    position: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_guide(orientation, position)?;
+        Ok(None)
+    })
+}
+
+/// Remove one guide.
+#[tauri::command]
+fn remove_guide(
+    state: State<'_, AppState>,
+    orientation: document::GuideOrientation,
+    position: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.remove_guide(orientation, position)?;
+        Ok(None)
+    })
+}
+
+/// View > Clear Guides.
+#[tauri::command]
+fn clear_guides(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.clear_guides();
+        Ok(None)
+    })
+}
+
+/// View > New Guide Layout: `columns` × `rows` equal cells.
+#[tauri::command]
+fn guide_layout(state: State<'_, AppState>, columns: u32, rows: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.guide_layout(columns, rows);
+        Ok(None)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -4177,6 +4221,10 @@ pub fn run() {
             select_subject,
             remove_background,
             mask_all_objects,
+            add_guide,
+            remove_guide,
+            clear_guides,
+            guide_layout,
             quick_select,
             select_magic_wand,
             select_color_range,

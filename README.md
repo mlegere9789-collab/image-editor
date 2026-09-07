@@ -12809,6 +12809,66 @@ hand instead. Every other layer of this project's quality bar
 **1300 Rust tests total** (1295 → 1300, 1293 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 212 — Guides: New Guide, Guide Layout, Clear Guides
+
+The document gains ruler guides. A `Guide` is a horizontal or vertical
+line on a pixel boundary, `position` pixels from the top or left, so
+`0` is the near edge and the canvas's height or width the far one.
+`add_guide` (View > New Guide) validates the position and ignores a
+duplicate, `remove_guide` errors when nothing is there, `clear_guides`
+empties the list, and `guide_layout(columns, rows)` (View > New Guide
+Layout) adds the interior boundaries of an equal split — `k × width /
+columns` rounded to the nearest pixel, and likewise for rows — on top
+of whatever guides exist; Photoshop's gutters, margins, and per-column
+widths are documented scope cuts, as is snapping. Guides are the one
+piece of position-bound document data that survives the two
+canvas-reshaping operations: a document rotation turns them with the
+picture (a vertical guide at `c` becomes horizontal at `c` clockwise or
+at `old width − c` counter-clockwise; a horizontal one at `c` becomes
+vertical at `old height − c` clockwise or at `c`), and a crop carries
+them along, shifted by the crop's origin, dropping any left outside
+it — one on the crop's own far edge is kept. The frontend draws each
+guide as a cyan hairline over the canvas (a click on one removes it)
+and a **Guides…** dialog offers New Guide (orientation and position),
+New Guide Layout (columns and rows), and Clear Guides through
+`add_guide`, `remove_guide`, `guide_layout`, and `clear_guides`
+commands. Guides ship in the document view as `guides`.
+
+**Verified two ways.** Five new `document.rs` tests on a `9×6` canvas,
+every position worked out by hand. Adding vertical `3`, horizontal
+`0`, vertical `3` again, and vertical `9` keeps three guides in
+placement order, and `10` or horizontal `7` error without adding.
+Removing a guide leaves the other, removing it again errors, and Clear
+empties the list. A `3 × 2` layout adds verticals at `3` and `6` and a
+horizontal at `3`; a four-column split of `9` rounds `2.25, 4.5, 6.75`
+to `2, 5, 7` (half away from zero); `1 × 1` adds nothing. Clockwise
+rotation turns vertical `3` into horizontal `3` and horizontal `2`
+into vertical `6 − 2 = 4`; counter-clockwise turns them into
+horizontal `9 − 3 = 6` and vertical `2`. Cropping to `(2, 1)–(7, 5)`
+drops vertical `1`, shifts `4` and `7` to `2` and `5`, and keeps the
+horizontal guide on the crop's bottom edge at `4`. Three of the five
+passed on the first run: the rotation test had derived the clockwise
+horizontal guide's new position from the old width rather than the old
+height (`7` instead of `4`), and the crop test had forgotten that a
+guide on the crop's far edge is inside the inclusive range and
+survives; both were slips in the expectations, checked against the
+pixel-mapping formulas and the documented rule, and the tests pass
+with the corrected values.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+fifty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The overlay and dialog
+were reviewed by hand instead. Every other layer of this project's
+quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**1305 Rust tests total** (1300 → 1305, 1298 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

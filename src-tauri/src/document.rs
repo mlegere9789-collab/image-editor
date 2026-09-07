@@ -109,6 +109,8 @@ pub struct Document {
     /// they survive reordering; layers deleted since are skipped on apply
     /// and layers added since are left alone.
     layer_comps: Vec<LayerComp>,
+    /// View > New Guide's guides, in placement order, deduplicated.
+    guides: Vec<Guide>,
 }
 
 /// One layer's recorded state inside a [`LayerComp`].
@@ -125,6 +127,25 @@ pub struct LayerCompState {
 pub struct LayerComp {
     pub name: String,
     pub states: Vec<LayerCompState>,
+}
+
+/// Which way a [`Guide`] runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GuideOrientation {
+    Horizontal,
+    Vertical,
+}
+
+/// A ruler guide: a horizontal line at `position` pixels down from the
+/// top, or a vertical one at `position` pixels in from the left, sitting
+/// on the pixel boundary so `0` is the canvas edge and `width` (or
+/// `height`) the far edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Guide {
+    pub orientation: GuideOrientation,
+    pub position: u32,
 }
 
 /// A Note tool annotation pinned to pixel `(x, y)`.
@@ -1168,6 +1189,8 @@ pub struct DocumentView {
     pub notes: Vec<Note>,
     /// Layer Comps saved on the document, in the order first saved.
     pub layer_comps: Vec<String>,
+    /// The ruler guides, in placement order.
+    pub guides: Vec<Guide>,
 }
 
 impl Document {
@@ -1189,6 +1212,7 @@ impl Document {
             count_marks: Vec::new(),
             notes: Vec::new(),
             layer_comps: Vec::new(),
+            guides: Vec::new(),
         })
     }
 
@@ -1222,6 +1246,75 @@ impl Document {
             count_marks: self.count_marks.clone(),
             notes: self.notes.clone(),
             layer_comps: self.layer_comp_names(),
+            guides: self.guides.clone(),
+        }
+    }
+
+    /// View > New Guide: adds a guide at `position` — a pixel boundary from
+    /// `0` (the top or left edge) to the canvas's height or width (the far
+    /// edge). A guide already there is left as is. Errors for a position
+    /// past the far edge.
+    pub fn add_guide(
+        &mut self,
+        orientation: GuideOrientation,
+        position: u32,
+    ) -> Result<(), String> {
+        let limit = match orientation {
+            GuideOrientation::Horizontal => self.height,
+            GuideOrientation::Vertical => self.width,
+        };
+        if position > limit {
+            return Err(format!(
+                "A guide at {position} would lie outside the {limit}-pixel canvas."
+            ));
+        }
+        let guide = Guide {
+            orientation,
+            position,
+        };
+        if !self.guides.contains(&guide) {
+            self.guides.push(guide);
+        }
+        Ok(())
+    }
+
+    /// Removes the guide at `position`, erroring when there is none.
+    pub fn remove_guide(
+        &mut self,
+        orientation: GuideOrientation,
+        position: u32,
+    ) -> Result<(), String> {
+        let guide = Guide {
+            orientation,
+            position,
+        };
+        let Some(index) = self.guides.iter().position(|g| *g == guide) else {
+            return Err("There is no guide there.".to_string());
+        };
+        self.guides.remove(index);
+        Ok(())
+    }
+
+    /// View > Clear Guides.
+    pub fn clear_guides(&mut self) {
+        self.guides.clear();
+    }
+
+    /// View > New Guide Layout: divides the canvas into `columns` equal
+    /// columns and `rows` equal rows, adding the interior boundaries as
+    /// guides (`columns − 1` vertical ones at `k × width / columns`,
+    /// rounded to the nearest pixel, and likewise for rows) on top of any
+    /// guides already there. Zero or one of either adds nothing on that
+    /// axis; Photoshop's gutters, margins, and per-column widths are
+    /// documented scope cuts.
+    pub fn guide_layout(&mut self, columns: u32, rows: u32) {
+        for k in 1..columns {
+            let x = (k as f32 * self.width as f32 / columns as f32).round() as u32;
+            let _ = self.add_guide(GuideOrientation::Vertical, x);
+        }
+        for k in 1..rows {
+            let y = (k as f32 * self.height as f32 / rows as f32).round() as u32;
+            let _ = self.add_guide(GuideOrientation::Horizontal, y);
         }
     }
 
@@ -2972,6 +3065,30 @@ impl Document {
         self.saved_selections.clear();
         self.count_marks.clear();
         self.notes.clear();
+        // A guide is a boundary line, so it turns with the picture: a
+        // vertical one at x = c becomes horizontal at y = c clockwise (or
+        // at old_width − c counter-clockwise), and a horizontal one at
+        // y = c becomes vertical at old_height − c clockwise (or c).
+        for guide in &mut self.guides {
+            *guide = match (guide.orientation, clockwise) {
+                (GuideOrientation::Vertical, true) => Guide {
+                    orientation: GuideOrientation::Horizontal,
+                    position: guide.position,
+                },
+                (GuideOrientation::Vertical, false) => Guide {
+                    orientation: GuideOrientation::Horizontal,
+                    position: old_width - guide.position,
+                },
+                (GuideOrientation::Horizontal, true) => Guide {
+                    orientation: GuideOrientation::Vertical,
+                    position: old_height - guide.position,
+                },
+                (GuideOrientation::Horizontal, false) => Guide {
+                    orientation: GuideOrientation::Vertical,
+                    position: guide.position,
+                },
+            };
+        }
     }
 
     /// Crops the whole document — the canvas and every layer in it — to
@@ -3007,6 +3124,22 @@ impl Document {
         self.saved_selections.clear();
         self.count_marks.clear();
         self.notes.clear();
+        // Guides ride along with the pixels they sit between; those left
+        // outside the crop are dropped.
+        self.guides = self
+            .guides
+            .iter()
+            .filter_map(|guide| {
+                let (origin, end) = match guide.orientation {
+                    GuideOrientation::Vertical => (rect.x0, rect.x1),
+                    GuideOrientation::Horizontal => (rect.y0, rect.y1),
+                };
+                (origin..=end).contains(&guide.position).then(|| Guide {
+                    orientation: guide.orientation,
+                    position: guide.position - origin,
+                })
+            })
+            .collect();
         Ok(())
     }
 
@@ -24208,6 +24341,129 @@ mod tests {
         assert!(doc.selection().is_none());
         let (mut doc, id) = object_scene();
         assert!(doc.mask_all_objects(id + 1, 0).is_err());
+    }
+
+    fn guides_of(doc: &Document) -> Vec<(GuideOrientation, u32)> {
+        doc.view()
+            .guides
+            .iter()
+            .map(|g| (g.orientation, g.position))
+            .collect()
+    }
+
+    #[test]
+    fn new_guide_adds_deduplicates_and_validates() {
+        let mut doc = Document::new(9, 6).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 3).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 0).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 3).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 9).unwrap();
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Vertical, 3),
+                (GuideOrientation::Horizontal, 0),
+                (GuideOrientation::Vertical, 9)
+            ]
+        );
+        assert!(doc.add_guide(GuideOrientation::Vertical, 10).is_err());
+        assert!(doc.add_guide(GuideOrientation::Horizontal, 7).is_err());
+        assert_eq!(guides_of(&doc).len(), 3);
+    }
+
+    #[test]
+    fn guides_can_be_removed_and_cleared() {
+        let mut doc = Document::new(9, 6).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 3).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 2).unwrap();
+        doc.remove_guide(GuideOrientation::Vertical, 3).unwrap();
+        assert_eq!(guides_of(&doc), vec![(GuideOrientation::Horizontal, 2)]);
+        assert!(doc.remove_guide(GuideOrientation::Vertical, 3).is_err());
+        doc.clear_guides();
+        assert!(guides_of(&doc).is_empty());
+    }
+
+    #[test]
+    fn guide_layout_divides_the_canvas_evenly() {
+        // Thirds of 9 are 3 and 6; halves of 6 is 3; a 4-column split of 9
+        // rounds 2.25 → 2, 4.5 → 5 (half away from zero), 6.75 → 7.
+        let mut doc = Document::new(9, 6).unwrap();
+        doc.guide_layout(3, 2);
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Vertical, 3),
+                (GuideOrientation::Vertical, 6),
+                (GuideOrientation::Horizontal, 3)
+            ]
+        );
+        doc.guide_layout(4, 0);
+        assert_eq!(
+            guides_of(&doc)[3..],
+            [
+                (GuideOrientation::Vertical, 2),
+                (GuideOrientation::Vertical, 5),
+                (GuideOrientation::Vertical, 7)
+            ]
+        );
+        doc.guide_layout(1, 1);
+        assert_eq!(guides_of(&doc).len(), 6);
+    }
+
+    #[test]
+    fn guides_turn_with_a_document_rotation() {
+        // On 9×6, vertical 3 and horizontal 2. Clockwise: vertical 3 →
+        // horizontal 3, horizontal 2 → vertical old_height − 2 = 4 (the
+        // canvas is now 6×9). Counter-clockwise from the original:
+        // vertical 3 → horizontal old_width − 3 = 6, horizontal 2 →
+        // vertical 2.
+        let mut doc = Document::new(9, 6).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 3).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 2).unwrap();
+        let mut cw = doc.clone();
+        cw.rotate_document_90(true);
+        assert_eq!(
+            guides_of(&cw),
+            vec![
+                (GuideOrientation::Horizontal, 3),
+                (GuideOrientation::Vertical, 4)
+            ]
+        );
+        doc.rotate_document_90(false);
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Horizontal, 6),
+                (GuideOrientation::Vertical, 2)
+            ]
+        );
+    }
+
+    #[test]
+    fn guides_ride_along_with_a_crop() {
+        let mut doc = Document::new(9, 6).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 1).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 4).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 7).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 5).unwrap();
+        doc.crop(Rect {
+            x0: 2,
+            y0: 1,
+            x1: 7,
+            y1: 5,
+        })
+        .unwrap();
+        // Vertical 1 falls outside the crop; 4 and 7 shift by 2; the
+        // horizontal guide at 5 sits on the crop's own bottom edge and is
+        // kept there, at 4.
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Vertical, 2),
+                (GuideOrientation::Vertical, 5),
+                (GuideOrientation::Horizontal, 4)
+            ]
+        );
     }
 
     #[test]

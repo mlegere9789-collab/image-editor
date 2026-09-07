@@ -73,7 +73,14 @@ export type DocumentView = {
   notes: Note[];
   /** Layer Comps saved on the document, in the order first saved. */
   layerComps: string[];
+  /** Ruler guides, in placement order. */
+  guides: Guide[];
 };
+
+/** Mirrors `GuideOrientation` / `Guide` in src-tauri/src/document.rs: a
+ * guide line on a pixel boundary, `position` pixels from the top or left. */
+export type GuideOrientation = "horizontal" | "vertical";
+export type Guide = { orientation: GuideOrientation; position: number };
 
 /** A Note tool annotation pinned to a pixel. */
 export type Note = {
