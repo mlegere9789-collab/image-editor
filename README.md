@@ -15299,6 +15299,63 @@ run build`) is fully green.
 **1525 Rust tests total** (1520 → 1525, 1518 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 257 — The Mixer Brush and the Art History Brush
+
+Two painting tools join the stroke engine as `Stroke` variants.
+`Stroke::Mixer { color, wet, load, mix }` is the Mixer Brush: each dab
+is paint from a reservoir of the brush colour mixed with the canvas as
+it stood before the stroke — Wet times Mix (each `0..=100` percent) is
+how much of the canvas colour is picked up, `paint + (canvas − paint)
+· wet · mix` per channel, pure paint over a transparent pixel — laid
+`source-over` like the Brush at Load (`0..=100`) times the coverage.
+`Stroke::ArtHistory { source, style, area, tolerance }` is the Art
+History Brush: each dab is the History Brush's source averaged over a
+square around the pixel by style — Dab the source pixel itself, Tight
+`area` pixels each way, Loose twice that (`area` `0..=50`), the
+edge-clamped `box_blur_at` average — composited by coverage times the
+averaged alpha, and only where the layer's current colour differs from
+the source's by more than Tolerance in some channel (`0` paints
+anywhere), so strokes go where the picture has changed. Both read the
+pre-stroke snapshot, honour the selection, and refuse a locked layer;
+the Mixer refuses a percentage over `100` and the Art History Brush an
+Area over `50` or a source of the wrong size. Two toolbar tools land
+with their options: Wet / Load / Mix sliders, and Set Source, Style,
+Area, and Tolerance. Photoshop's clean/dirty brush, reservoir
+depletion, Sample All Layers, and the curling and stroke-length
+styles are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every blend
+traced by hand and cross-checked in `f32` by an independent Python
+script. Red at Wet `100`, Mix `50` on grey `200` picks up half the
+canvas, `255 + (200 − 255) / 2 = 227.5 → 228` and `100, 100`; Load
+`50` lays that at half strength, `214, 150, 150`; Wet `0` is pure paint,
+byte-identical to the Brush along a two-point stroke; Wet and Mix at
+`100` lay the canvas back on itself. Over a transparent pixel blue at
+Load `50` lands as `(0, 0, 255, 128)`, a one-column selection keeps a
+dab off the centre pixel, and Wet, Load, and Mix of `101` are refused.
+On a 3×3 source `10 … 80, 250` painted onto a blank layer, Dab reads
+the centre's `50` and is byte-identical to the History Brush, Tight
+with Area `1` averages the nine to `610 / 9 = 67`, and Loose reaches
+two out, edge-clamped, to `1890 / 25 = 75`, leaving the corner clear.
+Tolerance `10` skips a centre already holding the source's `50` (and
+one a shade off at `55`) while painting the corners `10` and `250`,
+and Tolerance `0` paints it. Area `51`, a short source, and a locked
+layer are refused. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and four: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The tools were reviewed by hand instead. Every other
+layer of this project's quality bar (hand-verified Rust tests, `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings`, `npm run build`) is
+fully green.
+
+**1530 Rust tests total** (1525 → 1530, 1523 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

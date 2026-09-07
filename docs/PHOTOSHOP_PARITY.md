@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 468.**
+**618 distinct capabilities tracked. Currently shipped: 470.**
 
 ## PART I — EVERY TOOL
 
@@ -35,9 +35,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] BRUSH TOOL
 - [x] PENCIL TOOL
 - [x] COLOR REPLACEMENT TOOL (`Stroke::ColorReplace { color, tolerance }`, Color mode with Once sampling: each covered pixel within Tolerance of the colour under the stroke's start takes the brush colour's hue and saturation at its own lightness, mixed by coverage, alpha untouched; Continuous/Background Swatch sampling, the Hue/Saturation/Luminosity modes, Limits, and Anti-alias are documented scope cuts — see README Phase 179)
-- [ ] MIXER BRUSH TOOL
+- [x] MIXER BRUSH TOOL (`Stroke::Mixer { color, wet, load, mix }`: each dab is the reservoir colour pulled `wet · mix` of the way toward the pre-stroke canvas colour, laid `source-over` at Load times coverage; the clean/dirty brush, reservoir depletion, and Sample All Layers are documented scope cuts — see README Phase 257)
 - [x] HISTORY BRUSH TOOL (`Stroke::History { source }`, a brush that paints each covered pixel back from a remembered earlier state of the layer — the whole document cloned by Set Source, kept outside undo like the clipboard — composited by coverage times the sample's alpha; choosing any panel history state or snapshot is a documented scope cut — see README Phase 177)
-- [ ] ART HISTORY BRUSH TOOL
+- [x] ART HISTORY BRUSH TOOL (`Stroke::ArtHistory { source, style, area, tolerance }`: each dab is the History Brush's source averaged over a square by style — Dab the pixel, Tight `area` each way, Loose twice that — painted only where the layer differs from the source by more than Tolerance; the curling and stroke-length styles are documented scope cuts — see README Phase 257)
 - [x] DODGE TOOL (`Stroke::Dodge { exposure }`, a brush that lightens each covered pixel's colour toward white by Exposure × coverage, alpha untouched, transparent pixels skipped — Photoshop's Midtones range; Shadows/Highlights and Protect Tones are documented scope cuts — see README Phase 160)
 - [x] BURN TOOL (`Stroke::Burn { exposure }`, Dodge's mirror: a brush that darkens each covered pixel's colour toward black by Exposure × coverage, alpha untouched, transparent pixels skipped — Midtones only, Shadows/Highlights and Protect Tones documented scope cuts — see README Phase 161)
 - [x] SPONGE TOOL (`Stroke::Sponge { flow, saturate }`, a brush that moves each covered pixel's HSL saturation toward full (Saturate) or toward grey (Desaturate) by Flow × coverage, keeping hue, lightness, and alpha; Vibrance is a documented scope cut — see README Phase 162)

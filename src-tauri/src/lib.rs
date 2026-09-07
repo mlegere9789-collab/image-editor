@@ -3635,6 +3635,80 @@ fn history_stroke(
     })
 }
 
+/// Mixer Brush: paint `color` from the reservoir along `points` on layer
+/// `id`, mixed with the canvas by Wet and Mix at Load opacity.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn mixer_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    color: [u8; 3],
+    wet: u8,
+    load: u8,
+    mix: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(
+            id,
+            &points,
+            radius,
+            Stroke::Mixer {
+                color,
+                wet,
+                load,
+                mix,
+            },
+        )
+    })
+}
+
+/// Art History Brush: paint the history source along `points` on layer
+/// `id`, each dab averaged by `style` over `area`, only where the layer
+/// differs from the source by more than `tolerance`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn art_history_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    style: document::ArtStyle,
+    area: u32,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    let source = {
+        let guard = state
+            .history_source
+            .lock()
+            .map_err(|_| POISONED.to_string())?;
+        let remembered = guard.as_ref().ok_or_else(|| {
+            "Set a history source first (History Brush > Set Source).".to_string()
+        })?;
+        remembered
+            .layers()
+            .iter()
+            .find(|layer| layer.id == id)
+            .ok_or_else(|| "The history source has no layer with that id.".to_string())?
+            .pixels
+            .clone()
+    };
+    edit(&state, |document| {
+        document.stroke(
+            id,
+            &points,
+            radius,
+            Stroke::ArtHistory {
+                source: &source,
+                style,
+                area,
+                tolerance,
+            },
+        )
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -5372,6 +5446,8 @@ pub fn run() {
             clone_stroke,
             set_history_source,
             history_stroke,
+            mixer_stroke,
+            art_history_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,

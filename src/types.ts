@@ -106,6 +106,10 @@ export type SmartTransform = {
   maintainAspect: boolean;
 };
 
+/** Mirrors `ArtStyle` in src-tauri/src/document.rs: the Art History
+ * Brush's stroke style. */
+export type ArtStyle = "dab" | "tight" | "loose";
+
 /** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged
  * by `kind`): what a live fill layer paints. */
 export type Fill =
@@ -468,6 +472,8 @@ export type Tool =
   | "star"
   | "triangle"
   | "historyBrush"
+  | "mixerBrush"
+  | "artHistoryBrush"
   | "magicWand"
   | "lasso"
   | "magneticLasso"

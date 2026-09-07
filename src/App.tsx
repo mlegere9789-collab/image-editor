@@ -35,6 +35,7 @@ import type {
   TextLayer,
   ShapeLayer,
   ShapeSpec,
+  ArtStyle,
   WarpMesh,
   WarpStyle,
   PuppetMesh,
@@ -1192,6 +1193,14 @@ export default function App() {
   const [polygonSides, setPolygonSides] = useState(5);
   // Star tool: the inner points' radius as a percentage of the outer, Photoshop's Star Ratio.
   const [starRatio, setStarRatio] = useState(50);
+  // Mixer Brush: Wet, Load, and Mix percentages.
+  const [mixerWet, setMixerWet] = useState(50);
+  const [mixerLoad, setMixerLoad] = useState(100);
+  const [mixerMix, setMixerMix] = useState(50);
+  // Art History Brush: style, area, and tolerance.
+  const [artStyle, setArtStyle] = useState<ArtStyle>("tight");
+  const [artArea, setArtArea] = useState(2);
+  const [artTolerance, setArtTolerance] = useState(0);
 
   // The gradient drag's live start point — a ref, not state, read directly
   // at pointerup the same way `marqueeStart` below is; the gradient itself
@@ -4360,6 +4369,26 @@ export default function App() {
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "mixerBrush") {
+        const [r, g, b] = hexToRgb(brushColor);
+        void runCommand("mixer_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          color: [r, g, b],
+          wet: mixerWet,
+          load: mixerLoad,
+          mix: mixerMix,
+        });
+      } else if (tool === "artHistoryBrush") {
+        void runCommand("art_history_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          style: artStyle,
+          area: artArea,
+          tolerance: artTolerance,
+        });
       } else if (tool === "remove") {
         void runCommand("remove_stroke", { id: selectedId, points, radius: brushSize });
       } else if (tool === "spotHealingBrush") {
@@ -6475,6 +6504,24 @@ export default function App() {
             History Brush
           </button>
           <button
+            className={`button button--quiet${tool === "mixerBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "mixerBrush"}
+            onClick={() => setTool("mixerBrush")}
+            title="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
+          >
+            Mixer Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "artHistoryBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "artHistoryBrush"}
+            onClick={() => setTool("artHistoryBrush")}
+            title="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
+          >
+            Art History Brush
+          </button>
+          <button
             className={`button button--quiet${tool === "rectangle" ? " button--active" : ""}`}
             disabled={!canPaint}
             aria-pressed={tool === "rectangle"}
@@ -8083,6 +8130,50 @@ export default function App() {
                 Cancel
               </button>
             </span>
+          )}
+          {tool === "mixerBrush" && (
+            <>
+              {(
+                [
+                  ["Wet", mixerWet, setMixerWet],
+                  ["Load", mixerLoad, setMixerLoad],
+                  ["Mix", mixerMix, setMixerMix],
+                ] as const
+              ).map(([label, value, set]) => (
+                <label className="tools__slider" key={label}>
+                  {label} {value}%
+                  <input type="range" min={0} max={100} value={value} onChange={(event) => set(Number(event.target.value))} />
+                </label>
+              ))}
+            </>
+          )}
+          {tool === "artHistoryBrush" && (
+            <>
+              <button
+                className="button button--quiet"
+                onClick={() => void runCommand("set_history_source", {})}
+                disabled={busy || !hasDocument}
+                title="Remember the current document state as the Art History Brush's source"
+              >
+                Set Source
+              </button>
+              <label className="tools__slider">
+                Style
+                <select value={artStyle} onChange={(event) => setArtStyle(event.target.value as ArtStyle)}>
+                  <option value="dab">Dab</option>
+                  <option value="tight">Tight</option>
+                  <option value="loose">Loose</option>
+                </select>
+              </label>
+              <label className="tools__slider">
+                Area {artArea}
+                <input type="range" min={0} max={50} value={artArea} onChange={(event) => setArtArea(Number(event.target.value))} />
+              </label>
+              <label className="tools__slider">
+                Tolerance {artTolerance}
+                <input type="range" min={0} max={255} value={artTolerance} onChange={(event) => setArtTolerance(Number(event.target.value))} />
+              </label>
+            </>
           )}
           {tool === "historyBrush" && (
             <>

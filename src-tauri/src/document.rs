@@ -1363,6 +1363,19 @@ pub struct SmartObject {
     pub transform: FreeTransform,
 }
 
+/// The Art History Brush's stroke style: how much of the history source
+/// each dab averages — see [`Stroke::ArtHistory`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArtStyle {
+    /// The source pixel itself, the History Brush's dab.
+    Dab,
+    /// The source averaged over `area` pixels each way.
+    Tight,
+    /// The source averaged over twice `area` each way.
+    Loose,
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -12696,7 +12709,25 @@ impl Document {
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
-        if let Stroke::History { source } = stroke {
+        if let Stroke::Mixer { wet, load, mix, .. } = stroke {
+            if wet > 100 {
+                return Err("The Mixer Brush's Wet must be between 0 and 100 percent.".to_string());
+            }
+            if load > 100 {
+                return Err("The Mixer Brush's Load must be between 0 and 100 percent.".to_string());
+            }
+            if mix > 100 {
+                return Err("The Mixer Brush's Mix must be between 0 and 100 percent.".to_string());
+            }
+        }
+        if let Stroke::ArtHistory { area, .. } = stroke {
+            if area > 50 {
+                return Err(
+                    "The Art History Brush's Area must be between 0 and 50 pixels.".to_string(),
+                );
+            }
+        }
+        if let Stroke::History { source } | Stroke::ArtHistory { source, .. } = stroke {
             if source.len() != layer.pixels.len() {
                 return Err("The history source is a different size from the document.".to_string());
             }
@@ -12707,6 +12738,7 @@ impl Document {
             Stroke::Blur { .. }
                 | Stroke::Sharpen { .. }
                 | Stroke::Clone { .. }
+                | Stroke::Mixer { .. }
                 | Stroke::Smudge { .. }
                 | Stroke::Heal { .. }
                 | Stroke::SpotHeal
@@ -12815,6 +12847,60 @@ impl Document {
                     Stroke::History { source } => {
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&source[base..base + CHANNELS]);
+                        (color, to_unit(color[3]) * c)
+                    }
+                    Stroke::Mixer {
+                        color,
+                        wet,
+                        load,
+                        mix,
+                    } => {
+                        let canvas =
+                            &snapshot.as_ref().expect("taken above")[base..base + CHANNELS];
+                        let pickup = wet as f32 / 100.0 * (mix as f32 / 100.0);
+                        let mut out = [255u8; CHANNELS];
+                        for ((slot, &paint), &under) in
+                            out.iter_mut().zip(color.iter()).zip(canvas.iter())
+                        {
+                            *slot = if canvas[3] == 0 {
+                                paint
+                            } else {
+                                (paint as f32 + (under as f32 - paint as f32) * pickup).round()
+                                    as u8
+                            };
+                        }
+                        (out, load as f32 / 100.0 * c)
+                    }
+                    Stroke::ArtHistory {
+                        source,
+                        style,
+                        area,
+                        tolerance,
+                    } => {
+                        if tolerance > 0 {
+                            let alike = layer.pixels[base..base + 3]
+                                .iter()
+                                .zip(&source[base..base + 3])
+                                .all(|(&a, &b)| a.abs_diff(b) <= tolerance);
+                            if alike {
+                                continue;
+                            }
+                        }
+                        let reach = match style {
+                            ArtStyle::Dab => 0,
+                            ArtStyle::Tight => area as i64,
+                            ArtStyle::Loose => 2 * area as i64,
+                        };
+                        let (w, h) = (width as i64, height as i64);
+                        let color = box_blur_at(
+                            source,
+                            width as usize,
+                            w,
+                            h,
+                            y0 + row as u32,
+                            x0 + col as u32,
+                            reach,
+                        );
                         (color, to_unit(color[3]) * c)
                     }
                     Stroke::Heal { offset } => {
@@ -20319,6 +20405,35 @@ pub enum Stroke<'a> {
     /// history state or snapshot from the panel is a documented scope cut:
     /// the source is whatever state was remembered last.
     History { source: &'a [u8] },
+    /// The Mixer Brush: paint from a reservoir of `color` mixed with the
+    /// canvas as it stood before the stroke. Wet times Mix (each `0..=100`
+    /// percent) is how much of the canvas colour is picked up into each
+    /// dab — `paint + (canvas − paint) · wet · mix`, pure paint over a
+    /// transparent pixel — and Load (`0..=100`) is the dab's opacity,
+    /// composited `source-over` like [`Stroke::Brush`] at Load times the
+    /// coverage. Photoshop's clean/dirty brush, its per-stroke reservoir
+    /// depletion, and Sample All Layers are documented scope cuts.
+    Mixer {
+        color: [u8; 3],
+        wet: u8,
+        load: u8,
+        mix: u8,
+    },
+    /// The Art History Brush: paints from the History Brush's `source`,
+    /// each dab the source averaged over a square around the pixel by
+    /// `style` — Dab the pixel itself, Tight `area` pixels each way, Loose
+    /// twice that (`area` `0..=50`), the edge-clamped [`box_blur_at`]
+    /// average — composited by coverage times the averaged alpha, and
+    /// only where the layer's current colour differs from the source's
+    /// by more than `tolerance` in some channel (`0` paints anywhere), so
+    /// strokes go where the picture has changed. Photoshop's curling and
+    /// stroke-length styles are documented scope cuts.
+    ArtHistory {
+        source: &'a [u8],
+        style: ArtStyle,
+        area: u32,
+        tolerance: u8,
+    },
     /// The Smudge tool: drags colour along the stroke. Each covered pixel
     /// moves toward the pre-stroke pixel one segment step *behind* it —
     /// the pixel at `p − (b − a)`, rounded, for the stroke's last segment
@@ -47593,5 +47708,259 @@ mod tests {
         let (flat, fid) = row_doc(&[vec![grey(90), grey(90)]]);
         assert_eq!(flat.focus_bits(fid, 99, 0).unwrap(), vec![false, false]);
         assert_eq!(flat.focus_bits(fid, 100, 0).unwrap(), vec![true, true]);
+    }
+
+    fn mixer(color: [u8; 3], wet: u8, load: u8, mix: u8) -> Stroke<'static> {
+        Stroke::Mixer {
+            color,
+            wet,
+            load,
+            mix,
+        }
+    }
+
+    #[test]
+    fn mixer_brush_blends_the_reservoir_with_the_canvas_by_wet_and_mix() {
+        // Grey 200 under red: Wet 100 and Mix 50 pick up half the canvas,
+        // 255 + (200 − 255) / 2 = 227.5 → 228 and 100, 100.
+        let (mut doc, id) = grey_pixels_4x4([200; 16]);
+        doc.stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 100, 100, 50))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [228, 100, 100, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 200, 200, 255]);
+        // Load 50 lays that at half strength over the grey: 214, 150, 150.
+        let (mut doc, id) = grey_pixels_4x4([200; 16]);
+        doc.stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 100, 50, 50))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [214, 150, 150, 255]);
+        // Wet 0 is pure paint, byte-identical to the Brush; Wet and Mix at
+        // 100 lay the canvas back on itself.
+        let (mut doc, id) = grey_pixels_4x4([200; 16]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5), (3.5, 2.5)],
+            1.2,
+            mixer([255, 0, 0], 0, 100, 50),
+        )
+        .unwrap();
+        let (mut plain, pid) = grey_pixels_4x4([200; 16]);
+        plain
+            .stroke(
+                pid,
+                &[(0.5, 0.5), (3.5, 2.5)],
+                1.2,
+                Stroke::Brush {
+                    color: [255, 0, 0, 255],
+                },
+            )
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        let (mut same, sid) = grey_pixels_4x4([200; 16]);
+        same.stroke(sid, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 100, 100, 100))
+            .unwrap();
+        assert_eq!(pixel(&same, sid, 1, 1), [200, 200, 200, 255]);
+    }
+
+    #[test]
+    fn mixer_brush_paints_fresh_over_transparency_and_honours_the_selection() {
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("clear", &[0; 64], 4, 4).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 0.6, mixer([0, 0, 255], 100, 50, 100))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 255, 128]);
+        let (mut doc, id) = grey_pixels_4x4([200; 16]);
+        doc.select_rectangle(0.0, 0.0, 1.0, 4.0).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 0, 100, 0))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [200, 200, 200, 255]);
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 101, 100, 0))
+            .unwrap_err()
+            .contains("Wet"));
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 0, 101, 0))
+            .unwrap_err()
+            .contains("Load"));
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 0.6, mixer([255, 0, 0], 0, 100, 101))
+            .unwrap_err()
+            .contains("Mix"));
+    }
+
+    fn art_source() -> Vec<u8> {
+        [10u8, 20, 30, 40, 50, 60, 70, 80, 250]
+            .iter()
+            .flat_map(|&v| [v, v, v, 255])
+            .collect()
+    }
+
+    fn blank_3x3() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("blank", &[0; 36], 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn art_history_brush_paints_the_source_averaged_by_its_style() {
+        let source = art_source();
+        // Dab is the History Brush: the centre reads 50.
+        let (mut doc, id) = blank_3x3();
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.6,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Dab,
+                area: 1,
+                tolerance: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 50, 50, 255]);
+        let (mut plain, pid) = blank_3x3();
+        plain
+            .stroke(pid, &[(1.5, 1.5)], 0.6, Stroke::History { source: &source })
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        // Tight averages the 3×3 around the centre: 610 / 9 = 67.
+        let (mut doc, id) = blank_3x3();
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.6,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Tight,
+                area: 1,
+                tolerance: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [67, 67, 67, 255]);
+        // Loose reaches two out, edge-clamped: 1890 / 25 = 75.
+        let (mut doc, id) = blank_3x3();
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.6,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Loose,
+                area: 1,
+                tolerance: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [75, 75, 75, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn art_history_tolerance_skips_pixels_already_like_the_source() {
+        let source = art_source();
+        // The layer already holds the source at the centre but not the
+        // corner: Tolerance 10 paints only where the layer differs by more.
+        let (mut doc, id) = blank_3x3();
+        doc.layer_mut(id).unwrap().pixels[(4 * 4)..(4 * 4 + 4)].copy_from_slice(&[50, 50, 50, 255]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5), (2.5, 2.5)],
+            1.0,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Dab,
+                area: 1,
+                tolerance: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 50, 50, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 10, 10, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [250, 250, 250, 255]);
+        // With the centre a shade off (55), Tolerance 10 still skips it and
+        // Tolerance 0 paints it.
+        let (mut doc, id) = blank_3x3();
+        doc.layer_mut(id).unwrap().pixels[(4 * 4)..(4 * 4 + 4)].copy_from_slice(&[55, 55, 55, 255]);
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.6,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Dab,
+                area: 1,
+                tolerance: 10,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [55, 55, 55, 255]);
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.6,
+            Stroke::ArtHistory {
+                source: &source,
+                style: ArtStyle::Dab,
+                area: 1,
+                tolerance: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn art_history_refuses_a_bad_area_or_source_and_a_locked_layer() {
+        let source = art_source();
+        let (mut doc, id) = blank_3x3();
+        assert!(doc
+            .stroke(
+                id,
+                &[(1.5, 1.5)],
+                0.6,
+                Stroke::ArtHistory {
+                    source: &source,
+                    style: ArtStyle::Tight,
+                    area: 51,
+                    tolerance: 0
+                }
+            )
+            .unwrap_err()
+            .contains("Area"));
+        let short = vec![0u8; 8];
+        assert!(doc
+            .stroke(
+                id,
+                &[(1.5, 1.5)],
+                0.6,
+                Stroke::ArtHistory {
+                    source: &short,
+                    style: ArtStyle::Dab,
+                    area: 1,
+                    tolerance: 0
+                }
+            )
+            .unwrap_err()
+            .contains("size"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(
+                id,
+                &[(1.5, 1.5)],
+                0.6,
+                Stroke::ArtHistory {
+                    source: &source,
+                    style: ArtStyle::Dab,
+                    area: 1,
+                    tolerance: 0
+                }
+            )
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 0.6, mixer([1, 2, 3], 0, 100, 0))
+            .unwrap_err()
+            .contains("locked"));
     }
 }
