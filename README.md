@@ -10995,6 +10995,54 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1120 Rust tests total** (1115 → 1120, 1113 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 176 — Clone Stamp tool
+
+`Stroke::Clone { offset }` paints, at each pixel the brush covers, the
+pixel `offset` away in the layer as it stood before the stroke —
+composited source-over by the brush's coverage times the sample's own
+alpha, exactly as the Pattern Stamp composites its tile, so a
+transparent sample paints nothing and a sample off the canvas is
+skipped. It reads the same pre-stroke snapshot the Blur, Sharpen, and
+(now) Clone strokes share, which is what keeps a stroke from cloning
+pixels it has itself just written: cloning from the left column into
+the middle and right columns in one stroke gives the right column the
+middle's *original* values. The offset is the Alt-clicked sampling
+source minus the stroke's first point, and the frontend keeps it
+across strokes until the source is reset — Photoshop's Aligned mode,
+its default; the non-aligned mode and Sample All Layers are documented
+scope cuts. A new **Clone Stamp** tool button sits beside the Pattern
+Stamp; the tool options show the source point or ask for one, and the
+colour swatch is disabled for it.
+
+**Verified two ways.** Five new `document.rs` tests, the one blended
+byte cross-checked in Python emulating the source-over arithmetic. A
+full-coverage dot on `(0, 0)` of `ramped_3x3` with the source one pixel
+to the right copies `(1, 0)`'s `20` over it and touches nothing else.
+Covering everything with the same offset makes each pixel its
+right-hand neighbour — `[[20, 30, 30], [50, 60, 60], [80, 90, 90]]` —
+with the right column, whose sources lie off the canvas, untouched. The
+`0.7929` edge coverage composites `20` over `10` to `17.9 → 18`.
+Cloning from the left with everything covered gives `[[10, 10, 20],
+[40, 40, 50], [70, 70, 80]]` — the right column taking the middle's
+original `20, 50, 80`, not the `10`s just written. A one-pixel
+selection confines the stroke, a fully transparent sample on
+`depth_ramped_3x3` leaves its target byte-identical, and a locked
+layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-three:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The Alt-click source and stroke wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1125 Rust tests total** (1120 → 1125, 1118 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

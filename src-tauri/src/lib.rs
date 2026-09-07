@@ -1997,6 +1997,22 @@ fn sharpen_stroke(
     })
 }
 
+/// Clone Stamp tool: paint the pre-stroke layer's pixels `offset` away
+/// along `points` on layer `id`. See [`paint_stroke`] for `points` and
+/// checkpointing.
+#[tauri::command]
+fn clone_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    offset: (i32, i32),
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Clone { offset })
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -3431,6 +3447,7 @@ pub fn run() {
             sponge_stroke,
             blur_stroke,
             sharpen_stroke,
+            clone_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,

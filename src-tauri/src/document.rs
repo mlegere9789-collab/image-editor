@@ -7031,8 +7031,11 @@ impl Document {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
         // Neighbourhood tools read the layer as it stood before the stroke.
-        let snapshot = matches!(stroke, Stroke::Blur { .. } | Stroke::Sharpen { .. })
-            .then(|| layer.pixels.clone());
+        let snapshot = matches!(
+            stroke,
+            Stroke::Blur { .. } | Stroke::Sharpen { .. } | Stroke::Clone { .. }
+        )
+        .then(|| layer.pixels.clone());
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -7107,6 +7110,18 @@ impl Document {
                         let dest_alpha = to_unit(layer.pixels[base + 3]);
                         layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
                         continue;
+                    }
+                    Stroke::Clone { offset } => {
+                        let source = snapshot.as_ref().expect("taken above");
+                        let sx = (x0 + col as u32) as i64 + offset.0 as i64;
+                        let sy = (y0 + row as u32) as i64 + offset.1 as i64;
+                        if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
+                            continue;
+                        }
+                        let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
+                        let mut color = [0u8; CHANNELS];
+                        color.copy_from_slice(&source[src..src + CHANNELS]);
+                        (color, to_unit(color[3]) * c)
                     }
                     Stroke::Dodge { exposure } | Stroke::Burn { exposure } => {
                         if layer.pixels[base + 3] == 0 {
@@ -12447,6 +12462,14 @@ pub enum Stroke {
     /// (clamped, no threshold) that Filter > Sharpen uses, with alpha left
     /// alone. Reads the same pre-stroke snapshot as Blur.
     Sharpen { strength: u8 },
+    /// The Clone Stamp tool: paints, at each covered pixel, the pre-stroke
+    /// layer's pixel `offset` away — the sampling source set by Alt-click
+    /// minus the stroke's first point, kept for later strokes (Photoshop's
+    /// Aligned mode) — composited source-over by the brush's coverage times
+    /// the sample's own alpha, so transparent samples paint nothing and
+    /// off-canvas samples are skipped. Sample All Layers and the
+    /// non-aligned mode are documented scope cuts.
+    Clone { offset: (i32, i32) },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19183,6 +19206,71 @@ mod tests {
         assert!(doc.move_pixels(id, 1, 0).is_err());
         assert_eq!(pixel(&doc, id, 0, 0), [10, 0, 0, 255]);
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    fn clone(offset: (i32, i32)) -> Stroke {
+        Stroke::Clone { offset }
+    }
+
+    #[test]
+    fn clone_stamp_paints_the_pixel_offset_from_the_source() {
+        // A full-coverage dot on (0, 0) with the source one pixel to the
+        // right copies (1, 0)'s 20 over it.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 0.5)], 0.5, clone((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [20, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [20, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [40, 0, 0, 255]);
+    }
+
+    #[test]
+    fn clone_stamp_skips_samples_off_the_canvas() {
+        // Everything covered: each pixel takes its right-hand neighbour and
+        // the right column, whose source lies off the canvas, is untouched.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, clone((1, 0))).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![20, 30, 30], vec![50, 60, 60], vec![80, 90, 90]]
+        );
+    }
+
+    #[test]
+    fn clone_stamp_blends_the_sample_by_coverage() {
+        // The 0.7929 edge coverage composites (1, 0)'s 20 over (0, 0)'s 10
+        // source-over: 0.7929 * 20 + 0.2071 * 10 = 17.9 -> 18.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, clone((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [18, 0, 0, 255]);
+    }
+
+    #[test]
+    fn clone_stamp_reads_the_pre_stroke_layer() {
+        // Cloning from the left: column 1 takes column 0's values and column
+        // 2 takes column 1's ORIGINAL values (20, 50, 80), not the 10s just
+        // written there.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, clone((-1, 0))).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![10, 10, 20], vec![40, 40, 50], vec![70, 70, 80]]
+        );
+    }
+
+    #[test]
+    fn clone_stamp_respects_the_selection_transparency_and_locks() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, clone((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 20);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 20);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+        // A transparent sample paints nothing.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, clone((-1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stroke(id, &[(1.5, 1.5)], 0.5, clone((1, 0))).is_err());
     }
 
     #[test]

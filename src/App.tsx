@@ -269,6 +269,10 @@ export default function App() {
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const moveStart = useRef<[number, number] | null>(null);
+  // Clone Stamp: the Alt-clicked sampling point, and the offset from the
+  // first stroke point to it, kept across strokes (Photoshop's Aligned).
+  const [cloneSource, setCloneSource] = useState<[number, number] | null>(null);
+  const cloneOffset = useRef<[number, number] | null>(null);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
   const [showLayerCompsDialog, setShowLayerCompsDialog] = useState(false);
   const [layerCompName, setLayerCompName] = useState("Comp 1");
@@ -3010,6 +3014,13 @@ export default function App() {
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
         });
+      } else if (tool === "cloneStamp") {
+        void runCommand("clone_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          offset: cloneOffset.current ?? [0, 0],
+        });
       } else if (tool === "patternStamp") {
         void runCommand("pattern_stamp_stroke", {
           id: selectedId,
@@ -3077,6 +3088,7 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
+  const isCloneStamp = tool === "cloneStamp";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
 
@@ -3326,6 +3338,21 @@ export default function App() {
         return;
       }
       if (!canPaint) return;
+      if (isCloneStamp) {
+        if (event.altKey) {
+          setCloneSource(toDocPoint(event, document));
+          cloneOffset.current = null;
+          return;
+        }
+        if (!cloneSource) return;
+        if (cloneOffset.current === null) {
+          const [px, py] = toDocPoint(event, document);
+          cloneOffset.current = [
+            Math.round(cloneSource[0] - px),
+            Math.round(cloneSource[1] - py),
+          ];
+        }
+      }
       event.currentTarget.setPointerCapture(event.pointerId);
       const point = toDocPoint(event, document);
       lastPoint.current = point;
@@ -3349,6 +3376,8 @@ export default function App() {
       redEyeAt,
       isRuler,
       isMove,
+      isCloneStamp,
+      cloneSource,
       isLasso,
       isPolygonLasso,
       lassoPoints,
@@ -4123,6 +4152,15 @@ export default function App() {
             title="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
           >
             Pattern Stamp
+          </button>
+          <button
+            className={`button button--quiet${tool === "cloneStamp" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "cloneStamp"}
+            onClick={() => setTool("cloneStamp")}
+            title="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
+          >
+            Clone Stamp
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5359,6 +5397,7 @@ export default function App() {
               tool === "blur" ||
               tool === "sharpen" ||
               tool === "redEye" ||
+              tool === "cloneStamp" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"
@@ -5373,6 +5412,13 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "cloneStamp" && (
+            <span className="tools__slider">
+              {cloneSource
+                ? `Source (${Math.floor(cloneSource[0])}, ${Math.floor(cloneSource[1])})`
+                : "Alt-click to set the source"}
+            </span>
           )}
           {tool === "colorSampler" && (
             <button

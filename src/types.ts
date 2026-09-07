@@ -136,6 +136,7 @@ export type Tool =
   | "count"
   | "note"
   | "patternStamp"
+  | "cloneStamp"
   | "magicWand"
   | "lasso"
   | "polygonLasso"
