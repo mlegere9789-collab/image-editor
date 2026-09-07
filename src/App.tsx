@@ -529,12 +529,13 @@ export default function App() {
   const [showCylinderDialog, setShowCylinderDialog] = useState(false);
   const [cylinderAngle, setCylinderAngle] = useState(120);
   const [cylinderTilt, setCylinderTilt] = useState(0);
-  // Filter > Liquify's Twirl, Pucker, and Bloat tools: brush centre, radius, strength.
+  // Filter > Liquify's Twirl, Pucker, Bloat, and Forward Warp tools: brush centre, radius, strength/push.
   const [showLiquifyDialog, setShowLiquifyDialog] = useState(false);
-  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool>("twirl");
+  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool | "forward">("twirl");
   const [liquifyCenter, setLiquifyCenter] = useState<[number, number]>([0, 0]);
   const [liquifyRadius, setLiquifyRadius] = useState(50);
   const [liquifyStrength, setLiquifyStrength] = useState(50);
+  const [liquifyPush, setLiquifyPush] = useState<[number, number]>([20, 0]);
   // Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration.
   const [showLensCorrectionDialog, setShowLensCorrectionDialog] = useState(false);
   const [lensDistortion, setLensDistortion] = useState(0);
@@ -2236,6 +2237,11 @@ export default function App() {
   const applyLiquify = useCallback(async () => {
     if (selectedId === null) return;
     const [cx, cy] = liquifyCenter;
+    if (liquifyTool === "forward") {
+      const [dx, dy] = liquifyPush;
+      await runCommand("liquify_forward_warp", { id: selectedId, cx, cy, radius: liquifyRadius, dx, dy });
+      return;
+    }
     await runCommand("liquify_radial", {
       id: selectedId,
       tool: liquifyTool,
@@ -2244,7 +2250,7 @@ export default function App() {
       radius: liquifyRadius,
       strength: liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
     });
-  }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength]);
+  }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength, liquifyPush]);
 
   const applyLensCorrection = useCallback(async () => {
     if (selectedId === null) return;
@@ -12664,25 +12670,26 @@ export default function App() {
           <div className="modal" role="dialog" aria-label="Liquify" onClick={(event) => event.stopPropagation()}>
             <h2 className="modal__heading">Filter &gt; Liquify</h2>
             <p className="modal__hint">
-              Twirl rotates, Pucker pinches in, and Bloat pushes out, over a circular brush
-              centred at (Centre X, Centre Y) with a falloff strongest in the middle and
-              zero at the Radius. Apply repeatedly at different centres to build up an
-              effect; Forward Warp, Freeze/Thaw Mask, Reconstruct, and Face-Aware Liquify
-              are documented scope cuts.
+              Twirl rotates, Pucker pinches in, Bloat pushes out, and Forward Warp pushes by
+              (Push X, Push Y), all over a circular brush centred at (Centre X, Centre Y)
+              with a falloff strongest in the middle and zero at the Radius. Apply
+              repeatedly at different centres to build up an effect; Freeze/Thaw Mask,
+              Reconstruct, and Face-Aware Liquify are documented scope cuts.
             </p>
             <label className="control control--row">
               <span className="control__label">Tool</span>
               <select
                 value={liquifyTool}
                 onChange={(event) => {
-                  const next = event.target.value as LiquifyTool;
+                  const next = event.target.value as LiquifyTool | "forward";
                   setLiquifyTool(next);
-                  if (next !== "twirl") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
+                  if (next !== "twirl" && next !== "forward") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
                 }}
               >
                 <option value="twirl">Twirl</option>
                 <option value="pucker">Pucker</option>
                 <option value="bloat">Bloat</option>
+                <option value="forward">Forward Warp</option>
               </select>
             </label>
             <label className="control control--row">
@@ -12709,17 +12716,33 @@ export default function App() {
               />
               <span className="control__value">{liquifyRadius}</span>
             </label>
-            <label className="control control--row">
-              <span className="control__label">{liquifyTool === "twirl" ? "Twirl Rate" : "Pressure"}</span>
-              <input
-                type="range"
-                min={liquifyTool === "twirl" ? -180 : 0}
-                max={liquifyTool === "twirl" ? 180 : 100}
-                value={liquifyStrength}
-                onChange={(event) => setLiquifyStrength(Number(event.target.value))}
-              />
-              <span className="control__value">{liquifyStrength}</span>
-            </label>
+            {liquifyTool === "forward" ? (
+              <label className="control control--row">
+                <span className="control__label">Push X, Y</span>
+                <input
+                  type="number"
+                  value={liquifyPush[0]}
+                  onChange={(event) => setLiquifyPush(([, y]) => [Number(event.target.value), y])}
+                />
+                <input
+                  type="number"
+                  value={liquifyPush[1]}
+                  onChange={(event) => setLiquifyPush(([x]) => [x, Number(event.target.value)])}
+                />
+              </label>
+            ) : (
+              <label className="control control--row">
+                <span className="control__label">{liquifyTool === "twirl" ? "Twirl Rate" : "Pressure"}</span>
+                <input
+                  type="range"
+                  min={liquifyTool === "twirl" ? -180 : 0}
+                  max={liquifyTool === "twirl" ? 180 : 100}
+                  value={liquifyStrength}
+                  onChange={(event) => setLiquifyStrength(Number(event.target.value))}
+                />
+                <span className="control__value">{liquifyStrength}</span>
+              </label>
+            )}
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowLiquifyDialog(false)} title="Close">
                 Close

@@ -21149,6 +21149,63 @@ impl Document {
         })
     }
 
+    /// Filter > Liquify's Forward Warp Tool: pushes pixels within a
+    /// circular brush of `radius` centred at `(cx, cy)` on layer `id` by
+    /// `(dx, dy)`, strongest at the centre and zero at the edge — the
+    /// same falloff [`Self::liquify_radial`]'s tools share,
+    /// `f(d) = 1 − (d / radius)²`. Every destination pixel within the
+    /// radius is inverse-mapped: its source is the same point pulled
+    /// back by `(dx, dy) · f(d)`, so at the very centre the source sits
+    /// a full `(dx, dy)` behind the destination and at the edge it is
+    /// unmoved — a single application of one drag of the brush, not a
+    /// continuous stroke. Nearest-neighbour resampled, transparent
+    /// wherever the source falls outside the canvas, confined to the
+    /// active selection — the same conventions `liquify_radial` and
+    /// Rotate/Scale/Distort already use. Errors for a non-positive or
+    /// non-finite radius, a non-finite centre or push vector, or a
+    /// locked layer.
+    pub fn liquify_forward_warp(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if !(cx.is_finite() && cy.is_finite()) {
+            return Err("The centre must be finite coordinates.".to_string());
+        }
+        if !(dx.is_finite() && dy.is_finite()) {
+            return Err("The push must be a finite offset.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |source, row, col| {
+            let (ox, oy) = (col as f32 - cx, row as f32 - cy);
+            let d = (ox * ox + oy * oy).sqrt();
+            let (sx, sy) = if d >= radius {
+                (col as i64, row as i64)
+            } else {
+                let falloff = 1.0 - (d / radius) * (d / radius);
+                (
+                    (col as f32 - dx * falloff).round() as i64,
+                    (row as f32 - dy * falloff).round() as i64,
+                )
+            };
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Puppet Warp's mesh bounds: layer `id`'s opaque bounds grown by
     /// `expansion` pixels on every side and clipped to the canvas.
     fn puppet_bounds(&self, id: LayerId, expansion: u32) -> Result<Rect, String> {
@@ -50603,5 +50660,74 @@ mod tests {
             .contains("Blue/Yellow"));
         assert_eq!(doc.layers()[0].pixels, before);
         assert!(doc.lens_correction(999, 0, 0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn liquify_forward_warp_pulls_the_source_back_by_the_falloff_scaled_push() {
+        // Destination (13, 14), offset (3, 4) from centre (10, 10):
+        // d = 5, falloff = 1 - (5/10)^2 = 0.75. Pushing (4, -4) pulls
+        // the source back by (4·0.75, -4·0.75) = (3, -3), landing on
+        // (13-3, 14+3) = (10, 17) — independently confirmed in Python
+        // emulating Rust f32 arithmetic.
+        let (mut doc, id) = liquify_fixture(10, 17, [255, 0, 0, 255]);
+        doc.liquify_forward_warp(id, 10.0, 10.0, 10.0, 4.0, -4.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn liquify_forward_warp_pulls_the_full_push_at_the_exact_centre() {
+        // At the centre itself, d = 0 and falloff = 1.0, so the source
+        // is the destination minus the whole push: (10, 10) - (6, -2)
+        // = (4, 12).
+        let (mut doc, id) = liquify_fixture(4, 12, [0, 255, 0, 255]);
+        doc.liquify_forward_warp(id, 10.0, 10.0, 10.0, 6.0, -2.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 10, 10), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn liquify_forward_warp_leaves_pixels_outside_the_radius_untouched() {
+        let (mut doc, id) = liquify_fixture(0, 0, [128, 128, 128, 255]);
+        doc.liquify_forward_warp(id, 10.0, 10.0, 10.0, 4.0, -4.0)
+            .unwrap();
+        // (0, 0) is distance sqrt(200) ≈ 14.1 from the centre, past the
+        // radius of 10, so its own marker colour stays put.
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn liquify_forward_warp_is_confined_to_the_active_selection() {
+        let (mut doc, id) = liquify_fixture(10, 17, [255, 0, 0, 255]);
+        // A selection that excludes (13, 14) leaves it untouched even
+        // though it is well within the brush radius.
+        doc.select_rectangle(0.0, 0.0, 5.0, 5.0).unwrap();
+        doc.liquify_forward_warp(id, 10.0, 10.0, 10.0, 4.0, -4.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn liquify_forward_warp_validates_its_arguments() {
+        let (mut doc, id) = liquify_fixture(10, 17, [255, 0, 0, 255]);
+        assert!(doc
+            .liquify_forward_warp(id, 10.0, 10.0, 0.0, 1.0, 1.0)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_forward_warp(id, 10.0, 10.0, -5.0, 1.0, 1.0)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_forward_warp(id, f32::NAN, 10.0, 10.0, 1.0, 1.0)
+            .unwrap_err()
+            .contains("centre"));
+        assert!(doc
+            .liquify_forward_warp(id, 10.0, 10.0, 10.0, f32::INFINITY, 1.0)
+            .unwrap_err()
+            .contains("push"));
+        assert!(doc
+            .liquify_forward_warp(999, 10.0, 10.0, 10.0, 1.0, 1.0)
+            .is_err());
     }
 }

@@ -1508,6 +1508,24 @@ fn liquify_radial(
     })
 }
 
+/// Filter > Liquify's Forward Warp Tool on layer `id`: one drag of a
+/// brush of `radius` centred at `(cx, cy)`, pushing by `(dx, dy)`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn liquify_forward_warp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    dx: f32,
+    dy: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.liquify_forward_warp(id, cx, cy, radius, dx, dy)
+    })
+}
+
 /// Edit > Puppet Warp on layer `id` with its mode, density, expansion,
 /// and pins.
 #[tauri::command]
@@ -5800,6 +5818,7 @@ pub fn run() {
             warp_mesh,
             cylindrical_warp,
             liquify_radial,
+            liquify_forward_warp,
             puppet_warp,
             puppet_mesh,
             convert_to_indexed,

@@ -16055,6 +16055,56 @@ green.
 **1580 Rust tests total** (1575 → 1580, 1573 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 268 — Liquify's Forward Warp Tool
+
+The fourth of Liquify's nine sub-tools, and the one that made the other
+three (Twirl, Pucker, Bloat) worth shipping in the first place —
+Forward Warp is Liquify's signature push-pixels-around-with-a-brush
+tool. `liquify_forward_warp(id, cx, cy, radius, dx, dy)` shares its
+brush and falloff outright with `liquify_radial`: the same circular
+brush of `radius` centred at `(cx, cy)`, the same
+`f(d) = 1 − (d / radius)²` falloff strongest in the middle and zero at
+the edge. Where Twirl/Pucker/Bloat rotate or rescale the offset from
+centre, Forward Warp instead pulls the source straight back along a
+push vector `(dx, dy)`, scaled by that same falloff — at the very
+centre the source sits a full `(dx, dy)` behind the destination, and at
+the edge it is unmoved, exactly the push-strongest-under-the-brush feel
+Photoshop's own tool has. Photoshop's version is a continuous brush
+stroke sampled many times a second as the pointer moves; this is one
+drag's worth in a single call, applied repeatedly the way this
+project's other single-application tools already work — Forward Warp
+now joins Twirl, Pucker, and Bloat in the same "Liquify…" dialog, a
+Tool option away, rather than needing a new one.
+
+**Verified two ways.** Five new `document.rs` tests, reusing the same
+21×21 grey-canvas fixture Twirl/Pucker/Bloat's own tests built.
+Destination `(13, 14)` (offset `(3, 4)` from centre `(10, 10)`,
+distance `5`, falloff `0.75`) pushed by `(4, −4)` pulls its source back
+by `(3, −3)` exactly, landing on `(10, 17)` — hand-derived and
+independently confirmed in a Python script computing the same `f32`
+arithmetic. At the exact centre, falloff is `1.0`, so a push of
+`(6, −2)` pulls the full vector, sourcing `(4, 12)`. A pixel at
+distance `√200 ≈ 14.1`, past the radius, is untouched. A fourth test
+confirms the active selection confines the tool exactly as
+`liquify_radial`'s own test does; a fifth exercises every error path: a
+zero or negative radius, a non-finite centre, a non-finite push vector,
+and an unknown layer id. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and fifteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Liquify dialog's new Forward Warp option was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1585 Rust tests total** (1580 → 1585, 1578 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
