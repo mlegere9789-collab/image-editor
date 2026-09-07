@@ -1490,6 +1490,24 @@ fn cylindrical_warp(
     })
 }
 
+/// Filter > Liquify's Twirl, Pucker, and Bloat tools on layer `id`, one
+/// application over a brush of `radius` centred at `(cx, cy)`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn liquify_radial(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tool: document::LiquifyTool,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    strength: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.liquify_radial(id, tool, cx, cy, radius, strength)
+    })
+}
+
 /// Edit > Puppet Warp on layer `id` with its mode, density, expansion,
 /// and pins.
 #[tauri::command]
@@ -5765,6 +5783,7 @@ pub fn run() {
             warp,
             warp_mesh,
             cylindrical_warp,
+            liquify_radial,
             puppet_warp,
             puppet_mesh,
             convert_to_indexed,

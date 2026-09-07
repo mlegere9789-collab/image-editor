@@ -366,6 +366,9 @@ export type TargetedMode = "parametricCurve" | "hue" | "saturation" | "luminance
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
  * draws (vertices, where the pins move them, triangles as indices). */
 export type PuppetMode = "rigid" | "normal" | "distort";
+
+/** Mirrors `LiquifyTool` in src-tauri/src/document.rs. */
+export type LiquifyTool = "twirl" | "pucker" | "bloat";
 export type PuppetDensity = "fewer" | "normal" | "more";
 export type PuppetPin = { source: [number, number]; target: [number, number]; depth: number };
 export type PuppetWarpOptions = {

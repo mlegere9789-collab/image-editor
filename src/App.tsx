@@ -27,6 +27,7 @@ import type {
   HistoryState,
   Ink,
   LevelsChannel,
+  LiquifyTool,
   Measurement,
   MoveDirection,
   Palette,
@@ -528,6 +529,12 @@ export default function App() {
   const [showCylinderDialog, setShowCylinderDialog] = useState(false);
   const [cylinderAngle, setCylinderAngle] = useState(120);
   const [cylinderTilt, setCylinderTilt] = useState(0);
+  // Filter > Liquify's Twirl, Pucker, and Bloat tools: brush centre, radius, strength.
+  const [showLiquifyDialog, setShowLiquifyDialog] = useState(false);
+  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool>("twirl");
+  const [liquifyCenter, setLiquifyCenter] = useState<[number, number]>([0, 0]);
+  const [liquifyRadius, setLiquifyRadius] = useState(50);
+  const [liquifyStrength, setLiquifyStrength] = useState(50);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -2214,6 +2221,24 @@ export default function App() {
     await runCommand("cylindrical_warp", { id: selectedId, angle: cylinderAngle, tilt: cylinderTilt });
     setShowCylinderDialog(false);
   }, [runCommand, selectedId, cylinderAngle, cylinderTilt]);
+
+  const openLiquifyDialog = useCallback(() => {
+    if (document) setLiquifyCenter([Math.round(document.width / 2), Math.round(document.height / 2)]);
+    setShowLiquifyDialog(true);
+  }, [document]);
+
+  const applyLiquify = useCallback(async () => {
+    if (selectedId === null) return;
+    const [cx, cy] = liquifyCenter;
+    await runCommand("liquify_radial", {
+      id: selectedId,
+      tool: liquifyTool,
+      cx,
+      cy,
+      radius: liquifyRadius,
+      strength: liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
+    });
+  }, [runCommand, selectedId, liquifyTool, liquifyCenter, liquifyRadius, liquifyStrength]);
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -6136,6 +6161,14 @@ export default function App() {
             title="Cylindrical Transform Warp: wrap the layer around a cylinder"
           >
             Cylinder Warp…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openLiquifyDialog}
+            disabled={busy || !canPaint}
+            title="Filter > Liquify: Twirl, Pucker, and Bloat over a circular brush"
+          >
+            Liquify…
           </button>
           <button
             className="button button--quiet"
@@ -12594,6 +12627,79 @@ export default function App() {
               </button>
               <button className="button" onClick={applyCylinderWarp} disabled={busy} title="Commit the cylinder warp">
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLiquifyDialog && (
+        <div className="modal-overlay" onClick={() => setShowLiquifyDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Liquify" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Filter &gt; Liquify</h2>
+            <p className="modal__hint">
+              Twirl rotates, Pucker pinches in, and Bloat pushes out, over a circular brush
+              centred at (Centre X, Centre Y) with a falloff strongest in the middle and
+              zero at the Radius. Apply repeatedly at different centres to build up an
+              effect; Forward Warp, Freeze/Thaw Mask, Reconstruct, and Face-Aware Liquify
+              are documented scope cuts.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Tool</span>
+              <select
+                value={liquifyTool}
+                onChange={(event) => {
+                  const next = event.target.value as LiquifyTool;
+                  setLiquifyTool(next);
+                  if (next !== "twirl") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
+                }}
+              >
+                <option value="twirl">Twirl</option>
+                <option value="pucker">Pucker</option>
+                <option value="bloat">Bloat</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Centre X, Y</span>
+              <input
+                type="number"
+                value={liquifyCenter[0]}
+                onChange={(event) => setLiquifyCenter(([, y]) => [Number(event.target.value), y])}
+              />
+              <input
+                type="number"
+                value={liquifyCenter[1]}
+                onChange={(event) => setLiquifyCenter(([x]) => [x, Number(event.target.value)])}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Radius</span>
+              <input
+                type="range"
+                min={1}
+                max={500}
+                value={liquifyRadius}
+                onChange={(event) => setLiquifyRadius(Number(event.target.value))}
+              />
+              <span className="control__value">{liquifyRadius}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">{liquifyTool === "twirl" ? "Twirl Rate" : "Pressure"}</span>
+              <input
+                type="range"
+                min={liquifyTool === "twirl" ? -180 : 0}
+                max={liquifyTool === "twirl" ? 180 : 100}
+                value={liquifyStrength}
+                onChange={(event) => setLiquifyStrength(Number(event.target.value))}
+              />
+              <span className="control__value">{liquifyStrength}</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowLiquifyDialog(false)} title="Close">
+                Close
+              </button>
+              <button className="button" onClick={applyLiquify} disabled={busy || selectedId === null} title="Apply once at this centre">
+                Apply
               </button>
             </div>
           </div>

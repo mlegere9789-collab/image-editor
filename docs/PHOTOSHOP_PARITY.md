@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 493.**
+**618 distinct capabilities tracked. Currently shipped: 496.**
 
 ## PART I — EVERY TOOL
 
@@ -531,9 +531,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Lighting Effects (single Point light, Blinn-Phong diffuse+specular over a luma-derived bump-mapped normal; Spot/Infinite light types, multiple simultaneous lights, the texture-channel picker, and the Gloss/Metallic sliders are documented scope cuts — see README Phase 52)
 - [ ] Liquify
 - [ ] Forward Warp Tool
-- [ ] Pucker Tool
-- [ ] Bloat Tool
-- [ ] Twirl Tool
+- [x] Pucker Tool (`liquify_radial(id, LiquifyTool::Pucker, cx, cy, radius, strength)`, pixels pulled toward the brush centre — the source offset rescaled outward by `1 + (strength/100)·(1 − (d/radius)²)`, strongest at the centre and zero at the edge — see README Phase 266)
+- [x] Bloat Tool (the same `liquify_radial` with `LiquifyTool::Bloat`: the source offset rescaled inward instead, `1 − (strength/100)·(1 − (d/radius)²)`, magnifying the centre — see README Phase 266)
+- [x] Twirl Tool (the same `liquify_radial` with `LiquifyTool::Twirl`: the offset from centre rotated by `−strength°·(1 − (d/radius)²)`, a negative strength twirling the other way, Photoshop's Twirl Counter Clockwise on the same tool — see README Phase 266)
 - [ ] Reconstruct Tool
 - [ ] Freeze Mask Tool
 - [ ] Thaw Mask Tool

@@ -15907,6 +15907,86 @@ green.
 **1570 Rust tests total** (1565 → 1570, 1563 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 266 — Liquify: Twirl, Pucker, and Bloat
+
+Liquify was one of this project's own standing deferrals, bucketed
+alongside Lens Correction and Vanishing Point without ever actually
+being attempted — on closer look, three of its nine sub-tools are
+ordinary radial pixel warps, squarely in the same territory as the
+Warp, Puppet Warp, and Cylindrical Transform Warp already shipped, and
+not remotely neural. `liquify_radial(id, tool, cx, cy, radius,
+strength)` applies one of `LiquifyTool::{Twirl, Pucker, Bloat}` over a
+circular brush: every destination pixel within `radius` of `(cx, cy)`
+is inverse-mapped to a source pixel by a falloff strongest at the
+centre and zero at the edge, `f(d) = 1 − (d / radius)²`; a pixel at or
+past the radius is untouched. Twirl rotates the offset from centre by
+`−strength° · f(d)` — the *inverse* of rotating it forward that much,
+exact because rotation never changes distance from the centre, so
+undoing it is just the same rotation backward; a negative strength
+twirls the other way, Photoshop's Twirl Counter Clockwise living on the
+same tool rather than a second one. Pucker and Bloat instead rescale
+the offset's length by `1 ± (strength / 100) · f(d)`: Pucker grows it,
+sourcing from farther out and pinching the destination in; Bloat
+shrinks it, sourcing from nearer the centre and magnifying it.
+Nearest-neighbour resampled, transparent wherever the source falls
+outside the canvas, and confined to the active selection — the exact
+conventions Rotate, Scale, and Distort already established, applied
+here to a genuinely new deformation shape. Forward Warp (a directional
+brush stroke, not a radial one), Freeze/Thaw Mask, Reconstruct, Liquify
+Mesh, and Face-Aware Liquify are documented scope cuts: they need
+either a persisted Liquify-only mask and a reference image to
+reconstruct back toward, or (Face-Aware) real face landmark detection,
+that a single-application radial tool does not give. The "Liquify"
+umbrella row itself stays unchecked in the parity checklist until more
+of its nine sub-tools ship — three is a start, not the whole dialog.
+
+The frontend gains a "Liquify…" dialog: a Tool select (Twirl/Pucker/
+Bloat), numeric Centre X/Y fields (defaulting to the canvas centre when
+opened), a Radius slider, and a Twirl Rate/Pressure slider whose range
+switches between `-180..180` and `0..100` with the tool — Apply runs
+one application and leaves the dialog open, so a centre can be nudged
+and Applied again to build up an effect, the way Photoshop's own
+Liquify keeps its dialog open across brush strokes.
+
+**Verified two ways.** Five new `document.rs` tests. On a 21×21 canvas
+with centre `(10, 10)` and radius `10`, destination pixel `(13, 14)` —
+offset `(3, 4)`, distance `5` — has falloff `1 − (5/10)² = 0.75` in all
+three tests. Twirl at strength `120` gives angle `−120° · 0.75 = −90°`
+exactly, rotating `(3, 4)` to `(4, −3)` — an exact rotation with no
+transcendental-function rounding to worry about, since `sin`/`cos` of a
+right angle land on `−1`/`0`/`1` either way — landing on source pixel
+`(14, 7)`; a pixel at distance `√200 ≈ 14.1`, past the radius, stays
+untouched. Bloat at strength `100` gives scale `1 − 1.0·0.75 = 0.25`,
+rescaling `(3, 4)` to `(0.75, 1.0)` and sourcing `(11, 11)`; Pucker at
+the same strength gives scale `1.75`, rescaling to `(5.25, 7.0)` and
+sourcing `(15, 17)`. All three source pixels were independently
+confirmed in a Python script computing the same falloff, rotation, and
+rescale in `f32` (trig via `math.sin`/`math.cos`, which is not
+guaranteed bit-identical to Rust's own `sin_cos` — but every one of
+these three roundings lands more than a tenth of a pixel clear of its
+`.5` boundary, so the two implementations agreeing on the *rounded
+integer* pixel, which is all these tests actually assert, does not
+depend on matching to the last bit). A fourth test confines the tool to
+an active selection — a marker well inside the brush radius but outside
+a small selection rectangle stays untouched. A fifth exercises every
+error path: a zero or negative radius, a non-finite centre, Twirl
+strength outside `-180..=180`, Pucker/Bloat strength outside `0..=100`,
+and an unknown layer id. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and thirteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The new Liquify dialog was reviewed by hand instead. Every
+other layer of this project's quality bar (hand-verified Rust tests,
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1575 Rust tests total** (1570 → 1575, 1568 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

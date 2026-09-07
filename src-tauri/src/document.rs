@@ -726,6 +726,19 @@ impl WarpMesh {
     }
 }
 
+/// Filter > Liquify's radial tools — see [`Document::liquify_radial`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LiquifyTool {
+    /// Rotates pixels around the brush centre; a negative strength
+    /// twirls the other way, Photoshop's Twirl Counter Clockwise.
+    Twirl,
+    /// Pulls pixels toward the brush centre, pinching the image in.
+    Pucker,
+    /// Pushes pixels away from the brush centre, magnifying the image.
+    Bloat,
+}
+
 /// Edit > Puppet Warp's Mode: how the mesh moves between pins — see
 /// [`puppet_deform`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -20942,6 +20955,89 @@ impl Document {
             let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
             let mut out = [0u8; CHANNELS];
             out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            out
+        })
+    }
+
+    /// Filter > Liquify's Twirl, Pucker, and Bloat tools: one application
+    /// of a radial warp over a circular brush of `radius` centred at
+    /// `(cx, cy)` on layer `id`. Every destination pixel within the
+    /// radius is inverse-mapped to a source pixel by a falloff that is
+    /// strongest at the centre and zero at the edge —
+    /// `f(d) = 1 − (d / radius)²` for distance `d` from the centre — a
+    /// pixel at or beyond the radius is untouched. [`LiquifyTool::Twirl`]
+    /// rotates the offset from centre by `−strength° · f(d)` (the
+    /// inverse of rotating it forward that much — rotation does not
+    /// change distance from the centre, so undoing it is exact);
+    /// [`LiquifyTool::Pucker`] and [`LiquifyTool::Bloat`] instead rescale
+    /// the offset's length by `1 ± (strength / 100) · f(d)` — Pucker
+    /// growing it (sourcing from farther out, pinching the destination
+    /// in) and Bloat shrinking it (sourcing from nearer the centre,
+    /// magnifying it). Nearest-neighbour resampled, transparent wherever
+    /// the source falls outside the canvas, exactly as
+    /// Rotate/Scale/Distort already resample; the active selection
+    /// confines which destination pixels the tool touches. Errors for a
+    /// non-positive or non-finite radius, a non-finite centre, strength
+    /// outside `-180..=180` for Twirl or `0..=100` for Pucker/Bloat, or a
+    /// locked layer. Forward Warp (a directional brush stroke),
+    /// Freeze/Thaw Mask, Reconstruct, Liquify Mesh, and Face-Aware
+    /// Liquify are documented scope cuts: they need either a persisted
+    /// Liquify-only mask and reference image, or real face landmark
+    /// detection, that a single-application radial tool does not.
+    pub fn liquify_radial(
+        &mut self,
+        id: LayerId,
+        tool: LiquifyTool,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        strength: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if !(cx.is_finite() && cy.is_finite()) {
+            return Err("The centre must be finite coordinates.".to_string());
+        }
+        if tool == LiquifyTool::Twirl {
+            if !(-180.0..=180.0).contains(&strength) {
+                return Err("Twirl's strength must be -180..=180 degrees.".to_string());
+            }
+        } else if !(0.0..=100.0).contains(&strength) {
+            return Err("Strength must be 0..=100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |source, row, col| {
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let d = (dx * dx + dy * dy).sqrt();
+            let (sx, sy) = if d >= radius {
+                (col as i64, row as i64)
+            } else {
+                let falloff = 1.0 - (d / radius) * (d / radius);
+                let (ox, oy) = match tool {
+                    LiquifyTool::Twirl => {
+                        let angle = -(strength.to_radians()) * falloff;
+                        let (sin, cos) = angle.sin_cos();
+                        (dx * cos - dy * sin, dx * sin + dy * cos)
+                    }
+                    LiquifyTool::Pucker => {
+                        let scale = 1.0 + (strength / 100.0) * falloff;
+                        (dx * scale, dy * scale)
+                    }
+                    LiquifyTool::Bloat => {
+                        let scale = 1.0 - (strength / 100.0) * falloff;
+                        (dx * scale, dy * scale)
+                    }
+                };
+                ((cx + ox).round() as i64, (cy + oy).round() as i64)
+            };
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
             out
         })
     }
@@ -50217,5 +50313,93 @@ mod tests {
             .unwrap_err()
             .contains("person"));
         assert!(doc.select_people_with(SelectionMode::New, 999).is_err());
+    }
+
+    /// A `21x21` grey canvas with a coloured marker pixel at `(x, y)`.
+    fn liquify_fixture(x: u32, y: u32, rgba: [u8; 4]) -> (Document, LayerId) {
+        let mut doc = Document::new(21, 21).unwrap();
+        let mut pixels = solid(21, 21, [128, 128, 128, 255]);
+        let base = (y as usize * 21 + x as usize) * CHANNELS;
+        pixels[base..base + CHANNELS].copy_from_slice(&rgba);
+        let id = doc.add_layer("l", &pixels, 21, 21).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn liquify_twirl_rotates_the_offset_by_the_inverse_falloff_scaled_angle() {
+        // Destination (13, 14) is offset (3, 4) from centre (10, 10):
+        // d = 5, falloff = 1 - (5/10)^2 = 0.75, angle = -120° * 0.75 =
+        // -90° exactly, rotating (3, 4) to (4, -3) -> source (14, 7),
+        // independently confirmed in Python (both f32-emulated and via
+        // math.sin/cos) landing at (14, 7) with over a tenth of a pixel
+        // of headroom either side of the rounding boundary.
+        let (mut doc, id) = liquify_fixture(14, 7, [255, 0, 0, 255]);
+        doc.liquify_radial(id, LiquifyTool::Twirl, 10.0, 10.0, 10.0, 120.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [255, 0, 0, 255]);
+        // (0, 0) is distance sqrt(200) ≈ 14.1 from the centre, past the
+        // radius of 10, so it is untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn liquify_bloat_shrinks_the_offset_sourcing_nearer_the_centre() {
+        // Same destination and falloff as the Twirl test; strength 100
+        // gives scale = 1 - 1.0*0.75 = 0.25, so offset (3, 4) becomes
+        // (0.75, 1.0) -> source (10.75, 11.0), rounding to (11, 11).
+        let (mut doc, id) = liquify_fixture(11, 11, [0, 255, 0, 255]);
+        doc.liquify_radial(id, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 100.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn liquify_pucker_grows_the_offset_sourcing_farther_from_the_centre() {
+        // Strength 100 gives scale = 1 + 1.0*0.75 = 1.75, so offset
+        // (3, 4) becomes (5.25, 7.0) -> source (15.25, 17.0), rounding
+        // to (15, 17).
+        let (mut doc, id) = liquify_fixture(15, 17, [0, 0, 255, 255]);
+        doc.liquify_radial(id, LiquifyTool::Pucker, 10.0, 10.0, 10.0, 100.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn liquify_radial_is_confined_to_the_active_selection() {
+        let (mut doc, id) = liquify_fixture(11, 11, [0, 255, 0, 255]);
+        // A selection that excludes (13, 14) leaves it untouched even
+        // though it is well within the brush radius.
+        doc.select_rectangle(0.0, 0.0, 5.0, 5.0).unwrap();
+        doc.liquify_radial(id, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 100.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn liquify_radial_validates_its_arguments() {
+        let (mut doc, id) = liquify_fixture(11, 11, [0, 255, 0, 255]);
+        assert!(doc
+            .liquify_radial(id, LiquifyTool::Bloat, 10.0, 10.0, 0.0, 50.0)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_radial(id, LiquifyTool::Bloat, 10.0, 10.0, -5.0, 50.0)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_radial(id, LiquifyTool::Bloat, f32::NAN, 10.0, 10.0, 50.0)
+            .unwrap_err()
+            .contains("centre"));
+        assert!(doc
+            .liquify_radial(id, LiquifyTool::Twirl, 10.0, 10.0, 10.0, 181.0)
+            .unwrap_err()
+            .contains("Twirl"));
+        assert!(doc
+            .liquify_radial(id, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 101.0)
+            .unwrap_err()
+            .contains("Strength"));
+        assert!(doc
+            .liquify_radial(999, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 50.0)
+            .is_err());
     }
 }
