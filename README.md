@@ -10948,6 +10948,53 @@ quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
 **1115 Rust tests total** (1110 → 1115, 1108 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 175 — Lasso tool
+
+`select_lasso_with(mode, trail)` is the freehand Lasso: a pointer
+drag's trail, closed back to its start, handed to Phase 174's polygon
+fill after consecutive duplicate points — which a drag produces in
+quantity whenever the pointer pauses — are dropped. It needs at least
+three distinct points ("A lasso needs to enclose an area."), and a
+trail that encloses no pixel centre, a straight line say, errors like
+any empty polygon; both leave the selection intact. Everything else —
+the even-odd fill, the pixel-mask result, the New/Add/Subtract/
+Intersect combination — is the polygon's. A new **Lasso** tool button
+captures a drag, appends every pointer move to the trail (kept in a
+ref so moves append without re-rendering through stale state, and
+mirrored to the same SVG polyline preview the Polygonal Lasso draws),
+and sends the trail on release, with Shift/Alt at release choosing the
+mode as for the marquees. Anti-alias and Feather remain documented
+scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests reading the
+selection back pixel by pixel, the circle case confirmed by the Python
+`f32` model of the ray cast against the ellipse's own containment
+test. A trail with every vertex repeated selects the same six pixels
+as the plain triangle. A 64-gon inscribed in the canvas-spanning
+circle on `4×4` — whose apothem `2 cos(π/64) = 1.998` clears every
+pixel centre the ellipse admits (the nearest edge centres sit `1.58`
+from the middle) and excludes the corners (`2.12` away) — selects
+exactly the twelve pixels the ellipse marquee selects. A lasso in Add
+mode unions with a one-pixel selection. Two distinct points error
+mentioning "enclose", four collinear points error with "nothing
+selected", and the `Rectangle` survives both. The three corners of the
+triangle in the opposite winding, trail left open, still enclose it.
+All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drag capture and release wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1120 Rust tests total** (1115 → 1120, 1113 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

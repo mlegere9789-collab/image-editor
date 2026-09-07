@@ -261,8 +261,11 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
-  // The Polygonal Lasso's vertices so far, in document coordinates.
+  // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
+  // document coordinates; the trail also lives in a ref so pointer moves
+  // append without re-rendering through stale state.
   const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
+  const lassoTrail = useRef<[number, number][] | null>(null);
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const moveStart = useRef<[number, number] | null>(null);
@@ -3075,6 +3078,7 @@ export default function App() {
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
   const isPolygonLasso = tool === "polygonLasso";
+  const isLasso = tool === "lasso";
 
   const closeLasso = useCallback(
     (mode: SelectionMode) => {
@@ -3086,8 +3090,8 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!isPolygonLasso) setLassoPoints([]);
-  }, [isPolygonLasso]);
+    if (!isPolygonLasso && !isLasso) setLassoPoints([]);
+  }, [isPolygonLasso, isLasso]);
   const isColorSampler = tool === "colorSampler";
   const isCount = tool === "count";
   const isNote = tool === "note";
@@ -3261,6 +3265,13 @@ export default function App() {
         moveStart.current = toDocPoint(event, document);
         return;
       }
+      if (isLasso) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const start = toDocPoint(event, document);
+        lassoTrail.current = [start];
+        setLassoPoints([start]);
+        return;
+      }
       if (isPolygonLasso) {
         const point = toDocPoint(event, document);
         // A click back on the first vertex closes the polygon, as in
@@ -3338,6 +3349,7 @@ export default function App() {
       redEyeAt,
       isRuler,
       isMove,
+      isLasso,
       isPolygonLasso,
       lassoPoints,
       closeLasso,
@@ -3387,6 +3399,12 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       readLevelsAt(event);
+      if (isLasso) {
+        if (lassoTrail.current === null) return;
+        lassoTrail.current.push(toDocPoint(event, document));
+        setLassoPoints([...lassoTrail.current]);
+        return;
+      }
       if (isMarqueeTool) {
         if (marqueeStart.current === null) return;
         setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
@@ -3398,13 +3416,30 @@ export default function App() {
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, isMarqueeTool, applyStroke, readLevelsAt],
+    [document, isLasso, isMarqueeTool, applyStroke, readLevelsAt],
   );
 
   const endStroke = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (isLasso) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 3) {
+          const mode: SelectionMode =
+            event.shiftKey && event.altKey
+              ? "intersect"
+              : event.shiftKey
+                ? "add"
+                : event.altKey
+                  ? "subtract"
+                  : selectionMode;
+          void runCommand("select_lasso", { trail, mode });
+        }
+        return;
       }
       if (isMove) {
         const start = moveStart.current;
@@ -3482,6 +3517,7 @@ export default function App() {
       lastPoint.current = null;
     },
     [
+      isLasso,
       isMove,
       isRuler,
       isMarqueeTool,
@@ -4069,6 +4105,15 @@ export default function App() {
             title="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
           >
             Polygonal Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "lasso" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "lasso"}
+            onClick={() => setTool("lasso")}
+            title="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
+          >
+            Lasso
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -5410,7 +5455,7 @@ export default function App() {
               </button>
             </>
           )}
-          {(isMarqueeTool || isPolygonLasso) && (
+          {(isMarqueeTool || isPolygonLasso || isLasso) && (
             <label className="tools__slider">
               Mode
               <select

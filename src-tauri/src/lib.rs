@@ -403,6 +403,21 @@ fn select_polygon(
     })
 }
 
+/// Lasso: select the pixels inside a freehand drag's closed trail,
+/// combined with the current selection per `mode`.
+#[tauri::command]
+fn select_lasso(
+    state: State<'_, AppState>,
+    trail: Vec<(f32, f32)>,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_lasso_with(mode, &trail)?;
+        Ok(None)
+    })
+}
+
 /// Magic Wand: replace the selection with every pixel of layer `id` within
 /// `tolerance` of the pixel at `(x, y)`, contiguous or not.
 #[tauri::command]
@@ -3508,6 +3523,7 @@ pub fn run() {
             select_rectangle,
             select_ellipse,
             select_polygon,
+            select_lasso,
             select_magic_wand,
             select_color_range,
             grow_selection,

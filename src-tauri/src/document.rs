@@ -1271,6 +1271,29 @@ impl Document {
         )
     }
 
+    /// The Lasso tool: a freehand drag's trail, closed back to its start,
+    /// as a polygon selection — [`Self::select_polygon_with`] after
+    /// dropping consecutive duplicate points, which a pointer drag
+    /// produces in quantity whenever it pauses. Needs at least three
+    /// distinct points; a trail that encloses no pixel centre (a straight
+    /// line, say) errors like any empty polygon.
+    pub fn select_lasso_with(
+        &mut self,
+        mode: SelectionMode,
+        trail: &[(f32, f32)],
+    ) -> Result<(), String> {
+        let mut distinct: Vec<(f32, f32)> = Vec::with_capacity(trail.len());
+        for &point in trail {
+            if distinct.last() != Some(&point) {
+                distinct.push(point);
+            }
+        }
+        if distinct.len() < 3 {
+            return Err("A lasso needs to enclose an area.".to_string());
+        }
+        self.select_polygon_with(mode, &distinct)
+    }
+
     /// [`Self::combine_selection`]'s engine over an already-built `new`
     /// selection of any shape.
     fn combine_with(&mut self, mode: SelectionMode, new: Selection) -> Result<(), String> {
@@ -18995,6 +19018,90 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("nothing selected"), "{err}");
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    #[test]
+    fn lasso_drops_consecutive_duplicate_points() {
+        let mut doc = Document::new(4, 4).unwrap();
+        let trail = [
+            (0.0, 0.0),
+            (0.0, 0.0),
+            (4.0, 0.0),
+            (4.0, 0.0),
+            (4.0, 0.0),
+            (0.0, 4.0),
+            (0.0, 4.0),
+        ];
+        doc.select_lasso_with(SelectionMode::New, &trail).unwrap();
+        let mut polygon = Document::new(4, 4).unwrap();
+        polygon
+            .select_polygon_with(SelectionMode::New, &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)])
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), selected_pixels(&polygon));
+        assert_eq!(selected_pixels(&doc).len(), 6);
+    }
+
+    #[test]
+    fn lasso_trail_approximating_a_circle_matches_the_ellipse_marquee() {
+        // A 64-gon inscribed in the canvas-spanning circle on 4x4: its
+        // apothem 2 cos(pi/64) = 1.998 clears every pixel centre the ellipse
+        // admits (the nearest edge centres sit 1.58 from the middle) and
+        // excludes the corners (2.12 away), exactly as the ellipse does.
+        let trail: Vec<(f32, f32)> = (0..64)
+            .map(|i| {
+                let t = i as f32 / 64.0 * std::f32::consts::TAU;
+                (2.0 + 2.0 * t.cos(), 2.0 + 2.0 * t.sin())
+            })
+            .collect();
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_lasso_with(SelectionMode::New, &trail).unwrap();
+        let mut marquee = Document::new(4, 4).unwrap();
+        marquee.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        assert_eq!(selected_pixels(&doc), selected_pixels(&marquee));
+        assert_eq!(selected_pixels(&doc).len(), 12);
+    }
+
+    #[test]
+    fn lasso_combines_with_the_current_selection() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_rectangle(3.0, 3.0, 4.0, 4.0).unwrap();
+        doc.select_lasso_with(
+            SelectionMode::Add,
+            &[(0.0, 0.0), (0.0, 0.0), (2.0, 0.0), (0.0, 2.0)],
+        )
+        .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(0, 0), (3, 3)]);
+    }
+
+    #[test]
+    fn lasso_rejects_a_trail_that_encloses_nothing() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let err = doc
+            .select_lasso_with(SelectionMode::New, &[(0.0, 0.0), (0.0, 0.0), (2.0, 2.0)])
+            .unwrap_err();
+        assert!(err.contains("enclose"), "{err}");
+        let err = doc
+            .select_lasso_with(
+                SelectionMode::New,
+                &[(0.0, 0.0), (1.0, 1.0), (2.0, 2.0), (3.0, 3.0)],
+            )
+            .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    #[test]
+    fn lasso_closes_back_to_its_start() {
+        // The same three corners in either winding, with the trail's end
+        // left open, still enclose the triangle.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_lasso_with(SelectionMode::New, &[(0.0, 4.0), (4.0, 0.0), (0.0, 0.0)])
+            .unwrap();
+        assert_eq!(
+            selected_pixels(&doc),
+            vec![(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (0, 2)]
+        );
     }
 
     #[test]
