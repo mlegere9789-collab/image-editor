@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 380.**
+**618 distinct capabilities tracked. Currently shipped: 389.**
 
 ## PART I — EVERY TOOL
 
@@ -235,15 +235,15 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] X Position
 - [ ] Y Position
 - [ ] Maintain Aspect Ratio
-- [ ] Content-Aware Scale
-- [ ] Content-Aware Scale — Amount
-- [ ] Content-Aware Scale — Protect
-- [ ] Content-Aware Scale — Protect Skin Tones
-- [ ] Content-Aware Scale — Reference Point Location
-- [ ] Content-Aware Scale — Reference Point Position
-- [ ] Content-Aware Scale — Scaling Percentage
-- [ ] Content-Aware Scale — Commit Transform
-- [ ] Content-Aware Scale — Cancel Transform
+- [x] Content-Aware Scale (`content_aware_scale(id, options)`: the layer's opaque bounds resized by seam carving — each pixel's energy the sum of its absolute luma differences to its four neighbours, the cheapest 8-connected seam removed or, when enlarging, duplicated as the average of itself and its neighbour, vertically for the width then transposed for the height — and placed back on a transparent canvas — see README Phase 235)
+- [x] Content-Aware Scale — Amount (`amount` percent of each dimension's change is carved and the remainder nearest-neighbour resampled — see README Phase 235)
+- [x] Content-Aware Scale — Protect (`protect`: an alpha channel whose byte over 255 adds up to a 1020 energy penalty, so seams avoid its bright pixels — see README Phase 235)
+- [x] Content-Aware Scale — Protect Skin Tones (`protect_skin`: the classic RGB skin rule adds the full penalty — see README Phase 235)
+- [x] Content-Aware Scale — Reference Point Location (`ReferencePoint`, the nine points of the bounds; the result is placed so its own such point sits where the original's did — see README Phase 235)
+- [x] Content-Aware Scale — Reference Point Position (`position`: the document pixel the reference point lands on instead — see README Phase 235)
+- [x] Content-Aware Scale — Scaling Percentage (`width_percent` / `height_percent` of the opaque bounds, rounded to whole pixels, at least one — see README Phase 235)
+- [x] Content-Aware Scale — Commit Transform (the dialog's OK sends the options through the `content_aware_scale` command as one undo step — see README Phase 235)
+- [x] Content-Aware Scale — Cancel Transform (the dialog's Cancel discards the options with nothing sent — see README Phase 235)
 - [ ] Perspective Warp
 - [ ] Perspective Warp — Layout Mode
 - [ ] Perspective Warp — Warp Mode

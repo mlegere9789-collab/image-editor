@@ -14005,6 +14005,67 @@ by hand instead. Every other layer of this project's quality bar
 **1415 Rust tests total** (1410 → 1415, 1408 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 235 — Content-Aware Scale
+
+Edit > Content-Aware Scale arrives whole. `content_aware_scale(id,
+options)` takes the layer's opaque bounds as a working image with a
+protection penalty per pixel — the Protect channel's byte scaled to
+`1020`, plus `1020` for a skin-toned pixel under Protect Skin Tones
+(`is_skin_tone`, now shared with Color Range) — and resizes it to the
+Scaling Percentages by seam carving: each pixel's energy is the sum of
+its absolute luma differences to its four clamped neighbours plus its
+penalty; the cheapest 8-connected top-to-bottom seam, ties to the
+left at every step, is removed, or when enlarging the cheapest seams
+found by carving a copy are duplicated as the average of each seam
+pixel and its right neighbour; the width is carved first and the
+height on the transposed image. `amount` percent of each dimension's
+change is carved and the remainder nearest-neighbour resampled
+(`floor((i + 0.5) · old / new)`), Photoshop's blend of the two. The
+result replaces the layer on a transparent canvas, placed so its
+Reference Point — one of the nine points of its bounds — sits where
+the original's did, or at the Reference Point Position when given,
+clipped to the canvas. A non-positive or non-finite percentage, an
+amount over `100`, an unknown Protect channel, a layer with no opaque
+pixels, and a locked or unknown layer are refused. A **Content-Aware
+Scale…** dialog carries W and H percentages, Amount, Protect (any
+alpha channel), Protect Skin Tones, Reference Point, an optional
+position, and OK / Cancel as Commit / Cancel Transform. The live
+handles Photoshop drags are a documented scope cut.
+
+**Verified two ways.** Five new `document.rs` tests on rows of greys,
+every seam traced by hand. On `[10, 200, 10, 10]` the column energies
+are `190, 380, 190, 0`, so scaling to 75% removes the flat last column
+and leaves `[10, 200, 10, _]` on both rows; on two rows where only the
+second has the spike, halving the height removes the flat first row.
+Halving four columns at Amount `100` carves the flat column and then
+the leftmost `190` to leave `[200, 10]`; at Amount `50` it carves one
+seam and samples columns `0` and `2` of `[10, 200, 10]` to leave `[10,
+10]`; at Amount `0` it samples columns `1` and `3` to leave `[200,
+10]`. Protecting the flat column through a channel moves the seam to
+the leftmost `190`; a skin-coloured pair at the cheap left end is
+carved unprotected but skipped for the `255` column under Protect
+Skin Tones. Widening `[10, 200, 10]` to four duplicates the cheapest
+seam as the average `105` — `[10, 105, 200, 10]` — placed at position
+`(1, 0)`, and a bottom-right reference keeps a shrunk row's right
+edge in place. Bad percentages, Amount `101`, an unknown channel, an
+unknown layer, an empty layer, and a locked layer are refused. All
+five passed on the first run; clippy asked for one loop to become an
+iterator, a mechanical change.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-two: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1420 Rust tests total** (1415 → 1420, 1413 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

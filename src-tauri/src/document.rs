@@ -539,6 +539,256 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
     out
 }
 
+/// Edit > Content-Aware Scale's Reference Point Location: which point of
+/// the content stays put.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReferencePoint {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Center,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+/// Edit > Content-Aware Scale's options bar.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentAwareScale {
+    /// Scaling Percentage, width and height, of the layer's opaque bounds.
+    pub width_percent: f32,
+    pub height_percent: f32,
+    /// How much of the change is seam carving (`0..=100`); the rest is
+    /// plain nearest-neighbour scaling.
+    pub amount: u8,
+    /// Protect: an alpha channel whose bright pixels seams avoid.
+    pub protect: Option<String>,
+    /// Protect Skin Tones: seams avoid skin-coloured pixels.
+    pub protect_skin: bool,
+    /// Reference Point Location: which point of the bounds stays put.
+    pub reference: ReferencePoint,
+    /// Reference Point Position: where that point lands, in document
+    /// pixels, overriding its original place.
+    pub position: Option<(i32, i32)>,
+}
+
+/// Whether an RGB pixel passes the classic skin-tone rule (R > 95, G > 40,
+/// B > 20, spread > 15, R − G > 15, R > G, R > B) — Color Range's Skin
+/// Tones and Content-Aware Scale's Protect Skin Tones.
+pub fn is_skin_tone([r, g, b]: [u8; 3]) -> bool {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    r > 95 && g > 40 && b > 20 && max - min > 15 && r > g && r - g > 15 && r > b
+}
+
+/// A working image for seam carving: RGBA pixels with a protection
+/// penalty per pixel, carved together.
+#[derive(Clone)]
+struct SeamImage {
+    width: usize,
+    height: usize,
+    pixels: Vec<[u8; 4]>,
+    penalty: Vec<u32>,
+}
+
+impl SeamImage {
+    /// The energy of every pixel: the absolute luma differences to its
+    /// four clamped neighbours, plus its penalty.
+    fn energies(&self) -> Vec<u32> {
+        let (w, h) = (self.width, self.height);
+        let luma: Vec<i32> = self
+            .pixels
+            .iter()
+            .map(|&px| i32::from(ApplyChannel::Rgb.value(px)))
+            .collect();
+        let at = |x: usize, y: usize| luma[y * w + x];
+        let mut out = Vec::with_capacity(w * h);
+        for y in 0..h {
+            for x in 0..w {
+                let me = at(x, y);
+                let left = at(x.saturating_sub(1), y);
+                let right = at((x + 1).min(w - 1), y);
+                let up = at(x, y.saturating_sub(1));
+                let down = at(x, (y + 1).min(h - 1));
+                let e = (me - left).unsigned_abs()
+                    + (me - right).unsigned_abs()
+                    + (me - up).unsigned_abs()
+                    + (me - down).unsigned_abs();
+                out.push(e + self.penalty[y * w + x]);
+            }
+        }
+        out
+    }
+
+    /// The cheapest top-to-bottom 8-connected seam, one column per row,
+    /// ties broken toward the left at every step.
+    fn vertical_seam(&self) -> Vec<usize> {
+        let (w, h) = (self.width, self.height);
+        let energy = self.energies();
+        let mut cost = vec![0u64; w * h];
+        cost[..w]
+            .iter_mut()
+            .zip(&energy[..w])
+            .for_each(|(c, &e)| *c = u64::from(e));
+        for y in 1..h {
+            for x in 0..w {
+                let lo = x.saturating_sub(1);
+                let hi = (x + 1).min(w - 1);
+                let best = (lo..=hi)
+                    .map(|px| cost[(y - 1) * w + px])
+                    .min()
+                    .unwrap_or(0);
+                cost[y * w + x] = best + u64::from(energy[y * w + x]);
+            }
+        }
+        let mut seam = vec![0usize; h];
+        let last = (h - 1) * w;
+        let mut x = (0..w).min_by_key(|&px| (cost[last + px], px)).unwrap_or(0);
+        seam[h - 1] = x;
+        for y in (0..h - 1).rev() {
+            let lo = x.saturating_sub(1);
+            let hi = (x + 1).min(w - 1);
+            x = (lo..=hi)
+                .min_by_key(|&px| (cost[y * w + px], px))
+                .unwrap_or(x);
+            seam[y] = x;
+        }
+        seam
+    }
+
+    fn remove_seam(&mut self, seam: &[usize]) {
+        let w = self.width;
+        let mut pixels = Vec::with_capacity((w - 1) * self.height);
+        let mut penalty = Vec::with_capacity((w - 1) * self.height);
+        for (y, &sx) in seam.iter().enumerate() {
+            for x in 0..w {
+                if x != sx {
+                    pixels.push(self.pixels[y * w + x]);
+                    penalty.push(self.penalty[y * w + x]);
+                }
+            }
+        }
+        self.pixels = pixels;
+        self.penalty = penalty;
+        self.width -= 1;
+    }
+
+    /// Widens by `count` columns: the `count` cheapest seams found by
+    /// carving a copy, mapped back to these columns, each duplicated as
+    /// the average of itself and its right neighbour.
+    fn insert_seams(&mut self, count: usize) {
+        let (w, h) = (self.width, self.height);
+        let mut probe = self.clone();
+        let mut index: Vec<Vec<usize>> = (0..h).map(|_| (0..w).collect()).collect();
+        let mut inserts: Vec<Vec<usize>> = vec![Vec::new(); h];
+        for _ in 0..count {
+            if probe.width < 2 {
+                break;
+            }
+            let seam = probe.vertical_seam();
+            for (y, &sx) in seam.iter().enumerate() {
+                inserts[y].push(index[y][sx]);
+                index[y].remove(sx);
+            }
+            probe.remove_seam(&seam);
+        }
+        let added = inserts[0].len();
+        let mut pixels = Vec::with_capacity((w + added) * h);
+        let mut penalty = Vec::with_capacity((w + added) * h);
+        for (y, row_marks) in inserts.iter().enumerate() {
+            let mut marks = row_marks.clone();
+            marks.sort_unstable();
+            for x in 0..w {
+                let px = self.pixels[y * w + x];
+                pixels.push(px);
+                penalty.push(self.penalty[y * w + x]);
+                for _ in marks.iter().filter(|&&m| m == x) {
+                    let right = self.pixels[y * w + (x + 1).min(w - 1)];
+                    let mut avg = [0u8; 4];
+                    for c in 0..4 {
+                        avg[c] = ((u16::from(px[c]) + u16::from(right[c])) / 2) as u8;
+                    }
+                    pixels.push(avg);
+                    penalty.push(self.penalty[y * w + x]);
+                }
+            }
+        }
+        self.pixels = pixels;
+        self.penalty = penalty;
+        self.width = w + added;
+    }
+
+    fn transpose(&self) -> SeamImage {
+        let (w, h) = (self.width, self.height);
+        let mut pixels = Vec::with_capacity(w * h);
+        let mut penalty = Vec::with_capacity(w * h);
+        for x in 0..w {
+            for y in 0..h {
+                pixels.push(self.pixels[y * w + x]);
+                penalty.push(self.penalty[y * w + x]);
+            }
+        }
+        SeamImage {
+            width: h,
+            height: w,
+            pixels,
+            penalty,
+        }
+    }
+
+    /// Nearest-neighbour resampling to `new_width × new_height`, each
+    /// output pixel reading source `floor((i + 0.5) · old / new)`.
+    fn resample(&self, new_width: usize, new_height: usize) -> SeamImage {
+        let (w, h) = (self.width, self.height);
+        let mut pixels = Vec::with_capacity(new_width * new_height);
+        let mut penalty = Vec::with_capacity(new_width * new_height);
+        for y in 0..new_height {
+            let sy =
+                (((y as f32 + 0.5) * h as f32 / new_height as f32).floor() as usize).min(h - 1);
+            for x in 0..new_width {
+                let sx =
+                    (((x as f32 + 0.5) * w as f32 / new_width as f32).floor() as usize).min(w - 1);
+                pixels.push(self.pixels[sy * w + sx]);
+                penalty.push(self.penalty[sy * w + sx]);
+            }
+        }
+        SeamImage {
+            width: new_width,
+            height: new_height,
+            pixels,
+            penalty,
+        }
+    }
+
+    /// Carves or inserts vertical seams toward `target` width by `amount`
+    /// percent of the difference, then resamples the rest.
+    fn scale_width(&mut self, target: usize, amount: u8) {
+        if target == self.width {
+            return;
+        }
+        let difference = target.abs_diff(self.width);
+        let carved = (difference as f32 * f32::from(amount) / 100.0).round() as usize;
+        if target < self.width {
+            for _ in 0..carved {
+                if self.width < 2 {
+                    break;
+                }
+                let seam = self.vertical_seam();
+                self.remove_seam(&seam);
+            }
+        } else {
+            self.insert_seams(carved);
+        }
+        if self.width != target {
+            *self = self.resample(target, self.height);
+        }
+    }
+}
+
 /// The naive, profile-free CMYK split of an RGB pixel as ink coverages
 /// `0..=255`: `K = 1 − max(r, g, b)` and each ink `(1 − channel − K) /
 /// (1 − K)`, zero for black. Photoshop's own conversion goes through an
@@ -3802,11 +4052,7 @@ impl Document {
                             _ => luma <= 65,
                         }
                     }
-                    ColorRange::SkinTones => {
-                        let max = r.max(g).max(b);
-                        let min = r.min(g).min(b);
-                        r > 95 && g > 40 && b > 20 && max - min > 15 && r > g && r - g > 15 && r > b
-                    }
+                    ColorRange::SkinTones => is_skin_tone([r, g, b]),
                 }
             })
             .collect();
@@ -15523,6 +15769,140 @@ impl Document {
     /// positive: Photoshop's own dialog lets a negative percentage flip
     /// the layer, but that is already Edit > Transform > Flip here, so a
     /// zero or negative factor errors rather than silently mirroring.
+    /// Edit > Content-Aware Scale: resizes layer `id`'s opaque bounds to
+    /// the Scaling Percentages by seam carving. Each pixel's energy is
+    /// the sum of its absolute luma differences to its four clamped
+    /// neighbours plus a `1020` penalty per unit of protection — the
+    /// Protect channel's byte over `255`, or full for a skin-toned pixel
+    /// under Protect Skin Tones; the cheapest 8-connected seam (ties to
+    /// the left) is removed, or when enlarging duplicated as the average
+    /// of itself and its right neighbour, first vertically for the width
+    /// and then, transposed, for the height. `amount` percent of each
+    /// dimension's change is carved and the remainder nearest-neighbour
+    /// resampled, Photoshop's blend of the two. The result replaces the
+    /// layer on a transparent canvas, placed so its reference point sits
+    /// where the original bounds' did — or at `position` when given —
+    /// clipped to the canvas. Errors for a non-positive or non-finite
+    /// percentage, an amount over 100, an unknown Protect channel, a
+    /// layer with no opaque pixels, or a locked or unknown layer.
+    pub fn content_aware_scale(
+        &mut self,
+        id: LayerId,
+        options: &ContentAwareScale,
+    ) -> Result<Option<Rect>, String> {
+        let ContentAwareScale {
+            width_percent,
+            height_percent,
+            amount,
+            protect,
+            protect_skin,
+            reference,
+            position,
+        } = options;
+        if !(width_percent.is_finite() && height_percent.is_finite())
+            || *width_percent <= 0.0
+            || *height_percent <= 0.0
+        {
+            return Err("Scaling percentages must be finite and greater than zero.".to_string());
+        }
+        if *amount > 100 {
+            return Err(format!("Amount must be 0..=100 percent, not {amount}."));
+        }
+        let protect_pixels: Option<Vec<u8>> = match protect {
+            Some(name) => Some(self.channels[self.channel_index(name)?].pixels.clone()),
+            None => None,
+        };
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to scale.".to_string())?;
+        if self.layer(id)?.locked {
+            return Err(format!("Layer \"{}\" is locked.", self.layer(id)?.name));
+        }
+        let doc_width = self.width as usize;
+        let (bw, bh) = (
+            (bounds.x1 - bounds.x0) as usize,
+            (bounds.y1 - bounds.y0) as usize,
+        );
+        let mut image = SeamImage {
+            width: bw,
+            height: bh,
+            pixels: Vec::with_capacity(bw * bh),
+            penalty: Vec::with_capacity(bw * bh),
+        };
+        {
+            let layer = self.layer(id)?;
+            for y in bounds.y0..bounds.y1 {
+                for x in bounds.x0..bounds.x1 {
+                    let i = y as usize * doc_width + x as usize;
+                    let px = [
+                        layer.pixels[i * CHANNELS],
+                        layer.pixels[i * CHANNELS + 1],
+                        layer.pixels[i * CHANNELS + 2],
+                        layer.pixels[i * CHANNELS + 3],
+                    ];
+                    let mut penalty = 0u32;
+                    if let Some(mask) = &protect_pixels {
+                        penalty += u32::from(mask[i]) * 1020 / 255;
+                    }
+                    if *protect_skin && is_skin_tone([px[0], px[1], px[2]]) {
+                        penalty += 1020;
+                    }
+                    image.pixels.push(px);
+                    image.penalty.push(penalty);
+                }
+            }
+        }
+        let target_w = ((bw as f32 * width_percent / 100.0).round() as usize).max(1);
+        let target_h = ((bh as f32 * height_percent / 100.0).round() as usize).max(1);
+        image.scale_width(target_w, *amount);
+        let mut transposed = image.transpose();
+        transposed.scale_width(target_h, *amount);
+        let image = transposed.transpose();
+
+        let anchor = |rect_x0: i64, rect_y0: i64, w: i64, h: i64| -> (i64, i64) {
+            let (ax, ay) = match reference {
+                ReferencePoint::TopLeft => (0, 0),
+                ReferencePoint::Top => (w / 2, 0),
+                ReferencePoint::TopRight => (w, 0),
+                ReferencePoint::Left => (0, h / 2),
+                ReferencePoint::Center => (w / 2, h / 2),
+                ReferencePoint::Right => (w, h / 2),
+                ReferencePoint::BottomLeft => (0, h),
+                ReferencePoint::Bottom => (w / 2, h),
+                ReferencePoint::BottomRight => (w, h),
+            };
+            (rect_x0 + ax, rect_y0 + ay)
+        };
+        let (old_ax, old_ay) = anchor(bounds.x0 as i64, bounds.y0 as i64, bw as i64, bh as i64);
+        let (target_ax, target_ay) = match position {
+            Some((x, y)) => (i64::from(*x), i64::from(*y)),
+            None => (old_ax, old_ay),
+        };
+        let (rel_ax, rel_ay) = anchor(0, 0, image.width as i64, image.height as i64);
+        let (origin_x, origin_y) = (target_ax - rel_ax, target_ay - rel_ay);
+
+        let (doc_w, doc_h) = (self.width as i64, self.height as i64);
+        let layer = self.layer_mut(id)?;
+        layer.pixels.iter_mut().for_each(|b| *b = 0);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                let (dx, dy) = (origin_x + x as i64, origin_y + y as i64);
+                if dx < 0 || dy < 0 || dx >= doc_w || dy >= doc_h {
+                    continue;
+                }
+                let base = (dy as usize * doc_width + dx as usize) * CHANNELS;
+                layer.pixels[base..base + CHANNELS]
+                    .copy_from_slice(&image.pixels[y * image.width + x]);
+            }
+        }
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        }))
+    }
+
     pub fn scale(
         &mut self,
         id: LayerId,
@@ -38605,6 +38985,169 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 255]);
         doc.set_locked(id, true).unwrap();
         assert!(doc.satin(id, 1, 0.0, 0, [0, 0, 0], 100, false).is_err());
+    }
+
+    fn cas(width_percent: f32, height_percent: f32, amount: u8) -> ContentAwareScale {
+        ContentAwareScale {
+            width_percent,
+            height_percent,
+            amount,
+            protect: None,
+            protect_skin: false,
+            reference: ReferencePoint::TopLeft,
+            position: None,
+        }
+    }
+
+    /// Grey `v` as an opaque pixel.
+    fn grey(v: u8) -> [u8; 4] {
+        [v, v, v, 255]
+    }
+
+    fn row_doc(rows: &[Vec<[u8; 4]>]) -> (Document, LayerId) {
+        let (w, h) = (rows[0].len() as u32, rows.len() as u32);
+        let mut doc = Document::new(w, h).unwrap();
+        let pixels: Vec<u8> = rows
+            .iter()
+            .flatten()
+            .flat_map(|px| px.iter().copied())
+            .collect();
+        let id = doc.add_layer("l", &pixels, w, h).unwrap();
+        (doc, id)
+    }
+
+    fn greys_of(doc: &Document, id: LayerId, y: u32) -> Vec<Option<u8>> {
+        (0..doc.width())
+            .map(|x| {
+                let px = pixel(doc, id, x, y);
+                (px[3] > 0).then_some(px[0])
+            })
+            .collect()
+    }
+
+    #[test]
+    fn content_aware_scale_removes_the_flattest_vertical_seam() {
+        // Energies per column: 190, 380, 190, 0 — the flat last column goes.
+        let (mut doc, id) = row_doc(&[
+            vec![grey(10), grey(200), grey(10), grey(10)],
+            vec![grey(10), grey(200), grey(10), grey(10)],
+        ]);
+        doc.content_aware_scale(id, &cas(75.0, 100.0, 100)).unwrap();
+        for y in 0..2 {
+            assert_eq!(greys_of(&doc, id, y), [Some(10), Some(200), Some(10), None]);
+        }
+        // And the flattest horizontal seam: the row without the spike.
+        let (mut doc, id) = row_doc(&[
+            vec![grey(10), grey(10), grey(10), grey(10)],
+            vec![grey(10), grey(200), grey(10), grey(10)],
+        ]);
+        doc.content_aware_scale(id, &cas(100.0, 50.0, 100)).unwrap();
+        assert_eq!(
+            greys_of(&doc, id, 0),
+            [Some(10), Some(200), Some(10), Some(10)]
+        );
+        assert_eq!(greys_of(&doc, id, 1), [None, None, None, None]);
+    }
+
+    #[test]
+    fn content_aware_scale_amount_mixes_seams_and_plain_scaling() {
+        // Halving four columns: Amount 100 carves two seams (the flat
+        // column, then the leftmost of the two 190s); Amount 50 carves one
+        // and then samples columns 0 and 2 of [10, 200, 10]; Amount 0 only
+        // samples columns 1 and 3.
+        let rows = vec![vec![grey(10), grey(200), grey(10), grey(10)]];
+        let (mut doc, id) = row_doc(&rows);
+        doc.content_aware_scale(id, &cas(50.0, 100.0, 100)).unwrap();
+        assert_eq!(greys_of(&doc, id, 0), [Some(200), Some(10), None, None]);
+        let (mut doc, id) = row_doc(&rows);
+        doc.content_aware_scale(id, &cas(50.0, 100.0, 50)).unwrap();
+        assert_eq!(greys_of(&doc, id, 0), [Some(10), Some(10), None, None]);
+        let (mut doc, id) = row_doc(&rows);
+        doc.content_aware_scale(id, &cas(50.0, 100.0, 0)).unwrap();
+        assert_eq!(greys_of(&doc, id, 0), [Some(200), Some(10), None, None]);
+    }
+
+    #[test]
+    fn content_aware_scale_protects_a_channel_and_skin_tones() {
+        // Protecting the flat last column through a channel pushes the seam
+        // onto the leftmost 190 instead.
+        let (mut doc, id) = row_doc(&[vec![grey(10), grey(200), grey(10), grey(10)]]);
+        doc.add_channel("keep", vec![0, 0, 0, 255]).unwrap();
+        let mut options = cas(75.0, 100.0, 100);
+        options.protect = Some("keep".to_string());
+        doc.content_aware_scale(id, &options).unwrap();
+        assert_eq!(greys_of(&doc, id, 0), [Some(200), Some(10), Some(10), None]);
+        // Skin at the cheap left end (energy 0) is skipped for the 255 column
+        // on the right once skin tones are protected.
+        let skin = [220, 180, 150, 255];
+        let (mut doc, id) = row_doc(&[vec![skin, skin, grey(0), grey(255)]]);
+        doc.content_aware_scale(id, &cas(75.0, 100.0, 100)).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), skin);
+        assert_eq!(pixel(&doc, id, 1, 0), grey(0));
+        assert_eq!(pixel(&doc, id, 2, 0), grey(255));
+        let (mut doc, id) = row_doc(&[vec![skin, skin, grey(0), grey(255)]]);
+        let mut options = cas(75.0, 100.0, 100);
+        options.protect_skin = true;
+        doc.content_aware_scale(id, &options).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), skin);
+        assert_eq!(pixel(&doc, id, 1, 0), skin);
+        assert_eq!(pixel(&doc, id, 2, 0), grey(0));
+        assert_eq!(pixel(&doc, id, 3, 0)[3], 0);
+    }
+
+    #[test]
+    fn content_aware_scale_enlarges_by_inserting_seams_and_places_by_reference() {
+        // Widening [10, 200, 10] by one: the cheapest seam is the leftmost
+        // 190, duplicated as the average of itself and its right neighbour.
+        let mut doc = Document::new(5, 1).unwrap();
+        let mut pixels = vec![0u8; 20];
+        for (i, v) in [10u8, 200, 10].iter().enumerate() {
+            pixels[i * 4..i * 4 + 4].copy_from_slice(&grey(*v));
+        }
+        let id = doc.add_layer("l", &pixels, 5, 1).unwrap();
+        let mut options = cas(133.34, 100.0, 100);
+        options.position = Some((1, 0));
+        doc.content_aware_scale(id, &options).unwrap();
+        assert_eq!(
+            greys_of(&doc, id, 0),
+            [None, Some(10), Some(105), Some(200), Some(10)]
+        );
+        // Bottom-right reference: shrinking a 4-wide row to 3 keeps its
+        // right edge where it was.
+        let (mut doc, id) = row_doc(&[vec![grey(10), grey(200), grey(10), grey(10)]]);
+        let mut options = cas(75.0, 100.0, 100);
+        options.reference = ReferencePoint::BottomRight;
+        doc.content_aware_scale(id, &options).unwrap();
+        assert_eq!(greys_of(&doc, id, 0), [None, Some(10), Some(200), Some(10)]);
+    }
+
+    #[test]
+    fn content_aware_scale_validates() {
+        let (mut doc, id) = row_doc(&[vec![grey(10), grey(200), grey(10), grey(10)]]);
+        assert!(doc.content_aware_scale(id, &cas(0.0, 100.0, 100)).is_err());
+        assert!(doc
+            .content_aware_scale(id, &cas(f32::NAN, 100.0, 100))
+            .is_err());
+        assert!(doc.content_aware_scale(id, &cas(50.0, 100.0, 101)).is_err());
+        let mut options = cas(50.0, 100.0, 100);
+        options.protect = Some("nope".to_string());
+        assert!(doc.content_aware_scale(id, &options).is_err());
+        assert!(doc
+            .content_aware_scale(999, &cas(50.0, 100.0, 100))
+            .is_err());
+        assert_eq!(
+            greys_of(&doc, id, 0),
+            [Some(10), Some(200), Some(10), Some(10)]
+        );
+        let mut doc = Document::new(2, 1).unwrap();
+        let empty = doc.add_layer("e", &[0; 8], 2, 1).unwrap();
+        assert!(doc
+            .content_aware_scale(empty, &cas(50.0, 100.0, 100))
+            .is_err());
+        doc.set_locked(empty, true).unwrap();
+        assert!(doc
+            .content_aware_scale(empty, &cas(50.0, 100.0, 100))
+            .is_err());
     }
 
     #[test]

@@ -173,6 +173,28 @@ export type ColorRange =
   | { kind: "sampled"; samples: ColorSample[]; fuzziness: number; localized: number | null }
   | { kind: ColorRangePreset };
 
+/** Mirrors `ReferencePoint` / `ContentAwareScale` in
+ * src-tauri/src/document.rs: Edit > Content-Aware Scale's options bar. */
+export type ReferencePoint =
+  | "topLeft"
+  | "top"
+  | "topRight"
+  | "left"
+  | "center"
+  | "right"
+  | "bottomLeft"
+  | "bottom"
+  | "bottomRight";
+export type ContentAwareScaleOptions = {
+  widthPercent: number;
+  heightPercent: number;
+  amount: number;
+  protect: string | null;
+  protectSkin: boolean;
+  reference: ReferencePoint;
+  position: [number, number] | null;
+};
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness. */
 export type Proof = "protanopia" | "deuteranopia";

@@ -20,6 +20,7 @@ import type {
   ColorRange,
   ColorRangePreset,
   ColorSample,
+  ContentAwareScaleOptions,
   DocumentView,
   Fill,
   GuideOrientation,
@@ -30,6 +31,7 @@ import type {
   MoveDirection,
   Palette,
   Proof,
+  ReferencePoint,
   SelectionMode,
   SelectionShape,
   ShapeBlurKernel,
@@ -401,6 +403,17 @@ export default function App() {
     [0, 0],
   ]);
   const [showFreeTransformDialog, setShowFreeTransformDialog] = useState(false);
+  // Edit > Content-Aware Scale: the options bar, committed by OK.
+  const [showCasDialog, setShowCasDialog] = useState(false);
+  const [casWidth, setCasWidth] = useState(100);
+  const [casHeight, setCasHeight] = useState(100);
+  const [casAmount, setCasAmount] = useState(100);
+  const [casProtect, setCasProtect] = useState<string>("");
+  const [casProtectSkin, setCasProtectSkin] = useState(false);
+  const [casReference, setCasReference] = useState<ReferencePoint>("center");
+  const [casUsePosition, setCasUsePosition] = useState(false);
+  const [casX, setCasX] = useState(0);
+  const [casY, setCasY] = useState(0);
   const [freeTransform, setFreeTransform] = useState({
     widthPercent: 100,
     heightPercent: 100,
@@ -1610,6 +1623,33 @@ export default function App() {
     },
     [],
   );
+
+  const applyContentAwareScale = useCallback(async () => {
+    if (selectedId === null) return;
+    const options: ContentAwareScaleOptions = {
+      widthPercent: casWidth,
+      heightPercent: casHeight,
+      amount: Math.round(casAmount),
+      protect: casProtect === "" ? null : casProtect,
+      protectSkin: casProtectSkin,
+      reference: casReference,
+      position: casUsePosition ? [Math.round(casX), Math.round(casY)] : null,
+    };
+    await runCommand("content_aware_scale", { id: selectedId, options });
+    setShowCasDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    casWidth,
+    casHeight,
+    casAmount,
+    casProtect,
+    casProtectSkin,
+    casReference,
+    casUsePosition,
+    casX,
+    casY,
+  ]);
 
   const applyFreeTransform = useCallback(async () => {
     if (selectedId === null) return;
@@ -4866,6 +4906,14 @@ export default function App() {
             title="Edit > Free Transform (scale, rotate, skew, move as one edit)"
           >
             Free Transform…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowCasDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Content-Aware Scale: resize the layer's content by seam carving, protecting a channel or skin tones"
+          >
+            Content-Aware Scale…
           </button>
           <button
             className="button button--quiet"
@@ -10798,6 +10846,117 @@ export default function App() {
               </button>
               <button className="button" onClick={applyDropShadow} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCasDialog && (
+        <div className="modal-overlay" onClick={() => setShowCasDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Content-Aware Scale"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Content-Aware Scale</h2>
+            <p className="modal__hint">
+              Resizes the layer&apos;s opaque content by removing or duplicating its
+              lowest-energy seams; Amount is how much of the change is seam carving rather
+              than plain scaling. OK commits the transform, Cancel discards it.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">W (%)</span>
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                step={0.1}
+                value={casWidth}
+                onChange={(event) => setCasWidth(Number(event.target.value))}
+              />
+              <span className="control__label">H (%)</span>
+              <input
+                type="number"
+                min={1}
+                max={1000}
+                step={0.1}
+                value={casHeight}
+                onChange={(event) => setCasHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{casAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={casAmount}
+                onChange={(event) => setCasAmount(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Protect</span>
+              <select value={casProtect} onChange={(event) => setCasProtect(event.target.value)}>
+                <option value="">None</option>
+                {(document?.channels ?? []).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={casProtectSkin}
+                onChange={(event) => setCasProtectSkin(event.target.checked)}
+              />
+              <span className="control__label">Protect Skin Tones</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Reference Point</span>
+              <select
+                value={casReference}
+                onChange={(event) => setCasReference(event.target.value as ReferencePoint)}
+              >
+                <option value="topLeft">Top left</option>
+                <option value="top">Top</option>
+                <option value="topRight">Top right</option>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="bottomLeft">Bottom left</option>
+                <option value="bottom">Bottom</option>
+                <option value="bottomRight">Bottom right</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={casUsePosition}
+                onChange={(event) => setCasUsePosition(event.target.checked)}
+              />
+              <span className="control__label">Set reference point position</span>
+              {casUsePosition && (
+                <>
+                  <span className="control__label">X</span>
+                  <input type="number" value={casX} onChange={(event) => setCasX(Number(event.target.value))} />
+                  <span className="control__label">Y</span>
+                  <input type="number" value={casY} onChange={(event) => setCasY(Number(event.target.value))} />
+                </>
+              )}
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowCasDialog(false)} title="Cancel Transform">
+                Cancel
+              </button>
+              <button className="button" onClick={applyContentAwareScale} disabled={busy} title="Commit Transform">
+                OK
               </button>
             </div>
           </div>

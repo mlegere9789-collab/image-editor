@@ -1239,6 +1239,18 @@ fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, St
     })
 }
 
+/// Edit > Content-Aware Scale on layer `id` with the options bar's values.
+#[tauri::command]
+fn content_aware_scale(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::ContentAwareScale,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.content_aware_scale(id, &options)
+    })
+}
+
 /// Image > Adjustments > Color Lookup: apply the `.cube` 3D LUT at `path`
 /// to layer `id`.
 #[tauri::command]
@@ -4609,6 +4621,7 @@ pub fn run() {
             add_channel,
             convert_mode,
             color_lookup,
+            content_aware_scale,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,
