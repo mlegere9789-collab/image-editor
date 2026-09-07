@@ -11461,6 +11461,58 @@ instead. Every other layer of this project's quality bar
 **1170 Rust tests total** (1165 → 1170, 1163 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 186 — Remove tool
+
+`Stroke::Remove` is the Spot Healing Brush with one change that makes
+it behave like a removal rather than a touch-up: each covered pixel
+takes the ring mean of the pre-stroke layer computed only over ring
+samples the stroke itself does *not* cover — `stroke` already has the
+whole stroke's coverage map before it paints, so the arm can ask, for
+each of the sixteen ring samples, whether it lies under the brush. An
+object brushed over in one stroke is therefore filled from outside the
+brushed area instead of from its own remaining pixels, which is what a
+removal should do; when every sample is covered (a stroke over
+everything) the plain ring mean is used. Photoshop's Remove tool is a
+neural model; this is its explicit proximity stand-in, stated as such.
+Alpha is untouched and transparent pixels are skipped. A new **Remove**
+tool button sits beside Spot Healing.
+
+**Verified two ways.** Five new `document.rs` tests, every value
+derived in Python from the same clamp-and-truncate ring rule, with a
+side-by-side against the Spot Healing Brush that shows the difference
+the exclusion makes. On a new `striped_3x3` (solid `100` with a `200`
+stripe across the middle row) a radius-`0.5` stroke along the stripe
+covers exactly the middle row, and Remove turns every stripe pixel
+`100` — the surrounding value — while the Spot Healing Brush, whose
+rings also average the stripe's own pixels, gives `112`. A stroke over
+all of `ramped_3x3` falls back to the plain ring-mean grid `[[40, 42,
+45], [47, 50, 52], [55, 57, 60]]`. A radius-1 dot at `(1, 1)` covers
+four pixels; `(0, 0)`'s nine uncovered ring samples average `58`, and
+its `0.7929` coverage mixes `10` toward `58` to `48`. On
+`depth_ramped_3x3` the transparent column is untouched and the centre
+keeps alpha `128`. A one-column selection confines the removal to its
+first stripe pixel, and a locked layer errors. Four of the five passed
+on the first run: the selection test expected that pixel to become
+`100`, but only *selected* pixels carry coverage, so the unselected
+stripe pixel at `(2, 1)` — which the clamped ring reaches from column
+0 — is not excluded, and the fifteen remaining samples average
+`(14 × 100 + 200) / 15 = 106`. The Python model, given the same
+covered set, agrees, and the test now expects `106 200 200`.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1175 Rust tests total** (1170 → 1175, 1168 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

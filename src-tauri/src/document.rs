@@ -7044,6 +7044,7 @@ impl Document {
                 | Stroke::Smudge { .. }
                 | Stroke::Heal { .. }
                 | Stroke::SpotHeal
+                | Stroke::Remove
         )
         .then(|| layer.pixels.clone());
         // Color Replacement samples the colour to replace under the stroke's
@@ -7196,6 +7197,50 @@ impl Document {
                             x0 + col as u32,
                             y0 + row as u32,
                         );
+                        for (slot, &target) in
+                            layer.pixels[base..base + 3].iter_mut().zip(mean.iter())
+                        {
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), c));
+                        }
+                        continue;
+                    }
+                    Stroke::Remove => {
+                        if layer.pixels[base + 3] == 0 {
+                            continue;
+                        }
+                        let source = snapshot.as_ref().expect("taken above");
+                        let (px, py) = ((x0 + col as u32) as i64, (y0 + row as u32) as i64);
+                        let (w, h) = (width as i64, height as i64);
+                        let covered = |sx: i64, sy: i64| {
+                            let (bx, by) = (sx - x0 as i64, sy - y0 as i64);
+                            bx >= 0
+                                && by >= 0
+                                && (bx as usize) < box_width
+                                && (by as usize) < box_height
+                                && coverage[by as usize * box_width + bx as usize] > 0.0
+                        };
+                        let ring: Vec<(i64, i64)> = (-2i64..=2)
+                            .flat_map(|dy| {
+                                (-2i64..=2).filter_map(move |dx| {
+                                    (dx.abs().max(dy.abs()) == 2).then_some((dx, dy))
+                                })
+                            })
+                            .map(|(dx, dy)| ((px + dx).clamp(0, w - 1), (py + dy).clamp(0, h - 1)))
+                            .collect();
+                        let outside: Vec<(usize, usize)> = ring
+                            .iter()
+                            .filter(|&&(sx, sy)| !covered(sx, sy))
+                            .map(|&(sx, sy)| (sx as usize, sy as usize))
+                            .collect();
+                        let mean = if outside.is_empty() {
+                            average_samples(
+                                source,
+                                width as usize,
+                                ring.iter().map(|&(sx, sy)| (sx as usize, sy as usize)),
+                            )
+                        } else {
+                            average_samples(source, width as usize, outside.into_iter())
+                        };
                         for (slot, &target) in
                             layer.pixels[base..base + 3].iter_mut().zip(mean.iter())
                         {
@@ -12803,6 +12848,15 @@ pub enum Stroke<'a> {
     /// Create Texture types and Sample All Layers are documented scope
     /// cuts.
     SpotHeal,
+    /// The Remove tool: like [`Stroke::SpotHeal`], each covered pixel takes
+    /// a ring mean of the pre-stroke layer — but only over ring samples the
+    /// stroke itself does not cover, so an object brushed over in one
+    /// stroke is filled from *outside* the brushed area rather than from
+    /// its own remaining pixels; when every sample is covered (a stroke
+    /// over everything) the plain ring mean is used. Photoshop's Remove
+    /// tool is a neural model; this is its explicit proximity stand-in.
+    /// Alpha is untouched and transparent pixels are skipped.
+    Remove,
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -20293,6 +20347,75 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.content_aware_fill(id).is_err());
         assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+    }
+
+    /// Solid 100 with a 200 stripe across the middle row.
+    fn striped_3x3() -> (Document, LayerId) {
+        let mut pixels = solid(3, 3, [100, 0, 0, 255]);
+        for x in 0..3 {
+            pixels[(3 + x) * 4] = 200;
+        }
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn remove_tool_fills_from_outside_the_brushed_area() {
+        // Brushing the whole stripe at radius 0.5 covers exactly the middle
+        // row: the ring samples that land on the stripe are excluded, so
+        // every stripe pixel becomes the surrounding 100. The Spot Healing
+        // Brush, averaging the stripe's own neighbours too, gives 112.
+        let (mut doc, id) = striped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (2.5, 1.5)], 0.5, Stroke::Remove)
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![100, 100, 100]);
+        assert_eq!(red_channel_grid(&doc)[0], vec![100, 100, 100]);
+        let (mut doc, id) = striped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (2.5, 1.5)], 0.5, Stroke::SpotHeal)
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![112, 112, 112]);
+    }
+
+    #[test]
+    fn remove_tool_falls_back_to_the_plain_ring_mean_when_everything_is_covered() {
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Remove).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 42, 45], vec![47, 50, 52], vec![55, 57, 60]]
+        );
+    }
+
+    #[test]
+    fn remove_tool_blends_by_coverage_over_uncovered_samples() {
+        // A radius-1 dot at (1, 1) covers (0,0), (1,0), (0,1), (1,1); the
+        // nine uncovered ring samples of (0, 0) average 58, and its 0.7929
+        // coverage mixes 10 toward 58: 48.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Remove).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 48);
+    }
+
+    #[test]
+    fn remove_tool_leaves_alpha_and_transparent_pixels_alone() {
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Remove).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 1), [40, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 128);
+    }
+
+    #[test]
+    fn remove_tool_respects_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = striped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.stroke(id, &[(0.5, 1.5), (2.5, 1.5)], 0.5, Stroke::Remove)
+            .unwrap();
+        // Only the selected pixel is covered, so its ring keeps the
+        // unselected stripe pixel at (2, 1): 14 × 100 + 200 over 15 = 106.
+        assert_eq!(red_channel_grid(&doc)[1], vec![106, 200, 200]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stroke(id, &[(0.5, 1.5)], 0.5, Stroke::Remove).is_err());
     }
 
     #[test]

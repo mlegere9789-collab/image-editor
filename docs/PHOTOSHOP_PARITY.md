@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 259.**
+**618 distinct capabilities tracked. Currently shipped: 260.**
 
 ## PART I — EVERY TOOL
 
@@ -19,7 +19,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] QUICK SELECTION TOOL
 - [x] MAGIC WAND TOOL (`select_magic_wand`, a click selects every pixel within a per-channel Tolerance of the clicked pixel's own colour — 4-connected from the click in Contiguous mode, anywhere on the layer otherwise — as the first pixel-mask selection: a new `SelectionShape::Mask` backed by a shared document-sized bitmap that every selection-respecting command already honours through `Selection::contains`. Anti-alias and Sample All Layers are documented scope cuts, and Modify > Expand/Contract/Smooth/Border reject mask selections for now — see README Phase 149)
 - [ ] SELECTION BRUSH TOOL
-- [ ] REMOVE TOOL
+- [x] REMOVE TOOL (`Stroke::Remove`, the Spot Healing ring mean taken only over samples the stroke does not itself cover, so a brushed-over object is filled from outside the brushed area, falling back to the plain ring mean when everything is covered; Photoshop's neural model is replaced by this explicit proximity stand-in — see README Phase 186)
 - [x] HEALING BRUSH TOOL (`Stroke::Heal { offset }`, the Clone Stamp's aligned Alt-click sampling with the classic heal — texture from the source, tone from the destination: the sample shifted per channel by the difference of the two radius-1 local means, clamped, mixed by coverage, alpha untouched; Diffusion, Sample All Layers, and pattern sources are documented scope cuts — see README Phase 181)
 - [x] SPOT HEALING BRUSH TOOL (`Stroke::SpotHeal`, Proximity Match: each covered pixel takes the mean of the sixteen pre-stroke pixels on the square ring two pixels out, edge-clamped, mixed by coverage, alpha untouched; Content-Aware, Create Texture, and Sample All Layers are documented scope cuts — see README Phase 182)
 - [x] PATCH TOOL (`patch`, Normal/Source mode: the selection is the area to repair, dragged onto the area to sample; every selected pixel is rebuilt from the pre-patch pixel that offset away with the Healing Brush's tone-matched heal, replacing outright, alpha untouched, the outline left in place; Destination mode, Transparent, Diffusion, and Content-Aware patching are documented scope cuts — see README Phase 183)

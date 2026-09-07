@@ -144,6 +144,7 @@ export type Tool =
   | "cloneStamp"
   | "healingBrush"
   | "spotHealingBrush"
+  | "remove"
   | "patch"
   | "contentAwareMove"
   | "historyBrush"

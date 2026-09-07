@@ -3042,6 +3042,8 @@ export default function App() {
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "remove") {
+        void runCommand("remove_stroke", { id: selectedId, points, radius: brushSize });
       } else if (tool === "spotHealingBrush") {
         void runCommand("spot_heal_stroke", { id: selectedId, points, radius: brushSize });
       } else if (tool === "healingBrush") {
@@ -4271,6 +4273,15 @@ export default function App() {
             title="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
           >
             Spot Healing
+          </button>
+          <button
+            className={`button button--quiet${tool === "remove" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "remove"}
+            onClick={() => setTool("remove")}
+            title="Remove: brush over an object to fill it from the surroundings outside the brushed area"
+          >
+            Remove
           </button>
           <button
             className={`button button--quiet${tool === "patch" ? " button--active" : ""}`}
@@ -5539,6 +5550,7 @@ export default function App() {
               tool === "cloneStamp" ||
               tool === "healingBrush" ||
               tool === "spotHealingBrush" ||
+              tool === "remove" ||
               tool === "patch" ||
               tool === "contentAwareMove" ||
               tool === "historyBrush" ||
