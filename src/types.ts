@@ -152,6 +152,7 @@ export type Tool =
   | "line"
   | "polygon"
   | "star"
+  | "triangle"
   | "historyBrush"
   | "magicWand"
   | "lasso"

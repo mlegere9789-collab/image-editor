@@ -2997,7 +2997,39 @@ impl Document {
         self.paint_polygon(id, &vertices, color)
     }
 
-    /// [`Self::draw_polygon`] and [`Self::draw_star`]'s shared painter:
+    /// The Triangle tool in its Pixels mode: paints the isosceles triangle
+    /// fitted to the box spanning `(x0, y0)` and `(x1, y1)` — apex at the
+    /// top centre, base along the bottom edge, whichever way the drag went
+    /// (Photoshop keeps the apex at the box's top too; pointing it another
+    /// way is a transform, and its rounded-corner option is a documented
+    /// scope cut) — onto layer `id` in a flat `color`, through the Polygon
+    /// tool's even-odd pixel-centre fill, selection confinement, and dirty
+    /// box. A box with no width or height paints nothing and returns
+    /// `None`, as does one entirely off the canvas; non-finite corners and
+    /// a locked or unknown layer error.
+    pub fn draw_triangle(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return Err("Triangle coordinates must be finite numbers.".to_string());
+        }
+        let (left, right) = (x0.min(x1), x0.max(x1));
+        let (top, bottom) = (y0.min(y1), y0.max(y1));
+        if right - left <= f32::EPSILON || bottom - top <= f32::EPSILON {
+            return Ok(None);
+        }
+        let vertices = [((left + right) / 2.0, top), (right, bottom), (left, bottom)];
+        self.paint_polygon(id, &vertices, color)
+    }
+
+    /// [`Self::draw_polygon`], [`Self::draw_star`], and
+    /// [`Self::draw_triangle`]'s shared painter:
     /// overwrites every pixel of layer `id` whose centre is inside
     /// `vertices` by the even-odd rule and inside the active selection,
     /// returning the vertices' bounding box clipped to the canvas, or
@@ -21315,6 +21347,112 @@ mod tests {
             .is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 50, FILL).is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn triangle_tool_fits_the_box_in_either_drag_direction() {
+        // Apex (2.5, 0), base from (0, 5) to (5, 5): the half-width at a
+        // row's centre y is y / 2, so rows 0-1 hold one centre, rows 2-3
+        // three, and row 4 all five.
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_triangle(id, 5.0, 5.0, 0.0, 0.0, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", "..F..", ".FFF.", ".FFF.", "FFFFF"]
+        );
+    }
+
+    #[test]
+    fn triangle_tool_follows_a_wide_box() {
+        // A 5-wide, 3-tall box: the half-width grows 5/6 per pixel of
+        // height, so row 3's outer centres at 0.5 and 4.5 just make it in
+        // (the edge is at 0.417).
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_triangle(id, 0.0, 1.0, 5.0, 4.0, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 1,
+                x1: 5,
+                y1: 4
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", "..F..", ".FFF.", "FFFFF", "....."]
+        );
+    }
+
+    #[test]
+    fn triangle_tool_keeps_its_apex_at_the_top_of_a_small_box() {
+        let (mut doc, id) = blank_5x5();
+        doc.draw_triangle(id, 1.0, 1.0, 4.0, 4.0, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", "..F..", "..F..", ".FFF.", "....."]
+        );
+    }
+
+    #[test]
+    fn triangle_tool_respects_the_selection_and_clips_to_the_canvas() {
+        // A box hanging off the top-left corner: apex (0.5, −2), base
+        // from (−2, 3) to (3, 3).
+        let (mut doc, id) = blank_5x5();
+        let dirty = doc.draw_triangle(id, -2.0, -2.0, 3.0, 3.0, FILL).unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["FF...", "FF...", "FFF..", ".....", "....."]
+        );
+        let (mut doc, id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        doc.draw_triangle(id, 0.0, 0.0, 5.0, 5.0, FILL).unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".....", ".....", ".F...", ".F...", "FF..."]
+        );
+        assert_eq!(
+            doc.draw_triangle(id, 7.0, 7.0, 9.0, 9.0, FILL).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn triangle_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc
+            .draw_triangle(id, f32::NAN, 0.0, 5.0, 5.0, FILL)
+            .is_err());
+        assert_eq!(
+            doc.draw_triangle(id, 1.0, 1.0, 1.0, 4.0, FILL).unwrap(),
+            None
+        );
+        assert_eq!(
+            doc.draw_triangle(id, 1.0, 1.0, 4.0, 1.0, FILL).unwrap(),
+            None
+        );
+        assert!(doc.draw_triangle(id + 1, 0.0, 0.0, 5.0, 5.0, FILL).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.draw_triangle(id, 0.0, 0.0, 5.0, 5.0, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }
 

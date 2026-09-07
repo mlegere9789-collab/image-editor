@@ -3138,7 +3138,8 @@ export default function App() {
     tool === "ellipse" ||
     tool === "line" ||
     tool === "polygon" ||
-    tool === "star";
+    tool === "star" ||
+    tool === "triangle";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3601,7 +3602,16 @@ export default function App() {
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
             const fill = shapeFill ? [r, g, b, 255] : null;
             const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
-            if (tool === "star") {
+            if (tool === "triangle") {
+              void runCommand("draw_triangle", {
+                id: selectedId,
+                x0,
+                y0,
+                x1,
+                y1,
+                color: [r, g, b, 255],
+              });
+            } else if (tool === "star") {
               void runCommand("draw_star", {
                 id: selectedId,
                 cx: x0,
@@ -4464,6 +4474,15 @@ export default function App() {
             title="Star: drag from the centre to the first point to paint a star in the brush colour"
           >
             Star
+          </button>
+          <button
+            className={`button button--quiet${tool === "triangle" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "triangle"}
+            onClick={() => setTool("triangle")}
+            title="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
+          >
+            Triangle
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}

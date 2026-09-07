@@ -11806,6 +11806,57 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1200 Rust tests total** (1195 → 1200, 1193 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 192 — Triangle tool
+
+`Document::draw_triangle(id, x0, y0, x1, y1, color)` is the Triangle
+tool in its Pixels mode: the isosceles triangle fitted to the dragged
+box — apex at the top centre, base along the bottom edge — whichever
+way the drag went. Photoshop keeps the apex at the box's top as well
+(pointing it elsewhere is a transform), and its rounded-corner option,
+stroke, anti-aliasing, and Shape and Path modes are documented scope
+cuts. The three vertices go through the same private `paint_polygon`
+the Polygon and Star tools use, so the even-odd pixel-centre fill,
+selection confinement, and clipped dirty box are shared. A box with no
+width or no height paints nothing and returns `None`, as does one
+entirely off the canvas; non-finite corners and a locked or unknown
+layer error.
+
+A new **Triangle** tool button sits after Star; it uses the marquee's
+box preview and paints at pointer-up through a `draw_triangle` command
+in the brush colour.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python port of the even-odd test with the
+edge-margin check (closest centre `0.064` pixels from an edge, on the
+wide box). A `(5, 5)`→`(0, 0)` drag on a blank `5×5` fills `..F.. /
+..F.. / .FFF. / .FFF. / FFFFF`: the half-width at a row's centre `y` is
+`y / 2`, so rows 0–1 hold one centre, rows 2–3 three, and row 4 all
+five. A `5×3` box from `y = 1` to `4` gives `..F.. / .FFF. / FFFFF` on
+rows 1–3, row 3's outer centres at `0.5` and `4.5` clearing the edge at
+`0.417`. A `3×3` box at `(1, 1)` gives a one-pixel apex over a
+three-pixel base. A box hanging off the top-left corner — apex
+`(0.5, −2)`, base from `(−2, 3)` to `(3, 3)` — paints `FF / FF / FFF`
+and reports the clipped `(0, 0)–(3, 3)` box; the full-box triangle with
+the two left columns selected keeps `.F / .F / FF` on rows 2–4; and a
+box at `(7, 7)–(9, 9)` returns `None`. A `NaN` corner, an unknown
+layer, and a locked layer error with the pixels untouched, and a box
+with no width or no height returns `None`. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1205 Rust tests total** (1200 → 1205, 1198 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

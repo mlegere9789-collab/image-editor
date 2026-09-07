@@ -2254,6 +2254,23 @@ fn draw_star(
     })
 }
 
+/// Triangle tool (Pixels mode): paint the isosceles triangle fitted to a
+/// dragged box.
+#[tauri::command]
+fn draw_triangle(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_triangle(id, x0, y0, x1, y1, color)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3743,6 +3760,7 @@ pub fn run() {
             draw_line,
             draw_polygon,
             draw_star,
+            draw_triangle,
             clone_stroke,
             set_history_source,
             history_stroke,
