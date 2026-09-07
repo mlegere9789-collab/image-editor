@@ -2568,6 +2568,14 @@ fn histogram(state: State<'_, AppState>, id: LayerId) -> Result<Vec<Vec<u32>>, S
     Ok(counts.iter().map(|channel| channel.to_vec()).collect())
 }
 
+/// Camera Raw Filter > RGB Levels: layer `id`'s own RGBA8 pixel at `(x, y)`.
+#[tauri::command]
+fn rgb_levels(state: State<'_, AppState>, id: LayerId, x: u32, y: u32) -> Result<[u8; 4], String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.layer_pixel(id, x, y)
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2817,6 +2825,7 @@ pub fn run() {
             lens_blur,
             camera_raw_saturation,
             histogram,
+            rgb_levels,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 189.**
+**618 distinct capabilities tracked. Currently shipped: 190.**
 
 ## PART I — EVERY TOOL
 
@@ -619,7 +619,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] New Document — Neural Filter Output
 - [ ] Camera Raw Filter
 - [x] Camera Raw Histogram (`histogram`, a read-only per-channel 256-bin count of the layer's own R/G/B values over the selection or whole layer — the exact sampling `equalize` already used to build its own remap table, factored out into a shared `layer_histogram` helper — drawn as three overlaid channel curves in a Histogram dialog. Camera Raw's own luminance overlay and clipping warnings, and any alpha weighting, are a documented scope cut — see README Phase 127)
-- [ ] RGB Levels
+- [x] RGB Levels (`layer_pixel`, a read-only RGBA8 readout of the selected layer's own stored pixel under the pointer, shown live in the status bar as the pointer moves over the canvas — the layer's own bytes, alpha included, rather than the eyedropper's composited sample, so it reports exactly what `histogram` counts — see README Phase 128)
 - [ ] Shadow Clipping
 - [x] Temperature (`temperature_tint`, a direct per-channel shift — adds to red, subtracts from blue — standing in for Photoshop's own Kelvin-based white-balance model, since this project has no raw-metadata source for a file's own native white balance — see README Phase 117)
 - [x] Tint (`temperature_tint`'s own second slider, adding directly to green alone — see README Phase 117)

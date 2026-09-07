@@ -243,6 +243,8 @@ export default function App() {
   const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] = useState(false);
   const [cameraRawSaturation, setCameraRawSaturation] = useState(25);
   const [histogramData, setHistogramData] = useState<number[][] | null>(null);
+  const [rgbLevels, setRgbLevels] = useState<[number, number, number, number] | null>(null);
+  const lastLevelsPixel = useRef<string | null>(null);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
   const [defringeAmount, setDefringeAmount] = useState(50);
 
@@ -2670,9 +2672,35 @@ export default function App() {
     ],
   );
 
+  const readLevelsAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document || selectedId === null) return;
+      const [fx, fy] = toDocPoint(event, document);
+      const x = Math.floor(fx);
+      const y = Math.floor(fy);
+      if (x < 0 || y < 0 || x >= document.width || y >= document.height) return;
+      const key = `${selectedId}:${x}:${y}`;
+      if (lastLevelsPixel.current === key) return;
+      lastLevelsPixel.current = key;
+      void invoke<[number, number, number, number]>("rgb_levels", { id: selectedId, x, y })
+        .then((levels) => setRgbLevels(levels))
+        .catch(() => setRgbLevels(null));
+    },
+    [document, selectedId],
+  );
+
+  // A repaint under a stationary pointer would otherwise leave the readout
+  // showing the pre-edit value until the pointer moved to a new pixel. Every
+  // snapshot hands back a fresh document view, so keying on it catches
+  // every edit.
+  useEffect(() => {
+    lastLevelsPixel.current = null;
+  }, [document]);
+
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
+      readLevelsAt(event);
       if (isMarqueeTool) {
         if (marqueeStart.current === null) return;
         setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
@@ -2684,7 +2712,7 @@ export default function App() {
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, isMarqueeTool, applyStroke],
+    [document, isMarqueeTool, applyStroke, readLevelsAt],
   );
 
   const endStroke = useCallback(
@@ -11639,6 +11667,8 @@ export default function App() {
                 onPointerUp={endStroke}
                 onPointerCancel={endStroke}
                 onPointerLeave={(event) => {
+                  lastLevelsPixel.current = null;
+                  setRgbLevels(null);
                   // Pointer capture keeps delivering move/up here even once the
                   // cursor leaves the element, but a mouse that was never
                   // pressed on the canvas has no capture to keep the stroke
@@ -11745,6 +11775,14 @@ export default function App() {
             <span>
               {layers.length} layer{layers.length === 1 ? "" : "s"}
             </span>
+            {rgbLevels && (
+              <span
+                className="statusbar__levels"
+                title="Camera Raw Filter > RGB Levels: the selected layer's own pixel under the pointer"
+              >
+                R {rgbLevels[0]} G {rgbLevels[1]} B {rgbLevels[2]} A {rgbLevels[3]}
+              </span>
+            )}
           </>
         ) : (
           <span className="statusbar__name">Ready</span>

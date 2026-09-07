@@ -8447,6 +8447,56 @@ quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
 **877 Rust tests total** (873 → 877, 870 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 128 — Camera Raw Filter > RGB Levels
+
+`layer_pixel(id, x, y)` is the second read-only query, the natural
+companion to Phase 127's histogram: the RGBA8 value of a layer's own
+pixel at `(x, y)` — the per-channel readout Camera Raw shows under its
+histogram for the pixel beneath the pointer. Unlike the eyedropper's
+`sample_color`, which reads the flattened composite, this reads the one
+layer's own stored bytes, alpha included, so what it reports is exactly
+what `histogram` is counting for that layer. It is read-only (a locked
+layer is fine) and errors on an unknown layer or a point outside the
+canvas. On the frontend, moving the pointer over the canvas with a layer
+selected now asks for the pixel under it and shows `R G B A` in the
+status bar, cleared when the pointer leaves. Two small guards keep the
+readout honest and cheap: the request is skipped while the pointer stays
+on the same document pixel of the same layer (one round-trip per pixel
+crossed, not per mouse event), and that memo is reset whenever the
+composite is redrawn, so a repaint under a stationary pointer refreshes
+the value instead of showing the pre-edit byte until the pointer moves.
+Camera Raw's own readout is shown as percentages in its Lab/percentage
+modes and can be pinned per colour sampler; this project's own single
+live 8-bit readout is a documented scope cut.
+
+**Verified two ways.** Four new `document.rs` tests, again on fixtures
+whose contents are written out literally. `ramped_3x3`'s `(col 2, row
+1)` reads `[60, 0, 0, 255]`, `(0, 0)` reads `[10, 0, 0, 255]`, `(1, 2)`
+reads `[80, 0, 0, 255]`. Phase 125's `depth_ramped_3x3` shows the
+alpha-not-composite distinction directly: its fully transparent `(0, 1)`
+reads the layer's own stored `[40, 0, 0, 0]`, and `(1, 1)` reads
+`[50, 0, 0, 128]`, where a composited sample would have shown the
+canvas behind them. `(3, 0)` and `(0, 3)` — one past each edge of the
+3x3 canvas — error while the corner `(2, 2)` still reads
+`[90, 0, 0, 255]`. A locked layer still answers (`[50, 0, 0, 255]` at
+its centre) and an unknown layer errors. As with the histogram, the
+second verification is the fixture listing itself; no arithmetic is
+involved.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-five: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The pointer-move wiring and the per-pixel memo were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**881 Rust tests total** (877 → 881, 874 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

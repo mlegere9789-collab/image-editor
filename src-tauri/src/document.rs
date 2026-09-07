@@ -2006,6 +2006,27 @@ impl Document {
         self.layer_histogram(id).map(|(counts, _)| counts)
     }
 
+    /// Camera Raw Filter > RGB Levels: the RGBA8 value of layer `id`'s own
+    /// pixel at `(x, y)` — the per-channel readout Camera Raw shows under
+    /// its histogram for the pixel beneath the pointer. Unlike the
+    /// eyedropper's composited sample, this reads the one layer's own
+    /// stored bytes, alpha included, so what it reports is exactly what
+    /// [`Self::histogram`] is counting. Read-only (a locked layer is
+    /// fine); errors on an unknown layer or a point outside the canvas.
+    pub fn layer_pixel(&self, id: LayerId, x: u32, y: u32) -> Result<[u8; 4], String> {
+        if x >= self.width || y >= self.height {
+            return Err(format!(
+                "({x}, {y}) is outside the {}×{} canvas.",
+                self.width, self.height
+            ));
+        }
+        let layer = self.layer(id)?;
+        let base = (y as usize * self.width as usize + x as usize) * CHANNELS;
+        let mut out = [0u8; 4];
+        out.copy_from_slice(&layer.pixels[base..base + CHANNELS]);
+        Ok(out)
+    }
+
     /// Image > Adjustments > Equalize: redistributes each channel's values
     /// so its histogram is as flat as possible — the darkest level present
     /// becomes 0, the brightest 255, and every level in between lands
@@ -22873,6 +22894,42 @@ mod tests {
     fn histogram_of_an_unknown_layer_is_an_error() {
         let doc = Document::new(2, 2).unwrap();
         assert!(doc.histogram(999).is_err());
+    }
+
+    #[test]
+    fn layer_pixel_reads_the_layers_own_stored_bytes() {
+        // ramped_3x3: (col 2, row 1) is R 60, (col 0, row 0) is R 10, all
+        // with G = B = 0 and alpha 255.
+        let (doc, id) = ramped_3x3();
+        assert_eq!(doc.layer_pixel(id, 2, 1).unwrap(), [60, 0, 0, 255]);
+        assert_eq!(doc.layer_pixel(id, 0, 0).unwrap(), [10, 0, 0, 255]);
+        assert_eq!(doc.layer_pixel(id, 1, 2).unwrap(), [80, 0, 0, 255]);
+    }
+
+    #[test]
+    fn layer_pixel_reports_alpha_rather_than_compositing() {
+        // depth_ramped_3x3's column 0 is fully transparent: the eyedropper
+        // would see the composite, but RGB Levels reports the layer's own
+        // stored (40, 0, 0, 0) unchanged.
+        let (doc, id) = depth_ramped_3x3();
+        assert_eq!(doc.layer_pixel(id, 0, 1).unwrap(), [40, 0, 0, 0]);
+        assert_eq!(doc.layer_pixel(id, 1, 1).unwrap(), [50, 0, 0, 128]);
+    }
+
+    #[test]
+    fn layer_pixel_outside_the_canvas_is_an_error() {
+        let (doc, id) = ramped_3x3();
+        assert!(doc.layer_pixel(id, 3, 0).is_err());
+        assert!(doc.layer_pixel(id, 0, 3).is_err());
+        assert_eq!(doc.layer_pixel(id, 2, 2).unwrap(), [90, 0, 0, 255]);
+    }
+
+    #[test]
+    fn layer_pixel_is_read_only_and_needs_a_known_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.set_locked(id, true).unwrap();
+        assert_eq!(doc.layer_pixel(id, 1, 1).unwrap(), [50, 0, 0, 255]);
+        assert!(doc.layer_pixel(999, 1, 1).is_err());
     }
 
     #[test]

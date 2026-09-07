@@ -473,6 +473,11 @@ body {
   color: var(--muted);
 }
 
+.statusbar__levels {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
 .histogram {
   width: 100%;
   height: 120px;
