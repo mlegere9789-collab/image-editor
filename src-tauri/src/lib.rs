@@ -4535,6 +4535,16 @@ fn field_blur(
 }
 
 /// Filter Gallery > Blur Gallery > Spin Blur on layer `id`.
+/// Filter Gallery > Blur Gallery > Path Blur on layer `id`.
+#[tauri::command]
+fn path_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::PathBlur,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.path_blur(id, &options))
+}
+
 #[tauri::command]
 fn spin_blur(
     state: State<'_, AppState>,
@@ -5120,6 +5130,7 @@ pub fn run() {
             iris_blur,
             field_blur,
             spin_blur,
+            path_blur,
             lens_blur,
             camera_raw_saturation,
             histogram,

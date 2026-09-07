@@ -14703,6 +14703,63 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1475 Rust tests total** (1470 → 1475, 1468 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 247 — Path Blur, completing the Blur Gallery
+
+Blur Gallery > Path Blur lands, and with it every one of the gallery's
+five blurs is shipped, so the Blur Gallery row itself flips too. A
+`PathBlur` is the drawn path — a polyline of at least two points in
+pixel coordinates — with the options bar's Speed, Taper, and Centered
+Blur. `path_blur(id, options)` is a motion blur whose direction
+follows the path: for every pixel the nearest point of the polyline
+is found (the earlier segment on a tie) and the pixel is averaged
+along that segment's direction the way `motion_blur_at` averages —
+`2·half + 1` samples a whole pixel apart, edge-clamped,
+integer-truncated — straddling the pixel with Centered Blur and
+running forward along the path from it otherwise. `half` is Speed
+shrunk by Taper: at arc fraction `u` of the path the streak is `speed
+· (1 − taper/100 · (1 − 2·min(u, 1 − u)))` pixels, rounded, so Taper
+`100` fades it to nothing at the path's ends and leaves the middle
+whole. The selection confines it. A **Path Blur…** dialog has the
+path's point fields with Add point and remove, Speed and Taper
+sliders, Centered Blur, and Apply / Cancel. Photoshop's Bézier path
+handles, per-endpoint speeds, Rear Sync Flash, and Strobe are
+documented scope cuts. Fewer than two points, a non-finite point, a
+zero-length path, a zero Speed, a Taper out of `0..=100`, and a locked
+or unknown layer are refused.
+
+**Verified two ways.** Five new `document.rs` tests, every average
+traced by hand and the Taper factors cross-checked in `f32` by an
+independent Python script. A straight path along the top row of the
+3×3 ramp at Speed `1` is byte-identical to a 0° motion blur of
+distance `1`, and down the left column to the 90° one. An L along the
+top row and down the right column blurs each pixel along its nearer
+leg — `13` and `43` along rows, `70` and `80` down columns — with the
+corner and the centre, equidistant from both, taking the earlier,
+horizontal leg (`26`, `50`). On a five-pixel row `10 20 60 40 50` at
+Speed `2`, Taper `100` gives streak halves `0 1 2 1 0` and the row `10
+30 36 50 50`, Taper `50` halves `1 2 2 2 1` (`1.5` rounding up) and
+`13 28 36 44 46`. Uncentered at Speed `1` the same row streaks
+forward to `30 40 50 46 50`, the path drawn right to left streaks the
+other way to `10 13 30 40 50`, and with the first two pixels selected
+only they change. One point, two coincident points, a NaN point,
+Speed `0`, Taper `101`, an unknown layer, and a locked layer are
+refused with the ramp untouched. All five passed on the first run;
+clippy asked only for a type alias on the segment tuple.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1480 Rust tests total** (1475 → 1480, 1473 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

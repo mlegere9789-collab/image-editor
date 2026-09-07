@@ -37,6 +37,7 @@ import type {
   PuppetMesh,
   PuppetPin,
   PuppetWarpOptions,
+  PathBlurOptions,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -816,6 +817,9 @@ export default function App() {
   const [fieldBlurY2, setFieldBlurY2] = useState(0);
   const [fieldBlurRadius2, setFieldBlurRadius2] = useState(15);
   const [showSpinBlurDialog, setShowSpinBlurDialog] = useState(false);
+  // Blur Gallery > Path Blur: the path's points and the options bar.
+  const [showPathBlurDialog, setShowPathBlurDialog] = useState(false);
+  const [pathBlur, setPathBlur] = useState<PathBlurOptions>({ points: [], speed: 10, taper: 0, centered: true });
   const [spinBlurCenterX, setSpinBlurCenterX] = useState(0);
   const [spinBlurCenterY, setSpinBlurCenterY] = useState(0);
   const [spinBlurAngle, setSpinBlurAngle] = useState(15);
@@ -3578,6 +3582,34 @@ export default function App() {
     });
     setShowSpinBlurDialog(false);
   }, [runCommand, selectedId, spinBlurCenterX, spinBlurCenterY, spinBlurAngle]);
+
+  const openPathBlurDialog = useCallback(() => {
+    const w = document?.width ?? 2;
+    const h = document?.height ?? 2;
+    setPathBlur({
+      points: [
+        [Math.round(w / 4) + 0.5, Math.round(h / 2) + 0.5],
+        [Math.round((3 * w) / 4) + 0.5, Math.round(h / 2) + 0.5],
+      ],
+      speed: 10,
+      taper: 0,
+      centered: true,
+    });
+    setShowPathBlurDialog(true);
+  }, [document]);
+
+  const setPathBlurPoint = useCallback((index: number, axis: 0 | 1, value: number) => {
+    setPathBlur((options) => ({
+      ...options,
+      points: options.points.map((p, i) => (i === index ? (axis === 0 ? [value, p[1]] : [p[0], value]) : p)),
+    }));
+  }, []);
+
+  const applyPathBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("path_blur", { id: selectedId, options: pathBlur });
+    setShowPathBlurDialog(false);
+  }, [runCommand, selectedId, pathBlur]);
 
   const applyLensBlur = useCallback(async () => {
     if (selectedId === null) return;
@@ -7224,6 +7256,14 @@ export default function App() {
             title="Filter Gallery > Blur Gallery > Spin Blur"
           >
             Spin Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openPathBlurDialog}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Blur Gallery > Path Blur: a motion blur that follows a drawn path"
+          >
+            Path Blur…
           </button>
           <button
             className="button button--quiet"
@@ -18662,6 +18702,84 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFieldBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPathBlurDialog && (
+        <div className="modal-overlay" onClick={() => setShowPathBlurDialog(false)} role="presentation">
+          <div className="modal modal--wide" role="dialog" aria-label="Path Blur" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Filter Gallery &gt; Blur Gallery &gt; Path Blur</h2>
+            <p className="modal__hint">
+              Every pixel streaks along the nearest leg of the path. Speed is the streak&apos;s
+              half-length in pixels; Taper shortens it toward the path&apos;s ends; Centered
+              Blur straddles each pixel instead of running forward from it.
+            </p>
+            {pathBlur.points.map((point, i) => (
+              <span className="control control--row" key={i}>
+                <span className="control__label">Point {i + 1}</span>
+                <input type="number" step={0.5} value={point[0]} onChange={(event) => setPathBlurPoint(i, 0, Number(event.target.value))} />
+                <input type="number" step={0.5} value={point[1]} onChange={(event) => setPathBlurPoint(i, 1, Number(event.target.value))} />
+                <button
+                  className="button button--quiet"
+                  disabled={pathBlur.points.length <= 2}
+                  onClick={() => setPathBlur((o) => ({ ...o, points: o.points.filter((_, j) => j !== i) }))}
+                  title="Remove this point"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            <button
+              className="button button--quiet"
+              onClick={() =>
+                setPathBlur((o) => {
+                  const last = o.points[o.points.length - 1] ?? [0.5, 0.5];
+                  return { ...o, points: [...o.points, [last[0], last[1] + 10]] };
+                })
+              }
+              title="Add a point after the last"
+            >
+              Add point
+            </button>
+            <label className="control control--row">
+              <span className="control__label">Speed (px)</span>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={pathBlur.speed}
+                onChange={(event) => setPathBlur((o) => ({ ...o, speed: Number(event.target.value) }))}
+              />
+              <span className="control__value">{pathBlur.speed}</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Taper %</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={pathBlur.taper}
+                onChange={(event) => setPathBlur((o) => ({ ...o, taper: Number(event.target.value) }))}
+              />
+              <span className="control__value">{pathBlur.taper}</span>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={pathBlur.centered}
+                onChange={(event) => setPathBlur((o) => ({ ...o, centered: event.target.checked }))}
+              />
+              <span className="control__label">Centered Blur</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPathBlurDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyPathBlur} disabled={busy || pathBlur.points.length < 2}>
                 Apply
               </button>
             </div>

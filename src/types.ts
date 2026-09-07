@@ -245,6 +245,15 @@ export type WarpStyle =
   | "squeeze"
   | "twist";
 
+/** Mirrors `PathBlur` in src-tauri/src/document.rs: Blur Gallery > Path
+ * Blur's path, Speed, Taper, and Centered Blur. */
+export type PathBlurOptions = {
+  points: [number, number][];
+  speed: number;
+  taper: number;
+  centered: boolean;
+};
+
 /** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
  * draws (vertices, where the pins move them, triangles as indices). */

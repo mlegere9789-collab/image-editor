@@ -852,6 +852,29 @@ fn puppet_grid(bounds: Rect, spacing: u32) -> (Vec<[f32; 2]>, Vec<[usize; 3]>) {
     (vertices, triangles)
 }
 
+/// One leg of a Path Blur path: its start, unit direction, length, and
+/// the arc length before it.
+type PathSegment = ((f32, f32), (f32, f32), f32, f32);
+
+/// Everything Filter Gallery > Blur Gallery > Path Blur applies at once —
+/// see [`Document::path_blur`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathBlur {
+    /// The blur path's points, a polyline in pixel coordinates (pixel
+    /// centres at `.5`), at least two.
+    pub points: Vec<(f32, f32)>,
+    /// Pixels the streak extends on each side of a pixel (Centered Blur)
+    /// or ahead of it; at least 1.
+    pub speed: u32,
+    /// Percent by which the streak shortens toward the path's ends: `0`
+    /// keeps it full everywhere, `100` shrinks it to nothing at the ends.
+    pub taper: f32,
+    /// Centered Blur: the streak straddles the pixel rather than running
+    /// forward along the path from it.
+    pub centered: bool,
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -16342,6 +16365,90 @@ impl Document {
             }
         }
         Ok(Some(bounds))
+    }
+
+    /// Filter Gallery > Blur Gallery > Path Blur: a motion blur whose
+    /// direction follows a drawn path. For every pixel the nearest point
+    /// of the polyline through `options.points` is found — the earlier
+    /// segment on a tie — and the pixel is averaged along that segment's
+    /// direction the way [`motion_blur_at`] averages: `2·half + 1`
+    /// samples a whole pixel apart, edge-clamped, integer-truncated,
+    /// straddling the pixel with Centered Blur and running forward along
+    /// the path from it otherwise. `half` is `speed` shrunk by Taper: at
+    /// arc fraction `u` of the path the streak is `speed · (1 − taper/100
+    /// · (1 − 2·min(u, 1 − u)))` pixels, rounded, so Taper `100` fades it
+    /// to nothing at the path's ends and leaves the middle whole. The
+    /// selection confines it. Photoshop's Bézier path handles,
+    /// per-endpoint speeds, Rear Sync Flash, and Strobe are documented
+    /// scope cuts. Errors for fewer than two points, a non-finite point,
+    /// a path of zero length, a zero speed, a Taper out of `0..=100`, or
+    /// a locked or unknown layer.
+    pub fn path_blur(&mut self, id: LayerId, options: &PathBlur) -> Result<Option<Rect>, String> {
+        let PathBlur {
+            points,
+            speed,
+            taper,
+            centered,
+        } = options;
+        if points.len() < 2 {
+            return Err("Path Blur needs a path of at least two points.".to_string());
+        }
+        if points
+            .iter()
+            .any(|(x, y)| !(x.is_finite() && y.is_finite()))
+        {
+            return Err("Path Blur's points must be finite coordinates.".to_string());
+        }
+        if *speed == 0 {
+            return Err("Path Blur's Speed must be at least 1 pixel.".to_string());
+        }
+        if !(taper.is_finite() && (0.0..=100.0).contains(taper)) {
+            return Err("Path Blur's Taper must be between 0 and 100 percent.".to_string());
+        }
+        // Each segment: start, direction (unit), length, and the arc length
+        // before it.
+        let mut segments: Vec<PathSegment> = Vec::new();
+        let mut total = 0.0f32;
+        for pair in points.windows(2) {
+            let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
+            let (dx, dy) = (bx - ax, by - ay);
+            let len = dx.hypot(dy);
+            if len > 0.0 {
+                segments.push(((ax, ay), (dx / len, dy / len), len, total));
+                total += len;
+            }
+        }
+        if segments.is_empty() {
+            return Err("Path Blur's path must have some length.".to_string());
+        }
+        let speed = *speed as f32;
+        let taper = taper / 100.0;
+        let centered = *centered;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
+            let mut best: Option<(f32, (f32, f32), f32)> = None;
+            for &((ax, ay), (dx, dy), len, before) in &segments {
+                let t = ((px - ax) * dx + (py - ay) * dy).clamp(0.0, len);
+                let (qx, qy) = (ax + dx * t, ay + dy * t);
+                let distance = (px - qx) * (px - qx) + (py - qy) * (py - qy);
+                if best.map_or(true, |(d, _, _)| distance < d) {
+                    best = Some((distance, (dx, dy), (before + t) / total));
+                }
+            }
+            let (_, (dx, dy), u) = best.expect("at least one segment");
+            let factor = 1.0 - taper * (1.0 - 2.0 * u.min(1.0 - u));
+            let half = (speed * factor).round() as i64;
+            let range = if centered { -half..=half } else { 0..=2 * half };
+            let samples = range.map(|t| {
+                let sx = (col as i64 + (t as f32 * dx).round() as i64).clamp(0, width - 1) as usize;
+                let sy =
+                    (row as i64 + (t as f32 * dy).round() as i64).clamp(0, height - 1) as usize;
+                (sx, sy)
+            });
+            average_samples(pixels, doc_width, samples)
+        })
     }
 
     /// Filter Gallery > Blur Gallery > Spin Blur: [`Self::radial_blur`]'s
@@ -44140,5 +44247,125 @@ mod tests {
         assert_eq!(names.len(), 12);
         assert_eq!(doc.view().spots[0].color, [0, 128, 255]);
         assert_eq!(doc.view().spots[0].solidity, 100.0);
+    }
+
+    fn path(points: &[(f32, f32)], speed: u32, taper: f32, centered: bool) -> PathBlur {
+        PathBlur {
+            points: points.to_vec(),
+            speed,
+            taper,
+            centered,
+        }
+    }
+
+    fn row_5(values: [u8; 5]) -> (Document, LayerId) {
+        let mut doc = Document::new(5, 1).unwrap();
+        let pixels: Vec<u8> = values.iter().flat_map(|&v| [v, 0, 0, 255]).collect();
+        let id = doc.add_layer("row", &pixels, 5, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn path_blur_along_a_straight_path_is_a_motion_blur_in_its_direction() {
+        let (mut doc, id) = ramped_3x3();
+        doc.path_blur(id, &path(&[(0.5, 0.5), (2.5, 0.5)], 1, 0.0, true))
+            .unwrap();
+        let (mut motion, id_b) = ramped_3x3();
+        motion.motion_blur(id_b, 0.0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, motion.layers()[0].pixels);
+        let (mut doc, id) = ramped_3x3();
+        doc.path_blur(id, &path(&[(0.5, 0.5), (0.5, 2.5)], 1, 0.0, true))
+            .unwrap();
+        let (mut motion, id_b) = ramped_3x3();
+        motion.motion_blur(id_b, 90.0, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, motion.layers()[0].pixels);
+    }
+
+    #[test]
+    fn path_blur_follows_the_nearest_segment_of_a_bent_path() {
+        // An L along the top row and down the right column: pixels nearer
+        // the top blur along rows, pixels nearer the right edge down
+        // columns, and a tie goes to the earlier segment.
+        let (mut doc, id) = ramped_3x3();
+        doc.path_blur(
+            id,
+            &path(&[(0.5, 0.5), (2.5, 0.5), (2.5, 2.5)], 1, 0.0, true),
+        )
+        .unwrap();
+        let red = |x: u32, y: u32| pixel(&doc, id, x, y)[0];
+        assert_eq!(red(0, 0), 13); // (10 + 10 + 20) / 3
+        assert_eq!(red(2, 0), 26); // corner, tie: along the row (20 + 30 + 30) / 3
+        assert_eq!(red(0, 1), 43); // (40 + 40 + 50) / 3
+        assert_eq!(red(1, 1), 50); // tie: along the row (40 + 50 + 60) / 3
+        assert_eq!(red(1, 2), 70); // down the column (50 + 80 + 80) / 3
+        assert_eq!(red(2, 2), 80); // on the vertical leg (60 + 90 + 90) / 3
+    }
+
+    #[test]
+    fn path_blur_taper_shortens_the_streak_toward_the_ends() {
+        // Speed 2 along a five-pixel row: with Taper 100 the streak is 0
+        // at the ends, 1 a quarter of the way in, and the full 2 in the
+        // middle; with Taper 50 it is 1, round(1.5) = 2, 2, 2, 1.
+        let (mut doc, id) = row_5([10, 20, 60, 40, 50]);
+        doc.path_blur(id, &path(&[(0.5, 0.5), (4.5, 0.5)], 2, 100.0, true))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 30, 36, 50, 50]);
+        let (mut doc, id) = row_5([10, 20, 60, 40, 50]);
+        doc.path_blur(id, &path(&[(0.5, 0.5), (4.5, 0.5)], 2, 50.0, true))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![13, 28, 36, 44, 46]);
+    }
+
+    #[test]
+    fn path_blur_uncentered_streaks_forward_along_the_path() {
+        let (mut doc, id) = row_5([10, 20, 60, 40, 50]);
+        doc.path_blur(id, &path(&[(0.5, 0.5), (4.5, 0.5)], 1, 0.0, false))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![30, 40, 50, 46, 50]);
+        // The same path drawn right to left streaks the other way.
+        let (mut doc, id) = row_5([10, 20, 60, 40, 50]);
+        doc.path_blur(id, &path(&[(4.5, 0.5), (0.5, 0.5)], 1, 0.0, false))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 13, 30, 40, 50]);
+        // The selection confines it.
+        let (mut doc, id) = row_5([10, 20, 60, 40, 50]);
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.path_blur(id, &path(&[(0.5, 0.5), (4.5, 0.5)], 1, 0.0, false))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![30, 40, 60, 40, 50]);
+    }
+
+    #[test]
+    fn path_blur_refuses_a_bad_path_speed_taper_or_layer() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let line = [(0.5, 0.5), (2.5, 0.5)];
+        assert!(doc
+            .path_blur(id, &path(&line[..1], 1, 0.0, true))
+            .unwrap_err()
+            .contains("two points"));
+        assert!(doc
+            .path_blur(id, &path(&[(0.5, 0.5), (0.5, 0.5)], 1, 0.0, true))
+            .unwrap_err()
+            .contains("length"));
+        assert!(doc
+            .path_blur(id, &path(&[(0.5, 0.5), (f32::NAN, 0.5)], 1, 0.0, true))
+            .unwrap_err()
+            .contains("finite"));
+        assert!(doc
+            .path_blur(id, &path(&line, 0, 0.0, true))
+            .unwrap_err()
+            .contains("Speed"));
+        assert!(doc
+            .path_blur(id, &path(&line, 1, 101.0, true))
+            .unwrap_err()
+            .contains("Taper"));
+        assert!(doc.path_blur(999, &path(&line, 1, 0.0, true)).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .path_blur(id, &path(&line, 1, 0.0, true))
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 }
