@@ -8821,6 +8821,67 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **909 Rust tests total** (904 → 909, 902 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 135 — Filter > Camera Raw Filter (the whole dialog as one edit)
+
+With thirteen Camera Raw panels shipped one at a time over Phases
+117–134, `camera_raw_filter(id, settings)` finally fills in the menu
+entry itself. Camera Raw applies every panel's settings together in a
+fixed internal order and commits them as a single step; this does the
+same with the panels this project has built, running the
+already-verified per-panel adjustments in sequence on the same layer —
+white balance (`temperature_tint`), then tone (`highlights_shadows`),
+then `clarity`, then `camera_raw_saturation`, then the Curve panel
+(`parametric_curve` followed by `camera_raw_point_curve`), then Optics
+(`defringe`) — so that one call is byte-for-byte the same as making
+those calls yourself in that order, but lands as one undo step. The
+settings travel as a new `CameraRawSettings` struct (serde, camelCase)
+whose `Default` is the neutral dialog: every slider at `0`, an identity
+point curve, no defringing. A panel left at its neutral value is
+skipped outright rather than run as a no-op, so an untouched Optics
+panel never round-trips every pixel through HSL and all-default
+settings are an exact identity that reports nothing touched. Each
+stage's own clamping or erroring rules are unchanged (a `101`
+Defringe still errors, and nothing earlier in the sequence is applied
+when it does, since the checkpointed edit is discarded as a whole).
+Camera Raw's own remaining panels — Detail, Effects, Calibration,
+Geometry, and the local-adjustment masks — and its exact internal
+pipeline order are a documented scope cut. A new **Camera Raw
+Filter…** dialog presents Basic, Curve (Parametric and Point), and
+Optics sections with a Reset button, in a wider scrolling modal.
+
+**Verified two ways.** Four new `document.rs` tests on a new
+`camera_raw_fixture` — a 2x2 layer of four distinct, fully chromatic
+colours so every stage has something to change. With every panel
+non-neutral (temperature `20`, tint `-10`, highlights `30`, shadows
+`-20`, clarity `40`, saturation `25`, parametric `[10, -10, 20, -20]`,
+point curve `[0, 80, 128, 192, 255]`, defringe `30`), the composite
+equals the seven per-panel calls made in that order byte-for-byte, and
+genuinely differs from the untouched fixture. All-default settings are
+a byte-for-byte identity and report `None` touched. With only
+Saturation moved to `+50`, the result equals `camera_raw_saturation(50)`
+alone, and pixel `(0, 0)` — `(200, 100, 100)` — is the `(225, 75, 75)`
+Phase 126 already hand-verified. A one-pixel selection confines the
+edit, a `101` Defringe errors, and a locked or unknown layer errors
+even at all-default settings. All four passed on the first run. The
+"second way" here is structural rather than numeric: every number the
+composite produces is one an earlier phase already hand-computed and
+cross-checked, and the tests pin that the composite reproduces exactly
+those bytes.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**913 Rust tests total** (909 → 913, 906 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 196.**
+**618 distinct capabilities tracked. Currently shipped: 197.**
 
 ## PART I — EVERY TOOL
 
@@ -617,7 +617,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] New Layer Masked — Neural Filter Output
 - [ ] Smart Filter — Neural Filter Output
 - [ ] New Document — Neural Filter Output
-- [ ] Camera Raw Filter
+- [x] Camera Raw Filter (`camera_raw_filter`, the whole dialog as one edit: a `CameraRawSettings` struct applying the shipped panels in sequence on one layer — Temperature/Tint, Highlights/Shadows, Clarity, Saturation, Parametric Curve, Point Curve, Defringe — byte-for-byte the same as the per-panel calls in that order but as a single undo step, skipping any panel left at its neutral default. Camera Raw's own remaining panels (Detail, Effects, Calibration, Geometry, masks) and exact internal order are a documented scope cut — see README Phase 135)
 - [x] Camera Raw Histogram (`histogram`, a read-only per-channel 256-bin count of the layer's own R/G/B values over the selection or whole layer — the exact sampling `equalize` already used to build its own remap table, factored out into a shared `layer_histogram` helper — drawn as three overlaid channel curves in a Histogram dialog. Camera Raw's own luminance overlay and clipping warnings, and any alpha weighting, are a documented scope cut — see README Phase 127)
 - [x] RGB Levels (`layer_pixel`, a read-only RGBA8 readout of the selected layer's own stored pixel under the pointer, shown live in the status bar as the pointer moves over the canvas — the layer's own bytes, alpha included, rather than the eyedropper's composited sample, so it reports exactly what `histogram` counts — see README Phase 128)
 - [x] Shadow Clipping (`shadow_clipping`, read-only per-channel counts of sampled pixels clipped to 0 — bin 0 of each channel of the shared `layer_histogram` — lit per channel as an indicator under the Histogram dialog's curves, the way Camera Raw's own shadow-clipping triangle lights by channel. Camera Raw's own blue on-canvas overlay of the clipped pixels is a documented scope cut — see README Phase 129)

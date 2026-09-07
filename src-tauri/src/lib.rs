@@ -2659,6 +2659,17 @@ fn parametric_curve(
     })
 }
 
+/// Filter > Camera Raw Filter on layer `id`: every panel at once, as one
+/// undo step.
+#[tauri::command]
+fn camera_raw_filter(
+    state: State<'_, AppState>,
+    id: LayerId,
+    settings: document::CameraRawSettings,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.camera_raw_filter(id, settings))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2915,6 +2926,7 @@ pub fn run() {
             color_mixer,
             point_color,
             parametric_curve,
+            camera_raw_filter,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -10033,6 +10033,93 @@ impl Document {
             [apply(r), apply(g), apply(b), a]
         })
     }
+
+    /// Filter > Camera Raw Filter: the whole dialog as one edit. Camera
+    /// Raw applies every panel's settings together in a fixed internal
+    /// order and commits them as a single step; this does the same with
+    /// the panels this project has built, running the already-verified
+    /// per-panel adjustments in sequence on the same layer — white
+    /// balance ([`Self::temperature_tint`]), then tone
+    /// ([`Self::highlights_shadows`]), then [`Self::clarity`], then
+    /// [`Self::camera_raw_saturation`], then the Curve panel
+    /// ([`Self::parametric_curve`] followed by
+    /// [`Self::camera_raw_point_curve`]), then Optics
+    /// ([`Self::defringe`]) — so that one call is byte-for-byte the same
+    /// as making those calls yourself in that order, but lands as one
+    /// undo step. A panel left at its neutral value ([`CameraRawSettings`]'s
+    /// default for that field) is skipped outright rather than run as a
+    /// no-op, so an untouched Optics panel never round-trips every pixel
+    /// through HSL, and all-default settings are an exact identity.
+    /// Camera Raw's own remaining panels (Detail, Effects, Calibration,
+    /// Geometry, the local-adjustment masks) and its exact internal
+    /// pipeline order are a documented scope cut; each stage's own
+    /// clamping or erroring rules are unchanged.
+    pub fn camera_raw_filter(
+        &mut self,
+        id: LayerId,
+        settings: CameraRawSettings,
+    ) -> Result<Option<Rect>, String> {
+        let neutral = CameraRawSettings::default();
+        let mut touched = self.layer(id).map(|_| None)?;
+        if (settings.temperature, settings.tint) != (neutral.temperature, neutral.tint) {
+            touched = self.temperature_tint(id, settings.temperature, settings.tint)?;
+        }
+        if (settings.highlights, settings.shadows) != (neutral.highlights, neutral.shadows) {
+            touched = self.highlights_shadows(id, settings.highlights, settings.shadows)?;
+        }
+        if settings.clarity != neutral.clarity {
+            touched = self.clarity(id, settings.clarity)?;
+        }
+        if settings.saturation != neutral.saturation {
+            touched = self.camera_raw_saturation(id, settings.saturation)?;
+        }
+        if settings.parametric_curve != neutral.parametric_curve {
+            let [highlights, lights, darks, shadows] = settings.parametric_curve;
+            touched = self.parametric_curve(id, highlights, lights, darks, shadows)?;
+        }
+        if settings.point_curve != neutral.point_curve {
+            touched = self.camera_raw_point_curve(id, settings.point_curve)?;
+        }
+        if settings.defringe != neutral.defringe {
+            touched = self.defringe(id, settings.defringe)?;
+        }
+        Ok(touched)
+    }
+}
+
+/// Every panel value Filter > Camera Raw Filter applies at once — see
+/// [`Document::camera_raw_filter`]. `Default` is the neutral dialog:
+/// every slider at `0`, an identity point curve, no defringing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CameraRawSettings {
+    pub temperature: i32,
+    pub tint: i32,
+    pub highlights: i32,
+    pub shadows: i32,
+    pub clarity: i32,
+    pub saturation: i32,
+    /// Parametric Curve's Highlights, Lights, Darks, Shadows sliders.
+    pub parametric_curve: [i32; 4],
+    /// Point Curve outputs at inputs `0`, `64`, `128`, `192`, `255`.
+    pub point_curve: [u8; 5],
+    pub defringe: u32,
+}
+
+impl Default for CameraRawSettings {
+    fn default() -> Self {
+        Self {
+            temperature: 0,
+            tint: 0,
+            highlights: 0,
+            shadows: 0,
+            clarity: 0,
+            saturation: 0,
+            parametric_curve: [0; 4],
+            point_curve: [0, 64, 128, 192, 255],
+            defringe: 0,
+        }
+    }
 }
 
 /// The centre hue, in degrees, of each of Camera Raw's eight Color Mixer
@@ -23546,6 +23633,109 @@ mod tests {
         assert!(doc.parametric_curve(id, 0, 0, 0, 50).is_err());
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.parametric_curve(999, 0, 0, 0, 50).is_err());
+    }
+
+    /// A 2x2 layer with four distinct, fully chromatic colours, so every
+    /// Camera Raw stage has something to change.
+    fn camera_raw_fixture() -> (Document, LayerId) {
+        let mut doc = Document::new(2, 2).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            200, 100, 100, 255,  100, 150, 200, 255,
+             60, 180,  90, 255,  230, 220,  40, 255,
+        ];
+        let id = doc.add_layer("colours", &pixels, 2, 2).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn camera_raw_filter_equals_the_per_panel_calls_in_order() {
+        let settings = CameraRawSettings {
+            temperature: 20,
+            tint: -10,
+            highlights: 30,
+            shadows: -20,
+            clarity: 40,
+            saturation: 25,
+            parametric_curve: [10, -10, 20, -20],
+            point_curve: [0, 80, 128, 192, 255],
+            defringe: 30,
+        };
+        let (mut composite, id_a) = camera_raw_fixture();
+        composite.camera_raw_filter(id_a, settings).unwrap();
+
+        let (mut sequential, id_b) = camera_raw_fixture();
+        sequential.temperature_tint(id_b, 20, -10).unwrap();
+        sequential.highlights_shadows(id_b, 30, -20).unwrap();
+        sequential.clarity(id_b, 40).unwrap();
+        sequential.camera_raw_saturation(id_b, 25).unwrap();
+        sequential.parametric_curve(id_b, 10, -10, 20, -20).unwrap();
+        sequential
+            .camera_raw_point_curve(id_b, [0, 80, 128, 192, 255])
+            .unwrap();
+        sequential.defringe(id_b, 30).unwrap();
+
+        assert_eq!(composite.layers()[0].pixels, sequential.layers()[0].pixels);
+        // The composite genuinely changed something.
+        assert_ne!(
+            composite.layers()[0].pixels,
+            camera_raw_fixture().0.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn camera_raw_filter_at_defaults_is_an_exact_identity() {
+        let (mut doc, id) = camera_raw_fixture();
+        let before = doc.layers()[0].pixels.clone();
+        let touched = doc
+            .camera_raw_filter(id, CameraRawSettings::default())
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(touched, None);
+    }
+
+    #[test]
+    fn camera_raw_filter_with_one_panel_set_equals_that_panel_alone() {
+        // Only Saturation moved: the result is camera_raw_saturation's own,
+        // which on (200, 100, 100) at +50 is the hand-verified (225, 75, 75).
+        let (mut doc, id) = camera_raw_fixture();
+        let settings = CameraRawSettings {
+            saturation: 50,
+            ..CameraRawSettings::default()
+        };
+        let touched = doc.camera_raw_filter(id, settings).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [225, 75, 75, 255]);
+        let (mut alone, id_b) = camera_raw_fixture();
+        alone.camera_raw_saturation(id_b, 50).unwrap();
+        assert_eq!(doc.layers()[0].pixels, alone.layers()[0].pixels);
+        assert!(touched.is_some());
+    }
+
+    #[test]
+    fn camera_raw_filter_propagates_errors_and_respects_the_selection() {
+        let (mut doc, id) = camera_raw_fixture();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let settings = CameraRawSettings {
+            saturation: 50,
+            ..CameraRawSettings::default()
+        };
+        doc.camera_raw_filter(id, settings).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [225, 75, 75, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 255]);
+
+        let (mut doc, id) = camera_raw_fixture();
+        let bad = CameraRawSettings {
+            defringe: 101,
+            ..CameraRawSettings::default()
+        };
+        assert!(doc.camera_raw_filter(id, bad).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.camera_raw_filter(id, settings).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.camera_raw_filter(999, settings).is_err());
+        assert!(empty
+            .camera_raw_filter(999, CameraRawSettings::default())
+            .is_err());
     }
 
     #[test]

@@ -473,6 +473,21 @@ body {
   color: var(--muted);
 }
 
+.modal--wide {
+  width: 360px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal__section {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .statusbar__levels {
   margin-left: auto;
   font-variant-numeric: tabular-nums;

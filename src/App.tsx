@@ -250,6 +250,18 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
+  const [cameraRaw, setCameraRaw] = useState({
+    temperature: 0,
+    tint: 0,
+    highlights: 0,
+    shadows: 0,
+    clarity: 0,
+    saturation: 0,
+    parametricCurve: [0, 0, 0, 0],
+    pointCurve: IDENTITY_CURVE,
+    defringe: 0,
+  });
   const [showParametricCurveDialog, setShowParametricCurveDialog] = useState(false);
   const [parametricCurve, setParametricCurve] = useState<number[]>([0, 0, 0, 0]);
   const [showPointColorDialog, setShowPointColorDialog] = useState(false);
@@ -1023,6 +1035,32 @@ export default function App() {
     await runCommand("parametric_curve", { id: selectedId, highlights, lights, darks, shadows });
     setShowParametricCurveDialog(false);
   }, [runCommand, selectedId, parametricCurve]);
+
+  const setCameraRawSlider = useCallback(
+    (
+      key: "temperature" | "tint" | "highlights" | "shadows" | "clarity" | "saturation" | "defringe",
+      value: number,
+    ) => {
+      setCameraRaw((settings) => ({ ...settings, [key]: value }));
+    },
+    [],
+  );
+
+  const setCameraRawCurvePoint = useCallback(
+    (curve: "parametricCurve" | "pointCurve", index: number, value: number) => {
+      setCameraRaw((settings) => ({
+        ...settings,
+        [curve]: settings[curve].map((v, i) => (i === index ? value : v)),
+      }));
+    },
+    [],
+  );
+
+  const applyCameraRaw = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_filter", { id: selectedId, settings: cameraRaw });
+    setShowCameraRawDialog(false);
+  }, [runCommand, selectedId, cameraRaw]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3349,6 +3387,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowCameraRawDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Camera Raw Filter (every panel as one edit)"
+          >
+            Camera Raw Filter…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5531,6 +5577,132 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyParametricCurve} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCameraRawDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCameraRawDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Camera Raw Filter"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Camera Raw Filter</h2>
+            <p className="modal__hint">
+              Every panel is applied together as a single undoable edit, in Camera
+              Raw's own order: white balance, tone, clarity, saturation, curves,
+              then optics. Panels left at their defaults are skipped.
+            </p>
+            <h3 className="modal__section">Basic</h3>
+            {(
+              [
+                ["temperature", "Temperature"],
+                ["tint", "Tint"],
+                ["highlights", "Highlights"],
+                ["shadows", "Shadows"],
+                ["clarity", "Clarity"],
+                ["saturation", "Saturation"],
+              ] as const
+            ).map(([key, label]) => (
+              <label className="control" key={key}>
+                <span className="control__label">
+                  {label}
+                  <span className="control__value">{cameraRaw[key]}</span>
+                </span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={cameraRaw[key]}
+                  onChange={(event) => setCameraRawSlider(key, Number(event.target.value))}
+                />
+              </label>
+            ))}
+            <h3 className="modal__section">Curve — Parametric</h3>
+            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map((name, index) => (
+              <label className="control" key={name}>
+                <span className="control__label">
+                  {name}
+                  <span className="control__value">{cameraRaw.parametricCurve[index]}</span>
+                </span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={cameraRaw.parametricCurve[index]}
+                  onChange={(event) =>
+                    setCameraRawCurvePoint("parametricCurve", index, Number(event.target.value))
+                  }
+                />
+              </label>
+            ))}
+            <h3 className="modal__section">Curve — Point</h3>
+            {cameraRaw.pointCurve.map((value, index) => (
+              <label className="control" key={index}>
+                <span className="control__label">
+                  Input {IDENTITY_CURVE[index]}
+                  <span className="control__value">{value}</span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={value}
+                  onChange={(event) =>
+                    setCameraRawCurvePoint("pointCurve", index, Number(event.target.value))
+                  }
+                />
+              </label>
+            ))}
+            <h3 className="modal__section">Optics</h3>
+            <label className="control">
+              <span className="control__label">
+                Defringe
+                <span className="control__value">{cameraRaw.defringe}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={cameraRaw.defringe}
+                onChange={(event) => setCameraRawSlider("defringe", Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  setCameraRaw({
+                    temperature: 0,
+                    tint: 0,
+                    highlights: 0,
+                    shadows: 0,
+                    clarity: 0,
+                    saturation: 0,
+                    parametricCurve: [0, 0, 0, 0],
+                    pointCurve: IDENTITY_CURVE,
+                    defringe: 0,
+                  })
+                }
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCameraRawDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCameraRaw} disabled={busy}>
                 Apply
               </button>
             </div>
