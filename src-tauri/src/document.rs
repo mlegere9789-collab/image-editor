@@ -10085,6 +10085,46 @@ impl Document {
         }
         Ok(touched)
     }
+
+    /// Edit > Transform > Rotate: rotates layer `id`'s pixels by
+    /// `degrees` (positive clockwise on screen, Photoshop's own sign
+    /// convention) about the canvas centre, `((width - 1) / 2,
+    /// (height - 1) / 2)`, so that a square canvas rotated by a multiple
+    /// of `90` lands exactly back on the pixel grid. Inverse-mapped: each output
+    /// pixel looks up where it came from — `source = centre + R(-degrees)
+    /// × (pixel - centre)` — and takes the nearest source pixel, the same
+    /// nearest-neighbour rounding [`sample_nearest`] and the Distort
+    /// filters use, except that a source position falling outside the
+    /// canvas yields a fully transparent pixel instead of clamping to the
+    /// edge, since a rotated layer genuinely has nothing there. The
+    /// canvas itself does not grow, so corners that rotate past its
+    /// edges are clipped — Photoshop's own Free Transform keeps them by
+    /// letting a layer extend beyond the canvas, which this project's
+    /// document-sized layers can't, a documented scope cut alongside the
+    /// nearest-neighbour (rather than bicubic) resampling. With a
+    /// selection, only the selected pixels are rewritten, though the
+    /// rotation still reads from the whole layer.
+    pub fn rotate(&mut self, id: LayerId, degrees: f32) -> Result<Option<Rect>, String> {
+        if !degrees.is_finite() {
+            return Err("Rotate angle must be a finite number of degrees.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        self.filter_pixels(id, move |source, row, col| {
+            let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+            let sx = (cx + cos * dx + sin * dy).round() as i64;
+            let sy = (cy - sin * dx + cos * dy).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
 }
 
 /// Every panel value Filter > Camera Raw Filter applies at once — see
@@ -23736,6 +23776,106 @@ mod tests {
         assert!(empty
             .camera_raw_filter(999, CameraRawSettings::default())
             .is_err());
+    }
+
+    fn red_channel_grid(doc: &Document) -> Vec<Vec<u8>> {
+        let (w, h) = (doc.width() as usize, doc.height() as usize);
+        let p = &doc.layers()[0].pixels;
+        (0..h)
+            .map(|y| (0..w).map(|x| p[(y * w + x) * 4]).collect())
+            .collect()
+    }
+
+    #[test]
+    fn rotate_90_clockwise_turns_the_top_row_into_the_right_column() {
+        // About the centre (1, 1), a 90 degree turn lands every pixel
+        // exactly on the grid: the top row 10 20 30 becomes the right
+        // column read top to bottom.
+        let (mut doc, id) = ramped_3x3();
+        doc.rotate(id, 90.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![70, 40, 10], vec![80, 50, 20], vec![90, 60, 30]]
+        );
+        let (mut doc, id) = ramped_3x3();
+        doc.rotate(id, -90.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![30, 60, 90], vec![20, 50, 80], vec![10, 40, 70]]
+        );
+    }
+
+    #[test]
+    fn rotate_180_matches_the_rotate_layer_180_command() {
+        let (mut via_rotate, id_a) = ramped_3x3();
+        let (mut via_command, id_b) = ramped_3x3();
+        via_rotate.rotate(id_a, 180.0).unwrap();
+        via_command.rotate_layer_180(id_b).unwrap();
+        assert_eq!(
+            via_rotate.layers()[0].pixels,
+            via_command.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn rotate_45_rounds_each_source_position_to_its_nearest_pixel() {
+        // Output (0, 0) has offset (-1, -1): source x = 1 + 0.7071*(-1) +
+        // 0.7071*(-1) = -0.414 rounds to 0, source y = 1 - 0.7071*(-1) +
+        // 0.7071*(-1) = 1.0, so it reads (0, 1) = 40. The whole grid, by
+        // the same arithmetic, is the hand-and-script-checked table below;
+        // no corner rounds outside the 3x3 canvas.
+        let (mut doc, id) = ramped_3x3();
+        doc.rotate(id, 45.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 10, 20], vec![70, 50, 30], vec![80, 90, 60]]
+        );
+    }
+
+    #[test]
+    fn rotate_leaves_uncovered_pixels_transparent() {
+        // A 3x1 row turned 90 degrees about its centre (1, 0): the ends
+        // now come from y = +-1, outside the canvas, and are transparent;
+        // the centre pixel reads itself.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[10, 0, 0, 255, 20, 0, 0, 255, 30, 0, 0, 255], 3, 1)
+            .unwrap();
+        doc.rotate(id, 90.0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 0), [20, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn rotate_by_zero_or_a_full_turn_is_the_identity() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.rotate(id, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        doc.rotate(id, 360.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn rotate_is_confined_to_the_selection_and_propagates_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        doc.rotate(id, 90.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 10);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]);
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.rotate(id, f32::NAN).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.rotate(id, 90.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.rotate(999, 90.0).is_err());
     }
 
     #[test]

@@ -250,6 +250,8 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showRotateDialog, setShowRotateDialog] = useState(false);
+  const [rotateDegrees, setRotateDegrees] = useState(45);
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
@@ -1061,6 +1063,12 @@ export default function App() {
     await runCommand("camera_raw_filter", { id: selectedId, settings: cameraRaw });
     setShowCameraRawDialog(false);
   }, [runCommand, selectedId, cameraRaw]);
+
+  const applyRotate = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("rotate", { id: selectedId, degrees: rotateDegrees });
+    setShowRotateDialog(false);
+  }, [runCommand, selectedId, rotateDegrees]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3077,6 +3085,14 @@ export default function App() {
             title="Image > Image Rotation > 90° Counter Clockwise"
           >
             Rotate 90° CCW
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowRotateDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Rotate (any angle, selected layer)"
+          >
+            Rotate…
           </button>
         </div>
 
@@ -5703,6 +5719,57 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCameraRaw} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRotateDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowRotateDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Rotate"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Rotate</h2>
+            <p className="modal__hint">
+              Positive angles turn clockwise about the canvas centre. Corners that
+              leave the canvas are clipped; uncovered pixels become transparent.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Angle (°)</span>
+              <input
+                type="number"
+                step={0.1}
+                value={rotateDegrees}
+                onChange={(event) => setRotateDegrees(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                step={1}
+                value={rotateDegrees}
+                onChange={(event) => setRotateDegrees(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowRotateDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyRotate} disabled={busy}>
                 Apply
               </button>
             </div>

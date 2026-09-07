@@ -8882,6 +8882,69 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **913 Rust tests total** (909 → 913, 906 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 136 — Edit > Transform > Rotate (any angle)
+
+`rotate(id, degrees)` is the first of the Edit > Transform entries
+beyond the fixed 90°/180° turns and flips of Phase 17: it rotates a
+layer's pixels by any angle, positive clockwise on screen (Photoshop's
+own sign convention), about the canvas centre `((width - 1) / 2,
+(height - 1) / 2)` — chosen so that a square canvas rotated by a
+multiple of `90` lands exactly back on the pixel grid. The rotation is
+inverse-mapped: each output pixel looks up where it came from, `source
+= centre + R(-degrees) × (pixel - centre)` (in image coordinates,
+`sx = cx + cos·dx + sin·dy`, `sy = cy - sin·dx + cos·dy`), and takes
+the nearest source pixel, with the same `round()` nearest-neighbour
+rounding `sample_nearest` and the Distort filters already use — except
+that a source position falling outside the canvas yields a fully
+transparent pixel instead of clamping to the edge, since a rotated
+layer genuinely has nothing there. The canvas itself does not grow, so
+corners that rotate past its edges are clipped; Photoshop's own Free
+Transform keeps them by letting a layer extend beyond the canvas,
+which this project's document-sized layers can't, a documented scope
+cut alongside the nearest-neighbour (rather than bicubic) resampling.
+With a selection, only the selected pixels are rewritten, though the
+rotation still reads from the whole layer. A non-finite angle errors.
+A new **Rotate…** dialog takes the angle in degrees.
+
+**Verified two ways.** Six new `document.rs` tests on `ramped_3x3`,
+read back through a small `red_channel_grid` helper so a whole 3x3
+result can be asserted at once. A `90°` turn makes the top row `10 20
+30` the right column read top to bottom — `[[70, 40, 10], [80, 50,
+20], [90, 60, 30]]` — and `-90°` the mirror `[[30, 60, 90], [20, 50,
+80], [10, 40, 70]]`. `180°` equals the existing `rotate_layer_180`
+command byte-for-byte. At `45°`, output `(0, 0)` has offset `(-1, -1)`, so its
+source is `x = 1 + 0.7071·(-1) + 0.7071·(-1) = -0.414`, rounding to
+`0`, and `y = 1 - 0.7071·(-1) + 0.7071·(-1) = 1.0`: it reads `(0, 1) =
+40`; the full grid by the same arithmetic is `[[40, 10, 20], [70, 50,
+30], [80, 90, 60]]`, and — a genuine property of a 3x3, not an
+accident of the test — no corner rounds outside the canvas. A `3x1`
+row turned `90°` about its centre `(1, 0)` shows the transparency
+rule: both ends now come from `y = ±1`, outside the canvas, and read
+`(0, 0, 0, 0)`, while the centre reads itself. `0°` and `360°` are
+byte-for-byte identities. A one-pixel selection confines the rewrite
+(the selected top-right pixel becomes `10`, everything else untouched),
+and `NaN`, a locked layer, and an unknown layer all error. All six
+passed on the first run, every grid cross-checked against an
+independent Python port of the inverse mapping emulating Rust's `f32`
+trigonometry and half-away-from-zero rounding — which was also how the
+sign convention was pinned down before any Rust was written, by
+checking which of the two candidate inverse matrices turned the top
+row into the right column rather than the left.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**919 Rust tests total** (913 → 919, 912 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
