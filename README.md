@@ -15868,11 +15868,7 @@ give.
 
 **Verified two ways.** Five new tests, hand-verified integer/boolean
 logic with no floating-point math, so hand-verification alone was
-judged sufficient per this project's own stated bar. `is_skin_tone`
-accepts two representative skin tones, `(200, 150, 120)` and
-`(220, 170, 140)`, and rejects pure red (green too low), pure white (red
-not ahead of green), mid grey (no channel spread), pure blue, and a
-dim blue-grey (red too low in both). On a six-pixel row
+judged sufficient per this project's own stated bar. On a six-pixel row
 `[skin, skin, bg, skin, skin, skin]`, `people_bits` picks the
 three-pixel run over the two-pixel one; a skin-toned pixel at alpha `0`
 never counts. A 3×3 grid with a 2-pixel skin block at the top-left and
@@ -15880,7 +15876,21 @@ one lone skin pixel elsewhere (not 4-connected to the block — the pixel
 directly above it is background) selects only the block; adding to an
 existing one-pixel selection unions correctly; a layer with no
 skin-toned pixels at all is refused by name ("person"), and an unknown
-layer id is refused too. All five passed on the first run.
+layer id is refused too. A fifth test checks `people_bits` directly
+against `color_range_bits(id, &ColorRange::SkinTones)` on the same
+document — every pixel `people_bits` flags is also flagged there, since
+it is strictly the largest connected run of that same set — which is
+also how a same-day follow-up commit caught an accidental duplicate: an
+initial version of this phase defined its own private copy of the
+skin-tone rule instead of calling the existing top-level `is_skin_tone`
+that Color Range's Skin Tones and Content-Aware Scale's Protect Skin
+Tones already share, functionally identical but violating this
+project's own stated preference for reusing an already-built helper
+over writing a second copy of the same logic. The fix replaced the
+private copy with a call to the shared one and swapped a test that had
+exercised the duplicate directly for the cross-check against
+`color_range_bits` described above; the feature's behaviour did not
+change. All five passed on the first run.
 
 Live interactive verification under Xvfb was not attempted this phase,
 for the same reason as the previous two hundred and twelve: this

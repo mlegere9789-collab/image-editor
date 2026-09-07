@@ -7447,32 +7447,23 @@ impl Document {
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
-    /// Select > People's finder: this project's own stand-in for
-    /// Photoshop's neural person detection, the same kind of explicit
-    /// heuristic Object/Subject Selection and Sky Selection already use.
-    /// A pixel counts as skin-toned by a classic, explainable RGB rule
-    /// (Kovac, Solina & Peer 2003's daylight rule): red the strongest
-    /// channel and clearly ahead of both green and blue, with the three
-    /// channels spread wide enough to rule out grey.
-    fn is_skin_tone(r: u8, g: u8, b: u8) -> bool {
-        let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
-        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
-        r > 95 && g > 40 && b > 20 && max - min > 15 && (r - g).abs() > 15 && r > g && r > b
-    }
-
     /// Select > People's finder: the largest 4-connected group of
-    /// skin-toned pixels ([`Self::is_skin_tone`]) on layer `id`, one flag
-    /// per pixel — Individual Person Selection, Person Components, and
-    /// Hair Selection/Refine Hair are documented scope cuts, since they
-    /// need real per-instance segmentation this heuristic cannot give.
-    /// Errors for an unknown layer.
+    /// skin-toned pixels ([`is_skin_tone`], the same classic RGB rule
+    /// Color Range's Skin Tones and Content-Aware Scale's Protect Skin
+    /// Tones already use) on layer `id`, one flag per pixel — this
+    /// project's own stand-in for Photoshop's neural person detection,
+    /// the same kind of explicit heuristic Object/Subject Selection and
+    /// Sky Selection already use. Individual Person Selection, Person
+    /// Components, and Hair Selection/Refine Hair are documented scope
+    /// cuts, since they need real per-instance segmentation this
+    /// heuristic cannot give. Errors for an unknown layer.
     pub fn people_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
         let layer = self.layer(id)?;
         let (w, h) = (self.width as usize, self.height as usize);
         let skinlike: Vec<bool> = layer
             .pixels
             .chunks_exact(CHANNELS)
-            .map(|px| px[3] > 0 && Self::is_skin_tone(px[0], px[1], px[2]))
+            .map(|px| px[3] > 0 && is_skin_tone([px[0], px[1], px[2]]))
             .collect();
         let mut seen = vec![false; w * h];
         let mut best: Vec<usize> = Vec::new();
@@ -50161,14 +50152,19 @@ mod tests {
     }
 
     #[test]
-    fn is_skin_tone_accepts_the_classic_daylight_rule_and_rejects_clear_non_skin() {
-        assert!(Document::is_skin_tone(200, 150, 120));
-        assert!(Document::is_skin_tone(220, 170, 140));
-        assert!(!Document::is_skin_tone(255, 0, 0)); // green too low
-        assert!(!Document::is_skin_tone(255, 255, 255)); // red not ahead of green
-        assert!(!Document::is_skin_tone(128, 128, 128)); // grey: no spread
-        assert!(!Document::is_skin_tone(0, 0, 255)); // red too low
-        assert!(!Document::is_skin_tone(50, 100, 150)); // red too low
+    fn people_bits_is_the_largest_connected_component_of_color_ranges_skin_tones() {
+        // people_bits reuses is_skin_tone, the exact rule Color Range's
+        // Skin Tones already exposes, so every pixel it flags must also
+        // be flagged there — it is strictly a subset, the largest
+        // connected run of it.
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[vec![skin, skin, bg, skin]]);
+        let all_skin = doc.color_range_bits(id, &ColorRange::SkinTones).unwrap();
+        assert_eq!(all_skin, vec![true, true, false, true]);
+        let people = doc.people_bits(id).unwrap();
+        assert_eq!(people, vec![true, true, false, false]);
+        assert!(people.iter().zip(&all_skin).all(|(&p, &a)| !p || a));
     }
 
     #[test]
