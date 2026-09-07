@@ -11557,6 +11557,64 @@ impl Document {
         )
     }
 
+    /// The Levels and Curves dialogs' Black Point eyedropper: clicking
+    /// pixel `(x, y)` of layer `id` makes that pixel pure black by setting
+    /// each channel's input black point to the pixel's own value in that
+    /// channel (so a bluish shadow is neutralised, not just darkened),
+    /// leaving the input white at `255` — [`Self::levels`]'s remap with a
+    /// different input black per channel, gamma `1`, full output range.
+    /// Photoshop's configurable target colour (its default is pure black)
+    /// is a documented scope cut. Errors for a point off the canvas or an
+    /// unknown or locked layer.
+    pub fn levels_black_point(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        self.levels_per_channel(id, [r, g, b], [255; 3])
+    }
+
+    /// The Levels and Curves dialogs' White Point eyedropper: the mirror
+    /// of [`Self::levels_black_point`], setting each channel's input white
+    /// point to the clicked pixel's value in that channel so the pixel
+    /// becomes pure white, with the input black left at `0`.
+    pub fn levels_white_point(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        self.levels_per_channel(id, [0; 3], [r, g, b])
+    }
+
+    /// [`Self::levels`]'s input remap with its own black and white point
+    /// per channel (gamma `1`, output `0..=255`), the shape both
+    /// eyedroppers need. As in `levels`, each channel's white is clamped
+    /// to at least one above its black.
+    fn levels_per_channel(
+        &mut self,
+        id: LayerId,
+        input_black: [u8; 3],
+        input_white: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        let apply = move |c: u8, black: u8, white: u8| {
+            let black = black as f32;
+            let white = (white as f32).max(black + 1.0);
+            to_byte(((c as f32 - black) / (white - black)).clamp(0.0, 1.0))
+        };
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            [
+                apply(r, input_black[0], input_white[0]),
+                apply(g, input_black[1], input_white[1]),
+                apply(b, input_black[2], input_white[2]),
+                a,
+            ]
+        })
+    }
+
     /// [`Self::levels`] with Photoshop's Channel dropdown: `Rgb` remaps
     /// all three channels exactly as `levels` does, while `Red`, `Green`,
     /// or `Blue` puts only that one channel through the remap and leaves
@@ -21822,6 +21880,69 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.curves_points(id, &[(0, 0), (255, 255)]).is_err());
         assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+    }
+
+    #[test]
+    fn levels_black_point_makes_the_clicked_pixel_black_per_channel() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[40, 60, 80, 255, 140, 160, 180, 255], 2, 1)
+            .unwrap();
+        doc.levels_black_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        // (140 − 40) / 215, (160 − 60) / 195, (180 − 80) / 175 of 255.
+        assert_eq!(pixel(&doc, id, 1, 0), [119, 131, 146, 255]);
+    }
+
+    #[test]
+    fn levels_white_point_makes_the_clicked_pixel_white_per_channel() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[200, 220, 240, 255, 100, 110, 120, 255], 2, 1)
+            .unwrap();
+        doc.levels_white_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        // Each channel of the second pixel is exactly half its white.
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn levels_eyedroppers_chain_and_keep_alpha() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[200, 220, 240, 255, 40, 60, 80, 128], 2, 1)
+            .unwrap();
+        doc.levels_white_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [51, 70, 85, 128]);
+        doc.levels_black_point(id, 1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 128]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn levels_eyedroppers_sample_anywhere_but_adjust_only_the_selection() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[40, 60, 80, 255, 140, 160, 180, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        doc.levels_black_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [40, 60, 80, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [119, 131, 146, 255]);
+    }
+
+    #[test]
+    fn levels_eyedroppers_propagate_errors() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[40, 60, 80, 255, 140, 160, 180, 255], 2, 1)
+            .unwrap();
+        assert!(doc.levels_black_point(id, 2, 0).is_err());
+        assert!(doc.levels_white_point(id, 0, 1).is_err());
+        assert!(doc.levels_black_point(id + 1, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.levels_white_point(id, 0, 0).is_err());
+        assert_eq!(pixel(&doc, id, 1, 0), [140, 160, 180, 255]);
     }
 
     #[test]

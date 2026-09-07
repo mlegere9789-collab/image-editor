@@ -12013,6 +12013,58 @@ instead. Every other layer of this project's quality bar
 **1220 Rust tests total** (1215 → 1220, 1213 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 196 — Levels and Curves Black/White Point eyedroppers
+
+`Document::levels_black_point(id, x, y)` and `levels_white_point` are
+the Black Point and White Point eyedroppers both the Levels and the
+Curves dialogs carry. Clicking a pixel makes it pure black (or white)
+by setting *each channel's* input black (or white) point to the
+pixel's own value in that channel — the way Photoshop neutralises a
+bluish shadow rather than merely darkening it — through a new private
+`levels_per_channel(id, input_black, input_white)`, which is `levels`'s
+input remap with its own black and white per channel, gamma `1`, full
+output range, and the same "white at least one above black" clamp.
+The sample is read with `layer_pixel`, so a point off the canvas, an
+unknown layer, or a locked layer errors; the adjustment itself still
+respects the selection, so the sampled pixel may lie outside it.
+Photoshop's configurable target colours (its defaults are pure black
+and white) and its Gray Point eyedropper are documented scope cuts —
+the latter is next.
+
+Both dialogs gain **Black Pt** and **White Pt** buttons that arm the
+eyedropper and close the dialog; the toolbar then reads "Click a pixel
+to set the black point" with a Cancel button, and the next canvas
+click — whatever tool is active — runs `levels_black_point` or
+`levels_white_point` on the selected layer and disarms.
+
+**Verified two ways.** Five new `document.rs` tests, every byte first
+computed in Python emulating `f32`. A black point at `[40, 60, 80]`
+turns that pixel `[0, 0, 0]` and a `[140, 160, 180]` neighbour into
+`[119, 131, 146]` — `100/215`, `100/195`, `100/175` of `255`. A white
+point at `[200, 220, 240]` turns it `[255, 255, 255]` and a `[100,
+110, 120]` neighbour, each channel exactly half its white, into `[128,
+128, 128]`. The two chain: after that white point a `[40, 60, 80]`
+pixel reads `[51, 70, 85]`, and a black point clicked on it then makes
+it `[0, 0, 0]` while the white pixel stays white and its alpha `128`
+survives. With only the second pixel selected, sampling the first
+still adjusts only the second. Off-canvas coordinates, an unknown
+layer, and a locked layer error with the pixels intact. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The eyedropper arming was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1225 Rust tests total** (1220 → 1225, 1218 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -3236,6 +3236,30 @@ fn curves(state: State<'_, AppState>, id: LayerId, points: [u8; 5]) -> Result<Sn
     edit_checkpointed(&state, |document| document.curves(id, points))
 }
 
+/// Levels/Curves Black Point eyedropper: make pixel `(x, y)` of layer `id`
+/// black, per channel.
+#[tauri::command]
+fn levels_black_point(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.levels_black_point(id, x, y))
+}
+
+/// Levels/Curves White Point eyedropper: make pixel `(x, y)` of layer `id`
+/// white, per channel.
+#[tauri::command]
+fn levels_white_point(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.levels_white_point(id, x, y))
+}
+
 /// Image > Adjustments > Curves in Point mode: arbitrary `(input, output)`
 /// control points on layer `id`.
 #[tauri::command]
@@ -3852,6 +3876,8 @@ pub fn run() {
             levels,
             curves,
             curves_points,
+            levels_black_point,
+            levels_white_point,
             color_balance,
             highlights_shadows,
             clarity,

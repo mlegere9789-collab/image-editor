@@ -484,6 +484,9 @@ export default function App() {
   // Levels > Auto Options: the Clip percentages in hundredths (0.10% = 10).
   const [levelsClipShadows, setLevelsClipShadows] = useState(10);
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
+  // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
+  // makes the clicked pixel black or white and disarms.
+  const [levelsEyedropper, setLevelsEyedropper] = useState<"black" | "white" | null>(null);
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   // Curves > Point mode: free (input, output) control points instead of
@@ -3375,6 +3378,17 @@ export default function App() {
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
+      if (levelsEyedropper !== null) {
+        if (selectedId !== null) {
+          const [x, y] = toDocPoint(event, document);
+          void runCommand(
+            levelsEyedropper === "black" ? "levels_black_point" : "levels_white_point",
+            { id: selectedId, x: Math.floor(x), y: Math.floor(y) },
+          );
+        }
+        setLevelsEyedropper(null);
+        return;
+      }
       if (isEyedropper) {
         sampleColorAt(event);
         return;
@@ -3528,6 +3542,9 @@ export default function App() {
       canPaint,
       checkpoint,
       applyStroke,
+      levelsEyedropper,
+      selectedId,
+      runCommand,
     ],
   );
 
@@ -5883,6 +5900,18 @@ export default function App() {
                 onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
               />
             </label>
+          )}
+          {levelsEyedropper !== null && (
+            <span className="tools__slider">
+              Click a pixel to set the {levelsEyedropper} point
+              <button
+                className="button button--quiet"
+                onClick={() => setLevelsEyedropper(null)}
+                title="Cancel the eyedropper"
+              >
+                Cancel
+              </button>
+            </span>
           )}
           {tool === "historyBrush" && (
             <>
@@ -9501,6 +9530,28 @@ export default function App() {
               </button>
               <button
                 className="button button--quiet"
+                onClick={() => {
+                  setLevelsEyedropper("black");
+                  setShowLevelsDialog(false);
+                }}
+                disabled={busy}
+                title="Black Point eyedropper: then click the pixel that should become black"
+              >
+                Black Pt
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setLevelsEyedropper("white");
+                  setShowLevelsDialog(false);
+                }}
+                disabled={busy}
+                title="White Point eyedropper: then click the pixel that should become white"
+              >
+                White Pt
+              </button>
+              <button
+                className="button button--quiet"
                 onClick={applyLevelsAuto}
                 disabled={busy}
                 title="Auto: stretch each channel to full range, ignoring the clipped percentages at each end"
@@ -9611,6 +9662,28 @@ export default function App() {
                 onClick={() => setShowCurvesDialog(false)}
               >
                 Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setLevelsEyedropper("black");
+                  setShowCurvesDialog(false);
+                }}
+                disabled={busy}
+                title="Black Point eyedropper: then click the pixel that should become black"
+              >
+                Black Pt
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setLevelsEyedropper("white");
+                  setShowCurvesDialog(false);
+                }}
+                disabled={busy}
+                title="White Point eyedropper: then click the pixel that should become white"
+              >
+                White Pt
               </button>
               <button className="button" onClick={applyCurves} disabled={busy}>
                 Apply
