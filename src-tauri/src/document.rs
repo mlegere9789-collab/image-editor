@@ -6,6 +6,8 @@
 //! the document are pasted at the origin and padded with transparency; larger
 //! ones are clipped.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
@@ -137,16 +139,64 @@ pub enum SelectionShape {
     RoundedRectangle {
         radius: u32,
     },
+    /// An arbitrary set of pixels — the result of the Magic Wand and the
+    /// other colour-based selectors — carried in [`Selection::mask`], with
+    /// `bounds` its bounding box. The shape itself is just "whatever the
+    /// mask says"; a `Selection` with this shape and no mask selects
+    /// nothing.
+    Mask,
+}
+
+/// A document-sized bitmap of selected pixels, row-major, behind
+/// [`SelectionShape::Mask`]. Shared through an `Arc` so that cloning a
+/// `Selection` — which every stroke and filter does once per call — stays
+/// a pointer copy rather than a canvas-sized memcpy.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SelectionMask {
+    pub width: u32,
+    pub height: u32,
+    pub bits: Vec<bool>,
+}
+
+impl SelectionMask {
+    fn contains(&self, x: u32, y: u32) -> bool {
+        x < self.width && y < self.height && self.bits[(y * self.width + x) as usize]
+    }
+
+    /// The bounding box of the set bits, or `None` if none are set.
+    fn bounds(&self) -> Option<Rect> {
+        let mut bounds: Option<Rect> = None;
+        for y in 0..self.height {
+            for x in 0..self.width {
+                if !self.bits[(y * self.width + x) as usize] {
+                    continue;
+                }
+                bounds = Some(match bounds {
+                    None => Rect {
+                        x0: x,
+                        y0: y,
+                        x1: x + 1,
+                        y1: y + 1,
+                    },
+                    Some(b) => Rect {
+                        x0: b.x0.min(x),
+                        y0: b.y0.min(y),
+                        x1: b.x1.max(x + 1),
+                        y1: b.y1.max(y + 1),
+                    },
+                });
+            }
+        }
+        bounds
+    }
 }
 
 /// A hard-edged (no feather, no anti-aliasing) region of the document that
 /// paint/erase strokes are clipped to. Represented as a shape plus its
-/// bounding box rather than a document-sized mask — cheap to clone (every
-/// `stroke()` call needs its own copy, see below) and exact for the two
-/// shapes this supports today. A freehand/lasso selection, once added, would
-/// need an actual mask and probably a third variant here rather than
-/// replacing this representation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// bounding box — exact for the geometric shapes and cheap to clone — with
+/// an optional shared pixel mask behind [`SelectionShape::Mask`] for the
+/// colour-based selectors that no shape can describe.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Selection {
     pub shape: SelectionShape,
@@ -162,6 +212,11 @@ pub struct Selection {
     /// out of the middle. `None` (the default) selects the shape's whole
     /// interior, as before.
     pub border: Option<u32>,
+    /// The pixel bitmap behind a [`SelectionShape::Mask`] selection; `None`
+    /// for every geometric shape. Never sent to the frontend (which only
+    /// draws the bounding box of a mask selection) — hence the serde skip.
+    #[serde(skip)]
+    pub mask: Option<Arc<SelectionMask>>,
 }
 
 /// Whether `(px, py)` — the same `+0.5` pixel-centre convention
@@ -198,6 +253,8 @@ fn shape_contains(shape: SelectionShape, bounds: Rect, px: f32, py: f32) -> bool
                 let (dx, dy) = (px - cx, py - cy);
                 dx * dx + dy * dy <= r * r
             }
+            // The bitmap decides; see `Selection::contains`.
+            SelectionShape::Mask => true,
         }
 }
 
@@ -661,7 +718,14 @@ impl Selection {
     /// Whether the pixel centred at `(px, py)` — the same `+0.5` convention
     /// [`Document::stroke`] already samples at — falls inside this selection.
     fn contains(&self, px: f32, py: f32) -> bool {
-        let in_shape = shape_contains(self.shape, self.bounds, px, py);
+        let in_shape = shape_contains(self.shape, self.bounds, px, py)
+            && match (self.shape, &self.mask) {
+                (SelectionShape::Mask, Some(mask)) => {
+                    mask.contains(px.floor() as u32, py.floor() as u32)
+                }
+                (SelectionShape::Mask, None) => false,
+                _ => true,
+            };
         let in_border_hole = self
             .border
             .and_then(|width| shrink_rect(self.bounds, width))
@@ -859,7 +923,7 @@ impl Document {
             width: self.width,
             height: self.height,
             layers: self.layers.iter().map(Layer::view).collect(),
-            selection: self.selection,
+            selection: self.selection.clone(),
             can_reselect: self.last_selection.is_some(),
             can_transform_again: self.last_transform.is_some(),
             has_pattern: self.pattern.is_some(),
@@ -877,7 +941,7 @@ impl Document {
     /// active layer too), so a locked layer is fine; only an unknown layer
     /// errors. Nothing on the canvas changes.
     pub fn define_pattern(&mut self, id: LayerId) -> Result<(), String> {
-        let bounds = match self.selection {
+        let bounds = match &self.selection {
             None => Rect {
                 x0: 0,
                 y0: 0,
@@ -889,7 +953,8 @@ impl Document {
                 bounds,
                 inverted: false,
                 border: None,
-            }) => bounds,
+                ..
+            }) => *bounds,
             Some(_) => {
                 return Err(
                     "Define Pattern needs a plain rectangular selection (or none).".to_string(),
@@ -946,6 +1011,7 @@ impl Document {
             bounds,
             inverted: false,
             border: None,
+            mask: None,
         });
         Ok(())
     }
@@ -959,6 +1025,7 @@ impl Document {
             bounds,
             inverted: false,
             border: None,
+            mask: None,
         });
         Ok(())
     }
@@ -975,8 +1042,111 @@ impl Document {
             },
             inverted: false,
             border: None,
+            mask: None,
         });
         Ok(())
+    }
+
+    /// The Magic Wand tool: replaces the selection with every pixel of
+    /// layer `id` whose colour is within `tolerance` of the pixel at
+    /// `(x, y)` — per channel, RGBA, the same `abs_diff <= tolerance` test
+    /// the Paint Bucket ([`Self::flood_fill`]) uses — reached 4-connected
+    /// from the click when `contiguous` is set (Photoshop's default), or
+    /// anywhere on the layer when it is not. The result is the first
+    /// pixel-mask selection: a [`SelectionShape::Mask`] whose bitmap every
+    /// selection-respecting command already honours through
+    /// [`Selection::contains`], with `bounds` the mask's bounding box. Reads
+    /// the one layer's own bytes (Photoshop's Sample All Layers is a
+    /// documented scope cut, as is its Anti-alias option — masks here are
+    /// hard-edged like every other selection). A locked layer is fine;
+    /// errors on an unknown layer or a click outside the canvas.
+    pub fn select_magic_wand(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        tolerance: u8,
+        contiguous: bool,
+    ) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        if x >= width || y >= height {
+            return Err(format!(
+                "({x}, {y}) is outside the {width}x{height} canvas."
+            ));
+        }
+        let layer = self.layer(id)?;
+        let pixel_at = |px: u32, py: u32| -> [u8; 4] {
+            let base = (py as usize * width as usize + px as usize) * CHANNELS;
+            [
+                layer.pixels[base],
+                layer.pixels[base + 1],
+                layer.pixels[base + 2],
+                layer.pixels[base + 3],
+            ]
+        };
+        let seed = pixel_at(x, y);
+        let matches = |px: u32, py: u32| {
+            pixel_at(px, py)
+                .iter()
+                .zip(seed.iter())
+                .all(|(&a, &b)| a.abs_diff(b) <= tolerance)
+        };
+        let mut bits = vec![false; width as usize * height as usize];
+        if contiguous {
+            bits[(y * width + x) as usize] = true;
+            let mut stack = vec![(x, y)];
+            while let Some((px, py)) = stack.pop() {
+                let neighbours = [
+                    px.checked_sub(1).map(|nx| (nx, py)),
+                    (px + 1 < width).then_some((px + 1, py)),
+                    py.checked_sub(1).map(|ny| (px, ny)),
+                    (py + 1 < height).then_some((px, py + 1)),
+                ];
+                for (nx, ny) in neighbours.into_iter().flatten() {
+                    let idx = (ny * width + nx) as usize;
+                    if !bits[idx] && matches(nx, ny) {
+                        bits[idx] = true;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+        } else {
+            for py in 0..height {
+                for px in 0..width {
+                    bits[(py * width + px) as usize] = matches(px, py);
+                }
+            }
+        }
+        let mask = SelectionMask {
+            width,
+            height,
+            bits,
+        };
+        let bounds = mask
+            .bounds()
+            .expect("the clicked pixel always matches itself");
+        self.selection = Some(Selection {
+            shape: SelectionShape::Mask,
+            bounds,
+            inverted: false,
+            border: None,
+            mask: Some(Arc::new(mask)),
+        });
+        Ok(())
+    }
+
+    /// Select > Modify's geometric commands reshape a selection's bounding
+    /// box; a pixel mask has no box to reshape, so they decline it.
+    fn reject_mask_selection(&self, command: &str) -> Result<(), String> {
+        match &self.selection {
+            Some(Selection {
+                shape: SelectionShape::Mask,
+                ..
+            }) => Err(format!(
+                "Select > Modify > {command} isn't available for a pixel-mask selection."
+            )),
+            _ => Ok(()),
+        }
     }
 
     /// Select > Inverse: swap selected and unselected pixels. An error if
@@ -999,6 +1169,7 @@ impl Document {
         if amount == 0 {
             return Err("Expand By must be greater than zero pixels.".to_string());
         }
+        self.reject_mask_selection("Expand")?;
         self.resize_selection_bounds(amount as i64)
     }
 
@@ -1010,6 +1181,7 @@ impl Document {
         if amount == 0 {
             return Err("Contract By must be greater than zero pixels.".to_string());
         }
+        self.reject_mask_selection("Contract")?;
         self.resize_selection_bounds(-(amount as i64))
     }
 
@@ -1064,6 +1236,7 @@ impl Document {
         if radius == 0 {
             return Err("Smooth radius must be greater than zero pixels.".to_string());
         }
+        self.reject_mask_selection("Smooth")?;
         let selection = self
             .selection
             .as_mut()
@@ -1102,6 +1275,7 @@ impl Document {
         if width == 0 {
             return Err("Border Width must be greater than zero pixels.".to_string());
         }
+        self.reject_mask_selection("Border")?;
         let selection = self
             .selection
             .as_mut()
@@ -1125,13 +1299,14 @@ impl Document {
     pub fn reselect(&mut self) -> Result<(), String> {
         self.selection = Some(
             self.last_selection
+                .clone()
                 .ok_or_else(|| "Nothing to reselect.".to_string())?,
         );
         Ok(())
     }
 
     pub fn selection(&self) -> Option<Selection> {
-        self.selection
+        self.selection.clone()
     }
 
     /// Number of bytes in a document-sized RGBA8 buffer.
@@ -1509,7 +1684,7 @@ impl Document {
     /// selected — Photoshop's own "no selection means everything" rule for
     /// Edit > Copy and Edit > Cut.
     fn copy_bounds(&self) -> Rect {
-        self.selection.map(|s| s.bounds).unwrap_or(Rect {
+        self.selection.as_ref().map(|s| s.bounds).unwrap_or(Rect {
             x0: 0,
             y0: 0,
             x1: self.width,
@@ -1534,6 +1709,7 @@ impl Document {
                 let py = bounds.y0 + row;
                 let keep = self
                     .selection
+                    .as_ref()
                     .map_or(true, |s| s.contains(px as f32 + 0.5, py as f32 + 0.5));
                 if !keep {
                     continue;
@@ -1585,7 +1761,7 @@ impl Document {
     /// locked, the same as every other command that rewrites a layer's own
     /// pixels.
     fn paint_region(&mut self, id: LayerId, bounds: Rect, color: [u8; 4]) -> Result<(), String> {
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
         if layer.locked {
@@ -1593,8 +1769,9 @@ impl Document {
         }
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -1689,6 +1866,7 @@ impl Document {
     ) -> Result<LayerId, String> {
         let selection = self
             .selection
+            .clone()
             .ok_or_else(|| "Paste Into needs an active selection.".to_string())?;
         let bounds = selection.bounds;
         let origin_x =
@@ -1793,7 +1971,7 @@ impl Document {
             return Err("Blur radius must be at least 1 pixel.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -1804,8 +1982,9 @@ impl Document {
         let r = radius as i64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -1852,7 +2031,7 @@ impl Document {
             ));
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -1864,8 +2043,9 @@ impl Document {
         let threshold = threshold as i32;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -1930,7 +2110,7 @@ impl Document {
             return Err("Smart Sharpen reduce noise must be between 0 and 100.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -1942,8 +2122,9 @@ impl Document {
         let noise_frac = reduce_noise as f32 / 100.0;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -1993,7 +2174,7 @@ impl Document {
             return Err("Reduce Noise preserve details must be between 0 and 100.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -2004,8 +2185,9 @@ impl Document {
         let blend = (strength as f32 / 10.0) * (1.0 - preserve_details as f32 / 100.0);
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2107,7 +2289,7 @@ impl Document {
             return Err("Median radius must be at least 1 pixel.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -2119,8 +2301,9 @@ impl Document {
         let threshold = threshold as i32;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2170,7 +2353,7 @@ impl Document {
             ));
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
         if layer.locked {
@@ -2186,8 +2369,9 @@ impl Document {
         };
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2215,7 +2399,7 @@ impl Document {
     /// of its alpha. Shared by [`Self::equalize`] (which builds its remap
     /// table from it) and [`Self::histogram`] (which reports it).
     fn layer_histogram(&self, id: LayerId) -> Result<([[u32; 256]; 3], u32), String> {
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let sample_bounds = self.copy_bounds();
         let layer = self.layer(id)?;
@@ -2223,8 +2407,9 @@ impl Document {
         let mut sampled = 0u32;
         for row in sample_bounds.y0..sample_bounds.y1 {
             for col in sample_bounds.x0..sample_bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2312,7 +2497,7 @@ impl Document {
     /// the plain menu command: whole layer in, whole layer out. Errors
     /// on a locked/unknown layer.
     pub fn equalize(&mut self, id: LayerId, entire_image: bool) -> Result<Option<Rect>, String> {
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let sample_bounds = self.copy_bounds();
         let full = Rect {
@@ -2351,8 +2536,9 @@ impl Document {
         for row in target_bounds.y0..target_bounds.y1 {
             for col in target_bounds.x0..target_bounds.x1 {
                 if !remap_everything {
-                    let keep =
-                        selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                    let keep = selection
+                        .as_ref()
+                        .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                     if !keep {
                         continue;
                     }
@@ -2409,7 +2595,7 @@ impl Document {
     /// the resulting per-channel stretch, the same two-pass
     /// sample-then-remap shape [`Self::equalize`] already uses.
     fn auto_stretch(&mut self, id: LayerId, shared: bool) -> Result<Option<Rect>, String> {
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let bounds = self.copy_bounds();
         let layer = self.layer_mut(id)?;
@@ -2422,8 +2608,9 @@ impl Document {
         let mut sampled = false;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2448,8 +2635,9 @@ impl Document {
 
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2505,7 +2693,7 @@ impl Document {
             return Err("Match Color fade must be between 0 and 100.".to_string());
         }
         let source_stats = channel_mean_std(&self.layer(source_layer_id)?.pixels);
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let bounds = self.copy_bounds();
         let layer = self.layer_mut(id)?;
@@ -2517,8 +2705,9 @@ impl Document {
         let frac = fade as f32 / 100.0;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2564,7 +2753,7 @@ impl Document {
             return Err("Radius must be at least 1 pixel.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -2575,8 +2764,9 @@ impl Document {
         let r = radius as i64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2606,7 +2796,7 @@ impl Document {
             return Err("High Pass radius must be at least 1 pixel.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -2617,8 +2807,9 @@ impl Document {
         let r = radius as i64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2698,7 +2889,7 @@ impl Document {
             return Err("Scale must not be zero.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -2708,8 +2899,9 @@ impl Document {
         let source = layer.pixels.clone();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -2740,7 +2932,7 @@ impl Document {
         mut pick: impl FnMut(&[u8], u32, u32) -> [u8; CHANNELS],
     ) -> Result<Option<Rect>, String> {
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
         if layer.locked {
@@ -2749,8 +2941,9 @@ impl Document {
         let source = layer.pixels.clone();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -5469,7 +5662,7 @@ impl Document {
             return Err(format!("Motion blur angle must be a number, got {angle}."));
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -5482,8 +5675,9 @@ impl Document {
         let half = distance as i64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -5799,7 +5993,7 @@ impl Document {
         let (width, height) = (self.width, self.height);
         // Copied out before borrowing `self.layers` mutably below — `Selection`
         // is small (an enum plus four `u32`s), so this is cheap per call.
-        let selection = self.selection;
+        let selection = self.selection.clone();
         // Likewise the pattern, only when a stamp stroke needs it.
         let pattern = match stroke {
             Stroke::PatternStamp { .. } => Some(self.pattern.clone().ok_or_else(|| {
@@ -5934,7 +6128,7 @@ impl Document {
                 "({x}, {y}) is outside the {width}x{height} canvas."
             ));
         }
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -5942,6 +6136,7 @@ impl Document {
 
         let in_selection = |px: u32, py: u32| {
             selection
+                .as_ref()
                 .map(|s| s.contains(px as f32 + 0.5, py as f32 + 0.5))
                 .unwrap_or(true)
         };
@@ -6051,7 +6246,7 @@ impl Document {
         }
 
         let (width, height) = (self.width, self.height);
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -6119,7 +6314,7 @@ impl Document {
         mut f: impl FnMut([u8; 4]) -> [u8; 4],
     ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width, self.height);
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -9706,7 +9901,7 @@ impl Document {
     /// (amount / 100.0)`, clamped, per RGB channel; alpha untouched.
     pub fn clarity(&mut self, id: LayerId, amount: i32) -> Result<Option<Rect>, String> {
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -9718,8 +9913,9 @@ impl Document {
         const RADIUS: i64 = 40;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -9830,7 +10026,7 @@ impl Document {
             return Err("Tilt-Shift blur radius must be at least 1 pixel.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -9845,8 +10041,9 @@ impl Document {
             let distance = (row as i64 - focus_row).abs();
             let blend = ((distance - half_height) as f32 / blur_radius as f32).clamp(0.0, 1.0);
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -9893,7 +10090,7 @@ impl Document {
             );
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -9904,8 +10101,9 @@ impl Document {
         let r = blur_radius as i64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -9959,7 +10157,7 @@ impl Document {
             return Err("Field Blur pin coordinates must be finite numbers.".to_string());
         }
         let bounds = self.copy_bounds();
-        let selection = self.selection;
+        let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -9969,8 +10167,9 @@ impl Document {
         let source = layer.pixels.clone();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep =
-                    selection.map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                let keep = selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
                 if !keep {
                     continue;
                 }
@@ -25696,6 +25895,146 @@ mod tests {
         assert!(doc.constrain_crop(999).is_err());
     }
 
+    /// Which pixels of a 3x3 document the current selection contains.
+    fn selected_grid(doc: &Document) -> Vec<Vec<bool>> {
+        let selection = doc.selection().expect("a selection");
+        (0..3)
+            .map(|y| {
+                (0..3)
+                    .map(|x| selection.contains(x as f32 + 0.5, y as f32 + 0.5))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn magic_wand_selects_the_contiguous_run_within_tolerance_of_the_seed() {
+        // ramped_3x3 from (0, 0) = 10 at tolerance 15: (1, 0) = 20 is within
+        // 15 of the seed and adjacent; (2, 0) = 30 is 20 away and (0, 1) =
+        // 40 is 30 away, so neither joins.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_magic_wand(id, 0, 0, 15, true).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, true, false],
+                vec![false, false, false],
+                vec![false, false, false]
+            ]
+        );
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Mask);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            }
+        );
+        // Tolerance 25 reaches (2, 0) = 30 through (1, 0), still not 40.
+        doc.select_magic_wand(id, 0, 0, 25, true).unwrap();
+        assert_eq!(selected_grid(&doc)[0], vec![true, true, true]);
+        assert!(!selected_grid(&doc)[1][0]);
+    }
+
+    #[test]
+    fn magic_wand_compares_against_the_seed_not_the_neighbour() {
+        // Every step along the ramp is 10 apart, but tolerance 15 measured
+        // from the seed stops the wand after one step rather than walking
+        // the whole ramp.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_magic_wand(id, 0, 0, 15, true).unwrap();
+        let selected: usize = selected_grid(&doc).iter().flatten().filter(|&&b| b).count();
+        assert_eq!(selected, 2);
+    }
+
+    #[test]
+    fn magic_wand_non_contiguous_reaches_across_the_layer() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[10, 0, 0, 255, 50, 0, 0, 255, 10, 0, 0, 255], 3, 1)
+            .unwrap();
+        doc.select_magic_wand(id, 0, 0, 0, true).unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(0.5, 0.5) && !s.contains(1.5, 0.5) && !s.contains(2.5, 0.5));
+        doc.select_magic_wand(id, 0, 0, 0, false).unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(0.5, 0.5) && !s.contains(1.5, 0.5) && s.contains(2.5, 0.5));
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 1
+            }
+        );
+    }
+
+    #[test]
+    fn mask_selections_confine_fills_and_invert() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_magic_wand(id, 0, 0, 15, true).unwrap();
+        doc.fill_selection(id, [0, 0, 255, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [30, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 1), [40, 0, 0, 255]);
+
+        doc.invert_selection().unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![true, true, true]
+            ]
+        );
+        // The view carries the shape and bounding box, never the bitmap.
+        let view = doc.view();
+        assert_eq!(view.selection.as_ref().unwrap().shape, SelectionShape::Mask);
+    }
+
+    #[test]
+    fn mask_selections_survive_deselect_and_reselect() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_magic_wand(id, 2, 2, 0, true).unwrap();
+        doc.deselect();
+        assert!(doc.selection().is_none());
+        doc.reselect().unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(2.5, 2.5) && !s.contains(1.5, 2.5));
+    }
+
+    #[test]
+    fn modify_commands_decline_a_mask_selection() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_magic_wand(id, 0, 0, 15, true).unwrap();
+        for result in [
+            doc.expand_selection(1),
+            doc.contract_selection(1),
+            doc.smooth_selection(1),
+            doc.border_selection(1),
+        ] {
+            let err = result.unwrap_err();
+            assert!(err.contains("pixel-mask"), "{err}");
+        }
+        // Still intact afterwards.
+        assert!(selected_grid(&doc)[0][1]);
+    }
+
+    #[test]
+    fn magic_wand_reads_a_locked_layer_and_rejects_bad_input() {
+        let (mut doc, id) = ramped_3x3();
+        doc.set_locked(id, true).unwrap();
+        doc.select_magic_wand(id, 1, 1, 0, true).unwrap();
+        assert!(doc.selection().unwrap().contains(1.5, 1.5));
+        assert!(doc.select_magic_wand(id, 3, 0, 0, true).is_err());
+        assert!(doc.select_magic_wand(999, 0, 0, 0, true).is_err());
+    }
+
     #[test]
     fn a_new_document_has_no_selection() {
         let doc = Document::new(4, 4).unwrap();
@@ -25719,6 +26058,7 @@ mod tests {
                 },
                 inverted: false,
                 border: None,
+                mask: None,
             })
         );
     }
@@ -25761,6 +26101,7 @@ mod tests {
                 },
                 inverted: false,
                 border: None,
+                mask: None,
             })
         );
     }

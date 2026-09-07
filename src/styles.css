@@ -488,6 +488,10 @@ body {
   color: var(--muted);
 }
 
+.selection-outline--mask {
+  border-style: dotted;
+}
+
 .statusbar__levels {
   margin-left: auto;
   font-variant-numeric: tabular-nums;

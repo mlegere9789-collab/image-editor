@@ -278,6 +278,8 @@ export default function App() {
   const [showSkewDialog, setShowSkewDialog] = useState(false);
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
+  const [magicWandTolerance, setMagicWandTolerance] = useState(32);
+  const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [showGeometryDialog, setShowGeometryDialog] = useState(false);
   const [geometry, setGeometry] = useState({
     vertical: 0,
@@ -2841,7 +2843,23 @@ export default function App() {
   const isLineSelect = tool === "selectRow" || tool === "selectColumn";
   const isEyedropper = tool === "eyedropper";
   const isPaintBucket = tool === "paintBucket";
+  const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
+
+  const selectWandAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document || selectedId === null) return;
+      const [x, y] = toDocPoint(event, document);
+      void runCommand("select_magic_wand", {
+        id: selectedId,
+        x: Math.floor(x),
+        y: Math.floor(y),
+        tolerance: magicWandTolerance,
+        contiguous: magicWandContiguous,
+      });
+    },
+    [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous],
+  );
 
   const selectLineAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -2903,6 +2921,10 @@ export default function App() {
         if (canPaint) fillAt(event);
         return;
       }
+      if (isMagicWand) {
+        if (canPaint) selectWandAt(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -2936,6 +2958,8 @@ export default function App() {
       sampleColorAt,
       isPaintBucket,
       fillAt,
+      isMagicWand,
+      selectWandAt,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3308,6 +3332,15 @@ export default function App() {
             onClick={() => setTool("selectEllipse")}
           >
             Ellipse Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "magicWand" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magicWand"}
+            onClick={() => setTool("magicWand")}
+            title="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
+          >
+            Magic Wand
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
@@ -4657,6 +4690,30 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "magicWand" && (
+            <>
+              <label className="tools__slider">
+                Tolerance
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={magicWandTolerance}
+                  disabled={!canPaint}
+                  onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
+                />
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={magicWandContiguous}
+                  disabled={!canPaint}
+                  onChange={(event) => setMagicWandContiguous(event.target.checked)}
+                />
+                Contiguous
+              </label>
+            </>
           )}
           <label className="tools__slider">
             Size
@@ -13036,7 +13093,7 @@ export default function App() {
                   <div
                     className={`selection-outline${
                       document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
-                    }`}
+                    }${document.selection.shape === "mask" ? " selection-outline--mask" : ""}`}
                     style={{
                       ...overlayStyle(document.selection.bounds, document),
                       ...selectionRadiusStyle(document.selection.shape, document.selection.bounds),
@@ -13068,7 +13125,7 @@ export default function App() {
                             document.selection.shape === "ellipse"
                               ? " selection-outline--ellipse"
                               : ""
-                          }`}
+                          }${document.selection.shape === "mask" ? " selection-outline--mask" : ""}`}
                           style={{
                             ...overlayStyle(inner, document),
                             ...selectionRadiusStyle(document.selection.shape, inner),

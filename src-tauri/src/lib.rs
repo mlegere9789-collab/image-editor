@@ -383,6 +383,23 @@ fn select_ellipse(
     })
 }
 
+/// Magic Wand: replace the selection with every pixel of layer `id` within
+/// `tolerance` of the pixel at `(x, y)`, contiguous or not.
+#[tauri::command]
+fn select_magic_wand(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    tolerance: u8,
+    contiguous: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_magic_wand(id, x, y, tolerance, contiguous)?;
+        Ok(None)
+    })
+}
+
 /// Select the entire canvas.
 #[tauri::command]
 fn select_all(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -3085,6 +3102,7 @@ pub fn run() {
             pattern_stamp_stroke,
             select_rectangle,
             select_ellipse,
+            select_magic_wand,
             select_all,
             invert_selection,
             expand_selection,

@@ -9599,6 +9599,81 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **983 Rust tests total** (977 → 983, 976 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 149 — Magic Wand tool (and pixel-mask selections)
+
+The Magic Wand is the first selection tool that no geometric shape
+can describe, so this phase does two things: it teaches `Selection` to
+carry a pixel mask, and it ships the wand as that mask's first
+producer. `SelectionShape` gains a `Mask` variant and `Selection` an
+optional `mask: Arc<SelectionMask>` — a document-sized bitmap shared
+through an `Arc` so that cloning a selection, which every stroke and
+filter does once per call, stays a pointer copy rather than a
+canvas-sized memcpy. `Selection::contains` consults the bitmap for a
+`Mask` shape and is otherwise unchanged, so every selection-respecting
+command in the app — fills, strokes, filters, adjustments, copy, cut,
+Paste Into, Define Pattern's rectangle check — honours a mask
+selection without a line of change, and Select > Inverse still just
+flips a flag. The cost was that `Selection` can no longer be `Copy`:
+some thirty-five `let selection = self.selection;` captures across the
+file became `.clone()`s and a handful of by-value `Option` accessors
+became `as_ref()`, all mechanical and all guarded by the existing
+tests. The bitmap is never serialised to the frontend (`serde(skip)`);
+the view carries only the `"mask"` shape and its bounding box, which
+the canvas now draws as a dotted outline. Select > Modify's Expand,
+Contract, Smooth, and Border reshape a bounding box, which a mask has
+no meaningful way to follow, so they decline a mask selection with a
+clear error for now — a documented gap the morphological versions can
+close later.
+
+`select_magic_wand(id, x, y, tolerance, contiguous)` then replaces the
+selection with every pixel of layer `id` whose colour is within
+`tolerance` of the clicked pixel's own — per channel, RGBA, the same
+`abs_diff <= tolerance` test the Paint Bucket already uses — reached
+4-connected from the click when `contiguous` is set (Photoshop's
+default) or anywhere on the layer when it is not, with `bounds` the
+mask's bounding box. It reads the one layer's own bytes (Photoshop's
+Sample All Layers is a documented scope cut, as is its Anti-alias
+option; masks here are hard-edged like every other selection), works
+on a locked layer, and errors on an unknown layer or a click off the
+canvas. A new **Magic Wand** tool button sits with the marquees, with
+a Tolerance slider and a Contiguous checkbox appearing in the tool
+options while it is active; a click on the canvas sends the wand.
+
+**Verified two ways.** Seven new `document.rs` tests, reading the
+selection back pixel by pixel through `Selection::contains`. On
+`ramped_3x3` from `(0, 0) = 10` at tolerance `15`, `(1, 0) = 20` is
+within `15` of the seed and adjacent, while `(2, 0) = 30` is `20` away
+and `(0, 1) = 40` is `30` away, so exactly the top-left two pixels are
+selected, with bounds `(0, 0)–(2, 1)` and shape `Mask`; at tolerance
+`25` the wand reaches `(2, 0)` through `(1, 0)` but still not `40`. A
+second test pins that the comparison is against the seed rather than
+the neighbour: every step along the ramp is `10` apart, yet tolerance
+`15` from the seed selects two pixels, not the whole ramp. A `3x1` row
+`10 50 10` clicked at tolerance `0` selects only the first pixel
+contiguously and both `10`s non-contiguously, with bounds spanning the
+row. A mask selection confines `fill_selection` to exactly its pixels
+and inverts to exactly the complement, and the view exposes the `Mask`
+shape; a mask survives deselect and reselect; all four Modify commands
+decline it with an error mentioning "pixel-mask" and leave it intact;
+a locked layer can be sampled, and an off-canvas click or unknown layer
+errors. All seven passed on the first run, alongside the whole existing
+suite unchanged through the `Copy`-to-`Clone` refactor; the expected
+pixels are read straight off the fixture.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**990 Rust tests total** (983 → 990, 983 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -37,7 +37,9 @@ export type LayerView = {
 export type SelectionShape =
   | "rectangle"
   | "ellipse"
-  | { roundedRectangle: { radius: number } };
+  | { roundedRectangle: { radius: number } }
+  /** A pixel mask (Magic Wand and friends); only its bounding box is sent. */
+  | "mask";
 
 /** Mirrors `Selection` (aka `SelectionView`) in src-tauri/src/document.rs. */
 export type Selection = {
@@ -90,6 +92,7 @@ export type Tool =
   | "brush"
   | "eraser"
   | "patternStamp"
+  | "magicWand"
   | "selectRect"
   | "selectEllipse"
   | "selectRow"
