@@ -1914,6 +1914,14 @@ fn red_eye(
     edit_checkpointed(&state, |document| document.red_eye(id, x, y, darken))
 }
 
+/// Ruler tool: the width, height, distance, and angle of a drag from
+/// `(x0, y0)` to `(x1, y1)` in document pixels. Pure geometry — touches no
+/// document state.
+#[tauri::command]
+fn ruler_measure(x0: f32, y0: f32, x1: f32, y1: f32) -> Result<document::Measurement, String> {
+    document::measure(x0, y0, x1, y1)
+}
+
 /// Gradient (Linear): blends `start_color` to `end_color` from `(x0, y0)`
 /// to `(x1, y1)` on layer `id`. A whole, discrete action on its own, so it
 /// checkpoints itself, the same as [`flood_fill`].
@@ -3353,6 +3361,7 @@ pub fn run() {
             select_similar,
             magic_erase,
             red_eye,
+            ruler_measure,
             select_all,
             invert_selection,
             expand_selection,

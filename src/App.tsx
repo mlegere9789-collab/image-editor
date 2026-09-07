@@ -9,6 +9,7 @@ import type {
   BlendModeInfo,
   DocumentView,
   HistoryState,
+  Measurement,
   MoveDirection,
   SelectionMode,
   SelectionShape,
@@ -258,6 +259,8 @@ export default function App() {
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   const [spongeSaturate, setSpongeSaturate] = useState(false);
+  const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
+  const rulerStart = useRef<[number, number] | null>(null);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
@@ -3025,6 +3028,7 @@ export default function App() {
   );
 
   const isRedEye = tool === "redEye";
+  const isRuler = tool === "ruler";
 
   const redEyeAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3112,6 +3116,11 @@ export default function App() {
         if (canPaint) redEyeAt(event);
         return;
       }
+      if (isRuler) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        rulerStart.current = toDocPoint(event, document);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -3151,6 +3160,7 @@ export default function App() {
       magicEraseAt,
       isRedEye,
       redEyeAt,
+      isRuler,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3209,6 +3219,17 @@ export default function App() {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
+      if (isRuler) {
+        const start = rulerStart.current;
+        rulerStart.current = null;
+        if (start && document) {
+          const [x1, y1] = toDocPoint(event, document);
+          void invoke<Measurement>("ruler_measure", { x0: start[0], y0: start[1], x1, y1 })
+            .then(setRulerReadout)
+            .catch((err) => setError(String(err)));
+        }
+        return;
+      }
       if (isMarqueeTool) {
         const start = marqueeStart.current;
         marqueeStart.current = null;
@@ -3263,6 +3284,7 @@ export default function App() {
       lastPoint.current = null;
     },
     [
+      isRuler,
       isMarqueeTool,
       isGradient,
       document,
@@ -3778,6 +3800,15 @@ export default function App() {
             title="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
           >
             Red Eye
+          </button>
+          <button
+            className={`button button--quiet${tool === "ruler" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "ruler"}
+            onClick={() => setTool("ruler")}
+            title="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
+          >
+            Ruler
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -13845,6 +13876,15 @@ export default function App() {
                 title="Camera Raw Filter > RGB Levels: the selected layer's own pixel under the pointer"
               >
                 R {rgbLevels[0]} G {rgbLevels[1]} B {rgbLevels[2]} A {rgbLevels[3]}
+              </span>
+            )}
+            {rulerReadout && (
+              <span
+                className="statusbar__levels"
+                title="Ruler: the last measured drag (angle counter-clockwise from horizontal)"
+              >
+                W {rulerReadout.width.toFixed(1)} H {rulerReadout.height.toFixed(1)} D{" "}
+                {rulerReadout.distance.toFixed(1)} A {rulerReadout.angle.toFixed(1)}°
               </span>
             )}
           </>

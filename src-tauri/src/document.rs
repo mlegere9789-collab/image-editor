@@ -11837,6 +11837,38 @@ fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
     (to_byte(r1 + m), to_byte(g1 + m), to_byte(b1 + m))
 }
 
+/// The Ruler tool's readout for a drag from `(x0, y0)` to `(x1, y1)` in
+/// document pixels: the horizontal and vertical extents, the straight-line
+/// distance, and the angle in degrees measured counter-clockwise from the
+/// positive x axis with y pointing up on screen (so a drag up and to the
+/// right is positive), in `-180.0..=180.0` — Photoshop's Info-panel
+/// convention. A zero-length drag reads `0°`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Measurement {
+    pub width: f32,
+    pub height: f32,
+    pub distance: f32,
+    pub angle: f32,
+}
+
+/// The Ruler tool: see [`Measurement`]. Errors on non-finite coordinates.
+pub fn measure(x0: f32, y0: f32, x1: f32, y1: f32) -> Result<Measurement, String> {
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return Err("Ruler points must be finite numbers.".to_string());
+    }
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    Ok(Measurement {
+        width: dx.abs(),
+        height: dy.abs(),
+        distance: dx.hypot(dy),
+        // `0.0 - dy` rather than `-dy`: negating a zero gives -0.0, whose
+        // atan2 against a negative dx is -180 rather than the 180 a
+        // leftward drag should read.
+        angle: (0.0 - dy).atan2(dx).to_degrees(),
+    })
+}
+
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
@@ -28319,6 +28351,65 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.red_eye(id, 1, 1, 50).is_err());
         assert_eq!(pixel(&doc, id, 1, 1), [200, 40, 40, 255]);
+    }
+
+    fn assert_measurement(m: Measurement, width: f32, height: f32, distance: f32, angle: f32) {
+        assert_eq!((m.width, m.height), (width, height));
+        assert!(
+            (m.distance - distance).abs() < 1e-4,
+            "distance {}",
+            m.distance
+        );
+        assert!((m.angle - angle).abs() < 1e-3, "angle {}", m.angle);
+    }
+
+    #[test]
+    fn ruler_measures_a_3_4_5_triangle() {
+        // Down and to the right on screen is a negative angle.
+        assert_measurement(
+            measure(0.0, 0.0, 3.0, 4.0).unwrap(),
+            3.0,
+            4.0,
+            5.0,
+            -53.1301,
+        );
+    }
+
+    #[test]
+    fn ruler_angle_follows_the_drag_direction() {
+        // The same segment dragged the other way points up and left.
+        assert_measurement(
+            measure(3.0, 4.0, 0.0, 0.0).unwrap(),
+            3.0,
+            4.0,
+            5.0,
+            126.8699,
+        );
+        assert_measurement(
+            measure(0.0, 0.0, -1.0, 1.0).unwrap(),
+            1.0,
+            1.0,
+            std::f32::consts::SQRT_2,
+            -135.0,
+        );
+    }
+
+    #[test]
+    fn ruler_axis_aligned_drags_read_0_90_and_180() {
+        assert_measurement(measure(0.0, 0.0, 5.0, 0.0).unwrap(), 5.0, 0.0, 5.0, 0.0);
+        assert_measurement(measure(0.0, 0.0, 0.0, -2.0).unwrap(), 0.0, 2.0, 2.0, 90.0);
+        assert_measurement(measure(3.0, 0.0, 0.0, 0.0).unwrap(), 3.0, 0.0, 3.0, 180.0);
+    }
+
+    #[test]
+    fn ruler_zero_length_drag_reads_zero() {
+        assert_measurement(measure(1.5, 1.5, 1.5, 1.5).unwrap(), 0.0, 0.0, 0.0, 0.0);
+    }
+
+    #[test]
+    fn ruler_rejects_non_finite_points() {
+        assert!(measure(f32::NAN, 0.0, 1.0, 1.0).is_err());
+        assert!(measure(0.0, 0.0, f32::INFINITY, 1.0).is_err());
     }
 
     #[test]

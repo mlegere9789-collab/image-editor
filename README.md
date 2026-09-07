@@ -10516,6 +10516,53 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1070 Rust tests total** (1065 → 1070, 1063 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 166 — Ruler tool
+
+The first measuring tool. `measure(x0, y0, x1, y1)` is pure geometry
+in `document.rs` — it touches no document — returning a `Measurement`
+of a drag in document pixels: the horizontal and vertical extents, the
+straight-line distance (`hypot`), and the angle in degrees measured
+counter-clockwise from the positive x axis with y pointing up on
+screen, in `−180..=180`, which is Photoshop's Info-panel convention (a
+drag up and to the right reads positive; a zero-length drag reads
+`0°`). Non-finite coordinates error. A `ruler_measure` Tauri command
+exposes it without touching the document lock, and a new **Ruler**
+tool button (enabled whenever a document is open, since measuring needs
+no layer) captures a drag on the canvas and shows the readout in the
+status bar as `W H D A°`, staying put until the next drag. Photoshop's
+Straighten Layer button and the Alt-drag protractor leg are documented
+scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every value
+cross-checked against Python's `math.hypot` / `math.atan2` (the tests
+compare to `1e-4` px and `1e-3°`, well inside `f32`'s precision for
+these magnitudes). A `(0, 0) → (3, 4)` drag reads `W 3 H 4 D 5` at
+`−53.1301°` (down and right on screen is negative); the same segment
+dragged the other way reads `126.8699°`, and `(0, 0) → (−1, 1)` reads
+`√2` at `−135°`. Axis-aligned drags read `0°` (right), `90°` (up), and
+`180°` (left); a zero-length drag reads all zeros; a NaN or infinite
+coordinate errors. Four of the five passed on the first run, and this
+time the test caught a real defect: the leftward drag read `−180°`,
+because negating a zero vertical offset produces IEEE `−0.0`, whose
+`atan2` against a negative `dx` is `−180` — the code now computes `0.0
+− dy`, which is `+0.0`, and reads `180°` as Photoshop does. (Clippy
+separately insisted the `√2` expectation be spelled as the `SQRT_2`
+constant rather than a seven-digit literal.)
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and thirteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new tool's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1075 Rust tests total** (1070 → 1075, 1068 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
