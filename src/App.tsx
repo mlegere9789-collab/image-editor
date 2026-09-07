@@ -255,6 +255,16 @@ export default function App() {
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
+  const [showFreeTransformDialog, setShowFreeTransformDialog] = useState(false);
+  const [freeTransform, setFreeTransform] = useState({
+    widthPercent: 100,
+    heightPercent: 100,
+    degrees: 0,
+    skewHorizontal: 0,
+    skewVertical: 0,
+    offsetX: 0,
+    offsetY: 0,
+  });
   const [showSkewDialog, setShowSkewDialog] = useState(false);
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
@@ -1095,6 +1105,19 @@ export default function App() {
     });
     setShowSkewDialog(false);
   }, [runCommand, selectedId, skewHorizontal, skewVertical]);
+
+  const setFreeTransformField = useCallback(
+    (key: keyof typeof freeTransform, value: number) => {
+      setFreeTransform((transform) => ({ ...transform, [key]: value }));
+    },
+    [],
+  );
+
+  const applyFreeTransform = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("free_transform", { id: selectedId, transform: freeTransform });
+    setShowFreeTransformDialog(false);
+  }, [runCommand, selectedId, freeTransform]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3135,6 +3158,14 @@ export default function App() {
             title="Edit > Transform > Skew (selected layer)"
           >
             Skew…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFreeTransformDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Free Transform (scale, rotate, skew, move as one edit)"
+          >
+            Free Transform…
           </button>
         </div>
 
@@ -5941,6 +5972,78 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySkew} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFreeTransformDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFreeTransformDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Free Transform"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Free Transform</h2>
+            <p className="modal__hint">
+              Applied in order — scale, rotate, skew, move — about the canvas
+              centre, as a single undoable edit. Stages left at their defaults are
+              skipped.
+            </p>
+            {(
+              [
+                ["widthPercent", "Width %", 1, undefined],
+                ["heightPercent", "Height %", 1, undefined],
+                ["degrees", "Rotate (°)", undefined, undefined],
+                ["skewHorizontal", "Skew horizontal (°)", -89, 89],
+                ["skewVertical", "Skew vertical (°)", -89, 89],
+                ["offsetX", "Move X (px)", undefined, undefined],
+                ["offsetY", "Move Y (px)", undefined, undefined],
+              ] as const
+            ).map(([key, label, min, max]) => (
+              <label className="control control--row" key={key}>
+                <span className="control__label">{label}</span>
+                <input
+                  type="number"
+                  min={min}
+                  max={max}
+                  step={key === "degrees" ? 0.1 : 1}
+                  value={freeTransform[key]}
+                  onChange={(event) => setFreeTransformField(key, Number(event.target.value))}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  setFreeTransform({
+                    widthPercent: 100,
+                    heightPercent: 100,
+                    degrees: 0,
+                    skewHorizontal: 0,
+                    skewVertical: 0,
+                    offsetX: 0,
+                    offsetY: 0,
+                  })
+                }
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFreeTransformDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyFreeTransform} disabled={busy}>
                 Apply
               </button>
             </div>

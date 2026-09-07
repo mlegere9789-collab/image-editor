@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 200.**
+**618 distinct capabilities tracked. Currently shipped: 201.**
 
 ## PART I — EVERY TOOL
 
@@ -216,7 +216,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Content Credentials
 - [ ] Creative Cloud Libraries
 - [ ] Adobe Fonts integration
-- [ ] Free Transform
+- [x] Free Transform (`free_transform`, a `FreeTransform` struct applying `scale`, `rotate`, `skew`, and a transparent-fill move in that order as one undo step, skipping stages left at their defaults — byte-for-byte the same as the per-stage calls. Photoshop's single combined affine (one resampling pass) and on-canvas handles are a documented scope cut; here each stage resamples nearest-neighbour in turn — see README Phase 139)
 - [x] Scale (`scale`, independent width/height percentages about the canvas centre — `rotate`'s own inverse-mapped nearest-neighbour scheme with division instead of rotation, transparent wherever the source falls outside the canvas, so shrinking leaves a transparent border and enlarging clips at the canvas edge. Negative percentages error rather than flip, since Flip is its own command; nearest-neighbour rather than bicubic is a documented scope cut — see README Phase 137)
 - [x] Rotate (`rotate`, any angle, positive clockwise, about the canvas centre — inverse-mapped nearest-neighbour resampling with the same rounding `sample_nearest` uses, transparent wherever the source falls outside the canvas. The canvas does not grow, so corners rotating past its edges are clipped — a documented scope cut alongside nearest-neighbour rather than bicubic resampling — see README Phase 136)
 - [x] Skew (`skew`, horizontal then vertical shear angles (−89..89°) about the canvas centre, each sliding rows/columns by `tan(angle)` pixels per pixel of distance from the centre — `rotate`/`scale`'s own inverse-mapped nearest-neighbour resampling and transparent fill. Applied as two sequential determinant-1 shears rather than Photoshop's single simultaneous affine, which folds flat when `tan(h)·tan(v) = 1` — a documented difference — see README Phase 138)

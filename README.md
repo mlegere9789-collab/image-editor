@@ -9058,6 +9058,66 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **931 Rust tests total** (925 → 931, 924 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 139 — Edit > Free Transform
+
+`free_transform(id, transform)` gathers the three Transform entries of
+Phases 136–138 plus a move into Photoshop's own Free Transform: one
+dialog, one undo step. The settings travel as a new `FreeTransform`
+struct (serde, camelCase) — `width_percent`, `height_percent`,
+`degrees`, `skew_horizontal`, `skew_vertical`, `offset_x`, `offset_y` —
+whose `Default` is the neutral transform (`100`, `100`, `0`, `0`, `0`,
+`0`, `0`). The stages run in a fixed, documented order on the same
+layer: `scale`, then `rotate`, then `skew`, then a move, each an
+already-verified command, and a stage left at its default is skipped
+outright, so the result is byte-for-byte what the per-stage calls in
+that order would produce and all-default settings are an exact
+identity reporting nothing touched. The move is a new private
+`translate` helper in the same inverse-mapped style as its three
+siblings — every output pixel reads `(x - offset_x, y - offset_y)` and
+is transparent where that falls off the canvas — kept separate from
+Filter > Other > Offset, whose whole point is wrapping the vacated
+edge back in. Photoshop's Free Transform computes one combined affine
+and resamples once, positions a movable reference point, and is driven
+by on-canvas handles; this project's sequential composition resamples
+nearest-neighbour once per stage (so a scale followed by a rotate
+rounds twice), always about the canvas centre, from typed values — a
+documented scope cut, the same kind Phase 135's Camera Raw composite
+made. Each stage's own erroring rules are unchanged, and because the
+edit is checkpointed as a whole, a stage that errors leaves nothing
+earlier applied.
+
+**Verified two ways.** Six new `document.rs` tests. The move alone
+is pinned by hand: offset `(1, 0)` on `ramped_3x3` gives `[[0, 10,
+20], [0, 40, 50], [0, 70, 80]]` and `(0, -1)` gives `[[40, 50, 60],
+[70, 80, 90], [0, 0, 0]]`, with the vacated pixels fully transparent.
+A transform with every stage non-neutral — `50%` × `50%`, `90°`, skew
+`45°`/`0°`, offset `(1, 0)` on `ramped_4x4` — equals the four calls
+made in that order byte-for-byte and genuinely differs from the
+untouched fixture. All-default settings are a byte-for-byte identity
+reporting `None` touched. With only `degrees = 90`, the result equals
+`rotate(90)` alone (the Phase 136 grid). A one-pixel selection confines
+the edit, and a `0%` width, a `90°` skew, a locked layer, and an
+unknown layer (even at all-default settings) all error. All six passed
+on the first run; as with the Camera Raw composite, the second
+verification is structural — every non-trivial byte the composite
+produces is one Phases 136–138 already hand-computed and cross-checked
+in Python, and the tests pin that the composite reproduces exactly
+those bytes.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-six: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**937 Rust tests total** (931 → 937, 930 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

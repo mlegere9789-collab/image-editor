@@ -2702,6 +2702,17 @@ fn skew(
     })
 }
 
+/// Edit > Free Transform on layer `id`: scale, rotate, skew, and move as
+/// one undo step.
+#[tauri::command]
+fn free_transform(
+    state: State<'_, AppState>,
+    id: LayerId,
+    transform: document::FreeTransform,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.free_transform(id, transform))
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2962,6 +2973,7 @@ pub fn run() {
             rotate,
             scale,
             skew,
+            free_transform,
             select_rectangle,
             select_ellipse,
             select_all,

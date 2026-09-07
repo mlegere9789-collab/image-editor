@@ -10213,6 +10213,96 @@ impl Document {
             out
         })
     }
+
+    /// Moves layer `id`'s pixels by `(dx, dy)` with the vacated edge left
+    /// fully transparent — Free Transform's move, as distinct from
+    /// [`Self::offset`], whose whole point is wrapping that edge back in.
+    /// Same inverse-mapped style as [`Self::rotate`]/[`Self::scale`]/
+    /// [`Self::skew`]: each output pixel reads `(x - dx, y - dy)`.
+    fn translate(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |source, row, col| {
+            let (sx, sy) = (col as i64 - dx as i64, row as i64 - dy as i64);
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
+
+    /// Edit > Free Transform: [`Self::scale`], then [`Self::rotate`], then
+    /// [`Self::skew`], then a transparent-fill move, applied in that fixed
+    /// order to layer `id` as one edit — so the result is byte-for-byte
+    /// what those calls would produce made one after another, but lands
+    /// as a single undo step. A stage left at its [`FreeTransform`]
+    /// default is skipped outright, so all-default settings are an exact
+    /// identity. Photoshop's own Free Transform computes one combined
+    /// affine and resamples once, positions a movable reference point,
+    /// and is driven by on-canvas handles; this project's sequential
+    /// composition resamples nearest-neighbour once per stage (a scale
+    /// followed by a rotate rounds twice), always about the canvas
+    /// centre, from typed values — a documented scope cut, the same kind
+    /// [`Self::camera_raw_filter`] makes. Each stage's own erroring rules
+    /// are unchanged.
+    pub fn free_transform(
+        &mut self,
+        id: LayerId,
+        transform: FreeTransform,
+    ) -> Result<Option<Rect>, String> {
+        let neutral = FreeTransform::default();
+        let mut touched = self.layer(id).map(|_| None)?;
+        if (transform.width_percent, transform.height_percent)
+            != (neutral.width_percent, neutral.height_percent)
+        {
+            touched = self.scale(id, transform.width_percent, transform.height_percent)?;
+        }
+        if transform.degrees != neutral.degrees {
+            touched = self.rotate(id, transform.degrees)?;
+        }
+        if (transform.skew_horizontal, transform.skew_vertical)
+            != (neutral.skew_horizontal, neutral.skew_vertical)
+        {
+            touched = self.skew(id, transform.skew_horizontal, transform.skew_vertical)?;
+        }
+        if (transform.offset_x, transform.offset_y) != (neutral.offset_x, neutral.offset_y) {
+            touched = self.translate(id, transform.offset_x, transform.offset_y)?;
+        }
+        Ok(touched)
+    }
+}
+
+/// Every value Edit > Free Transform applies at once — see
+/// [`Document::free_transform`]. `Default` is the neutral transform: `100%`
+/// scale, no rotation, no skew, no move.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeTransform {
+    pub width_percent: f32,
+    pub height_percent: f32,
+    /// Rotation in degrees, positive clockwise.
+    pub degrees: f32,
+    pub skew_horizontal: f32,
+    pub skew_vertical: f32,
+    pub offset_x: i32,
+    pub offset_y: i32,
+}
+
+impl Default for FreeTransform {
+    fn default() -> Self {
+        Self {
+            width_percent: 100.0,
+            height_percent: 100.0,
+            degrees: 0.0,
+            skew_horizontal: 0.0,
+            skew_vertical: 0.0,
+            offset_x: 0,
+            offset_y: 0,
+        }
+    }
 }
 
 /// Every panel value Filter > Camera Raw Filter applies at once — see
@@ -24160,6 +24250,116 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.skew(999, 45.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn translate_moves_pixels_and_leaves_the_vacated_edge_transparent() {
+        let (mut doc, id) = ramped_3x3();
+        doc.translate(id, 1, 0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 20], vec![0, 40, 50], vec![0, 70, 80]]
+        );
+        assert_eq!(pixel(&doc, id, 0, 1), [0, 0, 0, 0]);
+        let (mut doc, id) = ramped_3x3();
+        doc.translate(id, 0, -1).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 50, 60], vec![70, 80, 90], vec![0, 0, 0]]
+        );
+        assert_eq!(pixel(&doc, id, 1, 2), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn free_transform_equals_the_per_stage_calls_in_order() {
+        let transform = FreeTransform {
+            width_percent: 50.0,
+            height_percent: 50.0,
+            degrees: 90.0,
+            skew_horizontal: 45.0,
+            skew_vertical: 0.0,
+            offset_x: 1,
+            offset_y: 0,
+        };
+        let (mut composite, id_a) = ramped_4x4();
+        composite.free_transform(id_a, transform).unwrap();
+
+        let (mut sequential, id_b) = ramped_4x4();
+        sequential.scale(id_b, 50.0, 50.0).unwrap();
+        sequential.rotate(id_b, 90.0).unwrap();
+        sequential.skew(id_b, 45.0, 0.0).unwrap();
+        sequential.translate(id_b, 1, 0).unwrap();
+
+        assert_eq!(composite.layers()[0].pixels, sequential.layers()[0].pixels);
+        assert_ne!(
+            composite.layers()[0].pixels,
+            ramped_4x4().0.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn free_transform_at_defaults_is_an_exact_identity() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let touched = doc.free_transform(id, FreeTransform::default()).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        assert_eq!(touched, None);
+    }
+
+    #[test]
+    fn free_transform_with_one_stage_set_equals_that_stage_alone() {
+        let (mut doc, id) = ramped_3x3();
+        let transform = FreeTransform {
+            degrees: 90.0,
+            ..FreeTransform::default()
+        };
+        assert!(doc.free_transform(id, transform).unwrap().is_some());
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![70, 40, 10], vec![80, 50, 20], vec![90, 60, 30]]
+        );
+    }
+
+    #[test]
+    fn free_transform_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        let transform = FreeTransform {
+            offset_x: 1,
+            ..FreeTransform::default()
+        };
+        doc.free_transform(id, transform).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 20);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]);
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]);
+    }
+
+    #[test]
+    fn free_transform_propagates_each_stages_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        let zero_width = FreeTransform {
+            width_percent: 0.0,
+            ..FreeTransform::default()
+        };
+        assert!(doc.free_transform(id, zero_width).is_err());
+        let flat_skew = FreeTransform {
+            skew_horizontal: 90.0,
+            ..FreeTransform::default()
+        };
+        assert!(doc.free_transform(id, flat_skew).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        doc.set_locked(id, true).unwrap();
+        let turn = FreeTransform {
+            degrees: 90.0,
+            ..FreeTransform::default()
+        };
+        assert!(doc.free_transform(id, turn).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.free_transform(999, turn).is_err());
+        assert!(empty.free_transform(999, FreeTransform::default()).is_err());
     }
 
     #[test]
