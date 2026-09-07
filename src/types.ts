@@ -110,6 +110,10 @@ export type Measurement = {
   angle: number;
 };
 
+/** Paint Symmetry: mirror every brush, eraser, and pattern-stamp stroke
+ * about the canvas's vertical centre line, its horizontal one, or both. */
+export type Symmetry = "vertical" | "horizontal" | "both";
+
 /** How a new marquee combines with the current selection — the four mode
  * buttons in Photoshop's selection-tool options bar. */
 export type SelectionMode = "new" | "add" | "subtract" | "intersect";

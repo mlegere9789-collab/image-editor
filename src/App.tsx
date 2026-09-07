@@ -14,6 +14,7 @@ import type {
   SelectionMode,
   SelectionShape,
   Snapshot,
+  Symmetry,
   Tool,
 } from "./types";
 
@@ -259,6 +260,7 @@ export default function App() {
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   const [spongeSaturate, setSpongeSaturate] = useState(false);
+  const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
@@ -2950,8 +2952,14 @@ export default function App() {
   const applyStroke = useCallback(
     (points: [number, number][]) => {
       if (selectedId === null) return;
+      const mirrored = symmetry === "off" ? null : symmetry;
       if (tool === "eraser") {
-        void runCommand("erase_stroke", { id: selectedId, points, radius: brushSize });
+        void runCommand("erase_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          symmetry: mirrored,
+        });
       } else if (tool === "dodge" || tool === "burn") {
         void runCommand(tool === "dodge" ? "dodge_stroke" : "burn_stroke", {
           id: selectedId,
@@ -2980,6 +2988,7 @@ export default function App() {
           points,
           radius: brushSize,
           opacity: Math.round(brushOpacity * 255),
+          symmetry: mirrored,
         });
       } else {
         const [r, g, b] = hexToRgb(brushColor);
@@ -2989,10 +2998,11 @@ export default function App() {
           points,
           radius: brushSize,
           color: [r, g, b, alpha],
+          symmetry: mirrored,
         });
       }
     },
-    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize, spongeSaturate],
+    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize, spongeSaturate, symmetry],
   );
 
   const canPaint = document !== null && selectedId !== null;
@@ -5223,6 +5233,23 @@ export default function App() {
             >
               Clear Notes
             </button>
+          )}
+          {(tool === "brush" || tool === "eraser" || tool === "patternStamp") && (
+            <label className="tools__slider">
+              Symmetry
+              <select
+                value={symmetry}
+                disabled={!canPaint}
+                aria-label="Paint symmetry"
+                title="Paint Symmetry: mirror each stroke about the canvas centre"
+                onChange={(event) => setSymmetry(event.target.value as Symmetry | "off")}
+              >
+                <option value="off">Off</option>
+                <option value="vertical">Vertical</option>
+                <option value="horizontal">Horizontal</option>
+                <option value="both">Dual Axis</option>
+              </select>
+            </label>
           )}
           {tool === "sponge" && (
             <label className="tools__slider">

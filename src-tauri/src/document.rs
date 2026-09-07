@@ -6958,6 +6958,63 @@ impl Document {
         Ok(Some(Rect { x0, y0, x1, y1 }))
     }
 
+    /// Paint Symmetry: [`Self::stroke`] applied to `points` and then to
+    /// their mirror image(s) about the canvas centre — across the vertical
+    /// centre line (`x ↦ width − x`), the horizontal one (`y ↦ height −
+    /// y`), or both, which adds the diagonal copy too — returning the union
+    /// of the dirty rectangles. With `None` it is exactly one stroke. Each
+    /// copy is its own stroke call, so the neighbourhood tools' snapshot is
+    /// per copy and copies that overlap compound, as two strokes would.
+    /// Photoshop's Circular, Spiral, Mandala, and Radial symmetries are
+    /// documented scope cuts.
+    pub fn stroke_symmetric(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke,
+        symmetry: Option<Symmetry>,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width as f32, self.height as f32);
+        let mirrored = |flip_x: bool, flip_y: bool| -> Vec<(f32, f32)> {
+            points
+                .iter()
+                .map(|&(x, y)| {
+                    (
+                        if flip_x { width - x } else { x },
+                        if flip_y { height - y } else { y },
+                    )
+                })
+                .collect()
+        };
+        let copies: Vec<Vec<(f32, f32)>> = match symmetry {
+            None => vec![points.to_vec()],
+            Some(Symmetry::Vertical) => vec![points.to_vec(), mirrored(true, false)],
+            Some(Symmetry::Horizontal) => vec![points.to_vec(), mirrored(false, true)],
+            Some(Symmetry::Both) => vec![
+                points.to_vec(),
+                mirrored(true, false),
+                mirrored(false, true),
+                mirrored(true, true),
+            ],
+        };
+        let mut touched: Option<Rect> = None;
+        for copy in copies {
+            if let Some(r) = self.stroke(id, &copy, radius, stroke)? {
+                touched = Some(match touched {
+                    None => r,
+                    Some(t) => Rect {
+                        x0: t.x0.min(r.x0),
+                        y0: t.y0.min(r.y0),
+                        x1: t.x1.max(r.x1),
+                        y1: t.y1.max(r.y1),
+                    },
+                });
+            }
+        }
+        Ok(touched)
+    }
+
     /// Paint Bucket: flood-fill from `(x, y)` with `color` (RGBA8, the same
     /// normal `source-over` blending [`Stroke::Brush`] uses), spreading to
     /// 4-connected neighbours whose colour is within `tolerance` (per
@@ -12019,6 +12076,18 @@ pub fn measure(x0: f32, y0: f32, x1: f32, y1: f32) -> Result<Measurement, String
 /// Linear interpolation from `a` to `b` at `t` (`0.0..=1.0`).
 fn lerp(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
+}
+
+/// Paint Symmetry's axes: every stroke is repeated mirrored about the
+/// canvas's vertical centre line, its horizontal centre line, or both (four
+/// copies), the way Photoshop's Vertical, Horizontal, and Dual Axis
+/// symmetry paint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Symmetry {
+    Vertical,
+    Horizontal,
+    Both,
 }
 
 /// A tool [`Document::stroke`] applies.
@@ -18512,6 +18581,120 @@ mod tests {
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
             .is_err());
+    }
+
+    /// A transparent 4x4 with a one-pixel red dot painted at (0, 0) under
+    /// `symmetry`: radius 0.5 at the pixel's centre covers it fully and its
+    /// neighbours (a full pixel away) not at all.
+    fn symmetric_dot(symmetry: Option<Symmetry>) -> (Document, LayerId, Option<Rect>) {
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("l", &solid(4, 4, [0, 0, 0, 0]), 4, 4)
+            .unwrap();
+        let rect = doc
+            .stroke_symmetric(
+                id,
+                &[(0.5, 0.5)],
+                0.5,
+                Stroke::Brush {
+                    color: [255, 0, 0, 255],
+                },
+                symmetry,
+            )
+            .unwrap();
+        (doc, id, rect)
+    }
+
+    fn painted(doc: &Document, id: LayerId) -> Vec<(u32, u32)> {
+        (0..4)
+            .flat_map(|y| (0..4).map(move |x| (x, y)))
+            .filter(|&(x, y)| pixel(doc, id, x, y)[3] > 0)
+            .collect()
+    }
+
+    #[test]
+    fn symmetry_off_paints_once() {
+        let (doc, id, rect) = symmetric_dot(None);
+        assert_eq!(painted(&doc, id), vec![(0, 0)]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn vertical_symmetry_mirrors_across_the_vertical_centre_line() {
+        // (0.5, 0.5) mirrors to (3.5, 0.5): pixel (3, 0).
+        let (doc, id, rect) = symmetric_dot(Some(Symmetry::Vertical));
+        assert_eq!(painted(&doc, id), vec![(0, 0), (3, 0)]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 4,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn horizontal_symmetry_mirrors_across_the_horizontal_centre_line() {
+        let (doc, id, rect) = symmetric_dot(Some(Symmetry::Horizontal));
+        assert_eq!(painted(&doc, id), vec![(0, 0), (0, 3)]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn dual_axis_symmetry_paints_four_copies() {
+        let (doc, id, rect) = symmetric_dot(Some(Symmetry::Both));
+        assert_eq!(painted(&doc, id), vec![(0, 0), (3, 0), (0, 3), (3, 3)]);
+        assert_eq!(pixel(&doc, id, 3, 3), [255, 0, 0, 255]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 4,
+                y1: 4
+            })
+        );
+    }
+
+    #[test]
+    fn symmetric_strokes_respect_the_selection_and_propagate_errors() {
+        // A selection covering only the left half keeps the mirrored copy
+        // from landing; a locked layer errors before anything is painted.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("l", &solid(4, 4, [0, 0, 0, 0]), 4, 4)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 4.0).unwrap();
+        let brush = Stroke::Brush {
+            color: [255, 0, 0, 255],
+        };
+        doc.stroke_symmetric(id, &[(0.5, 0.5)], 0.5, brush, Some(Symmetry::Both))
+            .unwrap();
+        assert_eq!(painted(&doc, id), vec![(0, 0), (0, 3)]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke_symmetric(id, &[(1.5, 1.5)], 0.5, brush, Some(Symmetry::Vertical))
+            .is_err());
+        assert_eq!(painted(&doc, id), vec![(0, 0), (0, 3)]);
     }
 
     #[test]

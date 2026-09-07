@@ -10700,6 +10700,52 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1090 Rust tests total** (1085 → 1090, 1083 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 170 — Paint Symmetry
+
+`stroke_symmetric(id, points, radius, stroke, symmetry)` is
+`Document::stroke` applied to the stroke's points and then to their
+mirror image(s) about the canvas centre — across the vertical centre
+line (`x ↦ width − x`), the horizontal one (`y ↦ height − y`), or both,
+which adds the diagonal copy for four in all — returning the union of
+the copies' dirty rectangles; with no symmetry it is exactly one
+stroke. A new `Symmetry` enum (`Vertical`, `Horizontal`, `Both`)
+names Photoshop's Vertical, Horizontal, and Dual Axis modes. Each copy
+is its own `stroke` call, so every copy honours the selection and the
+lock independently, the neighbourhood tools' pre-stroke snapshot is per
+copy, and copies that overlap compound as two strokes would — stated
+here rather than hidden. The `paint_stroke`, `erase_stroke`, and
+`pattern_stamp_stroke` commands take an optional `symmetry` (absent
+means off, so the existing calls are untouched) and a **Symmetry**
+drop-down appears in the tool options while the Brush, Eraser, or
+Pattern Stamp is active. Photoshop's Circular, Spiral, Mandala, and
+Radial symmetries, and its movable axis, are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests on a transparent
+`4×4` with a radius-`0.5` red dot at pixel `(0, 0)`'s centre — the
+coverage arithmetic (`0.5 − 0 + 0.5 = 1` on the dot's own pixel, `0.5 −
+1 + 0.5 = 0` on its neighbours) checked by hand so exactly one pixel
+per copy is painted. Off paints `(0, 0)` alone with box `(0, 0)–(1,
+1)`; Vertical paints `(0, 0)` and `(3, 0)` (the mirror of `x = 0.5` is
+`3.5`) with box `(0, 0)–(4, 1)`; Horizontal paints `(0, 0)` and `(0,
+3)`; Dual Axis paints all four corners, opaque red, with the box the
+whole canvas. A selection covering only the left half lets Dual Axis
+land `(0, 0)` and `(0, 3)` but not the right-hand copies, and a locked
+layer errors with nothing painted. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and seventeen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drop-down's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1095 Rust tests total** (1090 → 1095, 1088 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

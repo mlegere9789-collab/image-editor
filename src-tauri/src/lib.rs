@@ -1811,9 +1811,10 @@ fn paint_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     color: [u8; 4],
+    symmetry: Option<document::Symmetry>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Brush { color })
+        document.stroke_symmetric(id, &points, radius, Stroke::Brush { color }, symmetry)
     })
 }
 
@@ -1825,9 +1826,10 @@ fn erase_stroke(
     id: LayerId,
     points: Vec<(f32, f32)>,
     radius: f32,
+    symmetry: Option<document::Symmetry>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Eraser)
+        document.stroke_symmetric(id, &points, radius, Stroke::Eraser, symmetry)
     })
 }
 
@@ -1917,9 +1919,16 @@ fn pattern_stamp_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     opacity: u8,
+    symmetry: Option<document::Symmetry>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::PatternStamp { opacity })
+        document.stroke_symmetric(
+            id,
+            &points,
+            radius,
+            Stroke::PatternStamp { opacity },
+            symmetry,
+        )
     })
 }
 
