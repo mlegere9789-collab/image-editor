@@ -2782,6 +2782,90 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// The Rectangle tool in its Pixels mode: paints an axis-aligned
+    /// rectangle spanning the two corners `(x0, y0)` and `(x1, y1)` — in
+    /// either order, as a drag can go any direction — straight onto layer
+    /// `id`, with an optional flat `fill`, an optional `stroke` of
+    /// `(colour, width)` hugging the *inside* of the edge (Photoshop's
+    /// "Inside" stroke alignment; Center and Outside are a documented
+    /// scope cut), and rounded corners of `radius` pixels (`0` for a
+    /// plain rectangle). The box is normalised and clipped to the canvas
+    /// exactly as the Rectangular Marquee's is, and a pixel is inside the
+    /// shape when its centre is — the same `+0.5` pixel-centre rule the
+    /// selection shapes use, via [`shape_contains`] with
+    /// [`SelectionShape::RoundedRectangle`] — so edges are hard;
+    /// Photoshop's Anti-alias option is a documented scope cut. The
+    /// stroke band is the shape minus the same shape shrunk by `width`
+    /// on every side (exactly how Select > Modify > Border is built), so
+    /// a width that swallows the whole box strokes the whole shape. The
+    /// stroke wins where the two overlap; pixels are overwritten outright
+    /// (100% opacity, Normal), and the active selection confines the
+    /// paint. Photoshop's Shape and Path modes — a live vector layer —
+    /// are a documented scope cut; this app's layers are pixels only.
+    /// Errors when neither fill nor stroke is given, for a stroke width
+    /// outside `1..=250`, for non-finite corners, or a locked or unknown
+    /// layer; a box that rounds to no pixels paints nothing and returns
+    /// `None`, like a click with no drag.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_rectangle(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        radius: u32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+    ) -> Result<Option<Rect>, String> {
+        if fill.is_none() && stroke.is_none() {
+            return Err("A shape needs a fill, a stroke, or both.".to_string());
+        }
+        if let Some((_, width)) = stroke {
+            if !(1..=250).contains(&width) {
+                return Err("Shape stroke width must be between 1 and 250.".to_string());
+            }
+        }
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return Err("Shape coordinates must be finite numbers.".to_string());
+        }
+        let Ok(bounds) = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height) else {
+            return Ok(None);
+        };
+        let shape = if radius == 0 {
+            SelectionShape::Rectangle
+        } else {
+            SelectionShape::RoundedRectangle { radius }
+        };
+        let inner = stroke.and_then(|(_, width)| shrink_rect(bounds, width));
+        let selection = self.selection.clone();
+        let doc_width = self.width as usize;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
+                if !shape_contains(shape, bounds, px, py)
+                    || selection.as_ref().is_some_and(|s| !s.contains(px, py))
+                {
+                    continue;
+                }
+                let in_band = stroke.is_some()
+                    && !inner.is_some_and(|inner| shape_contains(shape, inner, px, py));
+                let color = match (in_band, stroke, fill) {
+                    (true, Some((color, _)), _) => color,
+                    (_, _, Some(fill)) => fill,
+                    _ => continue,
+                };
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Edit > Paste — and, since this app has no scrollable viewport to
     /// paste into the middle of, also Edit > Paste Special > Paste in
     /// Place: adds `clipboard`'s pixels as a new top layer, positioned at
@@ -20416,6 +20500,145 @@ mod tests {
         assert_eq!(red_channel_grid(&doc)[1], vec![106, 200, 200]);
         doc.set_locked(id, true).unwrap();
         assert!(doc.stroke(id, &[(0.5, 1.5)], 0.5, Stroke::Remove).is_err());
+    }
+
+    fn blank_5x5() -> (Document, LayerId) {
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc
+            .add_layer("l", &solid(5, 5, [0, 0, 0, 0]), 5, 5)
+            .unwrap();
+        (doc, id)
+    }
+
+    const FILL: [u8; 4] = [0, 255, 0, 255];
+    const STROKE: [u8; 4] = [0, 0, 255, 255];
+
+    /// One character per pixel: `.` untouched, `F` fill, `S` stroke.
+    fn shape_grid(doc: &Document, id: LayerId) -> Vec<String> {
+        (0..doc.height())
+            .map(|y| {
+                (0..doc.width())
+                    .map(|x| match pixel(doc, id, x, y) {
+                        p if p == FILL => 'F',
+                        p if p == STROKE => 'S',
+                        [0, 0, 0, 0] => '.',
+                        other => panic!("unexpected pixel {other:?} at ({x}, {y})"),
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn rectangle_tool_fills_the_box_in_either_drag_direction() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 0, 0, 0]), 3, 3)
+            .unwrap();
+        let dirty = doc
+            .draw_rectangle(id, 2.0, 2.0, 0.0, 0.0, 0, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            })
+        );
+        assert_eq!(shape_grid(&doc, id), ["FF.", "FF.", "..."]);
+    }
+
+    #[test]
+    fn rectangle_tool_strokes_a_band_inside_the_edge() {
+        let (mut doc, id) = blank_5x5();
+        doc.draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, Some(FILL), Some((STROKE, 1)))
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["SSSSS", "SFFFS", "SFFFS", "SFFFS", "SSSSS"]
+        );
+        // A width that swallows the box strokes the whole shape, and a
+        // stroke alone leaves the interior untouched.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, None, Some((STROKE, 3)))
+            .unwrap();
+        assert_eq!(shape_grid(&doc, id), ["SSSSS"; 5]);
+        let (mut doc, id) = blank_5x5();
+        doc.draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, None, Some((STROKE, 1)))
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["SSSSS", "S...S", "S...S", "S...S", "SSSSS"]
+        );
+    }
+
+    #[test]
+    fn rectangle_tool_rounds_the_corners() {
+        let (mut doc, id) = blank_5x5();
+        doc.draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 2, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".FFF.", "FFFFF", "FFFFF", "FFFFF", ".FFF."]
+        );
+        let (mut doc, id) = blank_5x5();
+        doc.draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 2, Some(FILL), Some((STROKE, 1)))
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".SSS.", "SFFFS", "SFFFS", "SFFFS", ".SSS."]
+        );
+    }
+
+    #[test]
+    fn rectangle_tool_respects_the_selection_and_clips_to_the_canvas() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 0, 0, 0]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        let dirty = doc
+            .draw_rectangle(id, -1.0, -1.0, 2.0, 2.0, 0, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            })
+        );
+        assert_eq!(shape_grid(&doc, id), ["F..", "F..", "..."]);
+    }
+
+    #[test]
+    fn rectangle_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc
+            .draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, None, None)
+            .is_err());
+        assert!(doc
+            .draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, Some(FILL), Some((STROKE, 0)))
+            .is_err());
+        assert!(doc
+            .draw_rectangle(id, f32::NAN, 0.0, 5.0, 5.0, 0, Some(FILL), None)
+            .is_err());
+        assert_eq!(
+            doc.draw_rectangle(id, 1.0, 1.0, 1.0, 3.0, 0, Some(FILL), None)
+                .unwrap(),
+            None
+        );
+        assert!(doc
+            .draw_rectangle(id + 1, 0.0, 0.0, 5.0, 5.0, 0, Some(FILL), None)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, Some(FILL), None)
+            .is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }
 
     #[test]

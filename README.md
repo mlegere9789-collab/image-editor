@@ -11513,6 +11513,67 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1175 Rust tests total** (1170 → 1175, 1168 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 187 — Rectangle tool
+
+`Document::draw_rectangle(id, x0, y0, x1, y1, radius, fill, stroke)` is
+the Rectangle tool in its Pixels mode. The drag's two corners are
+normalised and clipped to the canvas exactly as the Rectangular
+Marquee's are (the same `normalize_selection_bounds`), and every pixel
+whose centre lies inside the box — the same `+0.5` pixel-centre rule
+the selection shapes use, through `shape_contains` with
+`SelectionShape::RoundedRectangle` when `radius` is non-zero — is
+overwritten. The optional `fill` is a flat colour; the optional
+`stroke` is a `(colour, width)` band hugging the *inside* of the edge,
+built the way Select > Modify > Border is built (the shape minus the
+same shape shrunk by `width` on every side), so a width that swallows
+the whole box strokes the whole shape. The stroke wins where the two
+overlap, and the active selection confines the paint. Photoshop's
+Shape and Path modes (a live vector layer), its Anti-alias option, and
+its Center and Outside stroke alignments are documented scope cuts;
+this app's layers are pixels only, so edges are hard. Neither fill
+nor stroke, a stroke width outside `1..=250`, a non-finite corner, and
+a locked or unknown layer all error; a box that rounds to no pixels
+paints nothing and returns `None`, like a click with no drag.
+
+A new **Rectangle** tool button sits after History Brush. Its options
+are a **Fill** checkbox (the brush colour), a **Stroke** width slider
+(`0` for none) with its own colour swatch, and a **Radius** slider; the
+drag shares the marquee's live outline preview and paints at
+pointer-up through a `draw_rectangle` command.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python model of the pixel-centre rule and
+read back as one character per pixel (`.` untouched, `F` fill, `S`
+stroke). A `(2, 2)`→`(0, 0)` drag on a blank `3×3` fills the top-left
+`2×2` and reports that box dirty. On a blank `5×5`, a full-box fill
+with a 1-pixel stroke gives `SSSSS / SFFFS / SFFFS / SFFFS / SSSSS`, a
+3-pixel stroke alone (which shrinks the box to nothing) strokes all
+twenty-five pixels, and a 1-pixel stroke alone leaves the `3×3`
+interior untouched. Radius `2` clears exactly the four corner pixels
+(`(0, 0)`'s centre is `1.5` from the corner circle's centre on both
+axes, `4.5 > 4`; `(1, 0)`'s is `0.25 + 2.25 = 2.5 ≤ 4`), and with a
+1-pixel stroke the band's inner shape clamps its radius to `1.5`, so
+`(1, 1)` at `1 + 1 = 2 ≤ 2.25` is fill: `.SSS. / SFFFS / SFFFS / SFFFS
+/ .SSS.`. A `(-1, -1)`→`(2, 2)` drag with only column 0 selected paints
+`(0, 0)` and `(0, 1)` and reports the clipped `(0, 0)–(2, 2)` box.
+No fill and no stroke, a zero-width stroke, a `NaN` corner, an unknown
+layer, and a locked layer all error with the pixels untouched, and a
+zero-width box returns `None`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1180 Rust tests total** (1175 → 1180, 1173 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

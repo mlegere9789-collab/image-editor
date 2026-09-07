@@ -147,6 +147,7 @@ export type Tool =
   | "remove"
   | "patch"
   | "contentAwareMove"
+  | "rectangle"
   | "historyBrush"
   | "magicWand"
   | "lasso"

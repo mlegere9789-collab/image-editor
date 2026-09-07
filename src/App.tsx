@@ -808,6 +808,12 @@ export default function App() {
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
   const [gradientEndColor, setGradientEndColor] = useState("#000000");
+  // Rectangle tool options: whether to fill with the brush colour, the
+  // inside-stroke width (0 for none) and colour, and the corner radius.
+  const [shapeFill, setShapeFill] = useState(true);
+  const [shapeStrokeWidth, setShapeStrokeWidth] = useState(0);
+  const [shapeStrokeColor, setShapeStrokeColor] = useState("#000000");
+  const [shapeRadius, setShapeRadius] = useState(0);
 
   // The gradient drag's live start point — a ref, not state, read directly
   // at pointerup the same way `marqueeStart` below is; the gradient itself
@@ -3100,6 +3106,7 @@ export default function App() {
   const isPaintBucket = tool === "paintBucket";
   const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
+  const isRectangle = tool === "rectangle";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3380,7 +3387,7 @@ export default function App() {
         gradientStart.current = toDocPoint(event, document);
         return;
       }
-      if (isMarqueeTool) {
+      if (isMarqueeTool || (isRectangle && canPaint)) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const point = toDocPoint(event, document);
         marqueeStart.current = point;
@@ -3445,6 +3452,7 @@ export default function App() {
       selectLineAt,
       isGradient,
       isMarqueeTool,
+      isRectangle,
       canPaint,
       checkpoint,
       applyStroke,
@@ -3486,7 +3494,7 @@ export default function App() {
         setLassoPoints([...lassoTrail.current]);
         return;
       }
-      if (isMarqueeTool) {
+      if (isMarqueeTool || isRectangle) {
         if (marqueeStart.current === null) return;
         setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
         return;
@@ -3497,7 +3505,7 @@ export default function App() {
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, isLasso, isMarqueeTool, applyStroke, readLevelsAt],
+    [document, isLasso, isMarqueeTool, isRectangle, applyStroke, readLevelsAt],
   );
 
   const endStroke = useCallback(
@@ -3545,6 +3553,31 @@ export default function App() {
           void invoke<Measurement>("ruler_measure", { x0: start[0], y0: start[1], x1, y1 })
             .then(setRulerReadout)
             .catch((err) => setError(String(err)));
+        }
+        return;
+      }
+      if (isRectangle) {
+        const start = marqueeStart.current;
+        marqueeStart.current = null;
+        setMarqueePreview(null);
+        if (start && document && selectedId !== null) {
+          const [x0, y0] = start;
+          const [x1, y1] = toDocPoint(event, document);
+          // A click with no drag has no box to paint, the same as the marquee.
+          if (x0 !== x1 || y0 !== y1) {
+            const [r, g, b] = hexToRgb(brushColor);
+            const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
+            void runCommand("draw_rectangle", {
+              id: selectedId,
+              x0,
+              y0,
+              x1,
+              y1,
+              radius: shapeRadius,
+              fill: shapeFill ? [r, g, b, 255] : null,
+              stroke: shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null,
+            });
+          }
         }
         return;
       }
@@ -3608,6 +3641,7 @@ export default function App() {
       isRuler,
       isMarqueeTool,
       isGradient,
+      isRectangle,
       document,
       tool,
       selectionMode,
@@ -3616,6 +3650,10 @@ export default function App() {
       brushColor,
       brushOpacity,
       gradientEndColor,
+      shapeFill,
+      shapeStrokeWidth,
+      shapeStrokeColor,
+      shapeRadius,
     ],
   );
 
@@ -4309,6 +4347,15 @@ export default function App() {
             title="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
           >
             History Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "rectangle" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "rectangle"}
+            onClick={() => setTool("rectangle")}
+            title="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
+          >
+            Rectangle
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5568,6 +5615,51 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "rectangle" && (
+            <>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={shapeFill}
+                  disabled={!canPaint}
+                  onChange={(event) => setShapeFill(event.target.checked)}
+                />
+                Fill
+              </label>
+              <label className="tools__slider">
+                Stroke
+                <input
+                  type="range"
+                  min={0}
+                  max={50}
+                  value={shapeStrokeWidth}
+                  disabled={!canPaint}
+                  onChange={(event) => setShapeStrokeWidth(Number(event.target.value))}
+                />
+                {shapeStrokeWidth === 0 ? "none" : `${shapeStrokeWidth}px`}
+              </label>
+              <input
+                type="color"
+                className="tools__color"
+                value={shapeStrokeColor}
+                disabled={!canPaint || shapeStrokeWidth === 0}
+                aria-label="Shape stroke color"
+                onChange={(event) => setShapeStrokeColor(event.target.value)}
+              />
+              <label className="tools__slider">
+                Radius
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={shapeRadius}
+                  disabled={!canPaint}
+                  onChange={(event) => setShapeRadius(Number(event.target.value))}
+                />
+                {shapeRadius}px
+              </label>
+            </>
           )}
           {(tool === "colorReplace" || tool === "backgroundEraser") && (
             <label className="tools__slider">

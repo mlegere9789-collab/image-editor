@@ -2158,6 +2158,26 @@ fn remove_stroke(
     })
 }
 
+/// Rectangle tool (Pixels mode): fill and/or inside-stroke an
+/// axis-aligned, optionally rounded rectangle onto a layer.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn draw_rectangle(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    radius: u32,
+    fill: Option<[u8; 4]>,
+    stroke: Option<([u8; 4], u32)>,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_rectangle(id, x0, y0, x1, y1, radius, fill, stroke)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3642,6 +3662,7 @@ pub fn run() {
             heal_stroke,
             spot_heal_stroke,
             remove_stroke,
+            draw_rectangle,
             clone_stroke,
             set_history_source,
             history_stroke,
