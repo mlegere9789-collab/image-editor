@@ -16093,6 +16093,7 @@ export default function App() {
             void runCommand("set_layer_visible", { id, visible })
           }
           onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
+          onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
           onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
           onOpacityDragStart={checkpoint}
           onBlendMode={(id, blendMode: BlendMode) =>

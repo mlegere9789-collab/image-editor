@@ -349,7 +349,8 @@ body {
 }
 
 .layer__eye,
-.layer__lock {
+.layer__lock,
+.layer__link {
   flex: none;
   cursor: pointer;
 }

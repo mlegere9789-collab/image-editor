@@ -28,6 +28,8 @@ export type LayerView = {
   blendMode: BlendMode;
   /** Lock (image pixels): blocks paint/erase strokes onto this layer. */
   locked: boolean;
+  /** Layer > Link Layers: linked layers move together under the Move tool. */
+  linked: boolean;
 };
 
 /** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase).

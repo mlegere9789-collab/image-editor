@@ -938,6 +938,18 @@ fn set_layer_locked(
     })
 }
 
+/// Layer > Link Layers / Unlink Layers for layer `id`.
+#[tauri::command]
+fn set_layer_linked(
+    state: State<'_, AppState>,
+    id: LayerId,
+    linked: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_linked(id, linked).map(|_| None)
+    })
+}
+
 /// Layer > Rasterize on layer `id`. Every layer in this app is already
 /// pixels, so this is always a no-op beyond validating `id` exists.
 #[tauri::command]
@@ -3991,6 +4003,7 @@ pub fn run() {
             add_gradient_layer,
             set_layer_visible,
             set_layer_locked,
+            set_layer_linked,
             rasterize_layer,
             flip_layer_horizontal,
             flip_layer_vertical,

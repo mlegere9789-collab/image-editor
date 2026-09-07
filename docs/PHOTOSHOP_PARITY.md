@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 317.**
+**618 distinct capabilities tracked. Currently shipped: 318.**
 
 ## PART I — EVERY TOOL
 
@@ -100,7 +100,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] LAYER MASK
 - [ ] VECTOR MASK
 - [ ] CLIPPING MASK
-- [ ] LINK LAYERS
+- [x] LINK LAYERS (`set_linked`, a link flag per layer — one link set per document, as Photoshop's original linking — so the Move tool moves every linked layer together, whole or within the selection, refusing if any of them is locked — see README Phase 213)
 - [x] LOCK
 - [x] MERGE LAYERS
 - [x] MERGE VISIBLE

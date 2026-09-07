@@ -12869,6 +12869,50 @@ quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
 **1305 Rust tests total** (1300 → 1305, 1298 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 213 — Link Layers
+
+Every `Layer` gains a `linked` flag — one link set per document, as in
+Photoshop's original linking — set by `set_linked` and reported in the
+layer view. `move_pixels` now takes every linked layer along with a
+linked one: it collects the targets (the layer alone when it is not
+linked), refuses the whole move if any target is locked, and then
+either translates each target outright or, with a selection active,
+lifts the selected pixels on each target and sets them down at the
+offset, moving the selection once at the end; that per-layer pixel
+half was split out as `move_layer_pixels` so the loop and the old
+single-layer path are the same code. Moving an unlinked layer never
+disturbs the linked set. The layer panel gains a link checkbox beside
+the lock, through a `set_layer_linked` command. Photoshop's Select
+Linked Layers and its per-layer link *groups* are documented scope
+cuts.
+
+**Verified two ways.** Five new `document.rs` tests on three `3×3`
+layers each holding one opaque dot at the origin in red, green, and
+blue, every landing pixel reasoned out by hand. With red and blue
+linked, moving red by `(1, 2)` puts both red and blue dots at `(1, 2)`
+and leaves the green one at the origin; moving the unlinked green by
+`(2, 0)` leaves red and blue where they were. With the origin pixel
+selected, moving blue by `(1, 1)` moves red's and blue's dots and the
+selection to `(1, 1)` exactly once. Locking blue makes a move of the
+linked red error with both dots in place. Unlinking blue restores its
+independence, the view reports `[true, false, true]` before that and
+the ids of the linked pair, and an unknown layer errors. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and sixty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The panel checkbox was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1310 Rust tests total** (1305 → 1310, 1303 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

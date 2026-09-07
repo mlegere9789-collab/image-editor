@@ -32,6 +32,10 @@ pub struct Layer {
     /// opacity, blend mode, stacking order) is untouched by it: those
     /// aren't edits to the layer's own pixel data.
     pub locked: bool,
+    /// Layer > Link Layers: linked layers move together under the Move
+    /// tool — one link set for the whole document, as in Photoshop's
+    /// original linking.
+    pub linked: bool,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -46,6 +50,7 @@ pub struct LayerView {
     pub opacity: f32,
     pub blend_mode: BlendMode,
     pub locked: bool,
+    pub linked: bool,
 }
 
 impl Layer {
@@ -57,6 +62,7 @@ impl Layer {
             opacity: self.opacity,
             blend_mode: self.blend_mode,
             locked: self.locked,
+            linked: self.linked,
         }
     }
 
@@ -2834,6 +2840,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         });
         Ok(id)
@@ -2868,6 +2875,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         });
         id
@@ -2922,6 +2930,22 @@ impl Document {
     pub fn set_locked(&mut self, id: LayerId, locked: bool) -> Result<(), String> {
         self.layer_mut(id)?.locked = locked;
         Ok(())
+    }
+
+    /// Layer > Link Layers / Unlink Layers for one layer: a linked layer
+    /// moves with every other linked layer under [`Self::move_pixels`].
+    pub fn set_linked(&mut self, id: LayerId, linked: bool) -> Result<(), String> {
+        self.layer_mut(id)?.linked = linked;
+        Ok(())
+    }
+
+    /// The ids of every linked layer, bottom to top.
+    pub fn linked_layer_ids(&self) -> Vec<LayerId> {
+        self.layers
+            .iter()
+            .filter(|layer| layer.linked)
+            .map(|layer| layer.id)
+            .collect()
     }
 
     /// Layer > Rasterize > Type / Shape / Smart Object / Layer Style / ...:
@@ -3920,6 +3944,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         });
         id
@@ -8013,6 +8038,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         });
 
@@ -8050,6 +8076,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         }];
         Ok(id)
@@ -8087,6 +8114,7 @@ impl Document {
             opacity: 1.0,
             blend_mode: BlendMode::Normal,
             locked: false,
+            linked: false,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -13539,11 +13567,45 @@ impl Document {
             x1: self.width,
             y1: self.height,
         };
+        // Layer > Link Layers: a linked layer takes every other linked
+        // layer with it. Every one is checked for a lock before any moves.
+        let targets: Vec<LayerId> = if self.layer(id)?.linked {
+            self.linked_layer_ids()
+        } else {
+            vec![id]
+        };
+        for &target in &targets {
+            let layer = self.layer(target)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+        }
         if self.selection.is_none() {
-            self.translate(id, dx, dy)?;
+            for &target in &targets {
+                self.translate(target, dx, dy)?;
+            }
             return Ok(Some(everything));
         }
         let bits = self.selected_bits()?;
+        for &target in &targets {
+            self.move_layer_pixels(target, dx, dy, &bits)?;
+        }
+        if self.move_selection(dx as i64, dy as i64).is_err() {
+            self.selection = None;
+        }
+        Ok(Some(everything))
+    }
+
+    /// [`Self::move_pixels`]'s pixel half for one layer: the pixels under
+    /// `bits` lifted, the ground beneath them cleared, and set down `(dx,
+    /// dy)` away, anything pushed off the canvas dropped.
+    fn move_layer_pixels(
+        &mut self,
+        id: LayerId,
+        dx: i32,
+        dy: i32,
+        bits: &[bool],
+    ) -> Result<(), String> {
         let (width, height) = (self.width as i64, self.height as i64);
         let layer = self.layer_mut(id)?;
         if layer.locked {
@@ -13564,10 +13626,7 @@ impl Document {
                     .copy_from_slice(&snapshot[idx * CHANNELS..(idx + 1) * CHANNELS]);
             }
         }
-        if self.move_selection(dx as i64, dy as i64).is_err() {
-            self.selection = None;
-        }
-        Ok(Some(everything))
+        Ok(())
     }
 
     /// The mean of the pre-edit pixels on the square ring two pixels out
@@ -24464,6 +24523,88 @@ mod tests {
                 (GuideOrientation::Horizontal, 4)
             ]
         );
+    }
+
+    /// Three 3×3 layers, each a single opaque pixel at (0, 0) in its own
+    /// colour: red, green, blue.
+    fn three_dots() -> (Document, [LayerId; 3]) {
+        let mut doc = Document::new(3, 3).unwrap();
+        let mut ids = [0; 3];
+        for (i, colour) in [[255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]]
+            .iter()
+            .enumerate()
+        {
+            let mut pixels = solid(3, 3, [0, 0, 0, 0]);
+            pixels[..4].copy_from_slice(colour);
+            ids[i] = doc.add_layer(format!("dot {i}"), &pixels, 3, 3).unwrap();
+        }
+        (doc, ids)
+    }
+
+    #[test]
+    fn linked_layers_move_together() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        doc.set_linked(red, true).unwrap();
+        doc.set_linked(blue, true).unwrap();
+        doc.move_pixels(red, 1, 2).unwrap();
+        assert_eq!(pixel(&doc, red, 1, 2), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 1, 2), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, red, 0, 0)[3], 0);
+        // The unlinked green dot stays put.
+        assert_eq!(pixel(&doc, green, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, green, 1, 2)[3], 0);
+    }
+
+    #[test]
+    fn moving_an_unlinked_layer_leaves_linked_ones_alone() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        doc.set_linked(red, true).unwrap();
+        doc.set_linked(blue, true).unwrap();
+        doc.move_pixels(green, 2, 0).unwrap();
+        assert_eq!(pixel(&doc, green, 2, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, red, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 0, 0), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn linked_layers_move_together_within_a_selection() {
+        // Only the selected pixel travels, on every linked layer, and the
+        // selection travels once.
+        let (mut doc, [red, _green, blue]) = three_dots();
+        doc.set_linked(red, true).unwrap();
+        doc.set_linked(blue, true).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.move_pixels(blue, 1, 1).unwrap();
+        assert_eq!(pixel(&doc, red, 1, 1), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 1, 1), [0, 0, 255, 255]);
+        assert_eq!(selected_pixels(&doc), vec![(1, 1)]);
+    }
+
+    #[test]
+    fn a_locked_linked_layer_blocks_the_whole_move() {
+        let (mut doc, [red, _green, blue]) = three_dots();
+        doc.set_linked(red, true).unwrap();
+        doc.set_linked(blue, true).unwrap();
+        doc.set_locked(blue, true).unwrap();
+        assert!(doc.move_pixels(red, 1, 0).is_err());
+        assert_eq!(pixel(&doc, red, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 0, 0), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn unlinking_restores_independence_and_the_view_reports_links() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        doc.set_linked(red, true).unwrap();
+        doc.set_linked(blue, true).unwrap();
+        assert_eq!(doc.linked_layer_ids(), vec![red, blue]);
+        let linked: Vec<bool> = doc.view().layers.iter().map(|l| l.linked).collect();
+        assert_eq!(linked, vec![true, false, true]);
+        doc.set_linked(blue, false).unwrap();
+        doc.move_pixels(red, 0, 1).unwrap();
+        assert_eq!(pixel(&doc, red, 0, 1), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 0, 0), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, green, 0, 0), [0, 255, 0, 255]);
+        assert!(doc.set_linked(blue + 100, true).is_err());
     }
 
     #[test]
