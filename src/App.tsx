@@ -38,6 +38,7 @@ import type {
   PuppetPin,
   PuppetWarpOptions,
   PathBlurOptions,
+  CameraRawMask,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -578,6 +579,14 @@ export default function App() {
     offsetY: 0,
   });
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
+  // Camera Raw Filter > Masking: none, or one of the three masks.
+  const [rawMaskKind, setRawMaskKind] = useState<"none" | "subject" | "radial" | "colorRange">("none");
+  const [rawMaskTolerance, setRawMaskTolerance] = useState(32);
+  const [rawMaskEllipse, setRawMaskEllipse] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [rawMaskFeather, setRawMaskFeather] = useState(50);
+  const [rawMaskInvert, setRawMaskInvert] = useState(false);
+  const [rawMaskColor, setRawMaskColor] = useState("#ff0000");
+  const [rawMaskFuzziness, setRawMaskFuzziness] = useState(40);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
     tint: 0,
@@ -1512,9 +1521,40 @@ export default function App() {
 
   const applyCameraRaw = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("camera_raw_filter", { id: selectedId, settings: cameraRaw });
+    const mask: CameraRawMask | null =
+      rawMaskKind === "subject"
+        ? { kind: "subject", tolerance: rawMaskTolerance }
+        : rawMaskKind === "radial"
+          ? {
+              kind: "radial",
+              x0: rawMaskEllipse[0],
+              y0: rawMaskEllipse[1],
+              x1: rawMaskEllipse[2],
+              y1: rawMaskEllipse[3],
+              feather: rawMaskFeather,
+              invert: rawMaskInvert,
+            }
+          : rawMaskKind === "colorRange"
+            ? { kind: "colorRange", color: hexToRgb(rawMaskColor), fuzziness: rawMaskFuzziness, invert: rawMaskInvert }
+            : null;
+    if (mask) {
+      await runCommand("camera_raw_masked", { id: selectedId, settings: cameraRaw, mask });
+    } else {
+      await runCommand("camera_raw_filter", { id: selectedId, settings: cameraRaw });
+    }
     setShowCameraRawDialog(false);
-  }, [runCommand, selectedId, cameraRaw]);
+  }, [
+    runCommand,
+    selectedId,
+    cameraRaw,
+    rawMaskKind,
+    rawMaskTolerance,
+    rawMaskEllipse,
+    rawMaskFeather,
+    rawMaskInvert,
+    rawMaskColor,
+    rawMaskFuzziness,
+  ]);
 
   const applyRotate = useCallback(async () => {
     if (selectedId === null) return;
@@ -9232,6 +9272,93 @@ export default function App() {
                 onChange={(event) => setCameraRawSlider("defringe", Number(event.target.value))}
               />
             </label>
+            <label className="control control--row">
+              <span className="control__label">Masking</span>
+              <select
+                value={rawMaskKind}
+                onChange={(event) => {
+                  const kind = event.target.value as typeof rawMaskKind;
+                  setRawMaskKind(kind);
+                  if (kind === "radial" && document) {
+                    setRawMaskEllipse([
+                      Math.round(document.width / 4),
+                      Math.round(document.height / 4),
+                      Math.round((3 * document.width) / 4),
+                      Math.round((3 * document.height) / 4),
+                    ]);
+                  }
+                }}
+                title="Camera Raw Filter > Masking: where the adjustments apply"
+              >
+                <option value="none">None (whole layer)</option>
+                <option value="subject">Subject</option>
+                <option value="radial">Radial Gradient</option>
+                <option value="colorRange">Color Range</option>
+              </select>
+            </label>
+            {rawMaskKind === "subject" && (
+              <label className="control control--row">
+                <span className="control__label">Tolerance</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={rawMaskTolerance}
+                  onChange={(event) => setRawMaskTolerance(Number(event.target.value))}
+                />
+                <span className="control__value">{rawMaskTolerance}</span>
+              </label>
+            )}
+            {rawMaskKind === "radial" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Ellipse (x0, y0, x1, y1)</span>
+                  {rawMaskEllipse.map((v, i) => (
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={v}
+                      key={i}
+                      onChange={(event) =>
+                        setRawMaskEllipse((e) => e.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof e)
+                      }
+                    />
+                  ))}
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Feather %</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={rawMaskFeather}
+                    onChange={(event) => setRawMaskFeather(Number(event.target.value))}
+                  />
+                  <span className="control__value">{rawMaskFeather}</span>
+                </label>
+              </>
+            )}
+            {rawMaskKind === "colorRange" && (
+              <label className="control control--row">
+                <span className="control__label">Color</span>
+                <input type="color" value={rawMaskColor} onChange={(event) => setRawMaskColor(event.target.value)} />
+                <span className="control__label">Fuzziness</span>
+                <input
+                  type="range"
+                  min={0}
+                  max={200}
+                  value={rawMaskFuzziness}
+                  onChange={(event) => setRawMaskFuzziness(Number(event.target.value))}
+                />
+                <span className="control__value">{rawMaskFuzziness}</span>
+              </label>
+            )}
+            {(rawMaskKind === "radial" || rawMaskKind === "colorRange") && (
+              <label className="control control--row">
+                <input type="checkbox" checked={rawMaskInvert} onChange={(event) => setRawMaskInvert(event.target.checked)} />
+                <span className="control__label">Invert</span>
+              </label>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

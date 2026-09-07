@@ -4765,6 +4765,19 @@ fn camera_raw_filter(
     edit_checkpointed(&state, |document| document.camera_raw_filter(id, settings))
 }
 
+/// Camera Raw Filter with Masking on layer `id`.
+#[tauri::command]
+fn camera_raw_masked(
+    state: State<'_, AppState>,
+    id: LayerId,
+    settings: document::CameraRawSettings,
+    mask: document::CameraRawMask,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.camera_raw_masked(id, settings, &mask)
+    })
+}
+
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
 fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
@@ -5199,6 +5212,7 @@ pub fn run() {
             point_color,
             parametric_curve,
             camera_raw_filter,
+            camera_raw_masked,
             rotate,
             scale,
             skew,

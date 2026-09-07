@@ -14881,6 +14881,66 @@ by hand instead. Every other layer of this project's quality bar
 **1490 Rust tests total** (1485 → 1490, 1483 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 250 — Camera Raw Filter's Masking
+
+Camera Raw Filter's Masking panel lands with three of its masks. A
+`CameraRawMask` is one of Subject (Select Subject's subject at a
+`tolerance`), Radial Gradient (an ellipse in pixel-edge coordinates
+with a `feather` percent and Invert), or Color Range (one sampled
+colour with Color Range's own `fuzziness` and Invert).
+`camera_raw_mask_weights(id, mask)` gives every pixel a weight in
+`0..=1`: the subject's pixels `1` and the rest `0`; for the ellipse
+the pixel centre's normalised distance `d` from its centre decides —
+`1` at or within `1 − feather/100`, `0` at or beyond `1`, `(1 − d) /
+(feather/100)` between — and Color Range's bits are `1` / `0`, Invert
+taking `1 − weight`. `camera_raw_masked(id, settings, mask)` then runs
+`camera_raw_filter`'s adjustments and keeps them only as far as the
+weights reach: every channel, alpha included, becomes `before + (after
+− before) · weight`, rounded, so a Subject Mask adjusts the subject
+alone, a Radial Gradient fades the adjustment out across its feather,
+and a Color Range Mask reaches only the colours picked; neutral
+settings change nothing. The Camera Raw dialog gains a Masking list
+with each mask's controls — Tolerance; the ellipse's corners and
+Feather; Color and Fuzziness — and Invert. Linear Gradient, Brush,
+Luminance Range, and stacking masks by add / subtract are documented
+scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every weight
+and blend traced by hand and cross-checked in `f32` by an independent
+Python script, all driven by a Point Curve that inverts each channel
+exactly at its knots (`64 ↔ 192`, `0 ↔ 255`). Grey `64` on a 5×5
+canvas through an ellipse over the whole canvas at Feather `0` goes to
+`192` at the centre and the edge midpoints (`d ≤ 1`) and stays `64` in
+the corners (`d = 1.13`); at Feather `50` the weights `(1 − d) / 0.5`
+give `115` at the top edge's middle (`0.4`), `91` beside it (`0.211`),
+`175` one row in and one column over (`0.869`), and `192` one row in
+at the middle; Invert swaps inside and out (`64` at the centre, `192`
+in the corners, `141` at the top middle). A black 3×3 with a grey-`192`
+centre under a Subject Mask inverts only the centre (`192 → 64`) while
+the background stays black rather than going white, the weights being
+`1` at the centre alone. Red, green, blue under a Color Range Mask on
+red flips red alone to cyan; inverted it flips the other two; and
+Fuzziness `60` reaches `(200, 0, 0)`. A mask covering everything is
+byte-identical to the plain filter, neutral settings leave the layer
+untouched, and alpha survives. A zero-width ellipse, Feather `101`, a
+NaN corner, an unknown layer, a flat layer with no subject, and a
+locked layer are refused with the layer untouched. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1495 Rust tests total** (1490 → 1495, 1488 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

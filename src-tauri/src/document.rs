@@ -875,6 +875,33 @@ pub struct PathBlur {
     pub centered: bool,
 }
 
+/// Camera Raw Filter's Masking: where its adjustments apply — see
+/// [`Document::camera_raw_masked`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CameraRawMask {
+    /// Subject Mask: the subject Select Subject finds at `tolerance`.
+    Subject { tolerance: u8 },
+    /// Radial Gradient: full inside the ellipse spanning `(x0, y0)`–`(x1,
+    /// y1)` (pixel-edge coordinates) out to `1 − feather/100` of its
+    /// radius, fading to nothing at its edge; Invert swaps inside and out.
+    Radial {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        feather: u8,
+        invert: bool,
+    },
+    /// Color Range Mask: pixels within `fuzziness` of `color` (Color
+    /// Range's own Chebyshev test); Invert takes the rest.
+    ColorRange {
+        color: [u8; 3],
+        fuzziness: u8,
+        invert: bool,
+    },
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -17118,6 +17145,133 @@ impl Document {
         }
         if settings.defringe != neutral.defringe {
             touched = self.defringe(id, settings.defringe)?;
+        }
+        Ok(touched)
+    }
+
+    /// Camera Raw Filter > Masking: the weight, `0..=1`, each pixel of
+    /// layer `id` takes from `mask`, row-major. Subject is Select Subject's
+    /// subject (`1`) against everything else (`0`); Radial Gradient uses
+    /// the pixel centre's normalised distance `d` from the ellipse's
+    /// centre — `1` at or within `1 − feather/100`, `0` at or beyond `1`,
+    /// `(1 − d) / (feather/100)` between — and Color Range the Color Range
+    /// bits as `1` / `0`; Invert takes `1 − weight`. Errors for a
+    /// degenerate or non-finite ellipse, a Feather over `100`, no subject,
+    /// or an unknown layer.
+    pub fn camera_raw_mask_weights(
+        &self,
+        id: LayerId,
+        mask: &CameraRawMask,
+    ) -> Result<Vec<f32>, String> {
+        self.layer(id)?;
+        let count = self.width as usize * self.height as usize;
+        Ok(match mask {
+            CameraRawMask::Subject { tolerance } => {
+                let region = vec![true; count];
+                self.find_object_in_bits(id, region, *tolerance)?
+                    .into_iter()
+                    .map(|b| if b { 1.0 } else { 0.0 })
+                    .collect()
+            }
+            CameraRawMask::Radial {
+                x0,
+                y0,
+                x1,
+                y1,
+                feather,
+                invert,
+            } => {
+                if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+                    return Err(
+                        "The Radial Gradient's corners must be finite coordinates.".to_string()
+                    );
+                }
+                if x1 <= x0 || y1 <= y0 {
+                    return Err(
+                        "The Radial Gradient's ellipse must be wider and taller than zero."
+                            .to_string(),
+                    );
+                }
+                if *feather > 100 {
+                    return Err(
+                        "The Radial Gradient's Feather must be between 0 and 100 percent."
+                            .to_string(),
+                    );
+                }
+                let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+                let (rx, ry) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
+                let inner = 1.0 - *feather as f32 / 100.0;
+                let mut weights = Vec::with_capacity(count);
+                for y in 0..self.height {
+                    for x in 0..self.width {
+                        let nx = (x as f32 + 0.5 - cx) / rx;
+                        let ny = (y as f32 + 0.5 - cy) / ry;
+                        let d = (nx * nx + ny * ny).sqrt();
+                        let w = if d <= inner {
+                            1.0
+                        } else if d >= 1.0 {
+                            0.0
+                        } else {
+                            (1.0 - d) / (1.0 - inner)
+                        };
+                        weights.push(if *invert { 1.0 - w } else { w });
+                    }
+                }
+                weights
+            }
+            CameraRawMask::ColorRange {
+                color,
+                fuzziness,
+                invert,
+            } => {
+                let range = ColorRange::Sampled {
+                    samples: vec![ColorSample {
+                        color: *color,
+                        position: None,
+                    }],
+                    fuzziness: *fuzziness,
+                    localized: None,
+                };
+                self.color_range_bits(id, &range)?
+                    .into_iter()
+                    .map(|b| if b != *invert { 1.0 } else { 0.0 })
+                    .collect()
+            }
+        })
+    }
+
+    /// Camera Raw Filter with Masking: [`Self::camera_raw_filter`]'s
+    /// adjustments applied to layer `id` only as far as `mask` weights
+    /// each pixel — every channel, alpha included, becomes `before +
+    /// (after − before) · weight`, rounded — so a Subject Mask adjusts
+    /// the subject alone, a Radial Gradient fades the adjustment out
+    /// across its feather, and a Color Range Mask reaches only the colours
+    /// picked. Neutral settings change nothing. Errors as the mask and the
+    /// filter do, and for a locked layer.
+    pub fn camera_raw_masked(
+        &mut self,
+        id: LayerId,
+        settings: CameraRawSettings,
+        mask: &CameraRawMask,
+    ) -> Result<Option<Rect>, String> {
+        let weights = self.camera_raw_mask_weights(id, mask)?;
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let before = layer.pixels.clone();
+        let touched = self.camera_raw_filter(id, settings)?;
+        let layer = self.layer_mut(id)?;
+        for ((px, old), &w) in layer
+            .pixels
+            .chunks_exact_mut(CHANNELS)
+            .zip(before.chunks_exact(CHANNELS))
+            .zip(&weights)
+        {
+            for c in 0..CHANNELS {
+                let (a, b) = (old[c] as f32, px[c] as f32);
+                px[c] = (a + (b - a) * w).round().clamp(0.0, 255.0) as u8;
+            }
         }
         Ok(touched)
     }
@@ -44941,5 +45095,191 @@ mod tests {
             .decontaminate_colors(id, 50)
             .unwrap_err()
             .contains("locked"));
+    }
+
+    /// Camera Raw settings that invert every channel exactly at the Point
+    /// Curve's five knots (0 ↔ 255, 64 ↔ 192, 128 ↔ 128).
+    fn inverting_raw() -> CameraRawSettings {
+        CameraRawSettings {
+            point_curve: [255, 192, 128, 64, 0],
+            ..CameraRawSettings::default()
+        }
+    }
+
+    fn radial(x0: f32, y0: f32, x1: f32, y1: f32, feather: u8, invert: bool) -> CameraRawMask {
+        CameraRawMask::Radial {
+            x0,
+            y0,
+            x1,
+            y1,
+            feather,
+            invert,
+        }
+    }
+
+    #[test]
+    fn camera_raw_radial_gradient_mask_fades_the_adjustment_across_its_feather() {
+        // Grey 64 → 192 under the inverting curve, through an ellipse over
+        // the whole 5×5 canvas. Feather 0: the centre and the edge
+        // midpoints are inside (d ≤ 1), the corners (d = 1.13) out.
+        let (mut doc, id) = grey_ramp_square(5, 0);
+        let pixels: Vec<u8> = [64, 64, 64, 255].repeat(25);
+        doc.layer_mut(id).unwrap().pixels = pixels.clone();
+        doc.camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 5.0, 5.0, 0, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 192);
+        assert_eq!(pixel(&doc, id, 2, 0)[0], 192);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 192);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 64);
+        // Feather 50: weights (1 − d) / 0.5 between d = 0.5 and 1 — 0.4 at
+        // the top edge's middle (115), 0.211 beside it (91), 0.869 one row
+        // in and one column over (175), full one row in at the middle.
+        let (mut doc, id) = grey_ramp_square(5, 0);
+        doc.layer_mut(id).unwrap().pixels = pixels.clone();
+        doc.camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 5.0, 5.0, 50, false))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 0)[0], 115);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 91);
+        assert_eq!(pixel(&doc, id, 2, 1)[0], 192);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 175);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 64);
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 192);
+        // Invert swaps inside and out.
+        let (mut doc, id) = grey_ramp_square(5, 0);
+        doc.layer_mut(id).unwrap().pixels = pixels;
+        doc.camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 5.0, 5.0, 50, true))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 64);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 192);
+        assert_eq!(pixel(&doc, id, 2, 0)[0], 141); // 64 + 128 · 0.6
+    }
+
+    #[test]
+    fn camera_raw_subject_mask_adjusts_only_the_subject() {
+        // A 3×3 black background with a grey-192 centre: the subject is
+        // the centre, which the inverting curve takes to 64; the
+        // background, weight 0, stays black instead of going white.
+        let mut doc = Document::new(3, 3).unwrap();
+        let mut pixels = [0, 0, 0, 255].repeat(9);
+        pixels[4 * 4..4 * 4 + 3].copy_from_slice(&[192, 192, 192]);
+        let id = doc.add_layer("subject", &pixels, 3, 3).unwrap();
+        doc.camera_raw_masked(
+            id,
+            inverting_raw(),
+            &CameraRawMask::Subject { tolerance: 0 },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [64, 64, 64, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 1), [0, 0, 0, 255]);
+        let weights = doc
+            .camera_raw_mask_weights(id, &CameraRawMask::Subject { tolerance: 0 })
+            .unwrap();
+        assert_eq!(weights, vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn camera_raw_color_range_mask_picks_pixels_by_colour() {
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 255, 0], [0, 0, 255]]);
+        let red = CameraRawMask::ColorRange {
+            color: [255, 0, 0],
+            fuzziness: 0,
+            invert: false,
+        };
+        doc.camera_raw_masked(id, inverting_raw(), &red).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 255, 255]);
+        let (mut doc, id) = strip(&[[255, 0, 0], [0, 255, 0], [0, 0, 255]]);
+        let not_red = CameraRawMask::ColorRange {
+            color: [255, 0, 0],
+            fuzziness: 0,
+            invert: true,
+        };
+        doc.camera_raw_masked(id, inverting_raw(), &not_red)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 0, 255, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 255, 0, 255]);
+        // Fuzziness reaches near colours: 200 is within 60 of 255.
+        let (doc, id) = strip(&[[255, 0, 0], [200, 0, 0], [0, 0, 255]]);
+        let near = CameraRawMask::ColorRange {
+            color: [255, 0, 0],
+            fuzziness: 60,
+            invert: false,
+        };
+        assert_eq!(
+            doc.camera_raw_mask_weights(id, &near).unwrap(),
+            vec![1.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn camera_raw_masked_with_a_full_mask_is_the_plain_filter_and_neutral_settings_do_nothing() {
+        let (mut masked, id) = grey_ramp_square(4, 16);
+        masked
+            .camera_raw_masked(
+                id,
+                inverting_raw(),
+                &radial(-10.0, -10.0, 14.0, 14.0, 0, false),
+            )
+            .unwrap();
+        let (mut plain, id_b) = grey_ramp_square(4, 16);
+        plain.camera_raw_filter(id_b, inverting_raw()).unwrap();
+        assert_eq!(masked.layers()[0].pixels, plain.layers()[0].pixels);
+        let (mut still, id_c) = grey_ramp_square(4, 16);
+        let before = still.layers()[0].pixels.clone();
+        still
+            .camera_raw_masked(
+                id_c,
+                CameraRawSettings::default(),
+                &radial(0.0, 0.0, 4.0, 4.0, 0, false),
+            )
+            .unwrap();
+        assert_eq!(still.layers()[0].pixels, before);
+        // Alpha follows the same blend, so a masked pixel's alpha is kept
+        // where the filter keeps it.
+        assert_eq!(pixel(&masked, id, 0, 0)[3], 255);
+    }
+
+    #[test]
+    fn camera_raw_masks_refuse_bad_shapes_and_layers() {
+        let (mut doc, id) = grey_ramp_square(4, 16);
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .camera_raw_masked(id, inverting_raw(), &radial(2.0, 0.0, 2.0, 4.0, 0, false))
+            .unwrap_err()
+            .contains("ellipse"));
+        assert!(doc
+            .camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 4.0, 4.0, 101, false))
+            .unwrap_err()
+            .contains("Feather"));
+        assert!(doc
+            .camera_raw_masked(
+                id,
+                inverting_raw(),
+                &radial(f32::NAN, 0.0, 4.0, 4.0, 0, false)
+            )
+            .unwrap_err()
+            .contains("finite"));
+        assert!(doc
+            .camera_raw_masked(999, inverting_raw(), &radial(0.0, 0.0, 4.0, 4.0, 0, false))
+            .is_err());
+        // A flat layer has no subject to mask.
+        let (mut flat, flat_id) = grey_pixels_4x4([128; 16]);
+        assert!(flat
+            .camera_raw_masked(
+                flat_id,
+                inverting_raw(),
+                &CameraRawMask::Subject { tolerance: 0 }
+            )
+            .unwrap_err()
+            .contains("object"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 4.0, 4.0, 0, false))
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 }

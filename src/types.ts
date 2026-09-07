@@ -254,6 +254,13 @@ export type PathBlurOptions = {
   centered: boolean;
 };
 
+/** Mirrors `CameraRawMask` in src-tauri/src/document.rs: Camera Raw
+ * Filter's Masking (serde tagged by `kind`). */
+export type CameraRawMask =
+  | { kind: "subject"; tolerance: number }
+  | { kind: "radial"; x0: number; y0: number; x1: number; y1: number; feather: number; invert: boolean }
+  | { kind: "colorRange"; color: [number, number, number]; fuzziness: number; invert: boolean };
+
 /** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
  * draws (vertices, where the pins move them, triangles as indices). */
