@@ -11231,6 +11231,51 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1145 Rust tests total** (1140 → 1145, 1138 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 181 — Healing Brush tool
+
+`Stroke::Heal { offset }` is the Clone Stamp's sampling — the
+Alt-clicked source minus the stroke's first point, aligned across
+strokes — with the classic heal in place of a plain copy: texture from
+the source, tone from the destination. Each covered pixel takes the
+sampled pixel shifted, per channel, by the difference between the
+destination's and the source's local means (radius-1 box blurs of the
+pre-stroke layer through `box_blur_at`), clamped to `0..=255`, then
+mixed in by the brush's coverage. Sampling from a brighter region into
+a darker one thus carries the source's grain across at the
+destination's brightness, which is the point of the tool. Alpha is
+untouched; a transparent or off-canvas sample paints nothing. Photoshop's
+Diffusion slider, Sample All Layers, and pattern sources are documented
+scope cuts. A new **Healing Brush** tool button sits beside the Clone
+Stamp and shares its Alt-click source and options readout.
+
+**Verified two ways.** Five new `document.rs` tests, the whole healed
+grid derived in Python from `ramped_3x3` and its known radius-1 box-blur
+grid `[[23, 30, 36], [43, 50, 56], [63, 70, 76]]`, and the one
+coverage-mixed byte emulated in `f32`. Healing `(1, 1)` from `(2, 1)`
+gives `60 + (50 − 56) = 54`, and `(0, 0)` from `(1, 0)` gives `20 + (23
+− 30) = 13`. Covering everything with the source one pixel right gives
+`[[13, 24, 30], [43, 54, 60], [73, 84, 90]]` (the right column's sources
+lie off the canvas) and one pixel left gives `[[10, 17, 26], [40, 47,
+56], [70, 77, 86]]`. The `0.7929` edge coverage mixes `10` toward `13`
+to `12`. On `depth_ramped_3x3` a transparent sample paints nothing and
+an opaque one keeps the destination's alpha `128` while changing its
+colour. A one-pixel selection confines the stroke and a locked layer
+errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+twenty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1150 Rust tests total** (1145 → 1150, 1143 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

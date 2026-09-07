@@ -142,6 +142,7 @@ export type Tool =
   | "note"
   | "patternStamp"
   | "cloneStamp"
+  | "healingBrush"
   | "historyBrush"
   | "magicWand"
   | "lasso"

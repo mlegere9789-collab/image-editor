@@ -3042,6 +3042,13 @@ export default function App() {
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "healingBrush") {
+        void runCommand("heal_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          offset: cloneOffset.current ?? [0, 0],
+        });
       } else if (tool === "cloneStamp") {
         void runCommand("clone_stroke", {
           id: selectedId,
@@ -3126,7 +3133,7 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
-  const isCloneStamp = tool === "cloneStamp";
+  const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
 
@@ -4226,6 +4233,15 @@ export default function App() {
             title="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
           >
             Clone Stamp
+          </button>
+          <button
+            className={`button button--quiet${tool === "healingBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "healingBrush"}
+            onClick={() => setTool("healingBrush")}
+            title="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
+          >
+            Healing Brush
           </button>
           <button
             className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
@@ -5474,6 +5490,7 @@ export default function App() {
               tool === "smudge" ||
               tool === "redEye" ||
               tool === "cloneStamp" ||
+              tool === "healingBrush" ||
               tool === "historyBrush" ||
               tool === "patternStamp"
             }
@@ -5518,7 +5535,7 @@ export default function App() {
               </span>
             </>
           )}
-          {tool === "cloneStamp" && (
+          {(tool === "cloneStamp" || tool === "healingBrush") && (
             <span className="tools__slider">
               {cloneSource
                 ? `Source (${Math.floor(cloneSource[0])}, ${Math.floor(cloneSource[1])})`

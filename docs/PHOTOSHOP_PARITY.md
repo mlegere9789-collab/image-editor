@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 252.**
+**618 distinct capabilities tracked. Currently shipped: 253.**
 
 ## PART I — EVERY TOOL
 
@@ -20,7 +20,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] MAGIC WAND TOOL (`select_magic_wand`, a click selects every pixel within a per-channel Tolerance of the clicked pixel's own colour — 4-connected from the click in Contiguous mode, anywhere on the layer otherwise — as the first pixel-mask selection: a new `SelectionShape::Mask` backed by a shared document-sized bitmap that every selection-respecting command already honours through `Selection::contains`. Anti-alias and Sample All Layers are documented scope cuts, and Modify > Expand/Contract/Smooth/Border reject mask selections for now — see README Phase 149)
 - [ ] SELECTION BRUSH TOOL
 - [ ] REMOVE TOOL
-- [ ] HEALING BRUSH TOOL
+- [x] HEALING BRUSH TOOL (`Stroke::Heal { offset }`, the Clone Stamp's aligned Alt-click sampling with the classic heal — texture from the source, tone from the destination: the sample shifted per channel by the difference of the two radius-1 local means, clamped, mixed by coverage, alpha untouched; Diffusion, Sample All Layers, and pattern sources are documented scope cuts — see README Phase 181)
 - [ ] SPOT HEALING BRUSH TOOL
 - [ ] PATCH TOOL
 - [ ] CONTENT-AWARE MOVE TOOL

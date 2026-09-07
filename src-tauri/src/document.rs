@@ -7042,6 +7042,7 @@ impl Document {
                 | Stroke::Sharpen { .. }
                 | Stroke::Clone { .. }
                 | Stroke::Smudge { .. }
+                | Stroke::Heal { .. }
         )
         .then(|| layer.pixels.clone());
         // Color Replacement samples the colour to replace under the stroke's
@@ -7149,6 +7150,38 @@ impl Document {
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&source[base..base + CHANNELS]);
                         (color, to_unit(color[3]) * c)
+                    }
+                    Stroke::Heal { offset } => {
+                        let source = snapshot.as_ref().expect("taken above");
+                        let sx = (x0 + col as u32) as i64 + offset.0 as i64;
+                        let sy = (y0 + row as u32) as i64 + offset.1 as i64;
+                        if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
+                            continue;
+                        }
+                        let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
+                        if source[src + 3] == 0 {
+                            continue;
+                        }
+                        let (w, h) = (width as i64, height as i64);
+                        let dest_mean = box_blur_at(
+                            source,
+                            width as usize,
+                            w,
+                            h,
+                            y0 + row as u32,
+                            x0 + col as u32,
+                            1,
+                        );
+                        let source_mean =
+                            box_blur_at(source, width as usize, w, h, sy as u32, sx as u32, 1);
+                        for (channel, slot) in layer.pixels[base..base + 3].iter_mut().enumerate() {
+                            let healed = (i32::from(source[src + channel])
+                                + i32::from(dest_mean[channel])
+                                - i32::from(source_mean[channel]))
+                            .clamp(0, 255) as u8;
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(healed), c));
+                        }
+                        continue;
                     }
                     Stroke::BackgroundErase { tolerance } => {
                         let within = layer.pixels[base..base + 3]
@@ -12584,6 +12617,16 @@ pub enum Stroke<'a> {
     /// Swatch sampling, Limits, and Protect Foreground Color are documented
     /// scope cuts.
     BackgroundErase { tolerance: u8 },
+    /// The Healing Brush: the Clone Stamp's sampling (`offset` from the
+    /// Alt-clicked source, aligned) with the classic heal — texture from
+    /// the source, tone from the destination: each covered pixel takes the
+    /// sampled pixel shifted, per channel, by the difference between the
+    /// destination's and the source's local means (radius-1 box blurs of
+    /// the pre-stroke layer), clamped, then mixed in by the brush's
+    /// coverage. Alpha is untouched; transparent or off-canvas samples
+    /// paint nothing. Photoshop's Diffusion slider, Sample All Layers, and
+    /// pattern sources are documented scope cuts.
+    Heal { offset: (i32, i32) },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19729,6 +19772,71 @@ mod tests {
         assert!(doc
             .stroke(id, &[(1.5, 1.5)], 3.0, background_erase(32))
             .is_err());
+    }
+
+    fn heal(offset: (i32, i32)) -> Stroke<'static> {
+        Stroke::Heal { offset }
+    }
+
+    #[test]
+    fn healing_brush_takes_source_texture_at_the_destinations_tone() {
+        // Healing (1, 1) from (2, 1): sample 60, source mean 56, destination
+        // mean 50 -> 60 + (50 - 56) = 54. (0, 0) from (1, 0): 20 + (23 - 30)
+        // = 13.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, heal((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [54, 0, 0, 255]);
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 0.5)], 0.5, heal((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [13, 0, 0, 255]);
+    }
+
+    #[test]
+    fn healing_brush_over_everything_matches_the_hand_computed_grid() {
+        // Sources off the right edge leave the right column alone.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, heal((1, 0))).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![13, 24, 30], vec![43, 54, 60], vec![73, 84, 90]]
+        );
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, heal((-1, 0))).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![10, 17, 26], vec![40, 47, 56], vec![70, 77, 86]]
+        );
+    }
+
+    #[test]
+    fn healing_brush_blends_by_coverage() {
+        // The 0.7929 edge coverage mixes 10 toward the healed 13: 12.4 -> 12.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, heal((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 12);
+    }
+
+    #[test]
+    fn healing_brush_keeps_alpha_and_skips_transparent_samples() {
+        // depth_ramped_3x3: healing (1, 1) from the transparent (0, 1) paints
+        // nothing; healing from the opaque (2, 1) keeps (1, 1)'s alpha 128.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, heal((-1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, heal((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 128);
+        assert_ne!(pixel(&doc, id, 1, 1)[0], 50);
+    }
+
+    #[test]
+    fn healing_brush_respects_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, heal((1, 0))).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 13);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.stroke(id, &[(1.0, 1.0)], 3.0, heal((1, 0))).is_err());
     }
 
     #[test]
