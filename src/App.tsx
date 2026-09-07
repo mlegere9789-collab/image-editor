@@ -3010,6 +3010,13 @@ export default function App() {
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
         });
+      } else if (tool === "smudge") {
+        void runCommand("smudge_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          strength: Math.round(brushOpacity * 100),
+        });
       } else if (tool === "blur" || tool === "sharpen") {
         void runCommand(tool === "blur" ? "blur_stroke" : "sharpen_stroke", {
           id: selectedId,
@@ -4076,6 +4083,15 @@ export default function App() {
             title="Sharpen: paint to sharpen (Flow sets the Strength)"
           >
             Sharpen
+          </button>
+          <button
+            className={`button button--quiet${tool === "smudge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "smudge"}
+            onClick={() => setTool("smudge")}
+            title="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
+          >
+            Smudge
           </button>
           <button
             className={`button button--quiet${tool === "redEye" ? " button--active" : ""}`}
@@ -5410,6 +5426,7 @@ export default function App() {
               tool === "sponge" ||
               tool === "blur" ||
               tool === "sharpen" ||
+              tool === "smudge" ||
               tool === "redEye" ||
               tool === "cloneStamp" ||
               tool === "historyBrush" ||

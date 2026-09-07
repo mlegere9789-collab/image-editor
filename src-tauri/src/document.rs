@@ -7038,9 +7038,17 @@ impl Document {
         // Neighbourhood tools read the layer as it stood before the stroke.
         let snapshot = matches!(
             stroke,
-            Stroke::Blur { .. } | Stroke::Sharpen { .. } | Stroke::Clone { .. }
+            Stroke::Blur { .. }
+                | Stroke::Sharpen { .. }
+                | Stroke::Clone { .. }
+                | Stroke::Smudge { .. }
         )
         .then(|| layer.pixels.clone());
+        // Smudge pulls from one segment step behind the stroke's direction.
+        let smudge_offset = match points {
+            [.., a, b] => ((a.0 - b.0).round() as i32, (a.1 - b.1).round() as i32),
+            _ => (0, 0),
+        };
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -7132,6 +7140,26 @@ impl Document {
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&source[base..base + CHANNELS]);
                         (color, to_unit(color[3]) * c)
+                    }
+                    Stroke::Smudge { strength } => {
+                        if smudge_offset == (0, 0) {
+                            continue;
+                        }
+                        let source = snapshot.as_ref().expect("taken above");
+                        let sx = (x0 + col as u32) as i64 + smudge_offset.0 as i64;
+                        let sy = (y0 + row as u32) as i64 + smudge_offset.1 as i64;
+                        if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
+                            continue;
+                        }
+                        let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
+                        let amount = f32::from(strength) / 100.0 * c;
+                        for (slot, &target) in layer.pixels[base..base + CHANNELS]
+                            .iter_mut()
+                            .zip(source[src..src + CHANNELS].iter())
+                        {
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), amount));
+                        }
+                        continue;
                     }
                     Stroke::Dodge { exposure } | Stroke::Burn { exposure } => {
                         if layer.pixels[base + 3] == 0 {
@@ -12489,6 +12517,15 @@ pub enum Stroke<'a> {
     /// history state or snapshot from the panel is a documented scope cut:
     /// the source is whatever state was remembered last.
     History { source: &'a [u8] },
+    /// The Smudge tool: drags colour along the stroke. Each covered pixel
+    /// moves toward the pre-stroke pixel one segment step *behind* it —
+    /// the pixel at `p − (b − a)`, rounded, for the stroke's last segment
+    /// `a → b` — by `strength` percent scaled by the brush's coverage, all
+    /// four channels, so the colour under the brush's trailing edge is
+    /// carried forward. A single point (no direction) smudges nothing, and
+    /// a pixel whose source lies off the canvas is left alone. Photoshop's
+    /// Finger Painting and Sample All Layers are documented scope cuts.
+    Smudge { strength: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19397,6 +19434,74 @@ mod tests {
                 3.0,
                 Stroke::History { source: &original }
             )
+            .is_err());
+    }
+
+    fn smudge(strength: u8) -> Stroke<'static> {
+        Stroke::Smudge { strength }
+    }
+
+    #[test]
+    fn smudge_drags_the_trailing_colour_forward() {
+        // A one-pixel step to the right along the middle row: (1, 1) takes
+        // (0, 1)'s 40; (0, 1)'s own source lies off the canvas and stays.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(100))
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![40, 40, 60]);
+        assert_eq!(red_channel_grid(&doc)[0], vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn smudge_strength_scales_the_pull() {
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(50))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 45);
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(0))
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn smudge_follows_the_stroke_direction_and_scales_with_coverage() {
+        // A diagonal step pulls (1, 1) from (0, 0)'s 10. With radius 1 the
+        // horizontal step's edge covers (1, 0) at 0.5, pulling its 20 half
+        // way toward (0, 0)'s 10.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 0.5), (1.5, 1.5)], 0.5, smudge(100))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 10);
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 1.0, smudge(100))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 15);
+    }
+
+    #[test]
+    fn smudge_needs_a_direction_and_reads_the_pre_stroke_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, smudge(100)).unwrap();
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+        // A two-step drag across the whole row at full coverage reads every
+        // source from the snapshot: the row shifts by one, not more.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(0.5, 1.5), (2.5, 1.5), (3.5, 1.5)], 0.5, smudge(100))
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![40, 40, 50]);
+    }
+
+    #[test]
+    fn smudge_respects_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(100))
+            .unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![40, 50, 60]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(100))
             .is_err());
     }
 

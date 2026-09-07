@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 249.**
+**618 distinct capabilities tracked. Currently shipped: 250.**
 
 ## PART I — EVERY TOOL
 
@@ -43,7 +43,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] SPONGE TOOL (`Stroke::Sponge { flow, saturate }`, a brush that moves each covered pixel's HSL saturation toward full (Saturate) or toward grey (Desaturate) by Flow × coverage, keeping hue, lightness, and alpha; Vibrance is a documented scope cut — see README Phase 162)
 - [x] BLUR TOOL (`Stroke::Blur { strength }`, a brush that moves each covered pixel toward the radius-1 box blur of the pre-stroke layer by Strength × coverage, all four channels, never smearing its own output; Sample All Layers and the blend-mode option are documented scope cuts — see README Phase 163)
 - [x] SHARPEN TOOL (`Stroke::Sharpen { strength }`, Blur's opposite: a brush that moves each covered pixel's RGB away from the radius-1 box blur of the pre-stroke layer by Strength × coverage — the unsharp-mask formula Filter > Sharpen uses — alpha untouched — see README Phase 164)
-- [ ] SMUDGE TOOL
+- [x] SMUDGE TOOL (`Stroke::Smudge { strength }`, a brush that pulls each covered pixel toward the pre-stroke pixel one segment step behind it along the drag by Strength × coverage, carrying the trailing colour forward; a directionless dot smudges nothing; Finger Painting and Sample All Layers are documented scope cuts — see README Phase 178)
 - [ ] PEN TOOL
 - [ ] FREEFORM PEN TOOL
 - [ ] CURVATURE PEN TOOL

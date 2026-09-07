@@ -132,6 +132,7 @@ export type Tool =
   | "sponge"
   | "blur"
   | "sharpen"
+  | "smudge"
   | "redEye"
   | "ruler"
   | "colorSampler"

@@ -11091,6 +11091,51 @@ by hand instead. Every other layer of this project's quality bar
 **1130 Rust tests total** (1125 → 1130, 1123 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 178 — Smudge tool
+
+`Stroke::Smudge { strength }` drags colour along the stroke: each
+pixel the brush covers moves toward the pre-stroke pixel one segment
+step *behind* it — the pixel at `p − (b − a)`, rounded, for the
+stroke's last segment `a → b` — by `strength` percent scaled by the
+brush's coverage, all four channels, so the colour under the brush's
+trailing edge is carried forward. This is the project's own explicit
+definition of a tool Photoshop documents only by feel: a directed
+Clone with a per-segment offset, mixed by strength rather than
+composited. A single point has no direction and smudges nothing; a
+pixel whose source lies off the canvas is left alone; and the source
+is the same pre-stroke snapshot Blur, Sharpen, and Clone read, so a
+drag across a row shifts it by one step rather than compounding
+through pixels the stroke already moved. Photoshop's Finger Painting
+and Sample All Layers are documented scope cuts. A new **Smudge** tool
+button sits beside Sharpen; the Flow slider is its Strength.
+
+**Verified two ways.** Five new `document.rs` tests, the two blended
+bytes cross-checked in Python emulating the `f32` `lerp`. A one-pixel
+step right along `ramped_3x3`'s middle row at full strength gives `40
+40 60`: `(1, 1)` takes `(0, 1)`'s `40` and `(0, 1)`, whose source lies
+off the canvas, keeps its own; the top row is untouched. Strength 50
+pulls `50` half way to `45`, and strength 0 is an identity. A diagonal
+step pulls `(1, 1)` from `(0, 0)`'s `10`, and with radius 1 the
+horizontal step's edge covers `(1, 0)` at `0.5`, pulling its `20` to
+`15`. A directionless dot changes nothing, and a two-segment drag
+across the whole row at full coverage shifts it by exactly one step
+(`40 40 50`), proving the snapshot read. A selection confines the
+smudge and a locked layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-five:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new tool's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1135 Rust tests total** (1130 → 1135, 1128 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

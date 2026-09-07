@@ -2031,6 +2031,21 @@ fn clone_stroke(
     })
 }
 
+/// Smudge tool: drag colour along `points` on layer `id` by `strength`
+/// percent. See [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn smudge_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    strength: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Smudge { strength })
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3509,6 +3524,7 @@ pub fn run() {
             sponge_stroke,
             blur_stroke,
             sharpen_stroke,
+            smudge_stroke,
             clone_stroke,
             set_history_source,
             history_stroke,
