@@ -207,6 +207,16 @@ export type ContentAwareScaleOptions = {
   position: [number, number] | null;
 };
 
+/** Mirrors `PerspectivePlane` / `PerspectiveAuto` in
+ * src-tauri/src/document.rs: Edit > Perspective Warp's planes. */
+export type Quad = [number, number][];
+export type PerspectivePlane = { source: Quad; target: Quad };
+export type PerspectiveAuto =
+  | { kind: "level" }
+  | { kind: "vertical" }
+  | { kind: "both" }
+  | { kind: "edge"; plane: number; edge: number };
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness. */
 export type Proof = "protanopia" | "deuteranopia";

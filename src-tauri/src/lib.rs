@@ -1311,6 +1311,26 @@ fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, St
     })
 }
 
+/// Edit > Perspective Warp on layer `id` with its planes.
+#[tauri::command]
+fn perspective_warp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    planes: Vec<document::PerspectivePlane>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.perspective_warp(id, &planes))
+}
+
+/// Perspective Warp's Auto Level / Vertical / Both / Straighten Edge on
+/// the planes' warped corners. Read-only.
+#[tauri::command]
+fn perspective_auto(
+    planes: Vec<document::PerspectivePlane>,
+    auto: document::PerspectiveAuto,
+) -> Vec<document::PerspectivePlane> {
+    document::perspective_auto(&planes, auto)
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -4711,6 +4731,8 @@ pub fn run() {
             color_lookup,
             content_aware_scale,
             transform_to_bounds,
+            perspective_warp,
+            perspective_auto,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

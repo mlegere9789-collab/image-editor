@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 409.**
+**618 distinct capabilities tracked. Currently shipped: 421.**
 
 ## PART I — EVERY TOOL
 
@@ -244,18 +244,18 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Content-Aware Scale — Scaling Percentage (`width_percent` / `height_percent` of the opaque bounds, rounded to whole pixels, at least one — see README Phase 235)
 - [x] Content-Aware Scale — Commit Transform (the dialog's OK sends the options through the `content_aware_scale` command as one undo step — see README Phase 235)
 - [x] Content-Aware Scale — Cancel Transform (the dialog's Cancel discards the options with nothing sent — see README Phase 235)
-- [ ] Perspective Warp
-- [ ] Perspective Warp — Layout Mode
-- [ ] Perspective Warp — Warp Mode
-- [ ] Perspective Warp — Plane Quads
-- [ ] Perspective Warp — Connected Planes
-- [ ] Perspective Warp — Unconnected Planes
-- [ ] Perspective Warp — Straighten Edge
-- [ ] Perspective Warp — Auto Level
-- [ ] Perspective Warp — Auto Straighten Vertical Lines
-- [ ] Perspective Warp — Auto Warp to Horizontal and Vertical
-- [ ] Perspective Warp — Commit Perspective Warp
-- [ ] Perspective Warp — Cancel
+- [x] Perspective Warp (`perspective_warp(id, planes)`: every pixel inside a plane's warped quad reads the layer through that plane's homography back to its Layout quad, nearest-neighbour; a pixel inside no plane follows the first plane's — see README Phase 242)
+- [x] Perspective Warp — Layout Mode (the dialog's Layout mode editing each plane's `source` quad, its warped corners following until dragged — see README Phase 242)
+- [x] Perspective Warp — Warp Mode (the dialog's Warp mode editing each plane's `target` corners — see README Phase 242)
+- [x] Perspective Warp — Plane Quads (`PerspectivePlane { source, target }`, four corners each in pixel-index coordinates; Add plane in the dialog — see README Phase 242)
+- [x] Perspective Warp — Connected Planes (planes whose quads share corners; where targets meet the earlier plane owns the shared edge, each quad being tested a hair larger — see README Phase 242)
+- [x] Perspective Warp — Unconnected Planes (planes standing alone, each warping its own pixels — see README Phase 242)
+- [x] Perspective Warp — Straighten Edge (`PerspectiveAuto::Edge`: the edge made vertical if it leans that way, else horizontal, its endpoints' coordinate set to their mean — see README Phase 242)
+- [x] Perspective Warp — Auto Level (`PerspectiveAuto::Level`: every top and bottom edge made horizontal — see README Phase 242)
+- [x] Perspective Warp — Auto Straighten Vertical Lines (`PerspectiveAuto::Vertical`: every left and right edge made vertical — see README Phase 242)
+- [x] Perspective Warp — Auto Warp to Horizontal and Vertical (`PerspectiveAuto::Both` — see README Phase 242)
+- [x] Perspective Warp — Commit Perspective Warp (the dialog's OK, one undo step through the `perspective_warp` command — see README Phase 242)
+- [x] Perspective Warp — Cancel (the dialog's Cancel, nothing sent — see README Phase 242)
 - [ ] Puppet Warp
 - [ ] Puppet Warp — Mesh
 - [ ] Puppet Warp — Mode: Distort

@@ -14371,6 +14371,62 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1450 Rust tests total** (1445 → 1450, 1443 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 242 — Perspective Warp
+
+Edit > Perspective Warp arrives on the projective machinery Distort
+built. A `PerspectivePlane` is a Layout quad (`source`) and where its
+corners were dragged in Warp mode (`target`), four corners each in
+pixel-index coordinates. `perspective_warp(id, planes)` solves each
+plane's homography from its target back to its source with the same
+8×8 solver Distort uses, then inverse-maps every pixel: a pixel inside
+a plane's target quad reads the layer through that plane's homography,
+nearest-neighbour; a pixel inside no plane follows the first plane's,
+so a single plane warps the whole layer as Photoshop's does. Connected
+planes are planes whose quads share corners — the dialog keeps a
+shared pin's target equal in both — and where targets meet the earlier
+plane owns the shared edge, each quad being tested a hair larger about
+its centroid so an edge pixel belongs to someone. `perspective_auto`
+is the straightening family on the target quads: Auto Level makes
+every top and bottom edge horizontal, Auto Straighten Vertical Lines
+every left and right edge vertical, Auto Warp both, and Straighten
+Edge one edge — vertical if it leans that way, else horizontal — by
+setting its endpoints' coordinate to their mean; sources are never
+touched. No planes, a non-finite corner, a degenerate quad, and a
+locked or unknown layer are refused. A **Perspective Warp…** dialog
+has a Layout / Warp mode switch, per-plane corner fields, Add plane,
+Straighten edge per corner, the three Auto buttons, and OK / Cancel as
+Commit / Cancel. The interactive pin dragging is a documented scope
+cut.
+
+**Verified two ways.** Five new `document.rs` tests, every mapping
+traced by hand. One plane with its Layout unchanged is the identity on
+the 4×4 ramp, and the same plane shifted right by one is byte-identical
+to a one-pixel translate. A 4×2 ramp split into left and right planes
+sharing the middle edge, the right plane's target slid down a row,
+leaves the left plane's pixels alone while row `1` of the right plane
+now reads row `0` (`30`, `40`). On a leaning quad Auto Level sets both
+top corners to `y = 0.5`, Auto Straighten Vertical sets the right edge
+to `x = 4.5` and the left to `0.5`, Auto Warp does both, and
+Straighten Edge on the right edge alone moves only its two corners,
+the source untouched. A small plane shifted right by one moves the
+whole layer with it, again byte-identical to the translate. No planes,
+a NaN corner, a collinear quad, an unknown layer, and a locked layer
+are refused with the ramp untouched. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-nine: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1455 Rust tests total** (1450 → 1455, 1448 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -30,6 +30,8 @@ import type {
   Measurement,
   MoveDirection,
   Palette,
+  PerspectiveAuto,
+  PerspectivePlane,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -414,6 +416,10 @@ export default function App() {
   const [perspectiveHorizontal, setPerspectiveHorizontal] = useState(0);
   const [perspectiveVertical, setPerspectiveVertical] = useState(0);
   const [showDistortDialog, setShowDistortDialog] = useState(false);
+  // Edit > Perspective Warp: Layout quads and their warped corners.
+  const [showPerspectiveWarp, setShowPerspectiveWarp] = useState(false);
+  const [warpPlanes, setWarpPlanes] = useState<PerspectivePlane[]>([]);
+  const [warpMode, setWarpMode] = useState<"layout" | "warp">("layout");
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1762,6 +1768,71 @@ export default function App() {
       corners.map((c, i) => (i === corner ? (axis === 0 ? [value, c[1]] : [c[0], value]) : c)),
     );
   }, []);
+
+  const openPerspectiveWarp = useCallback(() => {
+    if (!document) return;
+    const w = document.width - 1;
+    const h = document.height - 1;
+    const quad: [number, number][] = [
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ];
+    setWarpPlanes([{ source: quad, target: quad.map((p) => [...p] as [number, number]) }]);
+    setWarpMode("layout");
+    setShowPerspectiveWarp(true);
+  }, [document]);
+
+  const setWarpCorner = useCallback(
+    (plane: number, corner: number, axis: 0 | 1, value: number) => {
+      setWarpPlanes((planes) =>
+        planes.map((p, i) => {
+          if (i !== plane) return p;
+          const key = warpMode === "layout" ? "source" : "target";
+          const quad = p[key].map((c, j) =>
+            j === corner ? ((axis === 0 ? [value, c[1]] : [c[0], value]) as [number, number]) : c,
+          );
+          // In Layout mode the warped corners follow the layout until dragged.
+          return warpMode === "layout"
+            ? { source: quad, target: quad.map((c) => [...c] as [number, number]) }
+            : { ...p, target: quad };
+        }),
+      );
+    },
+    [warpMode],
+  );
+
+  const addWarpPlane = useCallback(() => {
+    if (!document) return;
+    const w = Math.max(1, Math.floor((document.width - 1) / 2));
+    const h = document.height - 1;
+    const quad: [number, number][] = [
+      [0, 0],
+      [w, 0],
+      [w, h],
+      [0, h],
+    ];
+    setWarpPlanes((planes) => [...planes, { source: quad, target: quad.map((p) => [...p] as [number, number]) }]);
+  }, [document]);
+
+  const autoWarp = useCallback(
+    async (auto: PerspectiveAuto) => {
+      try {
+        const planes = await invoke<PerspectivePlane[]>("perspective_auto", { planes: warpPlanes, auto });
+        setWarpPlanes(planes);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [warpPlanes],
+  );
+
+  const applyPerspectiveWarp = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("perspective_warp", { id: selectedId, planes: warpPlanes });
+    setShowPerspectiveWarp(false);
+  }, [runCommand, selectedId, warpPlanes]);
 
   const applyDistort = useCallback(async () => {
     if (selectedId === null) return;
@@ -5131,6 +5202,14 @@ export default function App() {
             title="Edit > Transform > Distort (move the four corners; selected layer)"
           >
             Distort…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openPerspectiveWarp}
+            disabled={busy || !canPaint}
+            title="Edit > Perspective Warp: lay out planes, then drag their corners"
+          >
+            Perspective Warp…
           </button>
           <button
             className="button button--quiet"
@@ -10459,6 +10538,86 @@ export default function App() {
               </button>
               <button className="button" onClick={applyFreeTransform} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPerspectiveWarp && (
+        <div className="modal-overlay" onClick={() => setShowPerspectiveWarp(false)} role="presentation">
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Perspective Warp"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Perspective Warp</h2>
+            <p className="modal__hint">
+              Layout: the planes&apos; quads on the picture (corners top-left, top-right,
+              bottom-right, bottom-left). Warp: where each corner moves. Planes sharing a
+              corner are connected; keep their shared corners equal.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Mode</span>
+              <select value={warpMode} onChange={(event) => setWarpMode(event.target.value as "layout" | "warp")}>
+                <option value="layout">Layout</option>
+                <option value="warp">Warp</option>
+              </select>
+              <button className="button button--quiet" onClick={addWarpPlane} title="Add a plane">
+                Add plane
+              </button>
+            </label>
+            {warpPlanes.map((plane, i) => (
+              <div className="control" key={i}>
+                <span className="control__label">Plane {i + 1}</span>
+                {(warpMode === "layout" ? plane.source : plane.target).map((corner, j) => (
+                  <span className="control control--row" key={j}>
+                    <span className="control__label">{["TL", "TR", "BR", "BL"][j]}</span>
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={corner[0]}
+                      onChange={(event) => setWarpCorner(i, j, 0, Number(event.target.value))}
+                    />
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={corner[1]}
+                      onChange={(event) => setWarpCorner(i, j, 1, Number(event.target.value))}
+                    />
+                    {warpMode === "warp" && (
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void autoWarp({ kind: "edge", plane: i, edge: j })}
+                        title="Straighten Edge: this corner's edge to the next corner"
+                      >
+                        Straighten edge
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            ))}
+            {warpMode === "warp" && (
+              <div className="control control--row">
+                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "level" })}>
+                  Auto Level
+                </button>
+                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "vertical" })}>
+                  Auto Straighten Vertical
+                </button>
+                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "both" })}>
+                  Auto Warp Horizontal &amp; Vertical
+                </button>
+              </div>
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPerspectiveWarp(false)} title="Cancel">
+                Cancel
+              </button>
+              <button className="button" onClick={applyPerspectiveWarp} disabled={busy || warpPlanes.length === 0} title="Commit Perspective Warp">
+                OK
               </button>
             </div>
           </div>

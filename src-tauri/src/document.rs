@@ -539,6 +539,83 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
     out
 }
 
+/// A plane's inverse homography and its slightly grown target quad.
+type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
+
+/// One plane of Edit > Perspective Warp: the quad drawn in Layout mode
+/// (`source`) and where its corners were dragged in Warp mode (`target`),
+/// both in pixel-index coordinates, corners in order top-left, top-right,
+/// bottom-right, bottom-left.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerspectivePlane {
+    pub source: [[f32; 2]; 4],
+    pub target: [[f32; 2]; 4],
+}
+
+/// Perspective Warp's straightening helpers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PerspectiveAuto {
+    /// Auto Level: every top and bottom edge made horizontal.
+    Level,
+    /// Auto Straighten Vertical Lines: every left and right edge vertical.
+    Vertical,
+    /// Auto Warp to Horizontal and Vertical: both.
+    Both,
+    /// Straighten Edge: edge `edge` (from corner `edge` to the next) of
+    /// plane `plane` made vertical if it leans that way, else horizontal.
+    Edge { plane: usize, edge: usize },
+}
+
+/// Straightens one edge of `quad` in place: its endpoints' x (for a
+/// near-vertical edge) or y (near-horizontal) set to their mean.
+fn straighten_edge(quad: &mut [[f32; 2]; 4], edge: usize, force_vertical: Option<bool>) {
+    let (a, b) = (edge % 4, (edge + 1) % 4);
+    let (dx, dy) = (quad[b][0] - quad[a][0], quad[b][1] - quad[a][1]);
+    let vertical = force_vertical.unwrap_or(dx.abs() < dy.abs());
+    if vertical {
+        let x = (quad[a][0] + quad[b][0]) / 2.0;
+        quad[a][0] = x;
+        quad[b][0] = x;
+    } else {
+        let y = (quad[a][1] + quad[b][1]) / 2.0;
+        quad[a][1] = y;
+        quad[b][1] = y;
+    }
+}
+
+/// Perspective Warp's Auto Level / Auto Straighten Vertical Lines / Auto
+/// Warp / Straighten Edge on the planes' target quads; sources are never
+/// touched. Edges 0 and 2 are the top and bottom, 1 and 3 the right and
+/// left.
+pub fn perspective_auto(
+    planes: &[PerspectivePlane],
+    auto: PerspectiveAuto,
+) -> Vec<PerspectivePlane> {
+    let mut out = planes.to_vec();
+    match auto {
+        PerspectiveAuto::Level | PerspectiveAuto::Vertical | PerspectiveAuto::Both => {
+            for plane in &mut out {
+                if matches!(auto, PerspectiveAuto::Level | PerspectiveAuto::Both) {
+                    straighten_edge(&mut plane.target, 0, Some(false));
+                    straighten_edge(&mut plane.target, 2, Some(false));
+                }
+                if matches!(auto, PerspectiveAuto::Vertical | PerspectiveAuto::Both) {
+                    straighten_edge(&mut plane.target, 1, Some(true));
+                    straighten_edge(&mut plane.target, 3, Some(true));
+                }
+            }
+        }
+        PerspectiveAuto::Edge { plane, edge } => {
+            if let Some(p) = out.get_mut(plane) {
+                straighten_edge(&mut p.target, edge, None);
+            }
+        }
+    }
+    out
+}
+
 /// Edit > Content-Aware Scale's Reference Point Location: which point of
 /// the content stays put.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -16794,6 +16871,80 @@ impl Document {
             .ok_or_else(|| "Distort corners must not be collinear or coincident.".to_string())?;
         self.filter_pixels(id, move |pixels, row, col| {
             let (x, y) = (col as f64, row as f64);
+            let den = g * x + hh * y + 1.0;
+            if den.abs() < 1e-9 {
+                return [0; CHANNELS];
+            }
+            let sx = ((a * x + b * y + c) / den).round() as i64;
+            let sy = ((d * x + e * y + f) / den).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            out
+        })
+    }
+
+    /// Edit > Perspective Warp: every pixel inside a plane's warped
+    /// (`target`) quad reads the layer through that plane's own
+    /// homography back to its Layout (`source`) quad, nearest-neighbour;
+    /// a pixel inside no plane follows the first plane's homography, so
+    /// one plane warps the whole layer as Photoshop's does. Connected
+    /// planes are simply planes whose quads share corners — the
+    /// frontend keeps a shared pin's target the same in both — and
+    /// unconnected ones stand alone; where targets overlap the earlier
+    /// plane wins, each quad being tested a hair larger so shared edges
+    /// belong to someone. Errors for no planes, a non-finite corner, a
+    /// degenerate quad, or a locked or unknown layer. Not recorded for
+    /// Transform Again.
+    pub fn perspective_warp(
+        &mut self,
+        id: LayerId,
+        planes: &[PerspectivePlane],
+    ) -> Result<Option<Rect>, String> {
+        if planes.is_empty() {
+            return Err("Perspective Warp needs at least one plane.".to_string());
+        }
+        let mut mappings: Vec<PlaneMapping> = Vec::with_capacity(planes.len());
+        for plane in planes {
+            if plane
+                .source
+                .iter()
+                .chain(plane.target.iter())
+                .flatten()
+                .any(|v| !v.is_finite())
+            {
+                return Err("Perspective Warp corners must be finite coordinates.".to_string());
+            }
+            let target = plane.target.map(|[x, y]| (x as f64, y as f64));
+            let source = plane.source.map(|[x, y]| (x as f64, y as f64));
+            let h = homography(target, source).ok_or_else(|| {
+                "Perspective Warp quads must not be collinear or coincident.".to_string()
+            })?;
+            // The target quad grown a hair about its centroid, so pixels on
+            // a shared edge belong to the earlier plane rather than to none.
+            let (cx, cy) = plane
+                .target
+                .iter()
+                .fold((0.0f32, 0.0f32), |(sx, sy), [x, y]| {
+                    (sx + x / 4.0, sy + y / 4.0)
+                });
+            let grown = plane
+                .target
+                .map(|[x, y]| (cx + (x - cx) * 1.001, cy + (y - cy) * 1.001));
+            mappings.push((h, grown));
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let (x, y) = (col as f64, row as f64);
+            let chosen = mappings
+                .iter()
+                .find(|(_, quad)| point_in_polygon(col as f32, row as f32, quad))
+                .unwrap_or(&mappings[0]);
+            let [a, b, c, d, e, f, g, hh] = chosen.0;
             let den = g * x + hh * y + 1.0;
             if den.abs() < 1e-9 {
                 return [0; CHANNELS];
@@ -40375,6 +40526,180 @@ mod tests {
         assert!(doc
             .select_circle_with(SelectionMode::New, 20.0, 20.0, 1.0)
             .is_err());
+    }
+
+    fn canvas_quad(w: u32, h: u32) -> [[f32; 2]; 4] {
+        let (w, h) = ((w - 1) as f32, (h - 1) as f32);
+        [[0.0, 0.0], [w, 0.0], [w, h], [0.0, h]]
+    }
+
+    fn shifted(quad: [[f32; 2]; 4], dx: f32, dy: f32) -> [[f32; 2]; 4] {
+        quad.map(|[x, y]| [x + dx, y + dy])
+    }
+
+    #[test]
+    fn perspective_warp_with_the_layout_unchanged_is_the_identity_and_a_shift_a_move() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        let quad = canvas_quad(4, 4);
+        doc.perspective_warp(
+            id,
+            &[PerspectivePlane {
+                source: quad,
+                target: quad,
+            }],
+        )
+        .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        doc.perspective_warp(
+            id,
+            &[PerspectivePlane {
+                source: quad,
+                target: shifted(quad, 1.0, 0.0),
+            }],
+        )
+        .unwrap();
+        let (mut moved, id_b) = ramped_4x4();
+        moved.translate(id_b, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, moved.layers()[0].pixels);
+    }
+
+    #[test]
+    fn connected_planes_warp_each_side_on_its_own() {
+        // A 4×2 ramp split into left and right planes sharing the middle
+        // edge; the right plane's target slides down a row, the left stays.
+        let mut doc = Document::new(4, 2).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            10, 0, 0, 255,  20, 0, 0, 255,  30, 0, 0, 255,  40, 0, 0, 255,
+            50, 0, 0, 255,  60, 0, 0, 255,  70, 0, 0, 255,  80, 0, 0, 255,
+        ];
+        let id = doc.add_layer("ramp", &pixels, 4, 2).unwrap();
+        let left = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let right = [[2.0, 0.0], [3.0, 0.0], [3.0, 1.0], [2.0, 1.0]];
+        doc.perspective_warp(
+            id,
+            &[
+                PerspectivePlane {
+                    source: left,
+                    target: left,
+                },
+                PerspectivePlane {
+                    source: right,
+                    target: shifted(right, 0.0, 1.0),
+                },
+            ],
+        )
+        .unwrap();
+        // The left plane covers columns 0..=1 in both rows and is untouched.
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 60);
+        // Column 2 and 3 of row 1 now read row 0 of the right plane.
+        assert_eq!(pixel(&doc, id, 2, 1)[0], 30);
+        assert_eq!(pixel(&doc, id, 3, 1)[0], 40);
+    }
+
+    #[test]
+    fn perspective_auto_straightens_the_edges_it_is_asked_to() {
+        let leaning = [[0.0, 0.0], [4.0, 1.0], [5.0, 4.0], [1.0, 4.0]];
+        let plane = PerspectivePlane {
+            source: leaning,
+            target: leaning,
+        };
+        let level = perspective_auto(std::slice::from_ref(&plane), PerspectiveAuto::Level);
+        // Top and bottom edges made horizontal at their mean heights.
+        assert_eq!(level[0].target[0], [0.0, 0.5]);
+        assert_eq!(level[0].target[1], [4.0, 0.5]);
+        assert_eq!(level[0].target[2], [5.0, 4.0]);
+        assert_eq!(level[0].target[3], [1.0, 4.0]);
+        let vertical = perspective_auto(std::slice::from_ref(&plane), PerspectiveAuto::Vertical);
+        // Right edge (4,1)→(5,4) and left edge (1,4)→(0,0) made vertical.
+        assert_eq!(vertical[0].target[1], [4.5, 1.0]);
+        assert_eq!(vertical[0].target[2], [4.5, 4.0]);
+        assert_eq!(vertical[0].target[3], [0.5, 4.0]);
+        assert_eq!(vertical[0].target[0], [0.5, 0.0]);
+        let both = perspective_auto(std::slice::from_ref(&plane), PerspectiveAuto::Both);
+        assert_eq!(
+            both[0].target,
+            [[0.5, 0.5], [4.5, 0.5], [4.5, 4.0], [0.5, 4.0]]
+        );
+        // Straighten Edge: the edge nearer vertical goes vertical, the
+        // other horizontal; sources are never touched.
+        let one = perspective_auto(
+            std::slice::from_ref(&plane),
+            PerspectiveAuto::Edge { plane: 0, edge: 1 },
+        );
+        assert_eq!(one[0].target[1], [4.5, 1.0]);
+        assert_eq!(one[0].target[2], [4.5, 4.0]);
+        assert_eq!(one[0].target[0], [0.0, 0.0]);
+        assert_eq!(one[0].source, leaning);
+    }
+
+    #[test]
+    fn pixels_outside_every_plane_follow_the_first_plane() {
+        // One small plane shifted right by one: the whole layer, quad or
+        // not, moves with it.
+        let (mut doc, id) = ramped_4x4();
+        let small = [[1.0, 1.0], [2.0, 1.0], [2.0, 2.0], [1.0, 2.0]];
+        doc.perspective_warp(
+            id,
+            &[PerspectivePlane {
+                source: small,
+                target: shifted(small, 1.0, 0.0),
+            }],
+        )
+        .unwrap();
+        let (mut moved, id_b) = ramped_4x4();
+        moved.translate(id_b, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, moved.layers()[0].pixels);
+    }
+
+    #[test]
+    fn perspective_warp_validates() {
+        let (mut doc, id) = ramped_4x4();
+        let quad = canvas_quad(4, 4);
+        assert!(doc.perspective_warp(id, &[]).is_err());
+        let mut bad = quad;
+        bad[0][0] = f32::NAN;
+        assert!(doc
+            .perspective_warp(
+                id,
+                &[PerspectivePlane {
+                    source: quad,
+                    target: bad
+                }]
+            )
+            .is_err());
+        let flat = [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0], [3.0, 0.0]];
+        assert!(doc
+            .perspective_warp(
+                id,
+                &[PerspectivePlane {
+                    source: quad,
+                    target: flat
+                }]
+            )
+            .is_err());
+        assert!(doc
+            .perspective_warp(
+                999,
+                &[PerspectivePlane {
+                    source: quad,
+                    target: quad
+                }]
+            )
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .perspective_warp(
+                id,
+                &[PerspectivePlane {
+                    source: quad,
+                    target: quad
+                }]
+            )
+            .is_err());
+        assert_eq!(doc.layers()[0].pixels, ramped_4x4().0.layers()[0].pixels);
     }
 
     #[test]
