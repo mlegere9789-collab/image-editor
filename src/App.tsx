@@ -528,6 +528,10 @@ export default function App() {
     Array.from({ length: 256 }, (_, i) => i),
   );
   const pencilLast = useRef<[number, number] | null>(null);
+  // On-image adjustment: armed by the dialog; the next canvas press samples
+  // the pixel's tone and a vertical drag moves the curve there.
+  const [curveOnImage, setCurveOnImage] = useState(false);
+  const curveDrag = useRef<{ input: number; startY: number } | null>(null);
   const [curveClipping, setCurveClipping] = useState<[number, number] | null>(null);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
@@ -3528,6 +3532,22 @@ export default function App() {
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
+      if (curveOnImage) {
+        if (selectedId === null) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        const [x, y] = toDocPoint(event, document);
+        const startY = event.clientY;
+        void invoke<[number, number, number, number]>("rgb_levels", {
+          id: selectedId,
+          x: Math.floor(x),
+          y: Math.floor(y),
+        })
+          .then(([r, g, b]) => {
+            curveDrag.current = { input: Math.round((r + g + b) / 3), startY };
+          })
+          .catch((err) => setError(String(err)));
+        return;
+      }
       if (levelsEyedropper !== null) {
         if (selectedId !== null) {
           const [x, y] = toDocPoint(event, document);
@@ -3698,6 +3718,7 @@ export default function App() {
       levelsEyedropper,
       selectedId,
       runCommand,
+      curveOnImage,
     ],
   );
 
@@ -3754,6 +3775,30 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (curveOnImage) {
+        const drag = curveDrag.current;
+        curveDrag.current = null;
+        setCurveOnImage(false);
+        if (drag) {
+          // One screen pixel of vertical drag is one output level, up to lighten.
+          const delta = Math.round(drag.startY - event.clientY);
+          void invoke<[number, number][]>("curve_with_point", {
+            points: curvesPointMode
+              ? curveNodes
+              : IDENTITY_CURVE.map((input, i) => [input, curvePoints[i] ?? input]),
+            input: drag.input,
+            delta,
+          })
+            .then((nodes) => {
+              setCurvesPointMode(true);
+              setCurveNodes(nodes);
+              setCurveFocus(nodes.findIndex(([x]) => x === drag.input));
+              setShowCurvesDialog(true);
+            })
+            .catch((err) => setError(String(err)));
+        }
+        return;
       }
       if (isLasso) {
         const trail = lassoTrail.current;
@@ -3945,6 +3990,10 @@ export default function App() {
       lineWeight,
       polygonSides,
       starRatio,
+      curveOnImage,
+      curvesPointMode,
+      curveNodes,
+      curvePoints,
     ],
   );
 
@@ -6098,6 +6147,21 @@ export default function App() {
                 onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
               />
             </label>
+          )}
+          {curveOnImage && (
+            <span className="tools__slider">
+              Press on the picture and drag up or down to adjust the curve there
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setCurveOnImage(false);
+                  setShowCurvesDialog(true);
+                }}
+                title="Back to the Curves dialog"
+              >
+                Cancel
+              </button>
+            </span>
           )}
           {levelsEyedropper !== null && (
             <span className="tools__slider">
@@ -9914,6 +9978,17 @@ export default function App() {
                 </svg>
               );
             })()}
+            <button
+              className="button button--quiet"
+              onClick={() => {
+                setCurveOnImage(true);
+                setShowCurvesDialog(false);
+              }}
+              disabled={busy || curvesPencilMode}
+              title="On-image adjustment: press on the picture and drag up or down to move the curve at that tone"
+            >
+              On-image
+            </button>
             <label className="tools__slider">
               <input
                 type="checkbox"

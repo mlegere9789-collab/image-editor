@@ -3329,6 +3329,13 @@ fn smooth_curve(table: Vec<u8>) -> Result<Vec<u8>, String> {
     Ok(document::smooth_curve_table(&table).to_vec())
 }
 
+/// The Curves dialog's on-image adjustment: `points` with the point at
+/// `input` moved (or inserted) by `delta` output levels. Read-only.
+#[tauri::command]
+fn curve_with_point(points: Vec<(u8, u8)>, input: u8, delta: i32) -> Result<Vec<(u8, u8)>, String> {
+    document::curve_with_point(&points, input, delta)
+}
+
 /// The Curves dialog's graph: the 256-entry lookup table `points` describe.
 /// Read-only; needs no document.
 #[tauri::command]
@@ -3995,6 +4002,7 @@ pub fn run() {
             curves_clipping,
             curves_table,
             smooth_curve,
+            curve_with_point,
             levels_black_point,
             levels_white_point,
             levels_gray_point,

@@ -12453,6 +12453,53 @@ instead. Every other layer of this project's quality bar
 **1265 Rust tests total** (1260 → 1265, 1258 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 205 — Curves on-image adjustment tool
+
+`curve_with_point(points, input, delta)` is the pure half of
+Photoshop's on-image adjustment tool for Curves: given the current
+point list, the tone of the pixel pressed on, and the drag's height in
+output levels, it returns the list with the point at that input moved
+by `delta` — or, when no point sits there, a new point inserted at the
+curve's current output for that input plus `delta` — clamped to
+`0..=255` and sorted. The dialog gains an **On-image** button that
+arms the tool and closes; pressing on the picture samples the layer
+pixel under the pointer (`rgb_levels`) and takes the mean of its
+channels as the input, a vertical drag counts one output level per
+screen pixel (up to lighten), and pointer-up runs a read-only
+`curve_with_point` command over the active channel's list, switches
+the dialog to Point mode with the result, focuses the new point (so
+the intersection lines sit on it), and reopens the dialog. A Cancel
+button in the toolbar disarms and reopens instead. Pencil mode
+disables the button, since a freehand table has no points to move.
+
+**Verified two ways.** Five new `document.rs` tests, every value
+hand-computed from the lookup tables. On the identity, input `100`
+sits at `100`, so a `+30` drag adds `(100, 130)`; on the steep `(0,
+0)`→`(128, 255)`→`(255, 255)` curve input `64` sits at `128`, so `−8`
+gives `(64, 120)`. An existing point moves instead: `128` on the steep
+curve by `−55` becomes `(128, 200)`, and the endpoint `(0, 0)` by `+40`
+becomes `(0, 40)`. Output clamps (`250` by `+100` gives `(250, 255)`)
+and an unsorted list comes back sorted with a floor-clamped point
+(`(10, 0)`). The list the tool produces is what the dialog then
+applies: with `(100, 130)` inserted the table reads `65` at `50`, `130`
+at `100`, and `210.6 → 211` at `200`. A one-point list and duplicate
+inputs error. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifty-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drag wiring was reviewed by hand instead
+— including that the pointer capture is released before the tool's
+early return. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1270 Rust tests total** (1265 → 1270, 1263 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -13734,6 +13734,29 @@ pub fn curve_lookup(points: &[(u8, u8)]) -> Result<[u8; 256], String> {
     Ok(lut)
 }
 
+/// The Curves dialog's on-image adjustment tool: dragging on the picture
+/// moves the curve at the clicked pixel's tone. Given the current `points`
+/// (any order), the pixel's `input` value, and the drag's `delta` in output
+/// levels, returns the point list with the point at `input` moved by
+/// `delta` — or, when no point sits there, a new point inserted at the
+/// curve's current output for that input plus `delta` — clamped to
+/// `0..=255` and sorted. Errors when `points` is not a valid curve.
+pub fn curve_with_point(
+    points: &[(u8, u8)],
+    input: u8,
+    delta: i32,
+) -> Result<Vec<(u8, u8)>, String> {
+    let lut = curve_lookup(points)?;
+    let mut nodes: Vec<(u8, u8)> = points.to_vec();
+    let moved = (lut[input as usize] as i32 + delta).clamp(0, 255) as u8;
+    match nodes.iter_mut().find(|(x, _)| *x == input) {
+        Some(node) => node.1 = moved,
+        None => nodes.push((input, moved)),
+    }
+    nodes.sort_by_key(|&(x, _)| x);
+    Ok(nodes)
+}
+
 /// The Curves dialog's Smooth button for a Pencil-mode `table`: every
 /// entry becomes the rounded mean of itself and its two neighbours, the
 /// ends using themselves in place of the missing neighbour, so one press
@@ -23048,6 +23071,60 @@ mod tests {
         assert!(doc.curves_table(id + 1, &identity_table()).is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc.curves_table(id, &identity_table()).is_err());
+    }
+
+    #[test]
+    fn curve_with_point_inserts_a_point_at_the_curves_current_output() {
+        // On the identity, input 100 sits at 100; a +30 drag adds (100, 130).
+        let nodes = curve_with_point(&IDENTITY_POINTS, 100, 30).unwrap();
+        assert_eq!(nodes, vec![(0, 0), (100, 130), (255, 255)]);
+        // On a steep curve input 64 sits at 128, so −8 gives (64, 120).
+        let steep = [(0, 0), (128, 255), (255, 255)];
+        assert_eq!(
+            curve_with_point(&steep, 64, -8).unwrap(),
+            vec![(0, 0), (64, 120), (128, 255), (255, 255)]
+        );
+    }
+
+    #[test]
+    fn curve_with_point_moves_an_existing_point() {
+        let steep = [(0, 0), (128, 255), (255, 255)];
+        assert_eq!(
+            curve_with_point(&steep, 128, -55).unwrap(),
+            vec![(0, 0), (128, 200), (255, 255)]
+        );
+        // The endpoints are ordinary points too.
+        assert_eq!(
+            curve_with_point(&IDENTITY_POINTS, 0, 40).unwrap(),
+            vec![(0, 40), (255, 255)]
+        );
+    }
+
+    #[test]
+    fn curve_with_point_clamps_and_sorts() {
+        assert_eq!(
+            curve_with_point(&IDENTITY_POINTS, 250, 100).unwrap(),
+            vec![(0, 0), (250, 255), (255, 255)]
+        );
+        assert_eq!(
+            curve_with_point(&[(255, 255), (0, 0)], 10, -100).unwrap(),
+            vec![(0, 0), (10, 0), (255, 255)]
+        );
+    }
+
+    #[test]
+    fn curve_with_point_is_what_the_dialog_then_applies() {
+        let nodes = curve_with_point(&IDENTITY_POINTS, 100, 30).unwrap();
+        let lut = curve_lookup(&nodes).unwrap();
+        // 50 is half-way up the first segment: 65; 100 → 130; 200 sits
+        // 100/155 of the way from (100, 130) to (255, 255): 210.6 → 211.
+        assert_eq!((lut[50], lut[100], lut[200]), (65, 130, 211));
+    }
+
+    #[test]
+    fn curve_with_point_rejects_an_invalid_curve() {
+        assert!(curve_with_point(&[(0, 0)], 10, 5).is_err());
+        assert!(curve_with_point(&[(0, 0), (0, 255)], 10, 5).is_err());
     }
 
     #[test]

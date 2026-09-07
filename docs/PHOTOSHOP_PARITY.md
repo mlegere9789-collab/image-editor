@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 294.**
+**618 distinct capabilities tracked. Currently shipped: 295.**
 
 ## PART I — EVERY TOOL
 
@@ -455,7 +455,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Levels Auto Options (`auto_tone_clipped` / `auto_contrast_clipped`'s shadow and highlight Clip in hundredths of a percent, 0–9.99%, read off per-channel histograms as ranks; the algorithm choices beyond Enhance Per Channel Contrast, Snap Neutral Midtones, and the target colours are documented scope cuts — see README Phase 194)
 - [x] Curves Point Mode (`Document::curves_points`, any number of `(input, output)` control points at arbitrary inputs, sorted, joined by straight segments and flat beyond the outer points; the fixed-input `curves` now delegates to it; the smooth spline remains a documented scope cut — see README Phase 195)
 - [x] Curves Pencil/Draw Mode (`Document::curves_table`, a freehand 256-entry table drawn on the dialog's graph and applied as-is to all three channels, with `smooth_curve_table` behind the Smooth button; per-channel pencil curves are a documented scope cut — see README Phase 204)
-- [ ] Curves On-Image Adjustment Tool
+- [x] Curves On-Image Adjustment Tool (`curve_with_point`: pressing on the picture samples the pixel's tone and a vertical drag moves — or inserts — the curve point at that input by the drag's height in levels, then the dialog reopens on it — see README Phase 205)
 - [x] Curves Black Point (the Curves dialog's Black Point eyedropper, the same `levels_black_point` — see README Phase 196)
 - [x] Curves Gray Point (the Curves dialog's Gray Point eyedropper, the same `levels_gray_point` — see README Phase 197)
 - [x] Curves White Point (the Curves dialog's White Point eyedropper, the same `levels_white_point` — see README Phase 196)
