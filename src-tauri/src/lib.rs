@@ -738,6 +738,15 @@ fn color_range_bits(
     document.color_range_bits(id, &range)
 }
 
+/// The selection tools' Anti-alias option on the current selection.
+#[tauri::command]
+fn set_anti_alias(state: State<'_, AppState>, on: bool) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_anti_alias(on)?;
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Feather: soften the selection's edge over `radius`.
 #[tauri::command]
 fn feather_selection(state: State<'_, AppState>, radius: u32) -> Result<Snapshot, String> {
@@ -4894,6 +4903,7 @@ pub fn run() {
             select_color_range,
             select_color_range_with,
             feather_selection,
+            set_anti_alias,
             color_range_bits,
             grow_selection,
             select_similar,

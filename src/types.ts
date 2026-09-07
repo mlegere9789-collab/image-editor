@@ -102,6 +102,8 @@ export type Selection = {
   border: number | null;
   /** Select > Modify > Feather: the edge's softening radius, 0 for hard. */
   feather: number;
+  /** The selection tools' Anti-alias option: a supersampled edge. */
+  antiAlias: boolean;
 };
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */

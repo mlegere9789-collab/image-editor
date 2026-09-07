@@ -14227,6 +14227,50 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1435 Rust tests total** (1430 → 1435, 1428 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 239 — Anti-aliasing
+
+The selection tools' Anti-alias option follows Feather onto the
+selection. `Selection` carries `anti_alias` (serde-defaulted to
+`false`), and with it on and no feather `Selection::coverage`
+supersamples the edge 4×4 within the pixel square `[px − ½, px + ½)`
+instead of judging the pixel by its centre, so an ellipse edge takes
+paint, fills, cuts, and gradients in proportion to how much of each
+pixel it covers; a feather, when set, supersedes it with its box
+average of the hard edge. `set_anti_alias(on)` sets the flag on the
+current selection, erroring with nothing selected, and a new
+selection starts with it off. The Elliptical Marquee's options bar
+gains an Anti-alias checkbox, on by default as in Photoshop, applied
+to each new ellipse before its Feather. Rectangles on pixel
+boundaries are unaffected, as they should be.
+
+**Verified two ways.** Five new `document.rs` tests, the sub-sample
+counts first computed in Python emulating `f32`. A 4×4 ellipse over
+the whole canvas gives the corner pixel — whose centre is outside —
+`6/16` coverage, its two neighbours `15/16`, and the middle `1`;
+a 6×6 ellipse gives its corner `0`, `(1, 0)` `9/16`, and `(2, 0)`
+`15/16`. A pixel-aligned rectangle stays exactly `1` inside and `0`
+out. Red dabs on the 4×4 ellipse's edge land at alpha `96`, `239`,
+and `255`. Feathered by `1` the same selection gives `8/9` at `(1, 1)`
+whatever the flag, and clearing the feather restores the supersampled
+`6/16` at the corner. With nothing selected the option errors, the
+view reports it, turning it off restores the hard corner, a new
+rectangle resets it, and Deselect leaves nothing to set. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-six: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The checkbox was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1440 Rust tests total** (1435 → 1440, 1433 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

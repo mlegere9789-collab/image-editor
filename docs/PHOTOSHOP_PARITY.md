@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 397.**
+**618 distinct capabilities tracked. Currently shipped: 398.**
 
 ## PART I — EVERY TOOL
 
@@ -270,7 +270,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Add to Selection (`SelectionMode::Add` via `select_rectangle_with` / `select_ellipse_with`: the current selection rasterised and unioned pixel by pixel with the new marquee into a pixel-mask selection; Shift while dragging, or the Mode picker — see README Phase 158)
 - [x] Subtract from Selection (`SelectionMode::Subtract`, the new marquee removed from the current selection pixel by pixel; erroring when nothing is selected or nothing would remain; Alt while dragging — see README Phase 158)
 - [x] Intersect with Selection (`SelectionMode::Intersect`, only what both the current selection and the new marquee cover; erroring when nothing would remain, starting a new selection when nothing is selected; Shift+Alt while dragging — see README Phase 158)
-- [ ] Anti-aliasing
+- [x] Anti-aliasing (`Selection.anti_alias` / `set_anti_alias`: an unfeathered edge's coverage is supersampled 4×4 within each pixel, so an ellipse edge takes paint, fills, cuts, and gradients in proportion to the pixel it covers; the Elliptical Marquee's Anti-alias checkbox, on by default; a feather supersedes it — see README Phase 239)
 - [x] Feather — Selection Tool Option (the marquee tools' Feather field, applied to each new marquee through `feather_selection` — see README Phase 238)
 - [ ] Select and Mask — Refine Edge
 - [ ] Select and Mask — Edge Detection

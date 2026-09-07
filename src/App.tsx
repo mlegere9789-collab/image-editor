@@ -308,6 +308,8 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
+  // The selection tools' Anti-alias option, on by default as in Photoshop.
+  const [marqueeAntiAlias, setMarqueeAntiAlias] = useState(true);
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
@@ -4656,12 +4658,17 @@ export default function App() {
                   : event.altKey
                     ? "subtract"
                     : selectionMode;
-            void runCommand(command, { x0, y0, x1, y1, mode }).then(() => {
-              if (marqueeFeather > 0) {
-                return runCommand("feather_selection", { radius: marqueeFeather });
-              }
-              return undefined;
-            });
+            void runCommand(command, { x0, y0, x1, y1, mode })
+              .then(() =>
+                marqueeAntiAlias && tool === "selectEllipse"
+                  ? runCommand("set_anti_alias", { on: true })
+                  : undefined,
+              )
+              .then(() =>
+                marqueeFeather > 0
+                  ? runCommand("feather_selection", { radius: marqueeFeather })
+                  : undefined,
+              );
           }
         }
         return;
@@ -4713,6 +4720,7 @@ export default function App() {
       isRectangle,
       document,
       tool,
+      marqueeAntiAlias,
       marqueeFeather,
       selectionMode,
       runCommand,
@@ -7424,6 +7432,17 @@ export default function App() {
                 }
               />
               px
+            </label>
+          )}
+          {tool === "selectEllipse" && (
+            <label className="tools__slider" title="Anti-alias: give the ellipse's edge fractional coverage instead of a hard pixel step">
+              <input
+                type="checkbox"
+                checked={marqueeAntiAlias}
+                disabled={!hasDocument}
+                onChange={(event) => setMarqueeAntiAlias(event.target.checked)}
+              />
+              Anti-alias
             </label>
           )}
           {(tool === "magicWand" || tool === "magicEraser") && (

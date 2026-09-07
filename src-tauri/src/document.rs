@@ -1172,6 +1172,11 @@ pub struct Selection {
     /// `0` is the hard edge. See [`Selection::coverage`].
     #[serde(default)]
     pub feather: u32,
+    /// The selection tools' Anti-alias option: an unfeathered edge's
+    /// coverage is supersampled 4×4 within each pixel instead of judged
+    /// at its centre. See [`Selection::coverage`].
+    #[serde(default)]
+    pub anti_alias: bool,
 }
 
 /// How a new marquee combines with the selection already there — the four
@@ -1735,6 +1740,20 @@ impl Selection {
     /// softens against the canvas edge, as Photoshop's feather does.
     pub fn coverage(&self, px: f32, py: f32) -> f32 {
         if self.feather == 0 {
+            if self.anti_alias {
+                // 4×4 sub-samples across the pixel square `[px − ½, px + ½)`.
+                let mut hits = 0u32;
+                for j in 0..4 {
+                    for i in 0..4 {
+                        let sx = px - 0.5 + (i as f32 + 0.5) / 4.0;
+                        let sy = py - 0.5 + (j as f32 + 0.5) / 4.0;
+                        if self.contains(sx, sy) {
+                            hits += 1;
+                        }
+                    }
+                }
+                return hits as f32 / 16.0;
+            }
             return if self.contains(px, py) { 1.0 } else { 0.0 };
         }
         let r = self.feather as i64;
@@ -1844,6 +1863,7 @@ fn mask_selection(width: u32, height: u32, bits: Vec<bool>) -> Result<Selection,
         inverted: false,
         border: None,
         feather: 0,
+        anti_alias: false,
         mask: Some(Arc::new(mask)),
     })
 }
@@ -3113,6 +3133,7 @@ impl Document {
                 inverted: false,
                 border: None,
                 feather: 0,
+                anti_alias: false,
                 mask: None,
             },
         )
@@ -3162,6 +3183,7 @@ impl Document {
                 inverted: false,
                 border: None,
                 feather: 0,
+                anti_alias: false,
                 mask: Some(Arc::new(mask)),
             },
         )
@@ -3725,6 +3747,7 @@ impl Document {
             inverted: false,
             border: None,
             feather: 0,
+            anti_alias: false,
             mask: None,
         });
         Ok(())
@@ -4197,6 +4220,7 @@ impl Document {
             inverted: false,
             border: None,
             feather: 0,
+            anti_alias: false,
             mask: Some(Arc::new(mask)),
         });
         Ok(())
@@ -4302,6 +4326,21 @@ impl Document {
             .as_mut()
             .ok_or_else(|| "Nothing is selected.".to_string())?;
         selection.feather = radius;
+        Ok(())
+    }
+
+    /// The selection tools' Anti-alias option on the current selection:
+    /// with it on and no feather, [`Selection::coverage`] supersamples an
+    /// edge 4×4 within each pixel, so an ellipse or lasso edge takes
+    /// paint, fills, cuts, and gradients in proportion to how much of the
+    /// pixel it covers. A feather, when set, supersedes it. Errors when
+    /// nothing is selected.
+    pub fn set_anti_alias(&mut self, on: bool) -> Result<(), String> {
+        let selection = self
+            .selection
+            .as_mut()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        selection.anti_alias = on;
         Ok(())
     }
 
@@ -39796,6 +39835,91 @@ mod tests {
     }
 
     #[test]
+    fn anti_aliasing_supersamples_the_ellipse_edge() {
+        // A 4×4 ellipse over the whole canvas: the corner pixel's centre is
+        // outside, but 6 of its 16 sub-samples are in; its neighbour holds
+        // 15 of 16; the middle all 16.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        assert_eq!(coverage_at(&doc, 1, 0), 1.0);
+        doc.set_anti_alias(true).unwrap();
+        assert!(doc.selection().unwrap().anti_alias);
+        assert_eq!(coverage_at(&doc, 0, 0), 6.0 / 16.0);
+        assert_eq!(coverage_at(&doc, 1, 0), 15.0 / 16.0);
+        assert_eq!(coverage_at(&doc, 0, 1), 15.0 / 16.0);
+        assert_eq!(coverage_at(&doc, 1, 1), 1.0);
+        // On a 6×6 ellipse the corner is fully out and (1, 0) holds 9 of 16.
+        let mut doc = Document::new(6, 6).unwrap();
+        doc.select_ellipse(0.0, 0.0, 6.0, 6.0).unwrap();
+        doc.set_anti_alias(true).unwrap();
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        assert_eq!(coverage_at(&doc, 1, 0), 9.0 / 16.0);
+        assert_eq!(coverage_at(&doc, 2, 0), 15.0 / 16.0);
+    }
+
+    #[test]
+    fn anti_aliasing_leaves_a_pixel_aligned_rectangle_exact() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.set_anti_alias(true).unwrap();
+        assert_eq!(coverage_at(&doc, 1, 1), 1.0);
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        assert_eq!(coverage_at(&doc, 0, 1), 0.0);
+        assert_eq!(coverage_at(&doc, 2, 2), 1.0);
+    }
+
+    #[test]
+    fn a_brush_dab_on_an_anti_aliased_edge_is_scaled_by_its_coverage() {
+        // 6/16 → 96 and 15/16 → 239.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("l", &[0; 64], 4, 4).unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.set_anti_alias(true).unwrap();
+        let red = Stroke::Brush {
+            color: [255, 0, 0, 255],
+        };
+        doc.stroke(id, &[(0.5, 0.5)], 0.5, red).unwrap();
+        doc.stroke(id, &[(1.5, 0.5)], 0.5, red).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 0.5, red).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 96]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 0, 0, 239]);
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_feather_supersedes_anti_aliasing() {
+        // Feathered by 1, coverage is the box average of the hard edge —
+        // 8 of the 9 centres around (1, 1) — whatever the anti-alias flag.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.set_anti_alias(true).unwrap();
+        doc.feather_selection(1).unwrap();
+        assert!(doc.selection().unwrap().anti_alias);
+        assert_eq!(coverage_at(&doc, 1, 1), 8.0 / 9.0);
+        doc.feather_selection(0).unwrap();
+        assert_eq!(coverage_at(&doc, 1, 1), 1.0);
+        assert_eq!(coverage_at(&doc, 0, 0), 6.0 / 16.0);
+    }
+
+    #[test]
+    fn anti_alias_validates_and_resets_with_a_new_selection() {
+        let mut doc = Document::new(4, 4).unwrap();
+        assert!(doc.set_anti_alias(true).is_err());
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        assert!(!doc.view().selection.unwrap().anti_alias);
+        doc.set_anti_alias(true).unwrap();
+        assert!(doc.view().selection.unwrap().anti_alias);
+        doc.set_anti_alias(false).unwrap();
+        assert_eq!(coverage_at(&doc, 0, 0), 0.0);
+        doc.set_anti_alias(true).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        assert!(!doc.selection().unwrap().anti_alias);
+        doc.deselect();
+        assert!(doc.set_anti_alias(true).is_err());
+    }
+
+    #[test]
     fn combining_honours_the_new_shape_and_the_old_selections_form() {
         // Select All minus the canvas-spanning ellipse on 4x4 leaves exactly
         // the four corners; adding a rectangle to an inverted selection
@@ -41025,6 +41149,7 @@ mod tests {
                 inverted: false,
                 border: None,
                 feather: 0,
+                anti_alias: false,
                 mask: None,
             })
         );
@@ -41069,6 +41194,7 @@ mod tests {
                 inverted: false,
                 border: None,
                 feather: 0,
+                anti_alias: false,
                 mask: None,
             })
         );
