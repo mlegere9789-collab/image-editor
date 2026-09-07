@@ -1132,6 +1132,11 @@ export default function App() {
     setShowColorRangeDialog(false);
   }, [runCommand, selectedId, colorRangeColor, colorRangeFuzziness]);
 
+  const growSelection = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("grow_selection", { id: selectedId, tolerance: magicWandTolerance });
+  }, [runCommand, selectedId, magicWandTolerance]);
+
   const applyScale = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("scale", {
@@ -3363,6 +3368,14 @@ export default function App() {
             title="Select > Color Range (every pixel of the selected layer within Fuzziness of a chosen colour)"
           >
             Color Range…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={growSelection}
+            disabled={busy || !canPaint || !hasSelection}
+            title="Select > Grow (extend the selection to adjacent pixels within the Magic Wand's Tolerance of its colours)"
+          >
+            Grow
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}

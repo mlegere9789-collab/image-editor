@@ -752,6 +752,19 @@ pub struct Clipboard {
     pixels: Vec<u8>,
 }
 
+/// The per-channel `(min, max)` of every pixel of `pixels` flagged in
+/// `bits`, each widened by `tolerance` and saturated to `0..=255`.
+fn colour_range_of(pixels: &[u8], bits: &[bool], tolerance: u8) -> [(u8, u8); CHANNELS] {
+    let mut range = [(u8::MAX, u8::MIN); CHANNELS];
+    for (px, _) in pixels.chunks_exact(CHANNELS).zip(bits).filter(|(_, &b)| b) {
+        for (c, (lo, hi)) in px.iter().zip(range.iter_mut()) {
+            *lo = (*lo).min(*c);
+            *hi = (*hi).max(*c);
+        }
+    }
+    range.map(|(lo, hi)| (lo.saturating_sub(tolerance), hi.saturating_add(tolerance)))
+}
+
 /// Turn two arbitrary drag corners into a selection's bounding box: sorted
 /// into min/max, clamped to the document, and rejected if it covers no
 /// pixels (a click with no drag).
@@ -1152,6 +1165,69 @@ impl Document {
             })
             .collect();
         self.set_mask_selection(bits)
+    }
+
+    /// Select > Grow: extends the current selection to every pixel of layer
+    /// `id` reachable from it, 4-connected, through pixels whose colour lies
+    /// within the selection's own colour range widened by `tolerance` — per
+    /// channel, RGBA, `min - tolerance ..= max + tolerance` over the pixels
+    /// already selected, saturating at 0 and 255. It is the Magic Wand's
+    /// contiguous fill seeded by every selected pixel at once and judged
+    /// against a range instead of one clicked colour; Photoshop's Grow is
+    /// likewise driven by the Wand's Tolerance. The range is fixed from the
+    /// selection as it stood, so the fill never widens it as it goes, and
+    /// running the command again grows further from the new, wider range.
+    /// The result is always a [`SelectionShape::Mask`], even when nothing
+    /// qualified. Errors when nothing is selected or on an unknown layer,
+    /// leaving the selection intact either way.
+    pub fn grow_selection(&mut self, id: LayerId, tolerance: u8) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        let mut bits = self.selected_bits()?;
+        let layer = self.layer(id)?;
+        let range = colour_range_of(&layer.pixels, &bits, tolerance);
+        let in_range = |idx: usize| {
+            layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS]
+                .iter()
+                .zip(range.iter())
+                .all(|(c, (lo, hi))| (*lo..=*hi).contains(c))
+        };
+        let mut stack: Vec<usize> = (0..bits.len()).filter(|&idx| bits[idx]).collect();
+        while let Some(idx) = stack.pop() {
+            let (px, py) = (idx as u32 % width, idx as u32 / width);
+            let neighbours = [
+                px.checked_sub(1).map(|nx| (nx, py)),
+                (px + 1 < width).then_some((px + 1, py)),
+                py.checked_sub(1).map(|ny| (px, ny)),
+                (py + 1 < height).then_some((px, py + 1)),
+            ];
+            for (nx, ny) in neighbours.into_iter().flatten() {
+                let n = (ny * width + nx) as usize;
+                if !bits[n] && in_range(n) {
+                    bits[n] = true;
+                    stack.push(n);
+                }
+            }
+        }
+        self.set_mask_selection(bits)
+    }
+
+    /// The current selection as a canvas-sized bitmap, one flag per pixel
+    /// centre; errors when there is no selection or it covers no pixel.
+    fn selected_bits(&self) -> Result<Vec<bool>, String> {
+        let selection = self
+            .selection
+            .as_ref()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        let mut bits = Vec::with_capacity(self.width as usize * self.height as usize);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                bits.push(selection.contains(x as f32 + 0.5, y as f32 + 0.5));
+            }
+        }
+        if !bits.contains(&true) {
+            return Err("Nothing is selected.".to_string());
+        }
+        Ok(bits)
     }
 
     /// Installs a canvas-sized pixel-mask selection, or errors (leaving the
@@ -26148,6 +26224,105 @@ mod tests {
         let (mut doc, _id) = ramped_3x3();
         assert!(doc.select_color_range(999, [10, 0, 0], 0).is_err());
         assert!(doc.selection().is_none());
+    }
+
+    #[test]
+    fn grow_extends_the_selection_through_pixels_within_tolerance_of_its_colours() {
+        // The centre pixel (50) grown by 10 admits its 40 and 60 neighbours
+        // but not 20 above or 80 below, and neither 40 nor 60 leads on to
+        // anything else within 40..=60.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.grow_selection(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![true, true, true],
+                vec![false, false, false]
+            ]
+        );
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Mask);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 0,
+                y0: 1,
+                x1: 3,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn grow_measures_against_the_selections_whole_colour_range() {
+        // Selecting 40 and 50 makes the range 40..=50; at tolerance 10 that
+        // is 30..=60, so 60 joins, and 30 (which is 20 from 50) joins
+        // through it. At tolerance 5 (35..=55) nothing qualifies and the
+        // selection merely becomes the equivalent mask.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 1.0, 2.0, 2.0).unwrap();
+        doc.grow_selection(id, 5).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![true, true, false],
+                vec![false, false, false]
+            ]
+        );
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Mask);
+        doc.grow_selection(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn grow_only_reaches_adjacent_pixels() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[10, 0, 0, 255, 50, 0, 0, 255, 10, 0, 0, 255], 3, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.grow_selection(id, 0).unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(0.5, 0.5) && !s.contains(1.5, 0.5) && !s.contains(2.5, 0.5));
+    }
+
+    #[test]
+    fn grow_repeats_from_the_widened_range() {
+        // After the first grow the middle row's range is 40..=60; growing
+        // again at 10 (30..=70) reaches 30 through 60 and 70 through 40,
+        // while 20 and 80 stay out.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.grow_selection(id, 10).unwrap();
+        doc.grow_selection(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![true, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn grow_requires_a_selection_and_a_known_layer() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.grow_selection(id, 10).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        assert!(doc.grow_selection(999, 10).is_err());
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
     #[test]

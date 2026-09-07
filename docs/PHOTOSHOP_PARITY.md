@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 212.**
+**618 distinct capabilities tracked. Currently shipped: 213.**
 
 ## PART I — EVERY TOOL
 
@@ -84,7 +84,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] MODIFY > EXPAND
 - [x] MODIFY > CONTRACT
 - [ ] MODIFY > FEATHER
-- [ ] GROW
+- [x] GROW (`grow_selection`, extending the selection to every pixel 4-connected to it through pixels whose RGBA lies within the selection's own per-channel colour range widened by the Magic Wand's Tolerance — the Wand's contiguous fill seeded by every selected pixel at once, judged against a range; the result is a pixel-mask selection and repeating the command keeps growing — see README Phase 151)
 - [ ] SIMILAR
 - [ ] SELECT AND MASK
 

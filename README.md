@@ -9725,6 +9725,66 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **995 Rust tests total** (990 → 995, 988 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 151 — Select > Grow
+
+`grow_selection(id, tolerance)` extends the current selection to every
+pixel of layer `id` it can reach, 4-connected, through pixels whose
+colour lies within the selection's own colour range widened by
+`tolerance`: per channel, RGBA, `min − tolerance ..= max + tolerance`
+over the pixels already selected, saturating at `0` and `255`. It is
+the Magic Wand's contiguous fill seeded by every selected pixel at once
+and judged against a range rather than one clicked colour, which is
+also how Photoshop frames it — Grow takes its Tolerance from the Magic
+Wand's options, and the new **Grow** button beside Color Range does the
+same, reading the Wand's Tolerance slider. Two definitional choices are
+this project's own and are stated here: the range is computed once,
+from the selection as it stood, so the fill never widens its own
+criterion as it spreads (a pixel 20 away from everything originally
+selected can still join, but only if some chain of in-range neighbours
+leads to it); and repeating the command recomputes the range from the
+now-larger selection, so successive Grows keep spreading, as
+Photoshop's do. The result is always a pixel-mask selection, even when
+nothing qualified, so a rectangle that gains nothing becomes the
+equivalent mask. Nothing selected, or an unknown layer, errors and
+leaves the selection intact. Two helpers arrive with it that Similar
+(next) will share: `selected_bits`, the current selection rasterised
+one flag per pixel centre, and `colour_range_of`, the per-channel range
+of the flagged pixels widened by a tolerance.
+
+**Verified two ways.** Five new `document.rs` tests on `ramped_3x3`
+(the R channel steps `10 … 90` across the grid), every expected pixel
+read off the fixture and the whole set reproduced by an independent
+Python model of the algorithm (`grow_check.py`) before the Rust tests
+ran. The centre pixel (`50`) selected as a rectangle and grown by `10`
+admits its `40` and `60` neighbours but neither `20` above nor `80`
+below, giving exactly the middle row with bounds `(0, 1)–(3, 2)` and
+shape `Mask`. Selecting `40` and `50` together makes the range
+`40..=50`: at tolerance `5` (`35..=55`) nothing joins and the selection
+merely becomes the equivalent mask; at tolerance `10` (`30..=60`) the
+`60` joins and then `30` — twenty away from `50`, but in range —
+joins through it, yielding `[[F, F, T], [T, T, T], [F, F, F]]`. On the
+`3×1` row `10 50 10` with the first pixel selected, tolerance `0` leaves
+the far `10` unselected: Grow reaches only adjacent pixels. Growing the
+centre twice at `10` widens the range to `30..=70` on the second pass
+and reaches `30` and `70` but still not `20` or `80`, giving `[[F, F,
+T], [T, T, T], [T, F, F]]`. With nothing selected the call errors with
+"Nothing is selected"; with a rectangle selected an unknown layer errors
+and the rectangle survives. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1000 Rust tests total** (995 → 1000, 993 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -415,6 +415,20 @@ fn select_color_range(
     })
 }
 
+/// Select > Grow: extend the selection to adjacent pixels of layer `id`
+/// within `tolerance` of the colours already selected.
+#[tauri::command]
+fn grow_selection(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.grow_selection(id, tolerance)?;
+        Ok(None)
+    })
+}
+
 /// Select the entire canvas.
 #[tauri::command]
 fn select_all(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -3119,6 +3133,7 @@ pub fn run() {
             select_ellipse,
             select_magic_wand,
             select_color_range,
+            grow_selection,
             select_all,
             invert_selection,
             expand_selection,
