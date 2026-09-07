@@ -3783,6 +3783,16 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("content_aware_fill", { id: selectedId });
+            }}
+            disabled={busy || !canPaint || !hasSelection}
+            title="Edit > Content-Aware Fill (replace the selection with the mean of its surroundings)"
+          >
+            Content-Aware Fill
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowFillDialog(true)}
             disabled={busy || selectedId === null}
             title="Edit > Fill"

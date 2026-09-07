@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 256.**
+**618 distinct capabilities tracked. Currently shipped: 259.**
 
 ## PART I — EVERY TOOL
 
@@ -167,7 +167,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 
 ## PART XXXVII — THE 39th SYSTEM: “WHAT SHOULD I USE?”
 
-- [ ] Content-Aware Fill
+- [x] Content-Aware Fill (`content_aware_fill`, every selected pixel replaced by the ring mean of its pre-fill surroundings, all four channels — the explicit proximity fill the Content-Aware Move leaves behind; Photoshop's patch synthesis, sampling-area brush, Color/Rotation Adaptation, Scale, and Mirror are documented scope cuts — see README Phase 185)
 - [ ] Generative Fill
 - [ ] Generative Expand
 - [ ] Generate Background
@@ -326,8 +326,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Paste Special > Paste Outside (`paste_outside`, the clipboard as a new top layer centred on the selection's bounding box exactly as Paste Into centres it, keeping only the pixels outside the selection's shape — pixel for pixel the complement of Paste Into; the mask is baked in as transparency, a documented scope cut — see README Phase 154)
 - [x] Delete (also covers Edit > Clear — same command in this app, see README Phase 19)
 - [x] Fill (flat colour only, no pattern/history/content-aware source — see README Phase 19)
-- [ ] Content-Aware Fill from Selection
-- [ ] Delete and Fill Selection
+- [x] Content-Aware Fill from Selection (the same `content_aware_fill`, driven by the active selection — see README Phase 185)
+- [x] Delete and Fill Selection (the same `content_aware_fill`: the selected pixels are discarded and refilled from their surroundings in one step — see README Phase 185)
 - [ ] Move Tool — Hover Layer Bounds
 - [ ] Layer Auto-Select
 - [ ] Layer Auto-Select — Layer

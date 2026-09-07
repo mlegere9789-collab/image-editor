@@ -566,6 +566,13 @@ fn content_aware_move(
     edit_checkpointed(&state, |document| document.content_aware_move(id, dx, dy))
 }
 
+/// Edit > Content-Aware Fill: fill the selected pixels of layer `id` from
+/// their surroundings. A whole, discrete action, so it checkpoints itself.
+#[tauri::command]
+fn content_aware_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.content_aware_fill(id))
+}
+
 /// Select > Transform Selection: scale, rotate, and move the selection
 /// outline about its own centre without touching pixels.
 #[tauri::command]
@@ -3730,6 +3737,7 @@ pub fn run() {
             move_pixels,
             patch,
             content_aware_move,
+            content_aware_fill,
             transform_selection,
             save_selection,
             load_selection,

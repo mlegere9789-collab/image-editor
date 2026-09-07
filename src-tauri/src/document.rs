@@ -12131,6 +12131,38 @@ impl Document {
         Ok(touched)
     }
 
+    /// Edit > Content-Aware Fill: every selected pixel of layer `id` is
+    /// replaced by [`Self::ring_mean`] of the pre-fill layer — the mean of
+    /// the sixteen pixels two out from it, all four channels — so a
+    /// selected blemish, or a hole, is filled from what surrounds it. This
+    /// is the same explicit proximity fill the Content-Aware Move leaves
+    /// behind; Photoshop's patch synthesis, its sampling-area brush,
+    /// Color Adaptation, Rotation Adaptation, Scale, and Mirror are
+    /// documented scope cuts. Returns the selection's bounding box; errors
+    /// with nothing selected or on a locked or unknown layer.
+    pub fn content_aware_fill(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let bits = self.selected_bits()?;
+        let (width, height) = (self.width, self.height);
+        let bounds = SelectionMask {
+            width,
+            height,
+            bits: bits.clone(),
+        }
+        .bounds()
+        .expect("selected_bits guarantees a pixel");
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let (x, y) = (idx as u32 % width, idx as u32 / width);
+            let fill = Self::ring_mean(&source, width, height, x, y);
+            layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS].copy_from_slice(&fill);
+        }
+        Ok(Some(bounds))
+    }
+
     /// The Patch tool (Normal, Source mode): the active selection is the
     /// area to repair, dragged by `(dx, dy)` onto the area to sample. Every
     /// selected pixel `p` is rebuilt from the pre-patch pixel `p + (dx,
@@ -20195,6 +20227,72 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.content_aware_move(id, 1, 0).is_err());
         assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+    }
+
+    #[test]
+    fn content_aware_fill_replaces_the_selection_with_its_surroundings() {
+        let mut pixels = solid(3, 3, [100, 0, 0, 255]);
+        pixels[(3 + 1) * 4] = 200;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let rect = doc.content_aware_fill(id).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 0, 255]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn content_aware_fill_of_everything_is_the_ring_mean_grid() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_all().unwrap();
+        doc.content_aware_fill(id).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 42, 45], vec![47, 50, 52], vec![55, 57, 60]]
+        );
+    }
+
+    #[test]
+    fn content_aware_fill_reads_the_pre_fill_layer_and_fills_alpha() {
+        // Filling the left column: (0, 1)'s ring over depth_ramped_3x3
+        // averages red 760/16 = 47 and alpha 1531/16 = 95, from the
+        // untouched neighbours even though (0, 0) was filled first.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.content_aware_fill(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 1), [47, 0, 0, 95]);
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
+    }
+
+    #[test]
+    fn content_aware_fill_honours_the_selections_shape() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.content_aware_fill(id).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 40);
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 60);
+    }
+
+    #[test]
+    fn content_aware_fill_rejects_no_selection_and_locked_or_unknown_layers() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.content_aware_fill(id).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_all().unwrap();
+        assert!(doc.content_aware_fill(999).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.content_aware_fill(id).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
     }
 
     #[test]

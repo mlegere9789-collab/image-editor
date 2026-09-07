@@ -11416,6 +11416,51 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1165 Rust tests total** (1160 → 1165, 1158 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 185 — Edit > Content-Aware Fill
+
+`content_aware_fill(id)` replaces every selected pixel of a layer by
+the ring mean of the pre-fill layer — the sixteen pixels two out from
+it, edge-clamped, all four channels, through the `ring_mean` helper the
+Spot Healing Brush and Content-Aware Move share — so a selected blemish
+or hole is filled from what surrounds it, transparent holes included.
+Reading from a snapshot means filling a wide selection uses only the
+original neighbours, never pixels filled a moment earlier. It returns
+the selection's bounding box and errors with nothing selected or on a
+locked or unknown layer. This one command covers three checklist
+entries — Content-Aware Fill, Content-Aware Fill from Selection, and
+Delete and Fill Selection — which in Photoshop are three routes to the
+same operation. Photoshop's patch synthesis, its sampling-area brush,
+Color Adaptation, Rotation Adaptation, Scale, and Mirror are documented
+scope cuts. A new **Content-Aware Fill** button sits beside Delete.
+
+**Verified two ways.** Five new `document.rs` tests, every value read
+off the Python ring-mean model (the `ramped_3x3` grid `[[40, 42, 45],
+[47, 50, 52], [55, 57, 60]]`, and for `depth_ramped_3x3`'s `(0, 1)` the
+clamped ring's red `760 / 16 = 47` and alpha `1531 / 16 = 95`). A `200`
+spot on solid `100` fills to `100` with the box `(1, 1)–(2, 2)`. Select
+All on `ramped_3x3` fills to exactly the ring-mean grid. Filling the
+left column of `depth_ramped_3x3` gives `(0, 1)` `[47, 0, 0, 95]` from
+the untouched neighbours even though `(0, 0)` was filled first, and
+leaves the centre alone. An inverted centre selection fills everything
+but the centre (`(0, 0) → 40`, `(2, 2) → 60`, centre still `50`).
+Nothing selected errors with "Nothing is selected", and an unknown or
+locked layer errors with the pixels intact. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and thirty-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new button's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1170 Rust tests total** (1165 → 1170, 1163 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
