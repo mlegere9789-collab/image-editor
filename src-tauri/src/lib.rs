@@ -361,14 +361,17 @@ fn select_rectangle(
     y0: f32,
     x1: f32,
     y1: f32,
+    mode: Option<document::SelectionMode>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.select_rectangle(x0, y0, x1, y1)?;
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_rectangle_with(mode, x0, y0, x1, y1)?;
         Ok(None)
     })
 }
 
-/// Replace the selection with an ellipse inscribed in the given bounding box.
+/// Replace the selection with an ellipse inscribed in the given bounding
+/// box, or combine it with the current selection per `mode`.
 #[tauri::command]
 fn select_ellipse(
     state: State<'_, AppState>,
@@ -376,9 +379,11 @@ fn select_ellipse(
     y0: f32,
     x1: f32,
     y1: f32,
+    mode: Option<document::SelectionMode>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.select_ellipse(x0, y0, x1, y1)?;
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_ellipse_with(mode, x0, y0, x1, y1)?;
         Ok(None)
     })
 }

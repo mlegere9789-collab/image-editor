@@ -10,6 +10,7 @@ import type {
   DocumentView,
   HistoryState,
   MoveDirection,
+  SelectionMode,
   SelectionShape,
   Snapshot,
   Tool,
@@ -255,6 +256,7 @@ export default function App() {
   const [showMoveSelectionDialog, setShowMoveSelectionDialog] = useState(false);
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   const [showSaveSelectionDialog, setShowSaveSelectionDialog] = useState(false);
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
@@ -3137,7 +3139,16 @@ export default function App() {
           // "must cover at least one pixel" error for an everyday click.
           if (x0 !== x1 || y0 !== y1) {
             const command = tool === "selectRect" ? "select_rectangle" : "select_ellipse";
-            void runCommand(command, { x0, y0, x1, y1 });
+            // Photoshop's modifiers override the Mode picker for this drag.
+            const mode: SelectionMode =
+              event.shiftKey && event.altKey
+                ? "intersect"
+                : event.shiftKey
+                  ? "add"
+                  : event.altKey
+                    ? "subtract"
+                    : selectionMode;
+            void runCommand(command, { x0, y0, x1, y1, mode });
           }
         }
         return;
@@ -3174,6 +3185,7 @@ export default function App() {
       isGradient,
       document,
       tool,
+      selectionMode,
       runCommand,
       selectedId,
       brushColor,
@@ -4872,6 +4884,23 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {isMarqueeTool && (
+            <label className="tools__slider">
+              Mode
+              <select
+                value={selectionMode}
+                disabled={!hasDocument}
+                aria-label="Selection mode"
+                title="How the next marquee combines with the current selection (Shift adds, Alt subtracts, Shift+Alt intersects while dragging)"
+                onChange={(event) => setSelectionMode(event.target.value as SelectionMode)}
+              >
+                <option value="new">New</option>
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
+                <option value="intersect">Intersect</option>
+              </select>
+            </label>
           )}
           {(tool === "magicWand" || tool === "magicEraser") && (
             <>

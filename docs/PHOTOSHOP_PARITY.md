@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 219.**
+**618 distinct capabilities tracked. Currently shipped: 223.**
 
 ## PART I — EVERY TOOL
 
@@ -266,10 +266,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Puppet Warp — Pin Depth
 - [ ] Puppet Warp — Remove All Pins
 - [ ] Cylindrical Transform Warp
-- [ ] New Selection
-- [ ] Add to Selection
-- [ ] Subtract from Selection
-- [ ] Intersect with Selection
+- [x] New Selection (`SelectionMode::New`, the marquee tools' default — the selection is replaced outright; the explicit mode of the four-way Mode picker in the marquee tool options — see README Phase 158)
+- [x] Add to Selection (`SelectionMode::Add` via `select_rectangle_with` / `select_ellipse_with`: the current selection rasterised and unioned pixel by pixel with the new marquee into a pixel-mask selection; Shift while dragging, or the Mode picker — see README Phase 158)
+- [x] Subtract from Selection (`SelectionMode::Subtract`, the new marquee removed from the current selection pixel by pixel; erroring when nothing is selected or nothing would remain; Alt while dragging — see README Phase 158)
+- [x] Intersect with Selection (`SelectionMode::Intersect`, only what both the current selection and the new marquee cover; erroring when nothing would remain, starting a new selection when nothing is selected; Shift+Alt while dragging — see README Phase 158)
 - [ ] Anti-aliasing
 - [ ] Feather — Selection Tool Option
 - [ ] Select and Mask — Refine Edge

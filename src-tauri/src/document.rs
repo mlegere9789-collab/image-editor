@@ -225,6 +225,22 @@ pub struct Selection {
     pub mask: Option<Arc<SelectionMask>>,
 }
 
+/// How a new marquee combines with the selection already there — the four
+/// mode buttons in Photoshop's selection-tool options bar (Shift, Alt, and
+/// Shift+Alt while dragging).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectionMode {
+    /// Replace the selection outright.
+    New,
+    /// Union with the current selection.
+    Add,
+    /// Remove the new shape from the current selection.
+    Subtract,
+    /// Keep only what both cover.
+    Intersect,
+}
+
 /// Whether `(px, py)` — the same `+0.5` pixel-centre convention
 /// [`Document::stroke`] already samples at — falls inside `shape` sized to
 /// `bounds`. Free of [`Selection`]'s `inverted`/`border` handling, which
@@ -1081,29 +1097,94 @@ impl Document {
     /// corners `(x0, y0)` and `(x1, y1)` — in either order, as a drag can go
     /// any direction.
     pub fn select_rectangle(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) -> Result<(), String> {
+        self.select_rectangle_with(SelectionMode::New, x0, y0, x1, y1)
+    }
+
+    /// [`Self::select_rectangle`] combined with the current selection per
+    /// `mode` — see [`Self::combine_selection`].
+    pub fn select_rectangle_with(
+        &mut self,
+        mode: SelectionMode,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    ) -> Result<(), String> {
         let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
-        self.selection = Some(Selection {
-            shape: SelectionShape::Rectangle,
+        self.combine_selection(mode, SelectionShape::Rectangle, bounds)
+    }
+
+    /// [`Self::select_ellipse`] combined with the current selection per
+    /// `mode` — see [`Self::combine_selection`].
+    pub fn select_ellipse_with(
+        &mut self,
+        mode: SelectionMode,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    ) -> Result<(), String> {
+        let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
+        self.combine_selection(mode, SelectionShape::Ellipse, bounds)
+    }
+
+    /// The selection-tool modes: `New` replaces the selection with the
+    /// `shape` in `bounds`, and so do `Add` and `Intersect` when nothing is
+    /// selected yet (Photoshop starts a fresh selection rather than adding
+    /// to or intersecting with nothing); `Subtract` with nothing selected
+    /// is an error. Otherwise the current selection — whatever its shape,
+    /// inversion, border, or mask — is rasterised and combined pixel by
+    /// pixel with the new shape (union, difference, or intersection) into
+    /// a [`SelectionShape::Mask`]. A `Subtract` or `Intersect` that would
+    /// leave nothing selected errors and leaves the selection intact.
+    fn combine_selection(
+        &mut self,
+        mode: SelectionMode,
+        shape: SelectionShape,
+        bounds: Rect,
+    ) -> Result<(), String> {
+        let new = Selection {
+            shape,
             bounds,
             inverted: false,
             border: None,
             mask: None,
-        });
-        Ok(())
+        };
+        let current = match (mode, self.selection.is_some()) {
+            (SelectionMode::New, _)
+            | (SelectionMode::Add, false)
+            | (SelectionMode::Intersect, false) => {
+                self.selection = Some(new);
+                return Ok(());
+            }
+            (SelectionMode::Subtract, false) => return Err("Nothing is selected.".to_string()),
+            (_, true) => self.selected_bits()?,
+        };
+        let width = self.width;
+        let bits: Vec<bool> = current
+            .iter()
+            .enumerate()
+            .map(|(idx, &had)| {
+                let (x, y) = (idx as u32 % width, idx as u32 / width);
+                let has = new.contains(x as f32 + 0.5, y as f32 + 0.5);
+                match mode {
+                    SelectionMode::Add => had || has,
+                    SelectionMode::Subtract => had && !has,
+                    SelectionMode::Intersect => had && has,
+                    SelectionMode::New => unreachable!("handled above"),
+                }
+            })
+            .collect();
+        if !bits.contains(&true) {
+            return Err("That would leave nothing selected.".to_string());
+        }
+        self.set_mask_selection(bits)
     }
 
     /// Replace the selection with an ellipse inscribed in the bounding box
     /// spanning `(x0, y0)` and `(x1, y1)`.
     pub fn select_ellipse(&mut self, x0: f32, y0: f32, x1: f32, y1: f32) -> Result<(), String> {
-        let bounds = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height)?;
-        self.selection = Some(Selection {
-            shape: SelectionShape::Ellipse,
-            bounds,
-            inverted: false,
-            border: None,
-            mask: None,
-        });
-        Ok(())
+        self.select_ellipse_with(SelectionMode::New, x0, y0, x1, y1)
     }
 
     /// Select the entire canvas — a rectangle spanning the whole document.
@@ -26442,6 +26523,139 @@ mod tests {
         .unwrap();
         assert!(doc.saved_selection_names().is_empty());
         assert!(doc.load_selection("b").is_err());
+    }
+
+    #[test]
+    fn add_to_selection_unions_two_marquees() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.select_rectangle_with(SelectionMode::Add, 2.0, 2.0, 3.0, 3.0)
+            .unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, false, false],
+                vec![false, false, false],
+                vec![false, false, true]
+            ]
+        );
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Mask);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+    }
+
+    #[test]
+    fn subtract_from_selection_removes_the_overlap() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc
+            .select_rectangle_with(SelectionMode::Subtract, 1.0, 1.0, 2.0, 2.0)
+            .unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_all().unwrap();
+        doc.select_rectangle_with(SelectionMode::Subtract, 1.0, 1.0, 2.0, 2.0)
+            .unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, true, true],
+                vec![true, false, true],
+                vec![true, true, true]
+            ]
+        );
+        // Subtracting everything that is left errors and keeps the mask.
+        let err = doc
+            .select_rectangle_with(SelectionMode::Subtract, 0.0, 0.0, 3.0, 3.0)
+            .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        assert!(!selected_grid(&doc)[1][1] && selected_grid(&doc)[0][0]);
+    }
+
+    #[test]
+    fn intersect_with_selection_keeps_the_overlap() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.select_rectangle_with(SelectionMode::Intersect, 1.0, 1.0, 3.0, 3.0)
+            .unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![false, true, false],
+                vec![false, false, false]
+            ]
+        );
+        // No overlap at all errors and leaves the selection intact.
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        let err = doc
+            .select_rectangle_with(SelectionMode::Intersect, 2.0, 2.0, 3.0, 3.0)
+            .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Rectangle);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn add_and_intersect_with_nothing_selected_start_a_new_selection() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle_with(SelectionMode::Add, 0.0, 0.0, 2.0, 2.0)
+            .unwrap();
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+        doc.deselect();
+        doc.select_ellipse_with(SelectionMode::Intersect, 0.0, 0.0, 3.0, 3.0)
+            .unwrap();
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Ellipse);
+        doc.select_rectangle_with(SelectionMode::New, 1.0, 1.0, 2.0, 2.0)
+            .unwrap();
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Rectangle);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn combining_honours_the_new_shape_and_the_old_selections_form() {
+        // Select All minus the canvas-spanning ellipse on 4x4 leaves exactly
+        // the four corners; adding a rectangle to an inverted selection
+        // works on the inverted result.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_all().unwrap();
+        doc.select_ellipse_with(SelectionMode::Subtract, 0.0, 0.0, 4.0, 4.0)
+            .unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(0.5, 0.5) && s.contains(3.5, 3.5));
+        assert!(!s.contains(1.5, 0.5) && !s.contains(1.5, 1.5));
+
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.select_rectangle_with(SelectionMode::Add, 1.0, 1.0, 2.0, 2.0)
+            .unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.contains(0.5, 0.5) && s.contains(1.5, 1.5) && !s.contains(2.5, 2.5));
+        assert_eq!(s.shape, SelectionShape::Mask);
     }
 
     #[test]

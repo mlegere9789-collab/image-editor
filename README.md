@@ -10100,6 +10100,68 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1030 Rust tests total** (1025 → 1030, 1023 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 158 — Selection modes: New, Add, Subtract, Intersect
+
+The marquee tools gain Photoshop's four combination modes. A new
+`SelectionMode` enum (`New`, `Add`, `Subtract`, `Intersect`) rides on
+`select_rectangle_with` and `select_ellipse_with`; the existing
+`select_rectangle` and `select_ellipse` are now one-line `New` calls
+through them, so nothing that used them changes. `New` replaces the
+selection outright, and so do `Add` and `Intersect` when nothing is
+selected yet — Photoshop starts a fresh selection rather than adding to
+or intersecting with nothing — while `Subtract` with nothing selected
+is an error. Otherwise the current selection, whatever its shape,
+inversion, border, or mask, is rasterised through Phase 151's
+`selected_bits` and combined pixel by pixel with the new marquee
+(union, difference, or intersection) into a pixel-mask selection — the
+one representation that can hold two rectangles at once. A `Subtract`
+or `Intersect` that would leave nothing selected errors and leaves the
+selection intact. A combined selection is always a mask, even when the
+union of two rectangles happens to be a rectangle: detecting that
+would buy nothing, since every command already honours masks. In the
+frontend the `select_rectangle` and `select_ellipse` commands take an
+optional `mode` (absent means `New`, so the single-row and single-column
+marquees are untouched); a **Mode** drop-down appears in the tool
+options while a marquee tool is active, and Photoshop's modifiers work
+while dragging — Shift adds, Alt subtracts, Shift+Alt intersects —
+overriding the drop-down for that one drag. The Magic Wand, Color
+Range, and Load Selection keep replacing the selection for now; giving
+them modes is a documented follow-up.
+
+**Verified two ways.** Five new `document.rs` tests reading the
+selection back pixel by pixel through `selected_grid` and `contains`,
+each expected grid derived by hand from the two shapes' pixel sets.
+`(0, 0)` plus an added `(2, 2)` on `ramped_3x3` selects exactly those
+two corners as a `Mask` with bounds `(0, 0)–(3, 3)`. Subtracting the
+centre pixel from Select All leaves the eight-pixel ring, subtracting
+with nothing selected errors with "Nothing is selected", and
+subtracting everything that is left errors with "nothing selected" and
+keeps the ring. Intersecting the `2×2` at the origin with the `2×2` at
+`(1, 1)` leaves only `(1, 1)`; intersecting two disjoint rectangles
+errors and keeps the first, still a `Rectangle` at `(0, 0)–(2, 2)`. Add
+and Intersect with nothing selected produce a plain `Rectangle` and
+`Ellipse` respectively, and `New` over an existing selection replaces
+it. Select All minus the canvas-spanning ellipse on `4×4` leaves exactly
+the four corners (the ellipse's corner-exclusion Paste Into's tests
+established), and adding the centre pixel to an inverted rectangle
+works on the inverted result — `(0, 0)` and `(1, 1)` selected, `(2, 2)`
+not. All five passed on the first run; every earlier marquee test runs
+unchanged through the `New` path.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and five: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The Mode drop-down's and the modifier keys' wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1035 Rust tests total** (1030 → 1035, 1028 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

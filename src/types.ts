@@ -90,6 +90,10 @@ export type MoveDirection = "up" | "down";
 
 /** What a pointer drag on the canvas does: edit the selected layer, or
  * redefine the document's selection. */
+/** How a new marquee combines with the current selection — the four mode
+ * buttons in Photoshop's selection-tool options bar. */
+export type SelectionMode = "new" | "add" | "subtract" | "intersect";
+
 export type Tool =
   | "brush"
   | "eraser"
