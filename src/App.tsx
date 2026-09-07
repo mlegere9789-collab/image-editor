@@ -592,6 +592,9 @@ export default function App() {
   // Define Brush Preset: paint with the captured tip, stamped every Spacing pixels.
   const [useBrushTip, setUseBrushTip] = useState(false);
   const [tipSpacing, setTipSpacing] = useState(4);
+  // Gradient / Pattern / Adjustment Presets: the dialog and a name field.
+  const [showPresetsDialog, setShowPresetsDialog] = useState(false);
+  const [presetName, setPresetName] = useState("");
   // Sharpen tool options: Protect Detail and Sample All Layers.
   // Magnetic Lasso options: the edge search reach in pixels and the
   // minimum edge strength (0-255) that counts as an edge.
@@ -1697,6 +1700,15 @@ export default function App() {
       spot: { ...retouch, source: retouch.mode === "remove" ? null : retouch.source },
     });
   }, [runCommand, selectedId, retouch]);
+
+  const savePresetFromCurrent = useCallback(async () => {
+    const name = presetName.trim();
+    if (!name) return;
+    const [r, g, b] = hexToRgb(brushColor);
+    const [er, eg, eb] = hexToRgb(gradientEndColor);
+    await runCommand("save_gradient_preset", { name, startColor: [r, g, b, 255], endColor: [er, eg, eb, 255] });
+    setPresetName("");
+  }, [runCommand, presetName, brushColor, gradientEndColor]);
 
   const applyOptics = useCallback(async () => {
     if (selectedId === null) return;
@@ -5712,6 +5724,14 @@ export default function App() {
           title="Edit > Define Brush Preset: the selected layer's opaque pixels as a tip, dark paint covering most"
         >
           Define Brush Preset
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowPresetsDialog(true)}
+          disabled={busy || !hasDocument}
+          title="Edit > Presets: save and reuse Gradient, Pattern, and Adjustment presets by name"
+        >
+          Presets…
         </button>
         <label className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
           <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
@@ -10524,6 +10544,147 @@ export default function App() {
             </label>
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowLayerCompsDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPresetsDialog && document && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPresetsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Presets"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Presets</h2>
+            <label className="control control--row">
+              <span className="control__label">Name</span>
+              <input
+                type="text"
+                value={presetName}
+                onChange={(event) => setPresetName(event.target.value)}
+              />
+            </label>
+
+            <h3 className="modal__subheading">Gradient Presets</h3>
+            <p className="modal__hint">Saves the current Set Foreground / gradient end colours.</p>
+            {document.gradientPresets.length === 0 ? (
+              <p className="modal__hint">No gradient presets saved yet.</p>
+            ) : (
+              document.gradientPresets.map((preset) => (
+                <div className="control control--row" key={preset.name}>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: "inline-block",
+                      width: 16,
+                      height: 16,
+                      borderRadius: 3,
+                      background: `linear-gradient(90deg, ${rgbToHex(preset.startColor[0], preset.startColor[1], preset.startColor[2])}, ${rgbToHex(preset.endColor[0], preset.endColor[1], preset.endColor[2])})`,
+                    }}
+                  />
+                  <span className="control__label">{preset.name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setBrushColor(rgbToHex(preset.startColor[0], preset.startColor[1], preset.startColor[2]));
+                      setGradientEndColor(rgbToHex(preset.endColor[0], preset.endColor[1], preset.endColor[2]));
+                    }}
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_gradient_preset", { name: preset.name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button className="button" onClick={savePresetFromCurrent} disabled={busy || presetName.trim() === ""}>
+              Save Gradient
+            </button>
+
+            <h3 className="modal__subheading">Pattern Presets</h3>
+            <p className="modal__hint">Saves the pattern currently defined with Edit &gt; Define Pattern.</p>
+            {document.patternPresets.length === 0 ? (
+              <p className="modal__hint">No pattern presets saved yet.</p>
+            ) : (
+              document.patternPresets.map((name) => (
+                <div className="control control--row" key={name}>
+                  <span className="control__label">{name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("load_pattern_preset", { name })}
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_pattern_preset", { name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              className="button"
+              onClick={() => void runCommand("save_pattern_preset", { name: presetName.trim() })}
+              disabled={busy || presetName.trim() === ""}
+            >
+              Save Pattern
+            </button>
+
+            <h3 className="modal__subheading">Adjustment Presets</h3>
+            <p className="modal__hint">Saves the adjustment currently set up in the Adjustment Layer dialog.</p>
+            {document.adjustmentPresets.length === 0 ? (
+              <p className="modal__hint">No adjustment presets saved yet.</p>
+            ) : (
+              document.adjustmentPresets.map((preset) => (
+                <div className="control control--row" key={preset.name}>
+                  <span className="control__label">{preset.name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("apply_adjustment_preset", { name: preset.name })}
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_adjustment_preset", { name: preset.name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              className="button"
+              onClick={() =>
+                void runCommand("save_adjustment_preset", { name: presetName.trim(), adjustment: currentAdjustment() })
+              }
+              disabled={busy || presetName.trim() === ""}
+            >
+              Save Adjustment
+            </button>
+
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPresetsDialog(false)}>
                 Close
               </button>
             </div>

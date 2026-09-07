@@ -205,7 +205,19 @@ export type DocumentView = {
   hasBrushTip: boolean;
   /** The Pen tool family's current path, if any. */
   currentPath: PathData | null;
+  /** Pattern Presets' names, in the order first saved. */
+  patternPresets: string[];
+  /** Gradient Presets, in the order first saved. */
+  gradientPresets: GradientPreset[];
+  /** Adjustment Presets, in the order first saved. */
+  adjustmentPresets: AdjustmentPreset[];
 };
+
+/** Mirrors `GradientPreset` in src-tauri/src/document.rs. */
+export type GradientPreset = { name: string; startColor: [number, number, number, number]; endColor: [number, number, number, number] };
+
+/** Mirrors `AdjustmentPreset` in src-tauri/src/document.rs. */
+export type AdjustmentPreset = { name: string; adjustment: Adjustment };
 
 /** Mirrors `PathAnchor` / `Path` in src-tauri/src/document.rs: the Pen
  * tool family's current work path. */

@@ -3292,6 +3292,88 @@ fn set_adjustment(
     })
 }
 
+/// Gradient Presets: save (or overwrite) one by name.
+#[tauri::command]
+fn save_gradient_preset(
+    state: State<'_, AppState>,
+    name: String,
+    start_color: [u8; 4],
+    end_color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_gradient_preset(&name, start_color, end_color)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_gradient_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_gradient_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// Pattern Presets: save (or overwrite) the current pattern by name.
+#[tauri::command]
+fn save_pattern_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_pattern_preset(&name)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn load_pattern_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.load_pattern_preset(&name)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_pattern_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_pattern_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// Adjustment Presets: save (or overwrite) one by name.
+#[tauri::command]
+fn save_adjustment_preset(
+    state: State<'_, AppState>,
+    name: String,
+    adjustment: document::Adjustment,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_adjustment_preset(&name, adjustment)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_adjustment_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_adjustment_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// Applies adjustment preset `name` as a new adjustment layer.
+#[tauri::command]
+fn apply_adjustment_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.apply_adjustment_preset(&name)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// The Pen Tool: appends an anchor at `(x, y)` to the current path.
 #[tauri::command]
 fn pen_add_anchor(
@@ -5461,6 +5543,14 @@ pub fn run() {
             convert_anchor_point,
             move_path,
             move_anchor,
+            save_gradient_preset,
+            delete_gradient_preset,
+            save_pattern_preset,
+            load_pattern_preset,
+            delete_pattern_preset,
+            save_adjustment_preset,
+            delete_adjustment_preset,
+            apply_adjustment_preset,
             set_text,
             add_shape_layer,
             set_shape,

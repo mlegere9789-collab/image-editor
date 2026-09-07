@@ -146,6 +146,14 @@ pub struct Document {
     brush_tip: Option<BrushTip>,
     /// The Pen tool family's current work path — see [`Path`].
     current_path: Option<Path>,
+    /// Edit > Pattern Presets: patterns saved by name, in the order first
+    /// saved — Photoshop keeps these as application-wide presets too;
+    /// here they live on the document, like the one current pattern does.
+    pattern_presets: Vec<(String, Pattern)>,
+    /// Edit > Gradient Presets, in the order first saved.
+    gradient_presets: Vec<GradientPreset>,
+    /// Edit > Adjustment Presets, in the order first saved.
+    adjustment_presets: Vec<AdjustmentPreset>,
     /// Select > Save Selection's named selections, in the order first
     /// saved — Photoshop stores these as alpha channels; here they are the
     /// selections themselves (a mask's bitmap shared through its `Arc`),
@@ -1413,6 +1421,25 @@ pub struct PathAnchor {
 pub struct Path {
     pub anchors: Vec<PathAnchor>,
     pub closed: bool,
+}
+
+/// Edit > Gradient Presets: a saved two-colour gradient, picked by name
+/// into the Gradient tool and Gradient fills.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientPreset {
+    pub name: String,
+    pub start_color: [u8; 4],
+    pub end_color: [u8; 4],
+}
+
+/// Edit > Adjustment Presets: a saved [`Adjustment`], applied by adding a
+/// new adjustment layer set to it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdjustmentPreset {
+    pub name: String,
+    pub adjustment: Adjustment,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -3249,6 +3276,12 @@ pub struct DocumentView {
     pub has_brush_tip: bool,
     /// The Pen tool family's current path, if any.
     pub current_path: Option<Path>,
+    /// Pattern Presets' names, in the order first saved.
+    pub pattern_presets: Vec<String>,
+    /// Gradient Presets, in the order first saved.
+    pub gradient_presets: Vec<GradientPreset>,
+    /// Adjustment Presets, in the order first saved.
+    pub adjustment_presets: Vec<AdjustmentPreset>,
 }
 
 impl Document {
@@ -3268,6 +3301,9 @@ impl Document {
             pattern: None,
             brush_tip: None,
             current_path: None,
+            pattern_presets: Vec::new(),
+            gradient_presets: Vec::new(),
+            adjustment_presets: Vec::new(),
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
@@ -3329,6 +3365,13 @@ impl Document {
             duotone: self.duotone.clone(),
             has_brush_tip: self.brush_tip.is_some(),
             current_path: self.current_path.clone(),
+            pattern_presets: self
+                .pattern_presets
+                .iter()
+                .map(|(name, _)| name.clone())
+                .collect(),
+            gradient_presets: self.gradient_presets.clone(),
+            adjustment_presets: self.adjustment_presets.clone(),
         }
     }
 
@@ -7735,6 +7778,144 @@ impl Document {
         anchor.in_handle = anchor.in_handle.map(|h| (h.0 + dx, h.1 + dy));
         anchor.out_handle = anchor.out_handle.map(|h| (h.0 + dx, h.1 + dy));
         Ok(())
+    }
+
+    /// Gradient Presets: saves (or, by name, overwrites) a two-colour
+    /// gradient. Errors for a blank name.
+    pub fn save_gradient_preset(
+        &mut self,
+        name: &str,
+        start_color: [u8; 4],
+        end_color: [u8; 4],
+    ) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A gradient preset needs a name.".to_string());
+        }
+        match self.gradient_presets.iter_mut().find(|p| p.name == name) {
+            Some(preset) => {
+                preset.start_color = start_color;
+                preset.end_color = end_color;
+            }
+            None => self.gradient_presets.push(GradientPreset {
+                name: name.to_string(),
+                start_color,
+                end_color,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Deletes the gradient preset named `name`. Errors when there is none.
+    pub fn delete_gradient_preset(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .gradient_presets
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| format!("No gradient preset named \"{name}\"."))?;
+        self.gradient_presets.remove(index);
+        Ok(())
+    }
+
+    pub fn gradient_presets(&self) -> &[GradientPreset] {
+        &self.gradient_presets
+    }
+
+    /// Pattern Presets: saves (or, by name, overwrites) the currently
+    /// defined pattern. Errors when no pattern is defined
+    /// ([`Self::define_pattern`]), or for a blank name.
+    pub fn save_pattern_preset(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A pattern preset needs a name.".to_string());
+        }
+        let pattern = self
+            .pattern
+            .clone()
+            .ok_or_else(|| "Define Pattern first to save a pattern preset.".to_string())?;
+        match self.pattern_presets.iter_mut().find(|(n, _)| n == name) {
+            Some((_, saved)) => *saved = pattern,
+            None => self.pattern_presets.push((name.to_string(), pattern)),
+        }
+        Ok(())
+    }
+
+    /// Loads pattern preset `name` as the current pattern. Errors when
+    /// there is none.
+    pub fn load_pattern_preset(&mut self, name: &str) -> Result<(), String> {
+        let pattern = self
+            .pattern_presets
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, pattern)| pattern.clone())
+            .ok_or_else(|| format!("No pattern preset named \"{name}\"."))?;
+        self.pattern = Some(pattern);
+        Ok(())
+    }
+
+    /// Deletes the pattern preset named `name`. Errors when there is none.
+    pub fn delete_pattern_preset(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .pattern_presets
+            .iter()
+            .position(|(n, _)| n == name)
+            .ok_or_else(|| format!("No pattern preset named \"{name}\"."))?;
+        self.pattern_presets.remove(index);
+        Ok(())
+    }
+
+    /// Adjustment Presets: saves (or, by name, overwrites) an
+    /// [`Adjustment`]. A rejected adjustment leaves any existing preset of
+    /// the same name untouched. Errors for a blank name or an invalid
+    /// adjustment ([`Adjustment::validate`]).
+    pub fn save_adjustment_preset(
+        &mut self,
+        name: &str,
+        adjustment: Adjustment,
+    ) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("An adjustment preset needs a name.".to_string());
+        }
+        adjustment.validate()?;
+        match self.adjustment_presets.iter_mut().find(|p| p.name == name) {
+            Some(preset) => preset.adjustment = adjustment,
+            None => self.adjustment_presets.push(AdjustmentPreset {
+                name: name.to_string(),
+                adjustment,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Deletes the adjustment preset named `name`. Errors when there is
+    /// none.
+    pub fn delete_adjustment_preset(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .adjustment_presets
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| format!("No adjustment preset named \"{name}\"."))?;
+        self.adjustment_presets.remove(index);
+        Ok(())
+    }
+
+    /// Applies adjustment preset `name`: a new adjustment layer named
+    /// after the preset, set to its adjustment — see
+    /// [`Self::add_adjustment_layer`]. Errors when there is no such
+    /// preset.
+    pub fn apply_adjustment_preset(&mut self, name: &str) -> Result<LayerId, String> {
+        let adjustment = self
+            .adjustment_presets
+            .iter()
+            .find(|p| p.name == name)
+            .map(|p| p.adjustment)
+            .ok_or_else(|| format!("No adjustment preset named \"{name}\"."))?;
+        self.add_adjustment_layer(name, adjustment)
+    }
+
+    pub fn adjustment_presets(&self) -> &[AdjustmentPreset] {
+        &self.adjustment_presets
     }
 
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
@@ -48853,5 +49034,150 @@ mod tests {
         assert!(doc.move_anchor(9, 0.0, 0.0).unwrap_err().contains("anchor"));
         let mut none = Document::new(4, 4).unwrap();
         assert!(none.move_path(1.0, 1.0).unwrap_err().contains("path"));
+    }
+
+    #[test]
+    fn gradient_presets_save_overwrites_by_name_and_lists_in_order_added() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_gradient_preset("Sunset", [255, 100, 0, 255], [0, 0, 50, 255])
+            .unwrap();
+        doc.save_gradient_preset("Ocean", [0, 100, 200, 255], [0, 0, 50, 255])
+            .unwrap();
+        assert_eq!(doc.gradient_presets().len(), 2);
+        assert_eq!(doc.gradient_presets()[0].name, "Sunset");
+        assert_eq!(doc.gradient_presets()[1].name, "Ocean");
+        // Saving "Sunset" again overwrites it in place rather than adding
+        // a third preset.
+        doc.save_gradient_preset("Sunset", [10, 10, 10, 255], [20, 20, 20, 255])
+            .unwrap();
+        assert_eq!(doc.gradient_presets().len(), 2);
+        assert_eq!(doc.gradient_presets()[0].start_color, [10, 10, 10, 255]);
+        assert_eq!(doc.gradient_presets()[0].end_color, [20, 20, 20, 255]);
+        doc.delete_gradient_preset("Ocean").unwrap();
+        assert_eq!(doc.gradient_presets().len(), 1);
+        assert!(doc
+            .delete_gradient_preset("Ocean")
+            .unwrap_err()
+            .contains("preset"));
+        assert!(doc
+            .save_gradient_preset("  ", [0, 0, 0, 255], [0, 0, 0, 255])
+            .unwrap_err()
+            .contains("name"));
+    }
+
+    #[test]
+    fn pattern_presets_require_a_defined_pattern_and_round_trip_its_pixels() {
+        let mut doc = Document::new(4, 4).unwrap();
+        let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
+        let id = doc.add_layer("swatch", &pixels, 4, 4).unwrap();
+        assert!(doc
+            .save_pattern_preset("Bricks")
+            .unwrap_err()
+            .contains("pattern"));
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        let bricks = doc.pattern().unwrap().clone();
+        doc.save_pattern_preset("Bricks").unwrap();
+        assert_eq!(doc.view().pattern_presets, vec!["Bricks".to_string()]);
+        // Defining a different pattern changes the current one, not the
+        // saved preset.
+        doc.deselect();
+        doc.select_rectangle(2.0, 2.0, 4.0, 4.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        assert_ne!(doc.pattern().unwrap(), &bricks);
+        doc.load_pattern_preset("Bricks").unwrap();
+        assert_eq!(doc.pattern().unwrap(), &bricks);
+        assert!(doc
+            .load_pattern_preset("Nope")
+            .unwrap_err()
+            .contains("preset"));
+        doc.delete_pattern_preset("Bricks").unwrap();
+        assert!(doc.view().pattern_presets.is_empty());
+        assert!(doc
+            .load_pattern_preset("Bricks")
+            .unwrap_err()
+            .contains("preset"));
+    }
+
+    #[test]
+    fn adjustment_presets_validate_before_saving_and_apply_as_a_new_layer() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_adjustment_preset(
+            "High Contrast",
+            Adjustment::BrightnessContrast {
+                brightness: 0,
+                contrast: 40,
+            },
+        )
+        .unwrap();
+        assert!(doc
+            .save_adjustment_preset("Bad", Adjustment::Threshold { level: 0 })
+            .unwrap_err()
+            .contains("Threshold"));
+        assert_eq!(doc.adjustment_presets().len(), 1);
+        let id = doc.apply_adjustment_preset("High Contrast").unwrap();
+        assert_eq!(doc.layers()[0].id, id);
+        assert_eq!(doc.layers()[0].name, "High Contrast");
+        assert_eq!(
+            doc.layers()[0].adjustment,
+            Some(Adjustment::BrightnessContrast {
+                brightness: 0,
+                contrast: 40
+            })
+        );
+        assert!(doc
+            .apply_adjustment_preset("Nope")
+            .unwrap_err()
+            .contains("preset"));
+    }
+
+    #[test]
+    fn presets_are_exposed_on_the_document_view_and_deletions_are_exact() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_gradient_preset("A", [1, 2, 3, 255], [4, 5, 6, 255])
+            .unwrap();
+        doc.save_adjustment_preset("B", Adjustment::Invert).unwrap();
+        let view = doc.view();
+        assert_eq!(view.gradient_presets.len(), 1);
+        assert_eq!(view.gradient_presets[0].name, "A");
+        assert_eq!(view.adjustment_presets.len(), 1);
+        assert_eq!(view.adjustment_presets[0].name, "B");
+        assert_eq!(view.adjustment_presets[0].adjustment, Adjustment::Invert);
+        // Two gradient presets, deleting the first leaves only the second.
+        doc.save_gradient_preset("C", [0, 0, 0, 255], [0, 0, 0, 255])
+            .unwrap();
+        doc.delete_gradient_preset("A").unwrap();
+        assert_eq!(doc.gradient_presets().len(), 1);
+        assert_eq!(doc.gradient_presets()[0].name, "C");
+        assert!(doc
+            .delete_adjustment_preset("Nope")
+            .unwrap_err()
+            .contains("preset"));
+        doc.delete_adjustment_preset("B").unwrap();
+        assert!(doc.adjustment_presets().is_empty());
+    }
+
+    #[test]
+    fn presets_refuse_blank_names_and_bad_edits_change_nothing() {
+        let mut doc = Document::new(4, 4).unwrap();
+        assert!(doc
+            .save_adjustment_preset("", Adjustment::Invert)
+            .unwrap_err()
+            .contains("name"));
+        assert!(doc.save_pattern_preset("").is_err());
+        assert!(doc.adjustment_presets().is_empty());
+        // A rejected adjustment does not overwrite an existing preset of
+        // the same name.
+        doc.save_adjustment_preset("Keep", Adjustment::Invert)
+            .unwrap();
+        assert!(doc
+            .save_adjustment_preset("Keep", Adjustment::Posterize { levels: 1 })
+            .unwrap_err()
+            .contains("Posterize"));
+        assert_eq!(doc.adjustment_presets()[0].adjustment, Adjustment::Invert);
+        assert!(doc
+            .delete_pattern_preset("Nope")
+            .unwrap_err()
+            .contains("preset"));
     }
 }

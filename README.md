@@ -15509,6 +15509,73 @@ instead. Every other layer of this project's quality bar
 **1540 Rust tests total** (1535 → 1540, 1533 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 260 — Gradient, Pattern, and Adjustment Presets
+
+Three named-preset bins, each following the "overwrite in place by name,
+else push" convention `save_layer_comp` already established. A
+`GradientPreset { name, start_color, end_color }` and an
+`AdjustmentPreset { name, adjustment }` (reusing the existing
+`Adjustment` enum and its `validate()`) are new document types; Pattern
+Presets reuse the existing `Pattern` struct in a `Vec<(String,
+Pattern)>`, mirroring `saved_selections`'s own tuple shape rather than
+inventing a fourth wrapper type. `save_gradient_preset`/
+`save_pattern_preset`/`save_adjustment_preset` trim and reject a blank
+name, `save_adjustment_preset` also runs `Adjustment::validate()` before
+touching the vector — a rejected adjustment leaves an existing preset of
+the same name untouched. `load_pattern_preset` sets the document's one
+current pattern (the same slot `define_pattern` fills) to the saved
+copy; `apply_adjustment_preset` adds a new adjustment layer through the
+existing `add_adjustment_layer`, named after the preset. None of the
+three are cleared on canvas resize, unlike selections, channels, notes,
+and the Pen tool's current path — presets aren't position-bound the way
+those are. Tool Presets and the Preset Manager are a documented scope
+cut: both are frontend-only UI-state bundles (which tool, which of its
+option values) with no natural home in this project's document-centric
+Rust model, unlike the three preset kinds shipped here, which each wrap
+one already-modelled piece of document state. The toolbar gains one
+"Presets…" button opening a dialog with the three bins stacked: each
+lists its saved names with Apply/Delete, and a shared name field feeds a
+Save button per section — Gradient reads the Gradient tool's own
+foreground/end-colour fields, Pattern requires Define Pattern to have
+been run first, Adjustment reads whatever the Adjustment Layer dialog is
+currently set to.
+
+**Verified two ways.** Five new `document.rs` tests, all integer and
+string bookkeeping with no floating-point math, so hand-verification
+alone was judged sufficient per this project's own stated bar. Saving
+gradient presets "Sunset" then "Ocean" lists both in that order; saving
+"Sunset" again overwrites its colours in place rather than appending a
+third preset, leaving the list at length 2; deleting "Ocean" drops it to
+length 1, deleting it again is refused, and a blank name is refused too.
+A pattern preset cannot be saved before `define_pattern` has been run
+(the error names "pattern"); after defining a 2×2 corner of a 4×4
+grayscale ramp as "Bricks" and saving it, defining a second, different
+pattern from the opposite corner leaves the saved "Bricks" preset
+unchanged — reloading it restores the original pattern's exact pixels,
+confirmed unequal to the newly-defined one first. An adjustment preset
+save rejects `Threshold { level: 0 }` (the validation error names
+"Threshold") without disturbing the one already-saved
+`BrightnessContrast { brightness: 0, contrast: 40 }` preset; applying it
+adds a new layer named "High Contrast" carrying that exact adjustment,
+and applying an unknown name is refused. `DocumentView` exposes all
+three lists (pattern presets as names only, gradient and adjustment
+presets in full); deleting the first of two gradient presets leaves
+exactly the second. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The dialog and its three sections were reviewed by hand
+instead. Every other layer of this project's quality bar (hand-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1545 Rust tests total** (1540 → 1545, 1538 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
