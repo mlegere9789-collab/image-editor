@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 191.**
+**618 distinct capabilities tracked. Currently shipped: 192.**
 
 ## PART I — EVERY TOOL
 
@@ -628,7 +628,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Clarity (`clarity`, `unsharp_mask`'s own diff-and-amplify shape reusing `box_blur_at`, fixed at a large radius (40) matching Photoshop's own internal fixed-radius Clarity implementation, with a signed `-100..=100` amount so negative values soften local contrast instead of only ever sharpening — see README Phase 119)
 - [x] Saturation — Camera Raw (`camera_raw_saturation`, an exact preset over `vibrance` with its vibrance term held at 0 — Camera Raw's own Basic panel pairs Vibrance and Saturation exactly as Image > Adjustments > Vibrance does, so the uniform `s * (1 + saturation / 100)` HSL scale is the same already-verified code — see README Phase 126)
 - [ ] Parametric Curve
-- [ ] Point Curve
+- [x] Point Curve (`camera_raw_point_curve`, an exact preset over `curves` — Camera Raw's own Point Curve is the same point-driven RGB tone curve Image > Adjustments > Curves applies, so the five fixed-input, straight-segment curve is the same already-verified code under its Camera Raw name, with the same no-per-channel/no-spline scope cuts — see README Phase 130)
 - [ ] Targeted Adjustment Tool
 - [ ] Color Mixer
 - [ ] Point Color

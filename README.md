@@ -8545,6 +8545,50 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **885 Rust tests total** (881 → 885, 878 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 130 — Camera Raw Filter > Curve > Point Curve
+
+`camera_raw_point_curve(id, points)` fills in the Camera Raw Curve
+panel's own Point Curve mode. Camera Raw's Point Curve is the same
+point-driven RGB tone curve Image > Adjustments > Curves applies —
+draggable points on an input/output graph, applied identically to all
+three channels — so this is Phase 11's `curves` exposed under its
+Camera Raw name: the same five fixed input positions (`0`, `64`,
+`128`, `192`, `255`) with independently adjustable outputs, the same
+straight-segment interpolation, and the same documented scope cuts (no
+per-channel Red/Green/Blue curves, no spline). It is an exact preset,
+the same relationship `camera_raw_saturation` has to `vibrance`, and
+is framed as such. A new **Point Curve…** button with the other Camera
+Raw entries opens a dialog with the same five output sliders and Reset
+button the Curves dialog has, kept as its own state so the two dialogs
+don't share a draft.
+
+**Verified two ways.** Four new `document.rs` tests on `ramped_3x3`.
+Points `[0, 96, 128, 192, 255]` raise the input-`64` point from `64` to
+`96`, so every input below `64` scales by exactly `1.5`: `30 → 45`,
+`50 → 75`, `60 → 90`; input `70` sits `6/64 = 0.09375` of the way from
+`64` (now `96`) to `128` (still `128`), giving `96 + 0.09375 × 32 =
+99`. A second test confirms the preset equals `curves` byte-for-byte on
+a deliberately non-monotonic curve (`[0, 40, 200, 100, 255]`). A third
+confirms the identity curve is a byte-for-byte no-op. A fourth confines
+the lift to a one-pixel selection and confirms a locked/unknown layer
+errors. All four passed on the first run, the four curve values
+cross-checked by a five-line Python port of the segment interpolation
+(which also confirmed the identity curve reproduces all 256 inputs).
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**889 Rust tests total** (885 → 889, 882 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

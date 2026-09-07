@@ -9867,6 +9867,24 @@ impl Document {
     ) -> Result<Option<Rect>, String> {
         self.vibrance(id, 0, saturation)
     }
+
+    /// Camera Raw Filter > Curve > Point Curve: Camera Raw's own Point
+    /// Curve is the same point-driven RGB tone curve that Image >
+    /// Adjustments > Curves applies — draggable points on an input/output
+    /// graph, applied identically to all three channels — so this is
+    /// [`Self::curves`] exposed under its Camera Raw name, with the same
+    /// five fixed input positions (`0`, `64`, `128`, `192`, `255`),
+    /// independently adjustable outputs, and straight-segment
+    /// interpolation, and the same scope cuts (no per-channel curves, no
+    /// spline). An exact preset, like [`Self::camera_raw_saturation`]
+    /// over [`Self::vibrance`].
+    pub fn camera_raw_point_curve(
+        &mut self,
+        id: LayerId,
+        points: [u8; 5],
+    ) -> Result<Option<Rect>, String> {
+        self.curves(id, points)
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22979,6 +22997,62 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert_eq!(doc.shadow_clipping(id).unwrap(), [0, 9, 9]);
         assert!(doc.shadow_clipping(999).is_err());
+    }
+
+    #[test]
+    fn camera_raw_point_curve_lifts_the_first_segment() {
+        // Points [0, 96, 128, 192, 255] raise the input-64 point from 64 to
+        // 96, so every input below 64 scales by 1.5: ramped_3x3's 30 -> 45,
+        // 50 -> 75, 60 -> 90. Input 70 sits 6/64 of the way from 64 (now
+        // 96) to 128 (still 128): 96 + 0.09375 * 32 = 99.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.camera_raw_point_curve(id, [0, 96, 128, 192, 255])
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 0)], 45);
+        assert_eq!(p[idx(1, 1)], 75);
+        assert_eq!(p[idx(2, 1)], 90);
+        assert_eq!(p[idx(0, 2)], 99);
+    }
+
+    #[test]
+    fn camera_raw_point_curve_matches_curves_exactly() {
+        let (mut via_preset, id_a) = ramped_3x3();
+        let (mut via_curves, id_b) = ramped_3x3();
+        via_preset
+            .camera_raw_point_curve(id_a, [0, 40, 200, 100, 255])
+            .unwrap();
+        via_curves.curves(id_b, [0, 40, 200, 100, 255]).unwrap();
+        assert_eq!(via_preset.layers()[0].pixels, via_curves.layers()[0].pixels);
+    }
+
+    #[test]
+    fn camera_raw_point_curve_at_identity_is_a_no_op() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.camera_raw_point_curve(id, IDENTITY_CURVE).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn camera_raw_point_curve_is_confined_to_the_selection_and_propagates_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        doc.camera_raw_point_curve(id, [0, 96, 128, 192, 255])
+            .unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 45);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]);
+        assert_eq!(after[idx(2, 0) + 4..], before[idx(2, 0) + 4..]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.camera_raw_point_curve(id, IDENTITY_CURVE).is_err());
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.camera_raw_point_curve(999, IDENTITY_CURVE).is_err());
     }
 
     #[test]

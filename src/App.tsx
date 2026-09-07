@@ -248,6 +248,8 @@ export default function App() {
   } | null>(null);
   const [rgbLevels, setRgbLevels] = useState<[number, number, number, number] | null>(null);
   const lastLevelsPixel = useRef<string | null>(null);
+  const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
+  const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
   const [defringeAmount, setDefringeAmount] = useState(50);
 
@@ -921,6 +923,16 @@ export default function App() {
       .then(([counts, shadowClipping]) => setHistogramData({ counts, shadowClipping }))
       .catch((err) => setError(String(err)));
   }, [selectedId]);
+
+  const setPointCurvePoint = useCallback((index: number, value: number) => {
+    setPointCurvePoints((points) => points.map((p, i) => (i === index ? value : p)));
+  }, []);
+
+  const applyPointCurve = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_point_curve", { id: selectedId, points: pointCurvePoints });
+    setShowPointCurveDialog(false);
+  }, [runCommand, selectedId, pointCurvePoints]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3207,6 +3219,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowPointCurveDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Curve > Point Curve"
+          >
+            Point Curve…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5056,6 +5076,55 @@ export default function App() {
             <div className="modal__actions">
               <button className="button" onClick={() => setHistogramData(null)}>
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPointCurveDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPointCurveDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Point Curve"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Curve &gt; Point Curve</h2>
+            {pointCurvePoints.map((value, index) => (
+              <label className="control" key={index}>
+                <span className="control__label">
+                  Input {IDENTITY_CURVE[index]}
+                  <span className="control__value">{value}</span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={value}
+                  onChange={(event) => setPointCurvePoint(index, Number(event.target.value))}
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setPointCurvePoints(IDENTITY_CURVE)}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPointCurveDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPointCurve} disabled={busy}>
+                Apply
               </button>
             </div>
           </div>

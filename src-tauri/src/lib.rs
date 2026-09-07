@@ -2585,6 +2585,18 @@ fn shadow_clipping(state: State<'_, AppState>, id: LayerId) -> Result<[u32; 3], 
     document.shadow_clipping(id)
 }
 
+/// Camera Raw Filter > Curve > Point Curve on layer `id`.
+#[tauri::command]
+fn camera_raw_point_curve(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: [u8; 5],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.camera_raw_point_curve(id, points)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2836,6 +2848,7 @@ pub fn run() {
             histogram,
             rgb_levels,
             shadow_clipping,
+            camera_raw_point_curve,
             select_rectangle,
             select_ellipse,
             select_all,
