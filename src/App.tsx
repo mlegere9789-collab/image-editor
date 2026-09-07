@@ -1137,6 +1137,11 @@ export default function App() {
     await runCommand("grow_selection", { id: selectedId, tolerance: magicWandTolerance });
   }, [runCommand, selectedId, magicWandTolerance]);
 
+  const selectSimilar = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("select_similar", { id: selectedId, tolerance: magicWandTolerance });
+  }, [runCommand, selectedId, magicWandTolerance]);
+
   const applyScale = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("scale", {
@@ -3376,6 +3381,14 @@ export default function App() {
             title="Select > Grow (extend the selection to adjacent pixels within the Magic Wand's Tolerance of its colours)"
           >
             Grow
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={selectSimilar}
+            disabled={busy || !canPaint || !hasSelection}
+            title="Select > Similar (extend the selection to every pixel anywhere on the layer within the Magic Wand's Tolerance of its colours)"
+          >
+            Similar
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}

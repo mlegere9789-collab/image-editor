@@ -429,6 +429,20 @@ fn grow_selection(
     })
 }
 
+/// Select > Similar: extend the selection to every pixel of layer `id`
+/// within `tolerance` of the colours already selected, wherever it sits.
+#[tauri::command]
+fn select_similar(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_similar(id, tolerance)?;
+        Ok(None)
+    })
+}
+
 /// Select the entire canvas.
 #[tauri::command]
 fn select_all(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -3134,6 +3148,7 @@ pub fn run() {
             select_magic_wand,
             select_color_range,
             grow_selection,
+            select_similar,
             select_all,
             invert_selection,
             expand_selection,

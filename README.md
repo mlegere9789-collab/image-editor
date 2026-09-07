@@ -9785,6 +9785,57 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1000 Rust tests total** (995 → 1000, 993 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 152 — Select > Similar
+
+`select_similar(id, tolerance)` extends the current selection to every
+pixel of layer `id`, wherever it sits, whose colour lies within the
+selection's own colour range widened by `tolerance` — the same
+per-channel RGBA range Phase 151's Grow uses (`min − tolerance ..= max
++ tolerance` over the pixels already selected, via the shared
+`selected_bits` and `colour_range_of` helpers), without Grow's
+adjacency requirement. Similar is to Grow exactly what the Magic
+Wand's non-contiguous mode is to its contiguous one, and it takes its
+tolerance from the Wand's options the same way; a new **Similar**
+button beside Grow reads the Wand's Tolerance slider. Every pixel
+already selected defines the range and so stays selected. As with
+Grow, the range is fixed from the selection as it stood, repeating the
+command recomputes it from the larger selection, and the result is
+always a pixel-mask selection. Nothing selected, or an unknown layer,
+errors and leaves the selection intact.
+
+**Verified two ways.** Five new `document.rs` tests, every expected
+pixel read off its fixture and the full set reproduced by an
+independent Python model (`similar_check.py`) before the Rust tests
+ran. A new `cornered_3x3` fixture — `10` in the four corners, `90`
+everywhere else — separates the two commands cleanly: with the
+top-left corner selected, Similar at tolerance `0` selects all four
+corners (bounds `(0, 0)–(3, 3)`, shape `Mask`) while Grow at the same
+tolerance keeps only the one. On `ramped_3x3`, `40` and `50` selected
+together yield range `40..=50`: tolerance `5` (`35..=55`) adds nothing
+and tolerance `10` (`30..=60`) adds `30` and `60`, giving `[[F, F, T],
+[T, T, T], [F, F, F]]`; the whole middle row selected (`40..=60`) at
+tolerance `10` reaches `30` and `70` but not `20` or `80`. Alpha is
+part of the comparison, as it is for the Wand: on `depth_ramped_3x3`
+the centre `(50, α 128)` at tolerance `10` selects only itself, its
+`40` and `60` row-neighbours sitting at α `0` and `255`, far outside
+`118..=138`. With nothing selected the call errors with "Nothing is
+selected"; with a rectangle selected an unknown layer errors and the
+rectangle survives. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-nine: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1005 Rust tests total** (1000 → 1005, 998 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

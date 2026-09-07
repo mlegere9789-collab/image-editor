@@ -1211,6 +1211,31 @@ impl Document {
         self.set_mask_selection(bits)
     }
 
+    /// Select > Similar: extends the current selection to every pixel of
+    /// layer `id`, wherever it sits, whose colour lies within the
+    /// selection's own colour range widened by `tolerance` — the same
+    /// per-channel RGBA range [`Self::grow_selection`] uses, without its
+    /// adjacency requirement, exactly as the Magic Wand's non-contiguous
+    /// mode relates to its contiguous one. Every pixel already selected
+    /// defines the range and so stays selected. The result is always a
+    /// [`SelectionShape::Mask`]. Errors when nothing is selected or on an
+    /// unknown layer, leaving the selection intact either way.
+    pub fn select_similar(&mut self, id: LayerId, tolerance: u8) -> Result<(), String> {
+        let bits = self.selected_bits()?;
+        let layer = self.layer(id)?;
+        let range = colour_range_of(&layer.pixels, &bits, tolerance);
+        let bits = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| {
+                px.iter()
+                    .zip(range.iter())
+                    .all(|(c, (lo, hi))| (*lo..=*hi).contains(c))
+            })
+            .collect();
+        self.set_mask_selection(bits)
+    }
+
     /// The current selection as a canvas-sized bitmap, one flag per pixel
     /// centre; errors when there is no selection or it covers no pixel.
     fn selected_bits(&self) -> Result<Vec<bool>, String> {
@@ -26322,6 +26347,126 @@ mod tests {
         assert!(err.contains("Nothing is selected"), "{err}");
         doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
         assert!(doc.grow_selection(999, 10).is_err());
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    fn cornered_3x3() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 3).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            10, 0, 0, 255,  90, 0, 0, 255,  10, 0, 0, 255,
+            90, 0, 0, 255,  90, 0, 0, 255,  90, 0, 0, 255,
+            10, 0, 0, 255,  90, 0, 0, 255,  10, 0, 0, 255,
+        ];
+        let id = doc.add_layer("base", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn similar_selects_matching_pixels_anywhere_on_the_layer() {
+        // The four 10-corners are separated by 90s: Similar takes all four
+        // from one, Grow takes none.
+        let (mut doc, id) = cornered_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.select_similar(id, 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, false, true],
+                vec![false, false, false],
+                vec![true, false, true]
+            ]
+        );
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Mask);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.grow_selection(id, 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, false, false],
+                vec![false, false, false],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn similar_widens_the_selections_whole_colour_range_by_tolerance() {
+        // 40 and 50 selected: tolerance 5 (35..=55) adds nothing, tolerance
+        // 10 (30..=60) adds 30 and 60.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 1.0, 2.0, 2.0).unwrap();
+        doc.select_similar(id, 5).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![true, true, false],
+                vec![false, false, false]
+            ]
+        );
+        doc.select_similar(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn similar_repeats_from_the_widened_range() {
+        // Middle row selected (40..=60), tolerance 10 reaches 30 and 70.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 1.0, 3.0, 2.0).unwrap();
+        doc.select_similar(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, true],
+                vec![true, true, true],
+                vec![true, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn similar_compares_alpha_like_the_magic_wand() {
+        // depth_ramped_3x3's centre is (50, alpha 128); its row neighbours
+        // 40 and 60 sit at alpha 0 and 255, far outside 118..=138.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.select_similar(id, 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![false, true, false],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn similar_requires_a_selection_and_a_known_layer() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.select_similar(id, 10).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        assert!(doc.select_similar(999, 10).is_err());
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
