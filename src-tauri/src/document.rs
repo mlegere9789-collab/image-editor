@@ -21066,6 +21066,39 @@ impl Document {
         })
     }
 
+    /// [`Self::liquify_radial_with`] with no freeze mask — see there for
+    /// the full mechanism.
+    pub fn liquify_radial(
+        &mut self,
+        id: LayerId,
+        tool: LiquifyTool,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        strength: f32,
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_radial_with(id, tool, cx, cy, radius, strength, None)
+    }
+
+    /// [`Self::liquify_radial_with`] with `mask` — Liquify's Freeze Mask,
+    /// painted by [`Self::liquify_paint_mask`] — protecting frozen pixels
+    /// from this application. Errors exactly as `liquify_radial` does,
+    /// plus a `mask` whose length is not `width × height` for this
+    /// document.
+    #[allow(clippy::too_many_arguments)]
+    pub fn liquify_radial_masked(
+        &mut self,
+        id: LayerId,
+        tool: LiquifyTool,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        strength: f32,
+        mask: &[u8],
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_radial_with(id, tool, cx, cy, radius, strength, Some(mask))
+    }
+
     /// Filter > Liquify's Twirl, Pucker, and Bloat tools: one application
     /// of a radial warp over a circular brush of `radius` centred at
     /// `(cx, cy)` on layer `id`. Every destination pixel within the
@@ -21083,15 +21116,20 @@ impl Document {
     /// magnifying it). Nearest-neighbour resampled, transparent wherever
     /// the source falls outside the canvas, exactly as
     /// Rotate/Scale/Distort already resample; the active selection
-    /// confines which destination pixels the tool touches. Errors for a
-    /// non-positive or non-finite radius, a non-finite centre, strength
-    /// outside `-180..=180` for Twirl or `0..=100` for Pucker/Bloat, or a
-    /// locked layer. Forward Warp (a directional brush stroke),
-    /// Freeze/Thaw Mask, Reconstruct, Liquify Mesh, and Face-Aware
-    /// Liquify are documented scope cuts: they need either a persisted
-    /// Liquify-only mask and reference image, or real face landmark
-    /// detection, that a single-application radial tool does not.
-    pub fn liquify_radial(
+    /// confines which destination pixels the tool touches. When `mask` is
+    /// given (Liquify's Freeze Mask, one byte per pixel — 0 fully exposed,
+    /// 255 fully frozen), every destination pixel is blended back toward
+    /// its own pre-edit byte by the mask's fraction there afterward,
+    /// scaling down the tool's effective strength instead of skipping
+    /// frozen pixels outright. Errors for a non-positive or non-finite
+    /// radius, a non-finite centre, strength outside `-180..=180` for
+    /// Twirl or `0..=100` for Pucker/Bloat, a locked layer, or a `mask`
+    /// whose length is not `width × height`. Liquify Mesh and Face-Aware
+    /// Liquify remain documented scope cuts: they need real face landmark
+    /// detection, or an interactive mesh view, that a per-application
+    /// pixel tool does not.
+    #[allow(clippy::too_many_arguments)]
+    fn liquify_radial_with(
         &mut self,
         id: LayerId,
         tool: LiquifyTool,
@@ -21099,6 +21137,7 @@ impl Document {
         cy: f32,
         radius: f32,
         strength: f32,
+        mask: Option<&[u8]>,
     ) -> Result<Option<Rect>, String> {
         if !(radius.is_finite() && radius > 0.0) {
             return Err("Radius must be a positive number.".to_string());
@@ -21113,6 +21152,16 @@ impl Document {
         } else if !(0.0..=100.0).contains(&strength) {
             return Err("Strength must be 0..=100.".to_string());
         }
+        let expected_mask_len = self.width as usize * self.height as usize;
+        if let Some(m) = mask {
+            if m.len() != expected_mask_len {
+                return Err(format!(
+                    "The freeze mask must be {expected_mask_len} bytes for this {}×{} canvas.",
+                    self.width, self.height
+                ));
+            }
+        }
+        let mask = mask.map(|m| m.to_vec());
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         self.filter_pixels(id, move |source, row, col| {
@@ -21139,14 +21188,60 @@ impl Document {
                 };
                 ((cx + ox).round() as i64, (cy + oy).round() as i64)
             };
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
+            let mut out = if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                [0; CHANNELS]
+            } else {
+                let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                out.copy_from_slice(&source[base..base + CHANNELS]);
+                out
+            };
+            if let Some(ref m) = mask {
+                let freeze = m[row as usize * doc_width + col as usize] as f32 / 255.0;
+                if freeze > 0.0 {
+                    let orig_base = (row as usize * doc_width + col as usize) * CHANNELS;
+                    for (channel, slot) in out.iter_mut().enumerate() {
+                        let cur = *slot as f32;
+                        let orig = source[orig_base + channel] as f32;
+                        *slot = (cur + (orig - cur) * freeze).round().clamp(0.0, 255.0) as u8;
+                    }
+                }
             }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&source[base..base + CHANNELS]);
             out
         })
+    }
+
+    /// [`Self::liquify_forward_warp_with`] with no freeze mask — see there
+    /// for the full mechanism.
+    pub fn liquify_forward_warp(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_forward_warp_with(id, cx, cy, radius, dx, dy, None)
+    }
+
+    /// [`Self::liquify_forward_warp_with`] with `mask` — Liquify's Freeze
+    /// Mask, painted by [`Self::liquify_paint_mask`] — protecting frozen
+    /// pixels from this application. Errors exactly as
+    /// `liquify_forward_warp` does, plus a `mask` whose length is not
+    /// `width × height` for this document.
+    #[allow(clippy::too_many_arguments)]
+    pub fn liquify_forward_warp_masked(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        dx: f32,
+        dy: f32,
+        mask: &[u8],
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_forward_warp_with(id, cx, cy, radius, dx, dy, Some(mask))
     }
 
     /// Filter > Liquify's Forward Warp Tool: pushes pixels within a
@@ -21161,10 +21256,14 @@ impl Document {
     /// continuous stroke. Nearest-neighbour resampled, transparent
     /// wherever the source falls outside the canvas, confined to the
     /// active selection — the same conventions `liquify_radial` and
-    /// Rotate/Scale/Distort already use. Errors for a non-positive or
-    /// non-finite radius, a non-finite centre or push vector, or a
-    /// locked layer.
-    pub fn liquify_forward_warp(
+    /// Rotate/Scale/Distort already use. `mask`, when given, blends every
+    /// destination pixel back toward its own pre-edit byte by the freeze
+    /// mask's fraction there afterward, the same protection
+    /// `liquify_radial_with` applies. Errors for a non-positive or
+    /// non-finite radius, a non-finite centre or push vector, a locked
+    /// layer, or a `mask` whose length is not `width × height`.
+    #[allow(clippy::too_many_arguments)]
+    fn liquify_forward_warp_with(
         &mut self,
         id: LayerId,
         cx: f32,
@@ -21172,6 +21271,7 @@ impl Document {
         radius: f32,
         dx: f32,
         dy: f32,
+        mask: Option<&[u8]>,
     ) -> Result<Option<Rect>, String> {
         if !(radius.is_finite() && radius > 0.0) {
             return Err("Radius must be a positive number.".to_string());
@@ -21182,6 +21282,16 @@ impl Document {
         if !(dx.is_finite() && dy.is_finite()) {
             return Err("The push must be a finite offset.".to_string());
         }
+        let expected_mask_len = self.width as usize * self.height as usize;
+        if let Some(m) = mask {
+            if m.len() != expected_mask_len {
+                return Err(format!(
+                    "The freeze mask must be {expected_mask_len} bytes for this {}×{} canvas.",
+                    self.width, self.height
+                ));
+            }
+        }
+        let mask = mask.map(|m| m.to_vec());
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         self.filter_pixels(id, move |source, row, col| {
@@ -21196,12 +21306,25 @@ impl Document {
                     (row as f32 - dy * falloff).round() as i64,
                 )
             };
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
+            let mut out = if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                [0; CHANNELS]
+            } else {
+                let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                let mut out = [0u8; CHANNELS];
+                out.copy_from_slice(&source[base..base + CHANNELS]);
+                out
+            };
+            if let Some(ref m) = mask {
+                let freeze = m[row as usize * doc_width + col as usize] as f32 / 255.0;
+                if freeze > 0.0 {
+                    let orig_base = (row as usize * doc_width + col as usize) * CHANNELS;
+                    for (channel, slot) in out.iter_mut().enumerate() {
+                        let cur = *slot as f32;
+                        let orig = source[orig_base + channel] as f32;
+                        *slot = (cur + (orig - cur) * freeze).round().clamp(0.0, 255.0) as u8;
+                    }
+                }
             }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&source[base..base + CHANNELS]);
             out
         })
     }
@@ -21211,6 +21334,112 @@ impl Document {
     /// toward before any Liquify tool runs.
     pub fn layer_pixels(&self, id: LayerId) -> Result<Vec<u8>, String> {
         Ok(self.layer(id)?.pixels.clone())
+    }
+
+    /// Filter > Liquify's Freeze Mask Tool and Thaw Mask Tool: raises
+    /// (`freeze: true`) or lowers (`freeze: false`) a freeze mask — one
+    /// byte per pixel of a `width × height` canvas, 0 meaning fully
+    /// thawed (exposed to every Liquify tool) and 255 fully frozen
+    /// (protected from all of them) — within a circular brush of `radius`
+    /// centred at `(cx, cy)`, by `amount` percent scaled by the same
+    /// falloff every other Liquify tool shares,
+    /// `f(d) = 1 − (d / radius)²`: at the very centre a single
+    /// application moves the mask the full `(amount / 100) · 255` toward
+    /// its clamped extreme, fading to no change at the edge. The mask is
+    /// a plain buffer, not document state — Liquify has no notion of a
+    /// session here, so the frontend holds it for the life of the
+    /// Liquify dialog exactly as it already holds Reconstruct's
+    /// "original" snapshot from [`Self::layer_pixels`] — and
+    /// [`Self::liquify_radial_masked`],
+    /// [`Self::liquify_forward_warp_masked`], and
+    /// [`Self::liquify_reconstruct_masked`] read it back to protect
+    /// frozen pixels, scaling down each tool's effective strength there
+    /// rather than skipping frozen pixels outright, so a half-frozen
+    /// pixel is still half affected. Errors for a non-positive or
+    /// non-finite radius, a non-finite centre, an amount outside
+    /// `0..=100`, or a `mask` whose length is not `width × height`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn liquify_paint_mask(
+        mask: &[u8],
+        width: u32,
+        height: u32,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        amount: f32,
+        freeze: bool,
+    ) -> Result<Vec<u8>, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if !(cx.is_finite() && cy.is_finite()) {
+            return Err("The centre must be finite coordinates.".to_string());
+        }
+        if !(0.0..=100.0).contains(&amount) {
+            return Err("Amount must be 0..=100.".to_string());
+        }
+        let expected_len = width as usize * height as usize;
+        if mask.len() != expected_len {
+            return Err(format!(
+                "The freeze mask must be {expected_len} bytes for a {width}×{height} canvas."
+            ));
+        }
+        let amount_unit = amount / 100.0;
+        let doc_width = width as usize;
+        let mut out = mask.to_vec();
+        for row in 0..height {
+            for col in 0..width {
+                let (dx, dy) = (col as f32 - cx, row as f32 - cy);
+                let d = (dx * dx + dy * dy).sqrt();
+                if d >= radius {
+                    continue;
+                }
+                let falloff = 1.0 - (d / radius) * (d / radius);
+                let delta = amount_unit * falloff * 255.0;
+                let idx = row as usize * doc_width + col as usize;
+                let current = out[idx] as f32;
+                let next = if freeze {
+                    current + delta
+                } else {
+                    current - delta
+                };
+                out[idx] = next.round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        Ok(out)
+    }
+
+    /// [`Self::liquify_reconstruct_with`] with no freeze mask — see there
+    /// for the full mechanism.
+    pub fn liquify_reconstruct(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        amount: f32,
+        original: &[u8],
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_reconstruct_with(id, cx, cy, radius, amount, original, None)
+    }
+
+    /// [`Self::liquify_reconstruct_with`] with `mask` — Liquify's Freeze
+    /// Mask, painted by [`Self::liquify_paint_mask`] — protecting frozen
+    /// pixels from this application. Errors exactly as
+    /// `liquify_reconstruct` does, plus a `mask` whose length is not
+    /// `width × height` for this document.
+    #[allow(clippy::too_many_arguments)]
+    pub fn liquify_reconstruct_masked(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        amount: f32,
+        original: &[u8],
+        mask: &[u8],
+    ) -> Result<Option<Rect>, String> {
+        self.liquify_reconstruct_with(id, cx, cy, radius, amount, original, Some(mask))
     }
 
     /// Filter > Liquify's Reconstruct Tool: blends layer `id`'s current
@@ -21226,11 +21455,17 @@ impl Document {
     /// the very centre restores the original outright, fading to no
     /// change at the edge. `original` must be exactly
     /// `width × height × 4` bytes for this document; a wrong length is
-    /// refused rather than silently misreading it. Errors for a
+    /// refused rather than silently misreading it. `mask`, when given,
+    /// scales that same restoring fraction down by the freeze mask's own
+    /// fraction there — a fully frozen pixel does not restore at all,
+    /// algebraically equivalent to blending the un-masked result back
+    /// toward the pixel's current byte by the freeze fraction, the same
+    /// protection `liquify_radial_with` applies. Errors for a
     /// non-positive or non-finite radius, a non-finite centre, an amount
-    /// outside `0..=100`, a mismatched `original` length, or a locked
-    /// layer.
-    pub fn liquify_reconstruct(
+    /// outside `0..=100`, a mismatched `original` length, a `mask` whose
+    /// length is not `width × height`, or a locked layer.
+    #[allow(clippy::too_many_arguments)]
+    fn liquify_reconstruct_with(
         &mut self,
         id: LayerId,
         cx: f32,
@@ -21238,6 +21473,7 @@ impl Document {
         radius: f32,
         amount: f32,
         original: &[u8],
+        mask: Option<&[u8]>,
     ) -> Result<Option<Rect>, String> {
         if !(radius.is_finite() && radius > 0.0) {
             return Err("Radius must be a positive number.".to_string());
@@ -21255,6 +21491,15 @@ impl Document {
                 self.width, self.height
             ));
         }
+        let expected_mask_len = self.width as usize * self.height as usize;
+        if let Some(m) = mask {
+            if m.len() != expected_mask_len {
+                return Err(format!(
+                    "The freeze mask must be {expected_mask_len} bytes for this {}×{} canvas.",
+                    self.width, self.height
+                ));
+            }
+        }
         let layer = self.layer(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -21262,6 +21507,7 @@ impl Document {
         let doc_width = self.width as usize;
         let amount_unit = amount / 100.0;
         let original = original.to_vec();
+        let mask = mask.map(|m| m.to_vec());
         self.filter_pixels(id, move |source, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let mut out = [0u8; CHANNELS];
@@ -21272,7 +21518,11 @@ impl Document {
                 return out;
             }
             let falloff = 1.0 - (d / radius) * (d / radius);
-            let t = amount_unit * falloff;
+            let mut t = amount_unit * falloff;
+            if let Some(ref m) = mask {
+                let freeze = m[row as usize * doc_width + col as usize] as f32 / 255.0;
+                t *= 1.0 - freeze;
+            }
             for (channel, slot) in out.iter_mut().enumerate() {
                 let current = *slot as f32;
                 let target = original[base + channel] as f32;
@@ -50888,5 +51138,163 @@ mod tests {
         assert!(doc
             .liquify_reconstruct(999, 10.0, 10.0, 10.0, 50.0, &original)
             .is_err());
+    }
+
+    #[test]
+    fn liquify_paint_mask_rounds_half_away_from_zero() {
+        // Same 21x21 canvas, centre (10, 10), destination (13, 14):
+        // d = 5, falloff = 1 - (5/10)^2 = 0.75. Freezing by amount 40
+        // gives delta = 0.4 * 0.75 * 255 = 76.5 exactly, rounding away
+        // from zero to 77 rather than banker's-rounding to the nearer
+        // even 76 -- independently confirmed in Python emulating Rust
+        // f32 arithmetic.
+        let mask = vec![0u8; 21 * 21];
+        let out =
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 10.0, 40.0, true).unwrap();
+        assert_eq!(out[14 * 21 + 13], 77);
+    }
+
+    #[test]
+    fn liquify_paint_mask_thaws_and_clamps_at_zero() {
+        // Amount 100 at the same destination gives delta = 0.75 * 255 =
+        // 191.25 -> 191; thawing a mask already at 50 would go negative,
+        // clamped to 0.
+        let mut mask = vec![0u8; 21 * 21];
+        mask[14 * 21 + 13] = 50;
+        let out =
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 10.0, 100.0, false).unwrap();
+        assert_eq!(out[14 * 21 + 13], 0);
+    }
+
+    #[test]
+    fn liquify_paint_mask_freezes_and_clamps_at_255() {
+        // Same delta of 191; freezing a mask already at 200 would
+        // overflow 255, clamped there instead.
+        let mut mask = vec![0u8; 21 * 21];
+        mask[14 * 21 + 13] = 200;
+        let out =
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 10.0, 100.0, true).unwrap();
+        assert_eq!(out[14 * 21 + 13], 255);
+    }
+
+    #[test]
+    fn liquify_paint_mask_leaves_pixels_outside_the_radius_untouched() {
+        let mask = vec![0u8; 21 * 21];
+        let out =
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 10.0, 100.0, true).unwrap();
+        // (0, 0) is distance sqrt(200) ≈ 14.1 from the centre, past the
+        // radius of 10.
+        assert_eq!(out[0], 0);
+    }
+
+    #[test]
+    fn liquify_paint_mask_validates_its_arguments() {
+        let mask = vec![0u8; 21 * 21];
+        assert!(
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 0.0, 50.0, true)
+                .unwrap_err()
+                .contains("Radius")
+        );
+        assert!(
+            Document::liquify_paint_mask(&mask, 21, 21, f32::NAN, 10.0, 10.0, 50.0, true)
+                .unwrap_err()
+                .contains("centre")
+        );
+        assert!(
+            Document::liquify_paint_mask(&mask, 21, 21, 10.0, 10.0, 10.0, 101.0, true)
+                .unwrap_err()
+                .contains("Amount")
+        );
+        assert!(Document::liquify_paint_mask(
+            &mask[..mask.len() - 1],
+            21,
+            21,
+            10.0,
+            10.0,
+            10.0,
+            50.0,
+            true
+        )
+        .unwrap_err()
+        .contains("bytes"));
+    }
+
+    #[test]
+    fn liquify_radial_masked_blends_toward_the_pre_edit_byte_by_the_freeze_fraction() {
+        // Bloat at strength 100 sources destination (13, 14) from
+        // (11, 11), the marker [0, 255, 0, 255] -- see
+        // liquify_bloat_shrinks_the_offset_sourcing_nearer_the_centre.
+        // With a freeze mask of 51 (0.2) at (13, 14), the result blends
+        // 20% back toward that pixel's own pre-edit byte, the grey
+        // background [128, 128, 128, 255]: R 0 + 128*0.2 = 25.6 -> 26,
+        // G 255 - 127*0.2 = 229.6 -> 230, B 25.6 -> 26, A unchanged --
+        // independently confirmed in Python emulating Rust f32
+        // arithmetic.
+        let (mut doc, id) = liquify_fixture(11, 11, [0, 255, 0, 255]);
+        let mut mask = vec![0u8; 21 * 21];
+        mask[14 * 21 + 13] = 51;
+        doc.liquify_radial_masked(id, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 100.0, &mask)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [26, 230, 26, 255]);
+    }
+
+    #[test]
+    fn liquify_forward_warp_masked_blends_toward_the_pre_edit_byte_by_the_freeze_fraction() {
+        // Pushing (4, -4) sources destination (13, 14) from (10, 17), the
+        // marker [255, 0, 0, 255] -- see
+        // liquify_forward_warp_pulls_the_source_back_by_the_falloff_scaled_push.
+        // With a freeze mask of 102 (0.4) at (13, 14), the result blends
+        // 40% back toward the grey background [128, 128, 128, 255]:
+        // R 255 - 127*0.4 = 204.2 -> 204, G/B 0 + 128*0.4 = 51.2 -> 51,
+        // A unchanged -- independently confirmed in Python emulating
+        // Rust f32 arithmetic.
+        let (mut doc, id) = liquify_fixture(10, 17, [255, 0, 0, 255]);
+        let mut mask = vec![0u8; 21 * 21];
+        mask[14 * 21 + 13] = 102;
+        doc.liquify_forward_warp_masked(id, 10.0, 10.0, 10.0, 4.0, -4.0, &mask)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [204, 51, 51, 255]);
+    }
+
+    #[test]
+    fn liquify_reconstruct_masked_scales_the_restoring_amount_by_the_thawed_fraction() {
+        // Same fixture as
+        // liquify_reconstruct_blends_toward_the_original_by_amount_times_falloff:
+        // Amount 100 at falloff 0.75 gives t = 0.75. A freeze mask of 51
+        // (0.2) at (13, 14) scales that down to t_eff = 0.75*0.8 = 0.6,
+        // algebraically equivalent to reconstructing in full and then
+        // blending 20% back toward the pre-edit byte: current
+        // (200, 100, 50, 255) toward original (0, 0, 0, 255) by 0.6
+        // lands exactly on (80, 40, 20, 255), no rounding ambiguity --
+        // independently confirmed in Python emulating Rust f32
+        // arithmetic.
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let mut original = solid(21, 21, [128, 128, 128, 255]);
+        let base = (14 * 21 + 13) * CHANNELS;
+        original[base..base + CHANNELS].copy_from_slice(&[0, 0, 0, 255]);
+        let mut mask = vec![0u8; 21 * 21];
+        mask[14 * 21 + 13] = 51;
+        doc.liquify_reconstruct_masked(id, 10.0, 10.0, 10.0, 100.0, &original, &mask)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 13, 14), [80, 40, 20, 255]);
+    }
+
+    #[test]
+    fn liquify_masked_variants_validate_the_freeze_mask_length() {
+        let (mut doc, id) = liquify_fixture(13, 14, [200, 100, 50, 255]);
+        let original = solid(21, 21, [128, 128, 128, 255]);
+        let short_mask = vec![0u8; 21 * 21 - 1];
+        assert!(doc
+            .liquify_radial_masked(id, LiquifyTool::Bloat, 10.0, 10.0, 10.0, 100.0, &short_mask)
+            .unwrap_err()
+            .contains("bytes"));
+        assert!(doc
+            .liquify_forward_warp_masked(id, 10.0, 10.0, 10.0, 4.0, -4.0, &short_mask)
+            .unwrap_err()
+            .contains("bytes"));
+        assert!(doc
+            .liquify_reconstruct_masked(id, 10.0, 10.0, 10.0, 100.0, &original, &short_mask)
+            .unwrap_err()
+            .contains("bytes"));
     }
 }

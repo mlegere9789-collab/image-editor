@@ -16166,6 +16166,90 @@ green.
 **1590 Rust tests total** (1585 → 1590, 1583 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 270 — Liquify's Freeze Mask Tool and Thaw Mask Tool
+
+The sixth and seventh of Liquify's nine sub-tools, and the pair that
+finally lets the other five protect part of the layer instead of
+always affecting everything a brush touches. Photoshop's Freeze Mask
+paints a mask over the preview that later tools cannot move; Thaw Mask
+erases it back. This project's Liquify tools already have no notion of
+document-side session state — Reconstruct's "original" snapshot lives
+in a frontend ref instead — so the freeze mask follows the same
+pattern: a new `liquify_paint_mask(mask, width, height, cx, cy, radius,
+amount, freeze)` is a pure, document-independent function taking and
+returning a plain `width × height` byte buffer (0 fully thawed, 255
+fully frozen), raising or lowering it over the same circular brush and
+falloff every other Liquify tool shares, `f(d) = 1 − (d / radius)²`:
+`freeze: true` moves it toward 255 by `(amount / 100) · f(d) · 255`,
+`freeze: false` moves it toward 0 by the same amount, both clamped to
+`0..=255` rather than wrapping. The frontend holds the resulting buffer
+in a ref for the life of the Liquify dialog, initialized to all zeros
+when the dialog opens exactly the way `liquifyOriginal` already is, and
+passes it back into every other tool call.
+
+`liquify_radial`, `liquify_forward_warp`, and `liquify_reconstruct`
+each gained a `_masked` sibling (`liquify_radial_masked`,
+`liquify_forward_warp_masked`, `liquify_reconstruct_masked`) that reads
+this same mask back: their shared internals moved into a private
+`_with` method taking an `Option<&[u8]>`, with the existing public
+methods now thin wrappers passing `None`, so every already-shipped test
+for those three tools keeps calling the exact same unmasked signature
+unchanged. For Twirl/Pucker/Bloat and Forward Warp, a frozen
+destination pixel is blended back toward its own pre-edit byte by the
+mask's fraction there afterward — a half-frozen pixel keeps half of
+whatever the tool would otherwise have done, rather than the tool
+skipping it outright. For Reconstruct the same protection falls out
+algebraically as scaling its restoring fraction `t = (amount / 100) ·
+f(d)` down by the thawed fraction, `t · (1 − freeze)`: a fully frozen
+pixel does not restore toward `original` at all, and a half-frozen one
+restores at half strength. The Liquify dialog gained Freeze Mask and
+Thaw Mask as two more Tool options, sharing the Amount slider
+Reconstruct already uses; painting either only updates the held mask
+ref; no document command runs and nothing is added to the undo stack,
+matching Photoshop's own Liquify, where nothing commits until the
+dialog's OK.
+
+**Verified two ways.** Five new `document.rs` tests for
+`liquify_paint_mask` alone, working directly on a plain byte buffer:
+freezing at the same destination `(13, 14)` (offset `(3, 4)` from
+centre `(10, 10)`, distance `5`, falloff `0.75`) the other Liquify
+tools' tests already use, Amount 40 gives `delta = 0.4 · 0.75 · 255 =
+76.5` exactly — hand-derived and independently confirmed in a Python
+script computing the same `f32` arithmetic — rounding away from zero to
+`77` rather than banker's-rounding to the nearer even `76`; thawing a
+mask already at `50` by Amount 100 (`delta = 191.25 → 191`) goes
+negative and clamps to `0`; freezing a mask already at `200` by the
+same amount overflows `255` and clamps there; a pixel past the radius
+stays untouched; a fifth test exercises every error path (a zero or
+negative radius, a non-finite centre, an amount outside `0..=100`, and
+a mask one byte short of `width × height`). Five more tests exercise
+the `_masked` integration itself, reusing the exact fixtures the
+unmasked Bloat, Forward Warp, and Reconstruct tests already built: a
+freeze byte of `51` (`0.2`) blends Bloat's result `20%` back toward the
+grey background at that pixel, landing on `(26, 230, 26, 255)`; a
+freeze byte of `102` (`0.4`) does the same for Forward Warp's result,
+landing on `(204, 51, 51, 255)`; and a freeze byte of `51` scales
+Reconstruct's own `t = 0.75` down to `t = 0.6`, landing on
+`(80, 40, 20, 255)` — all three hand-derived and independently
+confirmed in the same Python script, with no rounding ambiguity in any
+of the three. A tenth test confirms all three `_masked` methods reject
+a freeze mask that is one byte short. All ten passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and seventeen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Liquify dialog's two new Tool options were reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1599 Rust tests total** (1590 → 1599, 1592 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

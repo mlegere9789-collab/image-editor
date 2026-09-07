@@ -1491,7 +1491,9 @@ fn cylindrical_warp(
 }
 
 /// Filter > Liquify's Twirl, Pucker, and Bloat tools on layer `id`, one
-/// application over a brush of `radius` centred at `(cx, cy)`.
+/// application over a brush of `radius` centred at `(cx, cy)`. `mask`,
+/// when given (Liquify's Freeze Mask, from `liquify_paint_mask`),
+/// protects frozen pixels from this application.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn liquify_radial(
@@ -1502,14 +1504,18 @@ fn liquify_radial(
     cy: f32,
     radius: f32,
     strength: f32,
+    mask: Option<Vec<u8>>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.liquify_radial(id, tool, cx, cy, radius, strength)
+    edit_checkpointed(&state, |document| match &mask {
+        Some(mask) => document.liquify_radial_masked(id, tool, cx, cy, radius, strength, mask),
+        None => document.liquify_radial(id, tool, cx, cy, radius, strength),
     })
 }
 
 /// Filter > Liquify's Forward Warp Tool on layer `id`: one drag of a
-/// brush of `radius` centred at `(cx, cy)`, pushing by `(dx, dy)`.
+/// brush of `radius` centred at `(cx, cy)`, pushing by `(dx, dy)`. `mask`,
+/// when given (Liquify's Freeze Mask, from `liquify_paint_mask`),
+/// protects frozen pixels from this application.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn liquify_forward_warp(
@@ -1520,9 +1526,11 @@ fn liquify_forward_warp(
     radius: f32,
     dx: f32,
     dy: f32,
+    mask: Option<Vec<u8>>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.liquify_forward_warp(id, cx, cy, radius, dx, dy)
+    edit_checkpointed(&state, |document| match &mask {
+        Some(mask) => document.liquify_forward_warp_masked(id, cx, cy, radius, dx, dy, mask),
+        None => document.liquify_forward_warp(id, cx, cy, radius, dx, dy),
     })
 }
 
@@ -1539,7 +1547,9 @@ fn layer_pixels(state: State<'_, AppState>, id: LayerId) -> Result<Vec<u8>, Stri
 /// Filter > Liquify's Reconstruct Tool on layer `id`: blends its pixels
 /// back toward `original` (from `layer_pixels`, captured before any
 /// Liquify tool ran) within a brush of `radius` centred at `(cx, cy)`,
-/// by `amount` percent.
+/// by `amount` percent. `mask`, when given (Liquify's Freeze Mask, from
+/// `liquify_paint_mask`), scales the restoring amount down over frozen
+/// pixels.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn liquify_reconstruct(
@@ -1550,10 +1560,37 @@ fn liquify_reconstruct(
     radius: f32,
     amount: f32,
     original: Vec<u8>,
+    mask: Option<Vec<u8>>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.liquify_reconstruct(id, cx, cy, radius, amount, &original)
+    edit_checkpointed(&state, |document| match &mask {
+        Some(mask) => {
+            document.liquify_reconstruct_masked(id, cx, cy, radius, amount, &original, mask)
+        }
+        None => document.liquify_reconstruct(id, cx, cy, radius, amount, &original),
     })
+}
+
+/// Filter > Liquify's Freeze Mask Tool and Thaw Mask Tool: raises
+/// (`freeze: true`) or lowers (`freeze: false`) `mask` — a `width ×
+/// height` byte buffer, 0 fully thawed and 255 fully frozen — over a
+/// brush of `radius` centred at `(cx, cy)`, by `amount` percent. Pure and
+/// document-independent: the freeze mask is not part of the document, so
+/// the frontend holds it for the life of the Liquify dialog and passes it
+/// back into `liquify_radial`, `liquify_forward_warp`, and
+/// `liquify_reconstruct` to protect frozen pixels from them.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn liquify_paint_mask(
+    mask: Vec<u8>,
+    width: u32,
+    height: u32,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    amount: f32,
+    freeze: bool,
+) -> Result<Vec<u8>, String> {
+    document::Document::liquify_paint_mask(&mask, width, height, cx, cy, radius, amount, freeze)
 }
 
 /// Edit > Puppet Warp on layer `id` with its mode, density, expansion,
@@ -5851,6 +5888,7 @@ pub fn run() {
             liquify_forward_warp,
             layer_pixels,
             liquify_reconstruct,
+            liquify_paint_mask,
             puppet_warp,
             puppet_mesh,
             convert_to_indexed,
