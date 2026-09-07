@@ -423,6 +423,14 @@ export default function App() {
     offsetX: 0,
     offsetY: 0,
   });
+  // Free Transform's options bar: reference point, X/Y position (absolute
+  // or relative), and the aspect-ratio link.
+  const [ftReference, setFtReference] = useState<"canvas" | ReferencePoint>("canvas");
+  const [ftUsePosition, setFtUsePosition] = useState(false);
+  const [ftX, setFtX] = useState(0);
+  const [ftY, setFtY] = useState(0);
+  const [ftRelative, setFtRelative] = useState(false);
+  const [ftMaintainAspect, setFtMaintainAspect] = useState(false);
   const [showSkewDialog, setShowSkewDialog] = useState(false);
   const [skewHorizontal, setSkewHorizontal] = useState(0);
   const [skewVertical, setSkewVertical] = useState(0);
@@ -1653,9 +1661,26 @@ export default function App() {
 
   const applyFreeTransform = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("free_transform", { id: selectedId, transform: freeTransform });
+    const transform = {
+      ...freeTransform,
+      reference: ftReference === "canvas" ? null : ftReference,
+      position: ftUsePosition ? [ftX, ftY] : null,
+      relative: ftRelative,
+      maintainAspect: ftMaintainAspect,
+    };
+    await runCommand("free_transform", { id: selectedId, transform });
     setShowFreeTransformDialog(false);
-  }, [runCommand, selectedId, freeTransform]);
+  }, [
+    runCommand,
+    selectedId,
+    freeTransform,
+    ftReference,
+    ftUsePosition,
+    ftX,
+    ftY,
+    ftRelative,
+    ftMaintainAspect,
+  ]);
 
   const openDistortDialog = useCallback(() => {
     const w = (document?.width ?? 1) - 1;
@@ -9988,10 +10013,42 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Free Transform</h2>
             <p className="modal__hint">
-              Applied in order — scale, rotate, skew, move — about the canvas
-              centre, as a single undoable edit. Stages left at their defaults are
-              skipped.
+              Applied in order — scale, rotate, skew, move — about the reference point
+              (the canvas centre by default), as a single undoable edit. Stages left at
+              their defaults are skipped.
             </p>
+            <label className="control control--row">
+              <span className="control__label">Reference point</span>
+              <select
+                value={ftReference}
+                onChange={(event) => setFtReference(event.target.value as "canvas" | ReferencePoint)}
+                title="Reference Point Locator: the point of the layer's content the transform pivots on"
+              >
+                <option value="canvas">Canvas centre</option>
+                <option value="topLeft">Top left</option>
+                <option value="top">Top</option>
+                <option value="topRight">Top right</option>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="bottomLeft">Bottom left</option>
+                <option value="bottom">Bottom</option>
+                <option value="bottomRight">Bottom right</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={ftMaintainAspect}
+                onChange={(event) => {
+                  setFtMaintainAspect(event.target.checked);
+                  if (event.target.checked) {
+                    setFreeTransformField("heightPercent", freeTransform.widthPercent);
+                  }
+                }}
+              />
+              <span className="control__label">Maintain aspect ratio (height follows width)</span>
+            </label>
             {(
               [
                 ["widthPercent", "Width %", 1, undefined],
@@ -10011,10 +10068,41 @@ export default function App() {
                   max={max}
                   step={key === "degrees" ? 0.1 : 1}
                   value={freeTransform[key]}
-                  onChange={(event) => setFreeTransformField(key, Number(event.target.value))}
+                  disabled={key === "heightPercent" && ftMaintainAspect}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    setFreeTransformField(key, value);
+                    if (key === "widthPercent" && ftMaintainAspect) {
+                      setFreeTransformField("heightPercent", value);
+                    }
+                  }}
                 />
               </label>
             ))}
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={ftUsePosition}
+                onChange={(event) => setFtUsePosition(event.target.checked)}
+              />
+              <span className="control__label">Set reference point position</span>
+              {ftUsePosition && (
+                <>
+                  <span className="control__label">X</span>
+                  <input type="number" value={ftX} onChange={(event) => setFtX(Number(event.target.value))} />
+                  <span className="control__label">Y</span>
+                  <input type="number" value={ftY} onChange={(event) => setFtY(Number(event.target.value))} />
+                  <label className="control control--row">
+                    <input
+                      type="checkbox"
+                      checked={ftRelative}
+                      onChange={(event) => setFtRelative(event.target.checked)}
+                    />
+                    <span className="control__label">Relative</span>
+                  </label>
+                </>
+              )}
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"

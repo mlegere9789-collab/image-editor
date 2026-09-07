@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 389.**
+**618 distinct capabilities tracked. Currently shipped: 394.**
 
 ## PART I — EVERY TOOL
 
@@ -230,11 +230,11 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Flip Vertical
 - [x] Transform Again (`transform_again`, repeats the most recent non-neutral `rotate`/`scale`/`skew`/`free_transform` on any layer as a `free_transform` with the same values; the remembered transform travels with the document through undo, so an undone transform is forgotten as in Photoshop — see README Phase 140)
 - [ ] Free Transform + Warp Mode
-- [ ] Reference Point Locator
-- [ ] Relative Positioning
-- [ ] X Position
-- [ ] Y Position
-- [ ] Maintain Aspect Ratio
+- [x] Reference Point Locator (`FreeTransform.reference`: one of the nine `ReferencePoint`s of the layer's opaque bounds, which scale, rotate, and skew now pivot on through `scale_about` / `rotate_about` / `skew_about`; `None` keeps the canvas centre — see README Phase 236)
+- [x] Relative Positioning (`FreeTransform.relative`: the X/Y Position is a delta the reference point moves by — see README Phase 236)
+- [x] X Position (`FreeTransform.position.0`: where the reference point lands, applied with Move X as the final move — see README Phase 236)
+- [x] Y Position (`FreeTransform.position.1`, likewise — see README Phase 236)
+- [x] Maintain Aspect Ratio (`FreeTransform.maintain_aspect`: the height percentage follows the width, the dialog linking the fields — see README Phase 236)
 - [x] Content-Aware Scale (`content_aware_scale(id, options)`: the layer's opaque bounds resized by seam carving — each pixel's energy the sum of its absolute luma differences to its four neighbours, the cheapest 8-connected seam removed or, when enlarging, duplicated as the average of itself and its neighbour, vertically for the width then transposed for the height — and placed back on a transparent canvas — see README Phase 235)
 - [x] Content-Aware Scale — Amount (`amount` percent of each dimension's change is carved and the remainder nearest-neighbour resampled — see README Phase 235)
 - [x] Content-Aware Scale — Protect (`protect`: an alpha channel whose byte over 255 adds up to a 1020 energy penalty, so seams avoid its bright pixels — see README Phase 235)

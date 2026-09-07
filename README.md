@@ -14066,6 +14066,60 @@ by hand instead. Every other layer of this project's quality bar
 **1420 Rust tests total** (1415 → 1420, 1413 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 236 — Free Transform's options bar
+
+Free Transform gains the rest of its options bar. `FreeTransform`
+grows four serde-defaulted fields: `reference`, one of the nine
+`ReferencePoint`s of the layer's opaque bounds that scale, rotate,
+and skew pivot on (`None` keeps the canvas centre, so every earlier
+transform is unchanged); `position`, the X / Y Position the reference
+point ends up at; `relative`, which makes that position a delta; and
+`maintain_aspect`, which makes the height percentage follow the
+width. The three stage functions split into public `scale`, `rotate`,
+and `skew` — which still pivot on the canvas centre and record the
+transform — and private `scale_about`, `rotate_about`, and
+`skew_about` taking an explicit pivot in pixel-index coordinates;
+`free_transform` resolves the pivot from the bounds (Left is the
+first opaque column, Right the last, Center their midpoint), runs
+the stages about it, and then moves by Move X/Y plus the reference
+point's journey to (or by) its position — the pivot being fixed
+under the stages, its place is still where it started. A layer with
+no opaque pixels refuses a reference, and a non-finite position is
+refused. The dialog gains a Reference point select, a Maintain aspect
+ratio checkbox that links the fields, and an optional X / Y position
+with a Relative checkbox.
+
+**Verified two ways.** Five new `document.rs` tests on a 4×4 document
+with an opaque 2×2 block at columns and rows `1..=2`, each pixel
+placement traced by hand through the inverse mapping. A half turn
+about the block's top-left corner lands it on `0..=1`, about its
+bottom-right corner on `2..=3`, and about its centre in place. Sending
+the top-left corner to `(0, 0)` lands the block on `0..=1`; moving it
+by `(1, 1)` relatively lands it on `2..=3`; sending the bottom-right
+corner to `(3, 3)` with Move X `−1` lands it on columns `1..=2` and
+rows `2..=3`. Width `200%` with Maintain aspect ratio equals a
+`200/200` scale byte for byte and differs from `200/100`. A `45°`
+horizontal skew about the top-left corner keeps the top row and
+slides the second right by one; about the bottom-left corner it keeps
+the bottom row and slides the top left. An empty layer refuses a
+reference, a NaN position is refused with the block untouched, and
+Transform Again repeats a reference rotation on a fresh copy of the
+block. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1425 Rust tests total** (1420 → 1425, 1418 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

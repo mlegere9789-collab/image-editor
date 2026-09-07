@@ -15730,12 +15730,28 @@ impl Document {
     /// selection, only the selected pixels are rewritten, though the
     /// rotation still reads from the whole layer.
     pub fn rotate(&mut self, id: LayerId, degrees: f32) -> Result<Option<Rect>, String> {
+        let touched = self.rotate_about(id, degrees, None)?;
+        self.last_transform = Some(FreeTransform {
+            degrees,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
+    }
+
+    /// [`Self::rotate`] about `pivot` (pixel-index coordinates), or the
+    /// canvas centre with `None`; does not record the transform.
+    fn rotate_about(
+        &mut self,
+        id: LayerId,
+        degrees: f32,
+        pivot: Option<(f32, f32)>,
+    ) -> Result<Option<Rect>, String> {
         if !degrees.is_finite() {
             return Err("Rotate angle must be a finite number of degrees.".to_string());
         }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
-        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (cx, cy) = pivot.unwrap_or(((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0));
         let (sin, cos) = degrees.to_radians().sin_cos();
         let touched = self.filter_pixels(id, move |source, row, col| {
             let (dx, dy) = (col as f32 - cx, row as f32 - cy);
@@ -15749,10 +15765,6 @@ impl Document {
             out.copy_from_slice(&source[base..base + CHANNELS]);
             out
         })?;
-        self.last_transform = Some(FreeTransform {
-            degrees,
-            ..FreeTransform::default()
-        });
         Ok(touched)
     }
 
@@ -15909,6 +15921,24 @@ impl Document {
         width_percent: f32,
         height_percent: f32,
     ) -> Result<Option<Rect>, String> {
+        let touched = self.scale_about(id, width_percent, height_percent, None)?;
+        self.last_transform = Some(FreeTransform {
+            width_percent,
+            height_percent,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
+    }
+
+    /// [`Self::scale`] about `pivot` (pixel-index coordinates), or the
+    /// canvas centre with `None`; does not record the transform.
+    fn scale_about(
+        &mut self,
+        id: LayerId,
+        width_percent: f32,
+        height_percent: f32,
+        pivot: Option<(f32, f32)>,
+    ) -> Result<Option<Rect>, String> {
         if !(width_percent.is_finite() && height_percent.is_finite())
             || width_percent <= 0.0
             || height_percent <= 0.0
@@ -15917,7 +15947,7 @@ impl Document {
         }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
-        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (cx, cy) = pivot.unwrap_or(((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0));
         let (fx, fy) = (width_percent / 100.0, height_percent / 100.0);
         let touched = self.filter_pixels(id, move |source, row, col| {
             let sx = (cx + (col as f32 - cx) / fx).round() as i64;
@@ -15959,13 +15989,31 @@ impl Document {
         horizontal_degrees: f32,
         vertical_degrees: f32,
     ) -> Result<Option<Rect>, String> {
+        let touched = self.skew_about(id, horizontal_degrees, vertical_degrees, None)?;
+        self.last_transform = Some(FreeTransform {
+            skew_horizontal: horizontal_degrees,
+            skew_vertical: vertical_degrees,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
+    }
+
+    /// [`Self::skew`] about `pivot` (pixel-index coordinates), or the
+    /// canvas centre with `None`; does not record the transform.
+    fn skew_about(
+        &mut self,
+        id: LayerId,
+        horizontal_degrees: f32,
+        vertical_degrees: f32,
+        pivot: Option<(f32, f32)>,
+    ) -> Result<Option<Rect>, String> {
         let in_range = |a: f32| a.is_finite() && a.abs() < 90.0;
         if !(in_range(horizontal_degrees) && in_range(vertical_degrees)) {
             return Err("Skew angles must be finite and between -89 and 89 degrees.".to_string());
         }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
-        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (cx, cy) = pivot.unwrap_or(((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0));
         let (th, tv) = (
             horizontal_degrees.to_radians().tan(),
             vertical_degrees.to_radians().tan(),
@@ -16263,21 +16311,77 @@ impl Document {
     ) -> Result<Option<Rect>, String> {
         let neutral = FreeTransform::default();
         let mut touched = self.layer(id).map(|_| None)?;
-        if (transform.width_percent, transform.height_percent)
+        // The pivot: the reference point of the layer's opaque bounds, in
+        // pixel-index coordinates, or the canvas centre.
+        let pivot: Option<(f32, f32)> = match transform.reference {
+            None => None,
+            Some(reference) => {
+                let bounds = self.layer_bounds(id)?.ok_or_else(|| {
+                    "The layer has no opaque pixels to place a reference point on.".to_string()
+                })?;
+                let (x0, x1) = (bounds.x0 as f32, (bounds.x1 - 1) as f32);
+                let (y0, y1) = (bounds.y0 as f32, (bounds.y1 - 1) as f32);
+                let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+                Some(match reference {
+                    ReferencePoint::TopLeft => (x0, y0),
+                    ReferencePoint::Top => (mx, y0),
+                    ReferencePoint::TopRight => (x1, y0),
+                    ReferencePoint::Left => (x0, my),
+                    ReferencePoint::Center => (mx, my),
+                    ReferencePoint::Right => (x1, my),
+                    ReferencePoint::BottomLeft => (x0, y1),
+                    ReferencePoint::Bottom => (mx, y1),
+                    ReferencePoint::BottomRight => (x1, y1),
+                })
+            }
+        };
+        if let Some((x, y)) = transform.position {
+            if !(x.is_finite() && y.is_finite()) {
+                return Err("The reference point position must be finite.".to_string());
+            }
+        }
+        let height_percent = if transform.maintain_aspect {
+            transform.width_percent
+        } else {
+            transform.height_percent
+        };
+        if (transform.width_percent, height_percent)
             != (neutral.width_percent, neutral.height_percent)
         {
-            touched = self.scale(id, transform.width_percent, transform.height_percent)?;
+            touched = self.scale_about(id, transform.width_percent, height_percent, pivot)?;
         }
         if transform.degrees != neutral.degrees {
-            touched = self.rotate(id, transform.degrees)?;
+            touched = self.rotate_about(id, transform.degrees, pivot)?;
         }
         if (transform.skew_horizontal, transform.skew_vertical)
             != (neutral.skew_horizontal, neutral.skew_vertical)
         {
-            touched = self.skew(id, transform.skew_horizontal, transform.skew_vertical)?;
+            touched = self.skew_about(
+                id,
+                transform.skew_horizontal,
+                transform.skew_vertical,
+                pivot,
+            )?;
         }
-        if (transform.offset_x, transform.offset_y) != (neutral.offset_x, neutral.offset_y) {
-            touched = self.translate(id, transform.offset_x, transform.offset_y)?;
+        // The move: Move X/Y, plus the reference point's journey to (or by)
+        // its X/Y Position. The pivot stays fixed under the stages above,
+        // so its place is still where it started.
+        let (mut dx, mut dy) = (transform.offset_x, transform.offset_y);
+        if let Some((x, y)) = transform.position {
+            let (px, py) = pivot.unwrap_or((
+                (self.width as f32 - 1.0) / 2.0,
+                (self.height as f32 - 1.0) / 2.0,
+            ));
+            let (jx, jy) = if transform.relative {
+                (x, y)
+            } else {
+                (x - px, y - py)
+            };
+            dx += jx.round() as i32;
+            dy += jy.round() as i32;
+        }
+        if (dx, dy) != (0, 0) {
+            touched = self.translate(id, dx, dy)?;
         }
         if transform != neutral {
             self.last_transform = Some(transform);
@@ -16534,6 +16638,21 @@ pub struct FreeTransform {
     pub skew_vertical: f32,
     pub offset_x: i32,
     pub offset_y: i32,
+    /// Reference Point Locator: the point of the layer's opaque bounds
+    /// that scale, rotate, and skew pivot on; `None` keeps the canvas
+    /// centre.
+    #[serde(default)]
+    pub reference: Option<ReferencePoint>,
+    /// X / Y Position: where the reference point ends up (or, with
+    /// `relative`, how far it moves), applied with Move X/Y.
+    #[serde(default)]
+    pub position: Option<(f32, f32)>,
+    /// Relative Positioning: `position` is a delta rather than a place.
+    #[serde(default)]
+    pub relative: bool,
+    /// Maintain Aspect Ratio: the height percentage follows the width.
+    #[serde(default)]
+    pub maintain_aspect: bool,
 }
 
 impl Default for FreeTransform {
@@ -16546,6 +16665,10 @@ impl Default for FreeTransform {
             skew_vertical: 0.0,
             offset_x: 0,
             offset_y: 0,
+            reference: None,
+            position: None,
+            relative: false,
+            maintain_aspect: false,
         }
     }
 }
@@ -35751,6 +35874,7 @@ mod tests {
             skew_vertical: 0.0,
             offset_x: 1,
             offset_y: 0,
+            ..FreeTransform::default()
         };
         let (mut composite, id_a) = ramped_4x4();
         composite.free_transform(id_a, transform).unwrap();
@@ -39148,6 +39272,215 @@ mod tests {
         assert!(doc
             .content_aware_scale(empty, &cas(50.0, 100.0, 100))
             .is_err());
+    }
+
+    /// A 4×4 document with an opaque 2×2 block at columns and rows 1..=2.
+    fn block_4x4() -> (Document, LayerId) {
+        let mut doc = Document::new(4, 4).unwrap();
+        let mut pixels = vec![0u8; 64];
+        for y in 1..3 {
+            for x in 1..3 {
+                let base = (y * 4 + x) * 4;
+                pixels[base..base + 4].copy_from_slice(&[9, 9, 9, 255]);
+            }
+        }
+        let id = doc.add_layer("block", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    fn filled(doc: &Document, id: LayerId) -> Vec<(u32, u32)> {
+        let mut out = Vec::new();
+        for y in 0..doc.height() {
+            for x in 0..doc.width() {
+                if pixel(doc, id, x, y)[3] > 0 {
+                    out.push((x, y));
+                }
+            }
+        }
+        out
+    }
+
+    fn about(reference: ReferencePoint) -> FreeTransform {
+        FreeTransform {
+            reference: Some(reference),
+            ..FreeTransform::default()
+        }
+    }
+
+    #[test]
+    fn free_transform_rotates_about_the_reference_point() {
+        // A half turn about the block's top-left corner mirrors it through
+        // that corner: it lands on columns and rows 0..=1. About the
+        // bottom-right corner it lands on 2..=3.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                degrees: 180.0,
+                ..about(ReferencePoint::TopLeft)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(0, 0), (1, 0), (0, 1), (1, 1)]);
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                degrees: 180.0,
+                ..about(ReferencePoint::BottomRight)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(2, 2), (3, 2), (2, 3), (3, 3)]);
+        // About the centre of the block it stays put.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                degrees: 180.0,
+                ..about(ReferencePoint::Center)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(1, 1), (2, 1), (1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn free_transform_positions_the_reference_point() {
+        // X/Y Position moves the top-left corner to (0, 0); relative
+        // positioning moves it by (1, 1) instead.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                position: Some((0.0, 0.0)),
+                ..about(ReferencePoint::TopLeft)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(0, 0), (1, 0), (0, 1), (1, 1)]);
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                position: Some((1.0, 1.0)),
+                relative: true,
+                ..about(ReferencePoint::TopLeft)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(2, 2), (3, 2), (2, 3), (3, 3)]);
+        // The bottom-right corner sent to (3, 3) is the same as relative
+        // (1, 1); Move X/Y still adds on top.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                position: Some((3.0, 3.0)),
+                offset_x: -1,
+                ..about(ReferencePoint::BottomRight)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(1, 2), (2, 2), (1, 3), (2, 3)]);
+    }
+
+    #[test]
+    fn free_transform_maintain_aspect_ratio_uses_the_width_for_both() {
+        let (mut linked, id_a) = ramped_4x4();
+        linked
+            .free_transform(
+                id_a,
+                FreeTransform {
+                    width_percent: 200.0,
+                    height_percent: 100.0,
+                    maintain_aspect: true,
+                    ..FreeTransform::default()
+                },
+            )
+            .unwrap();
+        let (mut both, id_b) = ramped_4x4();
+        both.scale(id_b, 200.0, 200.0).unwrap();
+        assert_eq!(linked.layers()[0].pixels, both.layers()[0].pixels);
+        let (mut unlinked, id_c) = ramped_4x4();
+        unlinked.scale(id_c, 200.0, 100.0).unwrap();
+        assert_ne!(linked.layers()[0].pixels, unlinked.layers()[0].pixels);
+    }
+
+    #[test]
+    fn free_transform_skews_about_the_reference_point() {
+        // A 45° horizontal skew about the block's top-left corner leaves its
+        // top row in place and slides the second row one pixel right.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                skew_horizontal: 45.0,
+                ..about(ReferencePoint::TopLeft)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(1, 1), (2, 1), (2, 2), (3, 2)]);
+        // About the bottom-left corner the bottom row stays and the top row
+        // slides left.
+        let (mut doc, id) = block_4x4();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                skew_horizontal: 45.0,
+                ..about(ReferencePoint::BottomLeft)
+            },
+        )
+        .unwrap();
+        assert_eq!(filled(&doc, id), [(0, 1), (1, 1), (1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn free_transform_reference_validates_and_repeats() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let empty = doc.add_layer("e", &[0; 16], 2, 2).unwrap();
+        assert!(doc
+            .free_transform(
+                empty,
+                FreeTransform {
+                    degrees: 90.0,
+                    ..about(ReferencePoint::Center)
+                }
+            )
+            .is_err());
+        let (mut doc, id) = block_4x4();
+        assert!(doc
+            .free_transform(
+                id,
+                FreeTransform {
+                    position: Some((f32::NAN, 0.0)),
+                    ..about(ReferencePoint::TopLeft)
+                }
+            )
+            .is_err());
+        assert_eq!(filled(&doc, id), [(1, 1), (2, 1), (1, 2), (2, 2)]);
+        // Transform Again repeats a reference transform as it was.
+        let (mut first, id_a) = block_4x4();
+        first
+            .free_transform(
+                id_a,
+                FreeTransform {
+                    degrees: 180.0,
+                    ..about(ReferencePoint::TopLeft)
+                },
+            )
+            .unwrap();
+        let (mut again, id_b) = block_4x4();
+        again
+            .free_transform(id_b, FreeTransform::default())
+            .unwrap();
+        assert!(again.transform_again(id_b).is_err());
+        let mut cloned = first.clone();
+        let id_c = cloned
+            .add_layer("c", &block_4x4().0.layers()[0].pixels, 4, 4)
+            .unwrap();
+        cloned.transform_again(id_c).unwrap();
+        assert_eq!(filled(&cloned, id_c), [(0, 0), (1, 0), (0, 1), (1, 1)]);
     }
 
     #[test]
