@@ -13117,6 +13117,77 @@ impl Document {
         })
     }
 
+    /// Filter Gallery > Sketch > Conté Crayon: reduces the layer to crayon
+    /// and paper, then rubs the paper's texture through it. Each pixel's
+    /// standard-weighted luma is mapped through Foreground Level and
+    /// Background Level (`1..=15` each): at or below `foreground / 15 ·
+    /// 128` it is black crayon, at or above `255 − background / 15 · 128`
+    /// white paper, and between the two a straight ramp from black to
+    /// white — with the levels so high that paper sits below crayon, a
+    /// hard threshold at the crayon level. The texture is then
+    /// [`Self::texturizer`]'s own — its `scale`, `relief`, `light_direction`
+    /// (`0..=7`, top clockwise to top-left), and `invert` — skipped at
+    /// Relief `0`. Alpha is kept and the selection confines it. Photoshop's
+    /// foreground and background colours, its Brick / Burlap / Canvas /
+    /// Sandstone textures, and loading a texture file are documented scope
+    /// cuts: the crayon is black on white over Texturizer's checkerboard
+    /// relief. Errors for a level out of `1..=15`, a texture setting
+    /// Texturizer refuses, or a locked or unknown layer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn conte_crayon(
+        &mut self,
+        id: LayerId,
+        foreground_level: u32,
+        background_level: u32,
+        scale: u32,
+        relief: u32,
+        light_direction: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=15).contains(&foreground_level) {
+            return Err("Conté Crayon Foreground Level must be between 1 and 15.".to_string());
+        }
+        if !(1..=15).contains(&background_level) {
+            return Err("Conté Crayon Background Level must be between 1 and 15.".to_string());
+        }
+        if !(1..=250).contains(&scale) {
+            return Err("Conté Crayon Scaling must be between 1 and 250.".to_string());
+        }
+        if relief > 50 {
+            return Err("Conté Crayon Relief must be between 0 and 50.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Conté Crayon Light direction must be between 0 and 7.".to_string());
+        }
+        let doc_width = self.width as usize;
+        let dark = foreground_level as f32 / 15.0 * 128.0;
+        let light = 255.0 - background_level as f32 / 15.0 * 128.0;
+        let touched = self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let luma = 0.299 * src[base] as f32
+                + 0.587 * src[base + 1] as f32
+                + 0.114 * src[base + 2] as f32;
+            let v = if light <= dark {
+                if luma <= dark {
+                    0
+                } else {
+                    255
+                }
+            } else if luma <= dark {
+                0
+            } else if luma >= light {
+                255
+            } else {
+                ((luma - dark) / (light - dark) * 255.0).round() as u8
+            };
+            [v, v, v, src[base + 3]]
+        })?;
+        if relief == 0 {
+            return Ok(touched);
+        }
+        self.texturizer(id, scale, relief, light_direction, invert)
+    }
+
     /// Filter Gallery > Sketch > Plaster: pre-smooths the layer with
     /// [`box_blur_at`] — the same neighbourhood-average helper `box_blur`
     /// and this project's other smoothing filters already use — then
@@ -44364,6 +44435,135 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .path_blur(id, &path(&line, 1, 0.0, true))
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn grey_pixels_4x4(values: [u8; 16]) -> (Document, LayerId) {
+        let mut doc = Document::new(4, 4).unwrap();
+        let pixels: Vec<u8> = values.iter().flat_map(|&v| [v, v, v, 255]).collect();
+        let id = doc.add_layer("greys", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn conte_crayon_reduces_tones_between_the_two_levels() {
+        // Defaults 11 / 7: crayon below 11/15 · 128 = 93.9, paper above
+        // 255 − 7/15 · 128 = 195.3, a straight ramp between — grey 128
+        // sits 34.1 / 101.4 of the way, 86.
+        let (mut doc, id) = grey_pixels_4x4([
+            50, 128, 200, 94, 195, 0, 255, 196, 93, 128, 128, 128, 50, 50, 200, 200,
+        ]);
+        doc.conte_crayon(id, 11, 7, 1, 0, 7, false).unwrap();
+        let red = |x: u32, y: u32| pixel(&doc, id, x, y);
+        assert_eq!(red(0, 0), [0, 0, 0, 255]);
+        assert_eq!(red(1, 0), [86, 86, 86, 255]);
+        assert_eq!(red(2, 0), [255, 255, 255, 255]);
+        assert_eq!(red(3, 0)[0], 0); // 94 is just past 93.9: (94 − 93.87) / 101.4 → 0.3 → 0
+        assert_eq!(red(0, 1)[0], 254); // 195: (195 − 93.87) / 101.4 · 255 = 254.3
+        assert_eq!(red(1, 1)[0], 0);
+        assert_eq!(red(2, 1)[0], 255);
+        assert_eq!(red(3, 1)[0], 255);
+        assert_eq!(red(0, 2)[0], 0);
+    }
+
+    #[test]
+    fn conte_crayon_extreme_levels_threshold_or_barely_touch() {
+        // 15 / 15 puts the paper level below the crayon level: a hard
+        // threshold at 128. 1 / 1 leaves almost everything a ramp.
+        let (mut doc, id) = grey_pixels_4x4([
+            128, 129, 8, 247, 128, 0, 255, 9, 246, 64, 192, 100, 150, 20, 230, 128,
+        ]);
+        let mut ramp = doc.clone();
+        doc.conte_crayon(id, 15, 15, 1, 0, 7, false).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 0);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 255);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 0);
+        assert_eq!(pixel(&doc, id, 2, 1)[0], 255);
+        ramp.conte_crayon(id, 1, 1, 1, 0, 7, false).unwrap();
+        assert_eq!(pixel(&ramp, id, 2, 0)[0], 0); // 8 ≤ 8.53
+        assert_eq!(pixel(&ramp, id, 3, 0)[0], 255); // 247 ≥ 246.47
+        assert_eq!(pixel(&ramp, id, 0, 1)[0], 128); // (128 − 8.53) / 237.9 · 255 = 128.0
+        assert_eq!(pixel(&ramp, id, 3, 1)[0], 1); // 9: 0.47 / 237.9 · 255 = 0.5 → 1
+        assert_eq!(pixel(&ramp, id, 0, 2)[0], 254); // 246: 237.47 / 237.9 · 255 = 254.4999 → 254
+    }
+
+    #[test]
+    fn conte_crayon_relief_is_texturizers_checkerboard_shade() {
+        // Flat grey 128 becomes 86 everywhere, then Relief 10 from the top
+        // left (direction 7) at Scaling 1 shades by the checkerboard: a
+        // pixel whose toward and away cells match keeps 86, one whose
+        // away cell is low drops to 76; Invert lifts it to 96 instead.
+        let (mut doc, id) = grey_pixels_4x4([128; 16]);
+        doc.conte_crayon(id, 11, 7, 1, 10, 7, false).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 86);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 86);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 76);
+        assert_eq!(pixel(&doc, id, 0, 1)[0], 76);
+        let (mut composed, id_b) = grey_pixels_4x4([128; 16]);
+        composed.conte_crayon(id_b, 11, 7, 1, 0, 7, false).unwrap();
+        composed.texturizer(id_b, 1, 10, 7, false).unwrap();
+        assert_eq!(doc.layers()[0].pixels, composed.layers()[0].pixels);
+        let (mut inverted, id_c) = grey_pixels_4x4([128; 16]);
+        inverted.conte_crayon(id_c, 11, 7, 1, 10, 7, true).unwrap();
+        assert_eq!(pixel(&inverted, id_c, 1, 0)[0], 96);
+        assert_eq!(pixel(&inverted, id_c, 1, 1)[0], 86);
+    }
+
+    #[test]
+    fn conte_crayon_keeps_alpha_and_respects_the_selection() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("two", &[128, 128, 128, 77, 200, 200, 200, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.conte_crayon(id, 11, 7, 1, 0, 7, false).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [86, 86, 86, 77]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 200, 200, 255]);
+        // Colour is reduced through its luma: pure red (luma 76) is crayon.
+        let mut colour = Document::new(1, 1).unwrap();
+        let cid = colour.add_layer("red", &[255, 0, 0, 255], 1, 1).unwrap();
+        colour.conte_crayon(cid, 11, 7, 1, 0, 7, false).unwrap();
+        assert_eq!(pixel(&colour, cid, 0, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn conte_crayon_refuses_bad_levels_texture_settings_or_layers() {
+        let (mut doc, id) = grey_pixels_4x4([128; 16]);
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .conte_crayon(id, 0, 7, 1, 0, 7, false)
+            .unwrap_err()
+            .contains("Foreground"));
+        assert!(doc
+            .conte_crayon(id, 16, 7, 1, 0, 7, false)
+            .unwrap_err()
+            .contains("Foreground"));
+        assert!(doc
+            .conte_crayon(id, 11, 0, 1, 0, 7, false)
+            .unwrap_err()
+            .contains("Background"));
+        assert!(doc
+            .conte_crayon(id, 11, 7, 0, 0, 7, false)
+            .unwrap_err()
+            .contains("Scaling"));
+        assert!(doc
+            .conte_crayon(id, 11, 7, 251, 0, 7, false)
+            .unwrap_err()
+            .contains("Scaling"));
+        assert!(doc
+            .conte_crayon(id, 11, 7, 1, 51, 7, false)
+            .unwrap_err()
+            .contains("Relief"));
+        assert!(doc
+            .conte_crayon(id, 11, 7, 1, 0, 8, false)
+            .unwrap_err()
+            .contains("Light"));
+        assert!(doc.conte_crayon(999, 11, 7, 1, 0, 7, false).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .conte_crayon(id, 11, 7, 1, 0, 7, false)
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);

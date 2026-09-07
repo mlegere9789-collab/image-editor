@@ -3737,6 +3737,33 @@ fn chalk_and_charcoal(
     })
 }
 
+/// Filter Gallery > Sketch > Conté Crayon on layer `id`. `light_direction`
+/// as Texturizer's: 0 top, clockwise to 7 top-left.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn conte_crayon(
+    state: State<'_, AppState>,
+    id: LayerId,
+    foreground_level: u32,
+    background_level: u32,
+    scale: u32,
+    relief: u32,
+    light_direction: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.conte_crayon(
+            id,
+            foreground_level,
+            background_level,
+            scale,
+            relief,
+            light_direction,
+            invert,
+        )
+    })
+}
+
 /// Filter Gallery > Sketch > Plaster on layer `id`. `light_direction`: 0
 /// Top, 1 Top Right, 2 Right, 3 Bottom Right, 4 Bottom, 5 Bottom Left, 6
 /// Left, 7 Top Left.
@@ -5071,6 +5098,7 @@ pub fn run() {
             note_paper,
             graphic_pen,
             chalk_and_charcoal,
+            conte_crayon,
             plaster,
             water_paper,
             torn_edges,

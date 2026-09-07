@@ -968,6 +968,14 @@ export default function App() {
   const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] = useState(25);
   const [graphicPenDirection, setGraphicPenDirection] = useState(1);
   const [showChalkAndCharcoalDialog, setShowChalkAndCharcoalDialog] = useState(false);
+  // Filter Gallery > Sketch > Conté Crayon: levels and the paper texture.
+  const [showConteDialog, setShowConteDialog] = useState(false);
+  const [conteForeground, setConteForeground] = useState(11);
+  const [conteBackground, setConteBackground] = useState(7);
+  const [conteScale, setConteScale] = useState(100);
+  const [conteRelief, setConteRelief] = useState(4);
+  const [conteLight, setConteLight] = useState(7);
+  const [conteInvert, setConteInvert] = useState(false);
   const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] = useState(10);
   const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
   const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] = useState(1);
@@ -3185,6 +3193,20 @@ export default function App() {
     });
     setShowChalkAndCharcoalDialog(false);
   }, [runCommand, selectedId, chalkAndCharcoalCharcoalArea, chalkAndCharcoalChalkArea, chalkAndCharcoalStrokePressure]);
+
+  const applyConteCrayon = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("conte_crayon", {
+      id: selectedId,
+      foregroundLevel: conteForeground,
+      backgroundLevel: conteBackground,
+      scale: conteScale,
+      relief: conteRelief,
+      lightDirection: conteLight,
+      invert: conteInvert,
+    });
+    setShowConteDialog(false);
+  }, [runCommand, selectedId, conteForeground, conteBackground, conteScale, conteRelief, conteLight, conteInvert]);
 
   const applyPlaster = useCallback(async () => {
     if (selectedId === null) return;
@@ -7080,6 +7102,14 @@ export default function App() {
             title="Filter Gallery > Sketch > Chalk & Charcoal"
           >
             Chalk &amp; Charcoal…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowConteDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Sketch > Conté Crayon"
+          >
+            Conté Crayon…
           </button>
           <button
             className="button button--quiet"
@@ -16384,6 +16414,52 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGraphicPen} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showConteDialog && (
+        <div className="modal-overlay" onClick={() => setShowConteDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Conté Crayon" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Conté Crayon</h2>
+            {(
+              [
+                ["Foreground Level", conteForeground, setConteForeground, 1, 15],
+                ["Background Level", conteBackground, setConteBackground, 1, 15],
+                ["Scaling %", conteScale, setConteScale, 1, 250],
+                ["Relief", conteRelief, setConteRelief, 0, 50],
+              ] as const
+            ).map(([label, value, set, min, max]) => (
+              <label className="control" key={label}>
+                <span className="control__label">
+                  {label}
+                  <span className="control__value">{value}</span>
+                </span>
+                <input type="range" min={min} max={max} value={value} onChange={(event) => set(Number(event.target.value))} />
+              </label>
+            ))}
+            <label className="control control--row">
+              <span className="control__label">Light</span>
+              <select value={conteLight} onChange={(event) => setConteLight(Number(event.target.value))}>
+                {["Top", "Top Right", "Right", "Bottom Right", "Bottom", "Bottom Left", "Left", "Top Left"].map((name, i) => (
+                  <option value={i} key={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              <label className="control control--row">
+                <input type="checkbox" checked={conteInvert} onChange={(event) => setConteInvert(event.target.checked)} />
+                <span className="control__label">Invert</span>
+              </label>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowConteDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyConteCrayon} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -14760,6 +14760,59 @@ by hand instead. Every other layer of this project's quality bar
 **1480 Rust tests total** (1475 → 1480, 1473 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 248 — Conté Crayon, completing the Filter Gallery's Sketch set
+
+Filter Gallery > Sketch > Conté Crayon, the last unshipped Filter
+Gallery entry, lands as a tonal reduction rubbed through Texturizer's
+paper. `conte_crayon(id, foreground_level, background_level, scale,
+relief, light_direction, invert)` maps each pixel's standard-weighted
+luma through the two levels (`1..=15` each): at or below `foreground /
+15 · 128` it is black crayon, at or above `255 − background / 15 · 128`
+white paper, and between the two a straight ramp from black to white —
+with the levels so high that paper sits below crayon, a hard threshold
+at the crayon level. The texture is then `texturizer`'s own
+checkerboard relief with its Scaling, Relief, Light direction (top,
+clockwise to top-left), and Invert, skipped at Relief `0`. Alpha is
+kept and the selection confines it. A **Conté Crayon…** dialog has
+Foreground Level, Background Level, Scaling, and Relief sliders, a
+Light list, and Invert. Photoshop's foreground and background colours,
+its Brick / Burlap / Canvas / Sandstone textures, and loading a texture
+file are documented scope cuts: the crayon is black on white over
+Texturizer's relief.
+
+**Verified two ways.** Five new `document.rs` tests, every value
+traced by hand and cross-checked in `f32` by an independent Python
+script. At the defaults 11 / 7 the crayon level is `93.87` and the
+paper level `195.27`: grey `50` is `0`, `200` is `255`, `128` sits
+`34.13 / 101.4` of the way and becomes `86`, `94` just past the crayon
+level rounds to `0`, and `195` to `254`. Levels 15 / 15 put paper
+below crayon and threshold at `128` (`128 → 0`, `129 → 255`); levels
+1 / 1 leave a ramp from `8.53` to `246.47` where `9` becomes `1`, `128`
+stays `128`, and `246` becomes `254`. Flat grey `128` becomes `86` and
+Relief `10` from the top left at Scaling `1` then shades it by the
+checkerboard — `86` where the toward and away cells match, `76` where
+the away cell is low, `96` with Invert — byte-identical to running the
+reduction and then `texturizer` separately. A pixel's alpha `77`
+survives, an unselected pixel is untouched, and pure red (luma `76`)
+is crayon. Levels `0` and `16`, Scaling `0` and `251`, Relief `51`,
+Light `8`, an unknown layer, and a locked layer are refused with the
+layer untouched. All five passed on the first run; clippy asked only
+for the repo's usual eight-argument allowance.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1485 Rust tests total** (1480 → 1485, 1478 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

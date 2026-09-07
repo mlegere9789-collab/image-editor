@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 443.**
+**618 distinct capabilities tracked. Currently shipped: 444.**
 
 ## PART I — EVERY TOOL
 
@@ -572,7 +572,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Bas Relief (Filter Gallery → Sketch; box-blurs the source, computes standard-weighted luma of the blur, then reuses `emboss`'s own `away - toward` relief shape at a fixed 1-pixel sample distance and `plaster`'s own 8-direction angle table, scaled by `detail` — grayscale output, not per-channel colour, is what distinguishes it from `plaster` — see README Phase 85)
 - [x] Chalk & Charcoal (Filter Gallery → Sketch; a three-way threshold on `box_blur_at`-smoothed luma — pure black below a dark threshold, pure white above a light threshold, mid-grey between — rather than the two-way splits `stamp`/`photocopy`/`graphic_pen` already use — Photoshop's own foreground/background colouring is a documented scope cut — see README Phase 81)
 - [x] Chrome (Filter Gallery → Sketch; maps each pixel's own standard-weighted luma through a mirrored triangular curve peaking bright at the neutral midtone and falling to black at either extreme, `v = 255 - 2·amount·|luma-128|`, pre-smoothed by a `box_blur_at` radius from Smoothness — Photoshop's own gradient-map-based metallic renderer is a documented scope cut — see README Phase 87)
-- [ ] Conté CrayonSimulates drawing with Conté crayon on textured paper.
+- [x] Conté Crayon (Filter Gallery → Sketch; `conte_crayon`, each pixel's standard-weighted luma mapped to black crayon at or below `foreground/15 · 128`, white paper at or above `255 − background/15 · 128`, a straight ramp between, then `texturizer`'s own checkerboard relief with its Scaling / Relief / Light / Invert; Photoshop's foreground and background colours and its four named textures are documented scope cuts — see README Phase 248)
 - [x] Graphic Pen (Filter Gallery → Sketch; a single directional `motion_blur_at` streak — sharing `sprayed_strokes`'s own four-way direction convention — hard-thresholded by Light/Dark Balance, the same threshold idea `stamp` already uses — see README Phase 80)
 - [x] Halftone Pattern (Filter Gallery → Sketch; Line type inks vertical bands from their own left edge by a thickness proportional to that band's own darkness, Dot type reuses `color_halftone`'s own `(dx²+dy²)·255 ≤ r²·measure` circular-area test applied to one grayscale measure instead of three RGB channels — Photoshop's own diagonal line screen and Circle type are documented scope cuts — see README Phase 86)
 - [x] Note Paper (Filter Gallery → Sketch; a seeded `XorShift32` draw added to each pixel's own luma before a `stamp`-style hard threshold, mottling the black/white boundary into a hand-torn paper edge — Photoshop's own Relief embossing is a documented scope cut — see README Phase 79)
