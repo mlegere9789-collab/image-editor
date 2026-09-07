@@ -8265,6 +8265,82 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **861 Rust tests total** (855 → 861, 854 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 125 — Filter > Blur > Lens Blur
+
+`lens_blur(id, max_radius, invert)` is a depth-of-field blur whose
+radius varies per pixel, and the last of the Blur menu's own
+depth-aware entries. Photoshop's own Lens Blur reads its depth map
+from a separate input (a chosen alpha channel, a layer mask, or the
+layer's transparency); this project's own version uses the layer's own
+alpha channel directly as that depth map, so no second input needs to
+be plumbed through. Each pixel's own blur radius is `round(depth / 255
+* max_radius)`, where `depth` is the pixel's own alpha byte — or `255 -
+alpha` when `invert` is set, matching Photoshop's own Invert checkbox
+on the depth map — and the result is run through the same edge-clamped
+`box_blur_at` primitive `box_blur`/`tilt_shift`/`iris_blur`/
+`field_blur` already share. Only the RGB channels are written back;
+alpha itself is left byte-for-byte untouched, since it *is* the depth
+map driving the blur and must survive unchanged for the effect to mean
+anything (the same alpha-untouched convention the three Blur Gallery
+filters already keep for their own reasons). Fully transparent pixels
+(depth `0`) always get radius `0` and stay exactly sharp; fully opaque
+ones blur at the full `max_radius`. `max_radius` is validated against
+Photoshop's own Lens Blur Radius range, `0..=100`. Photoshop's own
+Lens Blur also shapes its blur kernel by an adjustable iris (blade
+count, curvature, rotation), adds specular highlights past a
+brightness threshold, and can layer a film-grain pass back in
+afterward; this project's own flat, alpha-driven box blur is a
+documented scope cut, trading that richer bokeh simulation for one
+exactly hand-verifiable mechanism built entirely from an
+already-tested primitive. A new **Lens Blur…** dialog exposes the
+Radius slider and an Invert checkbox, with a one-line hint explaining
+that the layer's own alpha is the depth map.
+
+**Verified two ways.** Six new `document.rs` tests on a new
+`depth_ramped_3x3` fixture: `ramped_3x3`'s own R-only ramp (`10` to
+`90`), but with alpha standing in for depth — column `0` fully near
+(`0`), column `1` halfway (`128`), column `2` fully far (`255`). With
+`max_radius = 4`, pixel `(col 2, row 1)` (alpha `255`) gets radius
+`round(255/255 * 4) = 4`, whose edge-clamped window over the 3x3 grid
+averages (truncating, as `average_samples` does) to `52` — a real
+change from its own original `60` — while every alpha byte survives
+unchanged. A second test takes pixel `(col 1, row 0)` (alpha `128`,
+original `20`) through two different maxima: `max_radius = 1` gives
+`round(0.50196) = 1`, averaging to `30`; `max_radius = 4` gives
+`round(2.0078) = 2`, averaging to `38` — two distinct values from the
+same pixel, so the radius genuinely depends on `max_radius` rather
+than coincidentally matching. A third confirms every column-`0` pixel
+(alpha `0`, radius `0` at any maximum) is a byte-for-byte identity. A
+fourth flips `invert`: pixel `(col 0, row 1)` now blurs from `40` to a
+hand-computed `47` while pixel `(col 2, row 1)` (now depth `0`) stays
+exactly `60`. A fifth confines the blur to a single-pixel selection,
+checking both sides of the selected pixel stay untouched. A sixth
+confirms a `101` radius, plus a locked/unknown layer, all error. All
+six passed on the first run, cross-checked against an independent
+Python script that emulates `box_blur_at`'s own clamp-and-truncate
+averaging and Rust's own `f32` rounding — a script that, before being
+trusted, was itself checked against the three radius-`1` values (`23`,
+`50`, `76`) the box-blur suite had already hand-verified. That
+cross-check earned its keep: an initial hand-derivation had assumed
+any radius of `2` or more averages the whole 3x3 grid to `50` from any
+pixel, which is only true from the centre — from an off-centre pixel
+the clamped window repeats edge samples unevenly, and the script's
+`52`/`38`/`47` corrected the assumption before it reached a test.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-two: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**867 Rust tests total** (861 → 867, 860 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

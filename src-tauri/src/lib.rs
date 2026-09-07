@@ -2531,6 +2531,19 @@ fn spin_blur(
     })
 }
 
+/// Filter > Blur > Lens Blur on layer `id`, driven by its own alpha channel.
+#[tauri::command]
+fn lens_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    max_radius: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lens_blur(id, max_radius, invert)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2777,6 +2790,7 @@ pub fn run() {
             iris_blur,
             field_blur,
             spin_blur,
+            lens_blur,
             select_rectangle,
             select_ellipse,
             select_all,

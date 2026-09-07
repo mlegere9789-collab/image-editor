@@ -383,6 +383,9 @@ export default function App() {
   const [spinBlurCenterX, setSpinBlurCenterX] = useState(0);
   const [spinBlurCenterY, setSpinBlurCenterY] = useState(0);
   const [spinBlurAngle, setSpinBlurAngle] = useState(15);
+  const [showLensBlurDialog, setShowLensBlurDialog] = useState(false);
+  const [lensBlurRadius, setLensBlurRadius] = useState(15);
+  const [lensBlurInvert, setLensBlurInvert] = useState(false);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -2174,6 +2177,16 @@ export default function App() {
     setShowSpinBlurDialog(false);
   }, [runCommand, selectedId, spinBlurCenterX, spinBlurCenterY, spinBlurAngle]);
 
+  const applyLensBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("lens_blur", {
+      id: selectedId,
+      maxRadius: lensBlurRadius,
+      invert: lensBlurInvert,
+    });
+    setShowLensBlurDialog(false);
+  }, [runCommand, selectedId, lensBlurRadius, lensBlurInvert]);
+
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("lens_flare", {
@@ -3954,6 +3967,14 @@ export default function App() {
             title="Filter Gallery > Blur Gallery > Spin Blur"
           >
             Spin Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowLensBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Lens Blur"
+          >
+            Lens Blur…
           </button>
           <button
             className="button button--quiet"
@@ -11283,6 +11304,59 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySpinBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLensBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLensBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Lens Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Lens Blur</h2>
+            <p className="modal__hint">
+              The layer's own alpha channel is the depth map: opaque pixels
+              blur at the full radius, transparent pixels stay sharp.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{lensBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lensBlurRadius}
+                onChange={(event) => setLensBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={lensBlurInvert}
+                onChange={(event) => setLensBlurInvert(event.target.checked)}
+              />
+              <span className="control__label">Invert depth map</span>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLensBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyLensBlur} disabled={busy}>
                 Apply
               </button>
             </div>

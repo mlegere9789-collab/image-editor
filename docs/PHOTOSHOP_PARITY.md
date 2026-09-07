@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 186.**
+**618 distinct capabilities tracked. Currently shipped: 187.**
 
 ## PART I — EVERY TOOL
 
@@ -481,7 +481,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Radial Blur (`radial_blur`, Zoom method only: three `sample_nearest` lookups per pixel at scale factors `1-blur`, `1`, `1+blur` symmetric around a chosen centre, averaged across all four channels. Photoshop's own Spin method and its Draft/Good/Best sample-count Quality dial (fixed at three samples here) are a documented scope cut — see README Phase 113)
 - [ ] Shape Blur
 - [x] Surface Blur (edge-preserving weighted mean: weight = threshold − |neighbour − centre| clamped at 0, radius/threshold dialog — see README Phase 34)
-- [ ] Lens Blur
+- [x] Lens Blur (`lens_blur`, the layer's own alpha channel standing in for Photoshop's own separate depth-map input: each pixel's `box_blur_at` radius is `round(alpha / 255 * max_radius)`, or `round((255 - alpha) / 255 * max_radius)` with Invert, RGB written back and alpha left untouched as the depth map. Photoshop's own iris shape/blade curvature/rotation, specular highlights, and re-added noise are a documented scope cut — see README Phase 125)
 - [ ] Blur Gallery
 - [x] Field Blur (`field_blur`, two pins only: each pixel's own `box_blur_at` radius is an inverse-distance-weighted average of two pins' own radii, varying smoothly across the whole image, unlike `iris_blur`/`tilt_shift`'s own fixed radius blended past a hard zone boundary. Photoshop's own arbitrary-many-pin, spline-smoothed interpolation is a documented scope cut — see README Phase 123)
 - [x] Iris Blur (`iris_blur`, circular only: `tilt_shift`'s own gradient-blur shape with a circular sharp zone instead of a horizontal band, blending toward a `box_blur_at` average by Euclidean distance from a chosen centre past a given radius. Photoshop's own stretchable/rotatable ellipse and four independently draggable feather handles are a documented scope cut — see README Phase 122)

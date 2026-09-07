@@ -9733,6 +9733,53 @@ impl Document {
             out
         })
     }
+
+    /// Filter > Blur > Lens Blur: a depth-of-field blur whose radius
+    /// varies per pixel, driven directly by that pixel's own alpha
+    /// channel as a stand-in for Photoshop's own separate depth-map
+    /// input (a chosen alpha channel, layer mask, or transparency).
+    /// `radius = round(depth / 255 * max_radius)`, where `depth` is the
+    /// pixel's own alpha byte (or `255 - alpha` when `invert` is set,
+    /// matching Photoshop's own Invert checkbox on the depth map), and
+    /// the result is run through the same [`box_blur_at`] primitive
+    /// [`Self::box_blur`]/[`Self::tilt_shift`]/[`Self::field_blur`]
+    /// already share. Only the RGB channels are written back; alpha
+    /// itself is left byte-for-byte untouched, since it is the depth
+    /// map driving the blur and must survive unchanged for the effect
+    /// to mean anything (the same convention [`Self::tilt_shift`],
+    /// [`Self::iris_blur`], and [`Self::field_blur`] already keep for
+    /// their own reasons). `max_radius` is Photoshop's own Lens Blur
+    /// Radius range, `0..=100`. Photoshop's own Lens Blur also shapes
+    /// its blur kernel by an adjustable iris (blade count, curvature,
+    /// rotation), adds specular highlights past a brightness threshold,
+    /// and can layer a film-grain pass back in afterward; this
+    /// project's own flat, alpha-driven box blur is a documented scope
+    /// cut, trading that richer bokeh simulation for one exactly
+    /// hand-verifiable mechanism built entirely from an already-tested
+    /// primitive.
+    pub fn lens_blur(
+        &mut self,
+        id: LayerId,
+        max_radius: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if max_radius > 100 {
+            return Err("Lens Blur radius must be between 0 and 100 pixels.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |source, row, col| {
+            let idx = (row as usize * doc_width + col as usize) * CHANNELS;
+            let alpha = source[idx + 3];
+            let depth = if invert { 255 - alpha } else { alpha };
+            let radius = ((depth as f32 / 255.0) * max_radius as f32).round() as i64;
+            let blurred = box_blur_at(source, doc_width, width, height, row, col, radius);
+            let mut out = [0u8; CHANNELS];
+            out[..3].copy_from_slice(&blurred[..3]);
+            out[3] = alpha;
+            out
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22550,6 +22597,112 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.spin_blur(999, 1.0, 1.0, 90.0).is_err());
+    }
+
+    /// `ramped_3x3`'s own R-only ramp, but with alpha standing in for a
+    /// depth map: column 0 fully near (`0`), column 1 halfway (`128`),
+    /// column 2 fully far (`255`).
+    fn depth_ramped_3x3() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 3).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            10, 0, 0, 0,  20, 0, 0, 128,  30, 0, 0, 255,
+            40, 0, 0, 0,  50, 0, 0, 128,  60, 0, 0, 255,
+            70, 0, 0, 0,  80, 0, 0, 128,  90, 0, 0, 255,
+        ];
+        let id = doc.add_layer("base", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn lens_blur_scales_each_pixels_radius_by_its_own_alpha() {
+        // Pixel (col 2, row 1), alpha 255, max radius 4: depth 255/255 * 4
+        // rounds to radius 4, whose edge-clamped 9x9 window over this 3x3
+        // grid averages (truncating) to 52 -- a real change from its own
+        // original 60.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.lens_blur(id, 4, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 1)], 52);
+        // Alpha is the depth map: it must survive byte-for-byte.
+        assert_eq!(p[idx(2, 1) + 3], 255);
+        assert_eq!(p[idx(1, 1) + 3], 128);
+        assert_eq!(p[idx(0, 1) + 3], 0);
+    }
+
+    #[test]
+    fn lens_blur_max_radius_scales_the_per_pixel_radius() {
+        // Pixel (col 1, row 0), alpha 128. Max radius 1: 128/255 * 1 =
+        // 0.50196 rounds to radius 1, whose window averages to 30. Max
+        // radius 4: 128/255 * 4 = 2.0078 rounds to radius 2, whose window
+        // averages to 38 -- two distinct, hand-computed values from the
+        // same original 20, so the radius genuinely depends on max_radius.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.lens_blur(id, 1, false).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 30);
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.lens_blur(id, 4, false).unwrap();
+        assert_eq!(doc.layers()[0].pixels[idx(1, 0)], 38);
+    }
+
+    #[test]
+    fn lens_blur_leaves_fully_near_pixels_untouched() {
+        // Alpha 0 is depth 0, radius 0 at any max radius: the identity.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.lens_blur(id, 4, false).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(0, 1)], 40);
+        assert_eq!(p[idx(0, 2)], 70);
+    }
+
+    #[test]
+    fn lens_blur_invert_swaps_which_depth_is_sharp() {
+        // Inverted, alpha 0 becomes depth 255 (radius 4): pixel (col 0,
+        // row 1) now blurs from 40 to a hand-computed 47, while alpha 255
+        // becomes depth 0 (radius 0): pixel (col 2, row 1) stays exactly 60.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.lens_blur(id, 4, true).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 1)], 47);
+        assert_eq!(p[idx(2, 1)], 60);
+    }
+
+    #[test]
+    fn lens_blur_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = depth_ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 1.0, 3.0, 2.0).unwrap();
+        let dirty = doc.lens_blur(id, 4, false).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 1)], 52);
+        assert_eq!(after[..idx(2, 1)], before[..idx(2, 1)]); // unselected, untouched
+        assert_eq!(after[idx(2, 1) + 4..], before[idx(2, 1) + 4..]);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 1,
+                x1: 3,
+                y1: 2
+            })
+        );
+    }
+
+    #[test]
+    fn lens_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.lens_blur(id, 101, false).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.lens_blur(id, 4, false).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.lens_blur(999, 4, false).is_err());
     }
 
     #[test]
