@@ -11590,6 +11590,48 @@ impl Document {
         self.levels_per_channel(id, [0; 3], [r, g, b])
     }
 
+    /// The Levels and Curves dialogs' Gray Point eyedropper: clicking
+    /// pixel `(x, y)` of layer `id` makes that pixel neutral by giving
+    /// each channel its own gamma, chosen so the pixel's value in that
+    /// channel lands on the mean of its three channels (rounded) — for a
+    /// channel value `c` and target `t`, the exponent `ln(t/255) /
+    /// ln(c/255)`, applied as `(v/255)^exponent` to every pixel's value
+    /// `v` in that channel, so the clicked pixel's colour cast is removed
+    /// from the whole layer while its brightness is roughly kept. A
+    /// channel already at the target, or at `0` or `255` (where no gamma
+    /// can move it), is left alone. Photoshop keeps luminosity with its
+    /// own weighting and lets the target grey be configured; both are
+    /// documented scope cuts. Errors for a point off the canvas or an
+    /// unknown or locked layer.
+    pub fn levels_gray_point(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        let target = ((r as f32 + g as f32 + b as f32) / 3.0).round();
+        let exponent = |c: u8| -> Option<f32> {
+            if c == 0 || c == 255 || c as f32 == target {
+                return None;
+            }
+            Some((target / 255.0).ln() / (c as f32 / 255.0).ln())
+        };
+        let exponents = [exponent(r), exponent(g), exponent(b)];
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let apply = |v: u8, exponent: Option<f32>| match exponent {
+                Some(exponent) => to_byte(to_unit(v).powf(exponent)),
+                None => v,
+            };
+            [
+                apply(r, exponents[0]),
+                apply(g, exponents[1]),
+                apply(b, exponents[2]),
+                a,
+            ]
+        })
+    }
+
     /// [`Self::levels`]'s input remap with its own black and white point
     /// per channel (gamma `1`, output `0..=255`), the shape both
     /// eyedroppers need. As in `levels`, each channel's white is clamped
@@ -21943,6 +21985,82 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.levels_white_point(id, 0, 0).is_err());
         assert_eq!(pixel(&doc, id, 1, 0), [140, 160, 180, 255]);
+    }
+
+    /// Clicking [100, 150, 200] targets its mean 150: red's exponent is
+    /// ln(150/255)/ln(100/255) = 0.5669, green's 1, blue's 2.1841.
+    fn gray_point_fixture() -> (Document, LayerId) {
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[
+                    100, 150, 200, 255, 50, 50, 50, 255, 200, 200, 200, 128, 150, 150, 150, 255,
+                ],
+                4,
+                1,
+            )
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn levels_gray_point_makes_the_clicked_pixel_neutral() {
+        let (mut doc, id) = gray_point_fixture();
+        doc.levels_gray_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [150, 150, 150, 255]);
+    }
+
+    #[test]
+    fn levels_gray_point_applies_each_channels_gamma_to_the_whole_layer() {
+        // 50: 101.26 / 50 / 7.26; 200: 222.19 / 200 / 150; 150: 188.76 /
+        // 150 / 80.02 — Python f32 model, none near a rounding boundary.
+        let (mut doc, id) = gray_point_fixture();
+        doc.levels_gray_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [101, 50, 7, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [222, 200, 150, 128]);
+        assert_eq!(pixel(&doc, id, 3, 0), [189, 150, 80, 255]);
+    }
+
+    #[test]
+    fn levels_gray_point_on_a_neutral_pixel_is_a_no_op() {
+        let (mut doc, id) = gray_point_fixture();
+        doc.levels_gray_point(id, 3, 0).unwrap();
+        for x in 0..4 {
+            assert_eq!(
+                pixel(&doc, id, x, 0),
+                pixel(&gray_point_fixture().0, id, x, 0)
+            );
+        }
+    }
+
+    #[test]
+    fn levels_gray_point_skips_channels_at_the_extremes_and_keeps_the_selection() {
+        // A clicked [0, 128, 255] targets 128: only green can move, and
+        // it is already there, so nothing changes anywhere.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 128, 255, 255, 50, 50, 50, 255], 2, 1)
+            .unwrap();
+        doc.levels_gray_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
+        // Sampling outside the selection adjusts only the selection.
+        let (mut doc, id) = gray_point_fixture();
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        doc.levels_gray_point(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [101, 50, 7, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 200, 200, 128]);
+    }
+
+    #[test]
+    fn levels_gray_point_propagates_errors() {
+        let (mut doc, id) = gray_point_fixture();
+        assert!(doc.levels_gray_point(id, 4, 0).is_err());
+        assert!(doc.levels_gray_point(id + 1, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.levels_gray_point(id, 0, 0).is_err());
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
     }
 
     #[test]

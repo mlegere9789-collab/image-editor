@@ -486,7 +486,9 @@ export default function App() {
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
   // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
   // makes the clicked pixel black or white and disarms.
-  const [levelsEyedropper, setLevelsEyedropper] = useState<"black" | "white" | null>(null);
+  const [levelsEyedropper, setLevelsEyedropper] = useState<"black" | "gray" | "white" | null>(
+    null,
+  );
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   // Curves > Point mode: free (input, output) control points instead of
@@ -3381,10 +3383,13 @@ export default function App() {
       if (levelsEyedropper !== null) {
         if (selectedId !== null) {
           const [x, y] = toDocPoint(event, document);
-          void runCommand(
-            levelsEyedropper === "black" ? "levels_black_point" : "levels_white_point",
-            { id: selectedId, x: Math.floor(x), y: Math.floor(y) },
-          );
+          const command =
+            levelsEyedropper === "black"
+              ? "levels_black_point"
+              : levelsEyedropper === "gray"
+                ? "levels_gray_point"
+                : "levels_white_point";
+          void runCommand(command, { id: selectedId, x: Math.floor(x), y: Math.floor(y) });
         }
         setLevelsEyedropper(null);
         return;
@@ -9542,6 +9547,17 @@ export default function App() {
               <button
                 className="button button--quiet"
                 onClick={() => {
+                  setLevelsEyedropper("gray");
+                  setShowLevelsDialog(false);
+                }}
+                disabled={busy}
+                title="Gray Point eyedropper: then click the pixel that should become neutral grey"
+              >
+                Gray Pt
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => {
                   setLevelsEyedropper("white");
                   setShowLevelsDialog(false);
                 }}
@@ -9673,6 +9689,17 @@ export default function App() {
                 title="Black Point eyedropper: then click the pixel that should become black"
               >
                 Black Pt
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setLevelsEyedropper("gray");
+                  setShowCurvesDialog(false);
+                }}
+                disabled={busy}
+                title="Gray Point eyedropper: then click the pixel that should become neutral grey"
+              >
+                Gray Pt
               </button>
               <button
                 className="button button--quiet"

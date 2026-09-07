@@ -12065,6 +12065,53 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1225 Rust tests total** (1220 → 1225, 1218 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 197 — Levels and Curves Gray Point eyedropper
+
+`Document::levels_gray_point(id, x, y)` completes the eyedropper trio.
+Clicking a pixel makes it neutral by giving each channel its own
+gamma, chosen so the pixel's value in that channel lands on the
+rounded mean of its three channels: for a channel value `c` and target
+`t` the exponent is `ln(t/255) / ln(c/255)`, applied as
+`(v/255)^exponent` to every pixel's value `v` in that channel, so the
+clicked pixel's colour cast is lifted from the whole layer while its
+brightness is roughly kept. A channel already at the target, or at `0`
+or `255` where no gamma can move it, is left alone. Photoshop keeps
+luminosity with its own weighting and lets the target grey be
+configured; both are documented scope cuts, as before. The sample is
+read with `layer_pixel` (off-canvas, unknown, and locked all error)
+and the adjustment respects the selection. Both dialogs gain a **Gray
+Pt** button beside Black Pt and White Pt, arming the same toolbar
+eyedropper, which now runs `levels_gray_point` for it.
+
+**Verified two ways.** Five new `document.rs` tests, every byte first
+computed in Python emulating `f32`, with the raw products checked to
+sit well away from a rounding boundary (the closest is `33.0065`).
+Clicking `[100, 150, 200]` targets `150`: red's exponent is `0.5669`,
+green's `1`, blue's `2.1841`, and the pixel becomes `[150, 150, 150]`.
+The same exponents carry across the layer: `[50, 50, 50]` becomes
+`[101, 50, 7]` (`101.26`, `7.26`), `[200, 200, 200]` with alpha `128`
+becomes `[222, 200, 150]` (`222.19`), and `[150, 150, 150]` becomes
+`[189, 150, 80]` (`188.76`, `80.02`). Clicking an already-neutral pixel
+changes nothing anywhere. Clicking `[0, 128, 255]` — whose only movable
+channel is already at the target `128` — changes nothing either, and
+with only the second pixel selected, sampling the first adjusts only
+the second. Off-canvas coordinates, an unknown layer, and a locked
+layer error with the pixels intact. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new button was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1230 Rust tests total** (1225 → 1230, 1223 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

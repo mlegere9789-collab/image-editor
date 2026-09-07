@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 281.**
+**618 distinct capabilities tracked. Currently shipped: 283.**
 
 ## PART I — EVERY TOOL
 
@@ -449,7 +449,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Output Levels — White (`levels` / `levels_on`'s `output_white`, shipped with LEVELS — checked here for consistency)
 - [x] Levels Channel Selection (`Document::levels_on` with `LevelsChannel::{Rgb, Red, Green, Blue}`: the same remap put through one channel alone, the other two and alpha untouched, exposed as the Levels dialog's Channel dropdown — see README Phase 193)
 - [x] Levels Black Point Eyedropper (`Document::levels_black_point`, the clicked pixel's per-channel values become each channel's input black so it turns pure black; the configurable target colour is a documented scope cut — see README Phase 196)
-- [ ] Levels Gray Point Eyedropper
+- [x] Levels Gray Point Eyedropper (`Document::levels_gray_point`, each channel given the gamma that puts the clicked pixel's value on the mean of its channels, so the pixel goes neutral and its cast leaves the whole layer; Photoshop's luminosity weighting and configurable target grey are documented scope cuts — see README Phase 197)
 - [x] Levels White Point Eyedropper (`Document::levels_white_point`, the mirror: the clicked pixel's per-channel values become each channel's input white — see README Phase 196)
 - [x] Levels Auto (the Levels dialog's Auto button: `auto_tone_clipped` with the dialog's Clip percentages, each channel stretched to full range from its clipped low to its clipped high — see README Phase 194)
 - [x] Levels Auto Options (`auto_tone_clipped` / `auto_contrast_clipped`'s shadow and highlight Clip in hundredths of a percent, 0–9.99%, read off per-channel histograms as ranks; the algorithm choices beyond Enhance Per Channel Contrast, Snap Neutral Midtones, and the target colours are documented scope cuts — see README Phase 194)
@@ -457,7 +457,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Curves Pencil/Draw Mode
 - [ ] Curves On-Image Adjustment Tool
 - [x] Curves Black Point (the Curves dialog's Black Point eyedropper, the same `levels_black_point` — see README Phase 196)
-- [ ] Curves Gray Point
+- [x] Curves Gray Point (the Curves dialog's Gray Point eyedropper, the same `levels_gray_point` — see README Phase 197)
 - [x] Curves White Point (the Curves dialog's White Point eyedropper, the same `levels_white_point` — see README Phase 196)
 - [ ] Curves Show Clipping
 - [ ] Curves Show Channel Overlays

@@ -3260,6 +3260,18 @@ fn levels_white_point(
     edit_checkpointed(&state, |document| document.levels_white_point(id, x, y))
 }
 
+/// Levels/Curves Gray Point eyedropper: make pixel `(x, y)` of layer `id`
+/// neutral, per-channel gamma.
+#[tauri::command]
+fn levels_gray_point(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.levels_gray_point(id, x, y))
+}
+
 /// Image > Adjustments > Curves in Point mode: arbitrary `(input, output)`
 /// control points on layer `id`.
 #[tauri::command]
@@ -3878,6 +3890,7 @@ pub fn run() {
             curves_points,
             levels_black_point,
             levels_white_point,
+            levels_gray_point,
             color_balance,
             highlights_shadows,
             clarity,
