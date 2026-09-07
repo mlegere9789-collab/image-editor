@@ -520,6 +520,46 @@ fn clear_count_marks(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Note tool: pin a text note at `(x, y)`.
+#[tauri::command]
+fn add_note(state: State<'_, AppState>, x: u32, y: u32, text: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_note(x, y, &text)?;
+        Ok(None)
+    })
+}
+
+/// Note tool: rewrite note `index`'s text.
+#[tauri::command]
+fn set_note_text(
+    state: State<'_, AppState>,
+    index: usize,
+    text: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_note_text(index, &text)?;
+        Ok(None)
+    })
+}
+
+/// Note tool: delete note `index`.
+#[tauri::command]
+fn remove_note(state: State<'_, AppState>, index: usize) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.remove_note(index)?;
+        Ok(None)
+    })
+}
+
+/// Note tool: remove every note.
+#[tauri::command]
+fn clear_notes(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.clear_notes();
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
 #[tauri::command]
 fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
@@ -3401,6 +3441,10 @@ pub fn run() {
             load_selection,
             add_count_mark,
             clear_count_marks,
+            add_note,
+            set_note_text,
+            remove_note,
+            clear_notes,
             contract_selection,
             smooth_selection,
             border_selection,

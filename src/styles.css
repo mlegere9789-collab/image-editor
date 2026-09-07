@@ -512,6 +512,21 @@ body {
   box-shadow: 0 0 0 1px #fff;
 }
 
+.note-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 4px;
+  background: #f5c400;
+  color: #222;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
 .clipping {
   display: flex;
   align-items: center;

@@ -10656,6 +10656,50 @@ quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
 **1085 Rust tests total** (1080 → 1085, 1078 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 169 — Note tool
+
+`add_note(x, y, text)` pins a text annotation to a pixel and returns
+its index; `set_note_text(index, text)` rewrites it, `remove_note(index)`
+deletes it (later notes shift down), `clear_notes()` removes them all,
+and `notes()` lists them in placement order — a new `Note { x, y, text
+}` struct the `DocumentView` carries as `notes`. Text is trimmed and
+must not be blank; a click off the canvas or an unknown index errors,
+the latter naming the note by its 1-based number as the UI shows it.
+Notes are document data in Photoshop — they save with the file and
+undo — so, like count marks, they live on the `Document`, every change
+is one checkpointed undo step, and they are discarded when the canvas
+changes size. Photoshop's note author, colour, and audio annotations
+are documented scope cuts. A new **Note** tool button opens a dialog
+for the clicked pixel; each note is drawn on the canvas as a clickable
+badge whose tooltip is its text and whose click reopens the dialog to
+edit or delete it; a **Clear Notes** button appears in the tool
+options while the tool is active, and the status bar shows `Notes N`.
+
+**Verified two ways.** Five new `document.rs` tests reading the notes
+back through both the accessor and the view. Notes at `(2, 0)` and
+`(0, 2)` get indices `0` and `1`, `"  first "` is stored trimmed, and
+the view's list equals the accessor's. Rewriting the middle of three
+notes to `" bee "` stores `bee`, removing the first shifts the others
+down, and clearing empties the list. Blank text errors on add
+(mentioning "text") and on rewrite, leaving the existing note intact.
+Off-canvas pins error, and rewriting or removing note `0` on an empty
+document errors mentioning "#1". A note survives a pixel edit but not a
+document rotation or a crop. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and sixteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The tool, dialog, and badge wiring were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1090 Rust tests total** (1085 → 1090, 1083 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

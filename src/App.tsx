@@ -262,6 +262,13 @@ export default function App() {
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
+  // A note being written (index null) or edited (index set).
+  const [noteDialog, setNoteDialog] = useState<{
+    x: number;
+    y: number;
+    index: number | null;
+    text: string;
+  } | null>(null);
   const [samplerReadouts, setSamplerReadouts] = useState<[number, number, number, number][]>([]);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
@@ -3033,6 +3040,35 @@ export default function App() {
   const isRuler = tool === "ruler";
   const isColorSampler = tool === "colorSampler";
   const isCount = tool === "count";
+  const isNote = tool === "note";
+
+  const startNote = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document) return;
+      const [fx, fy] = toDocPoint(event, document);
+      const x = Math.floor(fx);
+      const y = Math.floor(fy);
+      if (x < 0 || y < 0 || x >= document.width || y >= document.height) return;
+      setNoteDialog({ x, y, index: null, text: "" });
+    },
+    [document],
+  );
+
+  const saveNote = useCallback(async () => {
+    if (!noteDialog) return;
+    if (noteDialog.index === null) {
+      await runCommand("add_note", { x: noteDialog.x, y: noteDialog.y, text: noteDialog.text });
+    } else {
+      await runCommand("set_note_text", { index: noteDialog.index, text: noteDialog.text });
+    }
+    setNoteDialog(null);
+  }, [runCommand, noteDialog]);
+
+  const deleteNote = useCallback(async () => {
+    if (!noteDialog || noteDialog.index === null) return;
+    await runCommand("remove_note", { index: noteDialog.index });
+    setNoteDialog(null);
+  }, [runCommand, noteDialog]);
 
   const placeCountMark = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3173,6 +3209,10 @@ export default function App() {
         placeCountMark(event);
         return;
       }
+      if (isNote) {
+        startNote(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -3217,6 +3257,8 @@ export default function App() {
       placeColorSampler,
       isCount,
       placeCountMark,
+      isNote,
+      startNote,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3883,6 +3925,15 @@ export default function App() {
             title="Count: click to place numbered marks; the running total shows in the status bar"
           >
             Count
+          </button>
+          <button
+            className={`button button--quiet${tool === "note" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "note"}
+            onClick={() => setTool("note")}
+            title="Note: click to pin a text note; click a note's badge to edit or delete it"
+          >
+            Note
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -5161,6 +5212,16 @@ export default function App() {
               title="Remove every count mark"
             >
               Clear Count
+            </button>
+          )}
+          {tool === "note" && (
+            <button
+              className="button button--quiet"
+              onClick={() => void runCommand("clear_notes", {})}
+              disabled={busy || (document?.notes.length ?? 0) === 0}
+              title="Remove every note"
+            >
+              Clear Notes
             </button>
           )}
           {tool === "sponge" && (
@@ -6626,6 +6687,54 @@ export default function App() {
               </button>
               <button className="button" onClick={applyGeometry} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {noteDialog && (
+        <div className="modal-overlay" onClick={() => setNoteDialog(null)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Note"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              {noteDialog.index === null ? "New Note" : `Note ${noteDialog.index + 1}`}
+            </h2>
+            <p className="modal__hint">
+              Pinned at ({noteDialog.x}, {noteDialog.y}). Notes are saved with the document and
+              undo like any edit.
+            </p>
+            <label className="control">
+              <span className="control__label">Text</span>
+              <textarea
+                rows={4}
+                value={noteDialog.text}
+                onChange={(event) =>
+                  setNoteDialog((current) =>
+                    current ? { ...current, text: event.target.value } : current,
+                  )
+                }
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setNoteDialog(null)}>
+                Cancel
+              </button>
+              {noteDialog.index !== null && (
+                <button className="button button--quiet" onClick={deleteNote} disabled={busy}>
+                  Delete
+                </button>
+              )}
+              <button
+                className="button"
+                onClick={saveNote}
+                disabled={busy || noteDialog.text.trim() === ""}
+              >
+                {noteDialog.index === null ? "Add" : "Save"}
               </button>
             </div>
           </div>
@@ -13886,6 +13995,25 @@ export default function App() {
                   {index + 1}
                 </span>
               ))}
+              {document.notes.map((note, index) => (
+                <button
+                  key={index}
+                  type="button"
+                  className="note-mark"
+                  title={note.text}
+                  aria-label={`Note ${index + 1}: ${note.text}`}
+                  style={{
+                    left: `${((note.x + 0.5) / document.width) * 100}%`,
+                    top: `${((note.y + 0.5) / document.height) * 100}%`,
+                  }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setNoteDialog({ x: note.x, y: note.y, index, text: note.text });
+                  }}
+                >
+                  ✎
+                </button>
+              ))}
               {!marqueePreview && document.selection && (
                 <>
                   <div
@@ -13996,6 +14124,11 @@ export default function App() {
             {document.countMarks.length > 0 && (
               <span className="statusbar__levels" title="Count tool: marks placed">
                 Count {document.countMarks.length}
+              </span>
+            )}
+            {document.notes.length > 0 && (
+              <span className="statusbar__levels" title="Note tool: notes pinned">
+                Notes {document.notes.length}
               </span>
             )}
             {samplerReadouts.map((rgba, index) => (

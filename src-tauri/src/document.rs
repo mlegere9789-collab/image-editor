@@ -101,6 +101,18 @@ pub struct Document {
     /// discarded, like every position-bound thing here, when the canvas
     /// changes size.
     count_marks: Vec<(u32, u32)>,
+    /// The Note tool's annotations, in placement order — document data,
+    /// undoable, and discarded when the canvas changes size.
+    notes: Vec<Note>,
+}
+
+/// A Note tool annotation pinned to pixel `(x, y)`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Note {
+    pub x: u32,
+    pub y: u32,
+    pub text: String,
 }
 
 /// A rectangle of RGBA8 pixels captured by [`Document::define_pattern`],
@@ -979,6 +991,8 @@ pub struct DocumentView {
     /// The Count tool's marks, `(x, y)` in placement order; mark `n` is
     /// numbered `n + 1`.
     pub count_marks: Vec<(u32, u32)>,
+    /// The Note tool's annotations in placement order.
+    pub notes: Vec<Note>,
 }
 
 impl Document {
@@ -998,6 +1012,7 @@ impl Document {
             pattern: None,
             saved_selections: Vec::new(),
             count_marks: Vec::new(),
+            notes: Vec::new(),
         })
     }
 
@@ -1029,6 +1044,7 @@ impl Document {
             has_pattern: self.pattern.is_some(),
             saved_selections: self.saved_selection_names(),
             count_marks: self.count_marks.clone(),
+            notes: self.notes.clone(),
         }
     }
 
@@ -1853,6 +1869,66 @@ impl Document {
         &self.count_marks
     }
 
+    /// The Note tool: pins a text annotation to pixel `(x, y)` and returns
+    /// its index. Notes are document data, as in Photoshop — they undo and
+    /// travel with the document — and are cleared when the canvas changes
+    /// size. The text is trimmed and must not be blank; a click off the
+    /// canvas errors. Photoshop's note author, colour, and audio
+    /// annotations are documented scope cuts.
+    pub fn add_note(&mut self, x: u32, y: u32, text: &str) -> Result<usize, String> {
+        if x >= self.width || y >= self.height {
+            return Err(format!(
+                "({x}, {y}) is outside the {}×{} canvas.",
+                self.width, self.height
+            ));
+        }
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("A note needs some text.".to_string());
+        }
+        self.notes.push(Note {
+            x,
+            y,
+            text: text.to_string(),
+        });
+        Ok(self.notes.len() - 1)
+    }
+
+    /// Rewrites note `index`'s text (trimmed, non-blank). Errors on an
+    /// unknown index or blank text.
+    pub fn set_note_text(&mut self, index: usize, text: &str) -> Result<(), String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("A note needs some text.".to_string());
+        }
+        let note = self
+            .notes
+            .get_mut(index)
+            .ok_or_else(|| format!("There is no note #{}.", index + 1))?;
+        note.text = text.to_string();
+        Ok(())
+    }
+
+    /// Deletes note `index`; later notes shift down. Errors on an unknown
+    /// index.
+    pub fn remove_note(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.notes.len() {
+            return Err(format!("There is no note #{}.", index + 1));
+        }
+        self.notes.remove(index);
+        Ok(())
+    }
+
+    /// Removes every note.
+    pub fn clear_notes(&mut self) {
+        self.notes.clear();
+    }
+
+    /// The Note tool's annotations in placement order.
+    pub fn notes(&self) -> &[Note] {
+        &self.notes
+    }
+
     pub fn selection(&self) -> Option<Selection> {
         self.selection.clone()
     }
@@ -2129,6 +2205,7 @@ impl Document {
         self.last_selection = None;
         self.saved_selections.clear();
         self.count_marks.clear();
+        self.notes.clear();
     }
 
     /// Crops the whole document — the canvas and every layer in it — to
@@ -2163,6 +2240,7 @@ impl Document {
         self.last_selection = None;
         self.saved_selections.clear();
         self.count_marks.clear();
+        self.notes.clear();
         Ok(())
     }
 
@@ -28593,6 +28671,78 @@ mod tests {
         let doc = Document::new(2, 2).unwrap();
         assert!(doc.count_marks().is_empty());
         assert!(doc.view().count_marks.is_empty());
+    }
+
+    fn note(x: u32, y: u32, text: &str) -> Note {
+        Note {
+            x,
+            y,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn notes_are_pinned_in_placement_order_with_trimmed_text() {
+        let (mut doc, _) = ramped_3x3();
+        assert_eq!(doc.add_note(2, 0, "  first ").unwrap(), 0);
+        assert_eq!(doc.add_note(0, 2, "second").unwrap(), 1);
+        assert_eq!(doc.notes(), &[note(2, 0, "first"), note(0, 2, "second")]);
+        assert_eq!(doc.view().notes, doc.notes().to_vec());
+    }
+
+    #[test]
+    fn notes_can_be_rewritten_and_removed() {
+        let (mut doc, _) = ramped_3x3();
+        doc.add_note(0, 0, "a").unwrap();
+        doc.add_note(1, 1, "b").unwrap();
+        doc.add_note(2, 2, "c").unwrap();
+        doc.set_note_text(1, " bee ").unwrap();
+        assert_eq!(doc.notes()[1], note(1, 1, "bee"));
+        doc.remove_note(0).unwrap();
+        assert_eq!(doc.notes(), &[note(1, 1, "bee"), note(2, 2, "c")]);
+        doc.clear_notes();
+        assert!(doc.notes().is_empty());
+    }
+
+    #[test]
+    fn notes_reject_blank_text() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc.add_note(0, 0, "   ").unwrap_err();
+        assert!(err.contains("text"), "{err}");
+        assert!(doc.notes().is_empty());
+        doc.add_note(0, 0, "kept").unwrap();
+        assert!(doc.set_note_text(0, "").is_err());
+        assert_eq!(doc.notes()[0].text, "kept");
+    }
+
+    #[test]
+    fn notes_reject_off_canvas_points_and_unknown_indices() {
+        let (mut doc, _) = ramped_3x3();
+        assert!(doc.add_note(3, 0, "x").is_err());
+        assert!(doc.add_note(0, 3, "x").is_err());
+        let err = doc.set_note_text(0, "x").unwrap_err();
+        assert!(err.contains("#1"), "{err}");
+        assert!(doc.remove_note(0).is_err());
+        assert!(doc.notes().is_empty());
+    }
+
+    #[test]
+    fn notes_survive_pixel_edits_but_not_a_canvas_resize() {
+        let (mut doc, id) = ramped_3x3();
+        doc.add_note(1, 1, "keep").unwrap();
+        doc.invert_colors(id).unwrap();
+        assert_eq!(doc.notes().len(), 1);
+        doc.rotate_document_90(true);
+        assert!(doc.notes().is_empty());
+        doc.add_note(0, 0, "again").unwrap();
+        doc.crop(Rect {
+            x0: 0,
+            y0: 0,
+            x1: 2,
+            y1: 2,
+        })
+        .unwrap();
+        assert!(doc.view().notes.is_empty());
     }
 
     #[test]

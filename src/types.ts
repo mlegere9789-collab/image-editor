@@ -69,6 +69,15 @@ export type DocumentView = {
   savedSelections: string[];
   /** The Count tool's marks, (x, y) in placement order; mark n is numbered n + 1. */
   countMarks: [number, number][];
+  /** The Note tool's annotations in placement order. */
+  notes: Note[];
+};
+
+/** A Note tool annotation pinned to a pixel. */
+export type Note = {
+  x: number;
+  y: number;
+  text: string;
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
@@ -118,6 +127,7 @@ export type Tool =
   | "ruler"
   | "colorSampler"
   | "count"
+  | "note"
   | "patternStamp"
   | "magicWand"
   | "selectRect"
