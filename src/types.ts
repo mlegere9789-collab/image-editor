@@ -127,6 +127,7 @@ export type Tool =
   | "brush"
   | "eraser"
   | "magicEraser"
+  | "backgroundEraser"
   | "dodge"
   | "burn"
   | "sponge"

@@ -2068,6 +2068,22 @@ fn color_replace_stroke(
     })
 }
 
+/// Background Eraser: erase, along `points` on layer `id`, only pixels
+/// within `tolerance` of the colour under the stroke's start. See
+/// [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn background_erase_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::BackgroundErase { tolerance })
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3548,6 +3564,7 @@ pub fn run() {
             sharpen_stroke,
             smudge_stroke,
             color_replace_stroke,
+            background_erase_stroke,
             clone_stroke,
             set_history_source,
             history_stroke,

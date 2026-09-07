@@ -7150,6 +7150,17 @@ impl Document {
                         color.copy_from_slice(&source[base..base + CHANNELS]);
                         (color, to_unit(color[3]) * c)
                     }
+                    Stroke::BackgroundErase { tolerance } => {
+                        let within = layer.pixels[base..base + 3]
+                            .iter()
+                            .zip(replace_sample.iter())
+                            .all(|(&a, &b)| a.abs_diff(b) <= tolerance);
+                        if within {
+                            let dest_alpha = to_unit(layer.pixels[base + 3]);
+                            layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
+                        }
+                        continue;
+                    }
                     Stroke::ColorReplace { color, tolerance } => {
                         if layer.pixels[base + 3] == 0 {
                             continue;
@@ -12565,6 +12576,14 @@ pub enum Stroke<'a> {
     /// Swatch sampling, Hue/Saturation/Luminosity modes, Limits, and
     /// Anti-alias are documented scope cuts.
     ColorReplace { color: [u8; 3], tolerance: u8 },
+    /// The Background Eraser with Sampling: Once — the Eraser's
+    /// multiply-toward-zero on alpha, applied only to covered pixels whose
+    /// RGB is within `tolerance` (per channel) of the pixel under the
+    /// stroke's first point, so a background colour can be scrubbed away
+    /// around a differently coloured subject. Continuous and Background
+    /// Swatch sampling, Limits, and Protect Foreground Color are documented
+    /// scope cuts.
+    BackgroundErase { tolerance: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19636,6 +19655,79 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
+            .is_err());
+    }
+
+    /// A green 3x3 background with a blue "subject" pixel at (2, 2).
+    fn subject_on_green() -> (Document, LayerId) {
+        let mut pixels = solid(3, 3, [100, 200, 100, 255]);
+        pixels[32..36].copy_from_slice(&[50, 50, 200, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    fn background_erase(tolerance: u8) -> Stroke<'static> {
+        Stroke::BackgroundErase { tolerance }
+    }
+
+    #[test]
+    fn background_eraser_erases_the_sampled_colour_and_spares_the_subject() {
+        let (mut doc, id) = subject_on_green();
+        doc.stroke(id, &[(0.5, 0.5), (2.5, 2.5)], 3.0, background_erase(32))
+            .unwrap();
+        for (x, y) in [(0, 0), (1, 1), (2, 0), (0, 2)] {
+            assert_eq!(pixel(&doc, id, x, y), [100, 200, 100, 0], "({x}, {y})");
+        }
+        assert_eq!(pixel(&doc, id, 2, 2), [50, 50, 200, 255]);
+    }
+
+    #[test]
+    fn background_eraser_samples_under_the_strokes_first_point() {
+        // Starting on the blue subject erases it and spares the green.
+        let (mut doc, id) = subject_on_green();
+        doc.stroke(id, &[(2.5, 2.5), (0.5, 0.5)], 3.0, background_erase(32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[3], 0);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
+    }
+
+    #[test]
+    fn background_eraser_scales_with_coverage_and_tolerance() {
+        // The 0.7929 edge coverage leaves 255 * (1 - 0.7929) = 52.8 -> 53.
+        let (mut doc, id) = subject_on_green();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, background_erase(0))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 53);
+        // Tolerance 255 takes the subject too.
+        let (mut doc, id) = subject_on_green();
+        doc.stroke(id, &[(0.5, 0.5), (2.5, 2.5)], 3.0, background_erase(255))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[3], 0);
+    }
+
+    #[test]
+    fn background_eraser_keeps_colour_bytes_and_compounds_like_the_eraser() {
+        let (mut doc, id) = subject_on_green();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, background_erase(0))
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, background_erase(0))
+            .unwrap();
+        // 53 * (1 - 0.7929) = 11.0 -> 11; colour untouched.
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 100, 11]);
+    }
+
+    #[test]
+    fn background_eraser_respects_the_selection_and_a_locked_layer() {
+        let (mut doc, id) = subject_on_green();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, background_erase(32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 255);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 3.0, background_erase(32))
             .is_err());
     }
 

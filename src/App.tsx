@@ -3010,6 +3010,13 @@ export default function App() {
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
         });
+      } else if (tool === "backgroundEraser") {
+        void runCommand("background_erase_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          tolerance: magicWandTolerance,
+        });
       } else if (tool === "colorReplace") {
         const [r, g, b] = hexToRgb(brushColor);
         void runCommand("color_replace_stroke", {
@@ -4057,6 +4064,15 @@ export default function App() {
             title="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
           >
             Magic Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "backgroundEraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "backgroundEraser"}
+            onClick={() => setTool("backgroundEraser")}
+            title="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
+          >
+            Background Eraser
           </button>
           <button
             className={`button button--quiet${tool === "dodge" ? " button--active" : ""}`}
@@ -5449,6 +5465,7 @@ export default function App() {
               !canPaint ||
               tool === "eraser" ||
               tool === "magicEraser" ||
+              tool === "backgroundEraser" ||
               tool === "dodge" ||
               tool === "burn" ||
               tool === "sponge" ||
@@ -5473,7 +5490,7 @@ export default function App() {
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
           )}
-          {tool === "colorReplace" && (
+          {(tool === "colorReplace" || tool === "backgroundEraser") && (
             <label className="tools__slider">
               Tolerance
               <input

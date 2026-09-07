@@ -11188,6 +11188,49 @@ instead. Every other layer of this project's quality bar
 **1140 Rust tests total** (1135 → 1140, 1133 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 180 — Background Eraser tool
+
+`Stroke::BackgroundErase { tolerance }` is the Background Eraser with
+Sampling: Once. It reuses the first-point sample Phase 179 added to
+`stroke` — the pixel under the stroke's start — and applies the
+Eraser's multiply-toward-zero on alpha (`α · (1 − coverage)`) only to
+covered pixels whose RGB is within `tolerance` of that sample, per
+channel, so a background colour scrubs away around a differently
+coloured subject while the subject's pixels are untouched. Colour bytes
+are never changed, and repeated strokes compound exactly as the Eraser
+does. Continuous and Background Swatch sampling, the Limits options
+(Discontiguous, Contiguous, Find Edges), and Protect Foreground Color
+are documented scope cuts. A new **Background Eraser** tool button sits
+beside the Magic Eraser with the shared Tolerance slider in its tool
+options; the colour swatch is disabled for it.
+
+**Verified two ways.** Five new `document.rs` tests on a new
+`subject_on_green` fixture — a green `(100, 200, 100)` background with a
+blue `(50, 50, 200)` subject pixel at `(2, 2)` — the two alpha values
+cross-checked in Python emulating the `f32` arithmetic. A stroke
+starting on green with tolerance 32 covering everything erases every
+green to alpha `0`, colour bytes intact, and leaves the blue opaque;
+the same stroke started on the blue erases the blue and spares the
+green, proving the first-point sample. The `0.7929` edge coverage
+leaves `255 × (1 − 0.7929) = 52.8 → 53`, and tolerance 255 takes the
+subject too. A second identical edge stroke compounds `53` to `11.0 →
+11` with the colour untouched. A one-pixel selection confines the
+erase and a locked layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+twenty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1145 Rust tests total** (1140 → 1145, 1138 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
