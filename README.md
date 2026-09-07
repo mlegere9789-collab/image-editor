@@ -10460,6 +10460,62 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1065 Rust tests total** (1060 → 1065, 1058 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 165 — Red Eye tool
+
+`red_eye(id, x, y, darken)` fixes a flash-lit pupil from one click.
+From the clicked pixel it floods the 4-connected region of red-dominant
+pixels — red exceeding the larger of green and blue by more than 50
+levels, this project's explicit, stated definition of "red eye" (skin
+and lips, whose red leads by less, fall outside it) — then neutralises
+each pixel of the region: its red is replaced by the mean of its green
+and blue, so the pupil turns grey, and all three channels are scaled by
+`1 − darken` percent (Photoshop's Darken Amount), rounded half up in
+integer arithmetic; alpha is untouched. Like the Paint Bucket and the
+Magic Eraser it is confined to the active selection — only selected
+pixels of the region change, and a click on an unselected pixel does
+nothing and returns `None` — and it returns the fixed region's bounding
+box otherwise. A click on a pixel that is not red-dominant errors
+("that pixel isn't red"), as does a locked or unknown layer, an
+off-canvas click, or a Darken Amount over 100. Photoshop's Pupil Size
+option is a documented scope cut. A **Red Eye** tool button sits beside
+Sharpen; the Flow slider is its Darken Amount.
+
+**Verified two ways.** Five new `document.rs` tests on a new
+`red_eye_3x3` fixture — a plus of pupil pixels `(200, 40, 40)` on skin
+`(220, 180, 160)`, whose red leads by only 40 — with every expected
+byte checked in integer Python before the Rust tests ran. A click on
+the centre at Darken 50 turns all five pupil pixels `(20, 20, 20)` —
+red to the mean `40`, then halved — leaves the four skin corners
+untouched, and reports the box `(0, 0)–(3, 3)`. Darken 0 gives `(40,
+40, 40)` and Darken 100 gives black; an uneven pupil `(180, 20, 60)` at
+alpha 128 becomes `(20, 10, 30)` with its alpha kept. With only the centre
+and a corner red, a click on the centre fixes it alone (box `(1, 1)–(2,
+2)`) and the corner, sharing no edge with it, is not reached. A click
+on skin errors
+mentioning "red"; a selection of the top two rows fixes only them (box
+`(0, 0)–(3, 2)`, the bottom pupil pixel untouched) and a click on an
+unselected pupil pixel returns `None`. An off-canvas click, an unknown
+layer, Darken 101, and a locked layer all error. Four of the five
+passed on the first run: the contiguity test had first placed its
+"disconnected" red pixel in a corner of the plus fixture, where it
+shares an edge with two arm pixels and is rightly reached — the test,
+not the code, was corrected to a fixture whose two red pixels share no
+edge.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twelve: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1070 Rust tests total** (1065 → 1070, 1063 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

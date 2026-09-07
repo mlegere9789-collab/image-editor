@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 236.**
+**618 distinct capabilities tracked. Currently shipped: 237.**
 
 ## PART I — EVERY TOOL
 
@@ -24,7 +24,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] SPOT HEALING BRUSH TOOL
 - [ ] PATCH TOOL
 - [ ] CONTENT-AWARE MOVE TOOL
-- [ ] RED EYE TOOL
+- [x] RED EYE TOOL (`red_eye`, a click that finds the 4-connected region of red-dominant pixels — red more than 50 levels above the larger of green and blue — replaces each pixel's red with the mean of its green and blue, and darkens all three channels by Darken Amount; confined to the selection, alpha untouched; Pupil Size is a documented scope cut — see README Phase 165)
 - [ ] CLONE STAMP TOOL
 - [x] PATTERN STAMP TOOL (`Stroke::PatternStamp`, the brush stroke machinery painting the pattern captured by Define Pattern instead of a flat colour — each pixel the pattern pixel at `(x mod w, y mod h)`, tiles aligned to the canvas origin as in Photoshop's default Aligned mode, blended source-over with the pattern's own alpha scaled by the tool's opacity; errors with no pattern. Photoshop's Impressionist option and unaligned mode are documented scope cuts — see README Phase 145)
 - [x] ERASER TOOL

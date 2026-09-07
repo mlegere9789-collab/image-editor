@@ -1900,6 +1900,20 @@ fn magic_erase(
     })
 }
 
+/// Red Eye tool: neutralise the red-dominant region around a click at
+/// `(x, y)` on layer `id`, darkening it by `darken` percent. A whole,
+/// discrete action, so it checkpoints itself.
+#[tauri::command]
+fn red_eye(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    darken: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.red_eye(id, x, y, darken))
+}
+
 /// Gradient (Linear): blends `start_color` to `end_color` from `(x0, y0)`
 /// to `(x1, y1)` on layer `id`. A whole, discrete action on its own, so it
 /// checkpoints itself, the same as [`flood_fill`].
@@ -3338,6 +3352,7 @@ pub fn run() {
             grow_selection,
             select_similar,
             magic_erase,
+            red_eye,
             select_all,
             invert_selection,
             expand_selection,

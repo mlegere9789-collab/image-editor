@@ -1306,6 +1306,109 @@ impl Document {
         Ok(erased)
     }
 
+    /// The Red Eye tool: from a click at `(x, y)` on layer `id`, finds the
+    /// 4-connected region of red-dominant pixels — red exceeding the larger
+    /// of green and blue by more than 50 levels, this project's explicit
+    /// definition of "red eye" — and neutralises it: each pixel's red is
+    /// replaced by the mean of its green and blue (so the pupil turns
+    /// grey), then all three channels are scaled by `1 − darken` percent
+    /// (`darken` in `0..=100`, Photoshop's Darken Amount), rounded half
+    /// up; alpha is untouched. Confined to the active selection like the
+    /// Paint Bucket: only selected pixels of the region change, and a
+    /// click on an unselected pixel does nothing and returns `None`.
+    /// Returns the region's bounding box otherwise. Errors when the
+    /// clicked pixel is not red-dominant (nothing to fix), on a locked or
+    /// unknown layer, or off the canvas. Photoshop's Pupil Size option is a
+    /// documented scope cut.
+    pub fn red_eye(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        darken: u8,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width, self.height);
+        if x >= width || y >= height {
+            return Err(format!(
+                "({x}, {y}) is outside the {width}x{height} canvas."
+            ));
+        }
+        if darken > 100 {
+            return Err(format!(
+                "Darken Amount must be 0..=100 percent, not {darken}."
+            ));
+        }
+        let selection = self.selection.clone();
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let red_dominant = |pixels: &[u8], px: u32, py: u32| {
+            let base = (py as usize * width as usize + px as usize) * CHANNELS;
+            let (r, g, b) = (pixels[base], pixels[base + 1], pixels[base + 2]);
+            u32::from(r) > u32::from(g.max(b)) + 50
+        };
+        if !red_dominant(&layer.pixels, x, y) {
+            return Err(format!("No red eye at ({x}, {y}): that pixel isn't red."));
+        }
+        let in_selection = |px: u32, py: u32| {
+            selection
+                .as_ref()
+                .map(|s| s.contains(px as f32 + 0.5, py as f32 + 0.5))
+                .unwrap_or(true)
+        };
+        if !in_selection(x, y) {
+            return Ok(None);
+        }
+        let mut region = vec![false; width as usize * height as usize];
+        region[(y * width + x) as usize] = true;
+        let mut stack = vec![(x, y)];
+        while let Some((px, py)) = stack.pop() {
+            let neighbours = [
+                px.checked_sub(1).map(|nx| (nx, py)),
+                (px + 1 < width).then_some((px + 1, py)),
+                py.checked_sub(1).map(|ny| (px, ny)),
+                (py + 1 < height).then_some((px, py + 1)),
+            ];
+            for (nx, ny) in neighbours.into_iter().flatten() {
+                let idx = (ny * width + nx) as usize;
+                if !region[idx] && red_dominant(&layer.pixels, nx, ny) {
+                    region[idx] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+        let keep = u32::from(100 - darken);
+        let mut fixed: Option<Rect> = None;
+        for (idx, _) in region.iter().enumerate().filter(|(_, &r)| r) {
+            let (px, py) = (idx as u32 % width, idx as u32 / width);
+            if !in_selection(px, py) {
+                continue;
+            }
+            let base = idx * CHANNELS;
+            let (g, b) = (layer.pixels[base + 1], layer.pixels[base + 2]);
+            let grey = ((u32::from(g) + u32::from(b)) / 2) as u8;
+            for (slot, value) in layer.pixels[base..base + 3].iter_mut().zip([grey, g, b]) {
+                *slot = ((u32::from(value) * keep + 50) / 100) as u8;
+            }
+            fixed = Some(match fixed {
+                None => Rect {
+                    x0: px,
+                    y0: py,
+                    x1: px + 1,
+                    y1: py + 1,
+                },
+                Some(r) => Rect {
+                    x0: r.x0.min(px),
+                    y0: r.y0.min(py),
+                    x1: r.x1.max(px + 1),
+                    y1: r.y1.max(py + 1),
+                },
+            });
+        }
+        Ok(fixed)
+    }
+
     /// Select > Color Range: replaces the selection with every pixel of
     /// layer `id` whose RGB is within `fuzziness` of `color` — per channel,
     /// `abs_diff <= fuzziness`, so the Magic Wand's tolerance test applied
@@ -28107,6 +28210,115 @@ mod tests {
         let err = doc.magic_erase(id, 0, 0, 0, true, 255).unwrap_err();
         assert!(err.contains("locked"), "{err}");
         assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
+    }
+
+    /// A 3x3 "eye": a plus of red-eye pixels (200, 40, 40) on skin
+    /// (220, 180, 160), whose red exceeds its green by only 40.
+    fn red_eye_3x3() -> (Document, LayerId) {
+        let skin = [220, 180, 160, 255];
+        let eye = [200, 40, 40, 255];
+        let mut pixels = Vec::new();
+        for (x, y) in (0..3).flat_map(|y| (0..3).map(move |x| (x, y))) {
+            pixels.extend(if x == 1 || y == 1 { eye } else { skin });
+        }
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("eye", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn red_eye_neutralises_the_red_dominant_region() {
+        // Red becomes the mean of green and blue (40), then everything is
+        // darkened by half: (20, 20, 20). Skin is left alone.
+        let (mut doc, id) = red_eye_3x3();
+        let rect = doc.red_eye(id, 1, 1, 50).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            })
+        );
+        for (x, y) in [(1, 0), (0, 1), (1, 1), (2, 1), (1, 2)] {
+            assert_eq!(pixel(&doc, id, x, y), [20, 20, 20, 255], "({x}, {y})");
+        }
+        for (x, y) in [(0, 0), (2, 0), (0, 2), (2, 2)] {
+            assert_eq!(pixel(&doc, id, x, y), [220, 180, 160, 255], "({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn red_eye_darken_amount_scales_the_result() {
+        let (mut doc, id) = red_eye_3x3();
+        doc.red_eye(id, 1, 1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [40, 40, 40, 255]);
+        let (mut doc, id) = red_eye_3x3();
+        doc.red_eye(id, 1, 1, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 255]);
+        // An uneven pupil (180, 20, 60): grey 40, then halved -> (20, 10, 30).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("px", &[180, 20, 60, 128], 1, 1).unwrap();
+        doc.red_eye(id, 0, 0, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [20, 10, 30, 128]);
+    }
+
+    #[test]
+    fn red_eye_reaches_only_the_contiguous_region() {
+        // Only the centre and the corner are red; they share no edge, so a
+        // click on the centre leaves the corner alone.
+        let mut pixels = solid(3, 3, [220, 180, 160, 255]);
+        pixels[..4].copy_from_slice(&[200, 40, 40, 255]);
+        pixels[16..20].copy_from_slice(&[200, 40, 40, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("eye", &pixels, 3, 3).unwrap();
+        let rect = doc.red_eye(id, 1, 1, 50).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 40, 40, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [20, 20, 20, 255]);
+    }
+
+    #[test]
+    fn red_eye_rejects_a_click_that_is_not_red_and_respects_the_selection() {
+        let (mut doc, id) = red_eye_3x3();
+        let err = doc.red_eye(id, 0, 0, 50).unwrap_err();
+        assert!(err.contains("red"), "{err}");
+        doc.select_rectangle(0.0, 0.0, 3.0, 2.0).unwrap();
+        let rect = doc.red_eye(id, 1, 1, 50).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 2
+            })
+        );
+        assert_eq!(pixel(&doc, id, 1, 1), [20, 20, 20, 255]);
+        assert_eq!(pixel(&doc, id, 1, 2), [200, 40, 40, 255]);
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        assert_eq!(doc.red_eye(id, 1, 2, 50).unwrap(), None);
+        assert_eq!(pixel(&doc, id, 1, 2), [200, 40, 40, 255]);
+    }
+
+    #[test]
+    fn red_eye_rejects_bad_input() {
+        let (mut doc, id) = red_eye_3x3();
+        assert!(doc.red_eye(id, 3, 1, 50).is_err());
+        assert!(doc.red_eye(999, 1, 1, 50).is_err());
+        assert!(doc.red_eye(id, 1, 1, 101).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.red_eye(id, 1, 1, 50).is_err());
+        assert_eq!(pixel(&doc, id, 1, 1), [200, 40, 40, 255]);
     }
 
     #[test]

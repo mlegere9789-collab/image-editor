@@ -3024,6 +3024,22 @@ export default function App() {
     [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous, brushOpacity],
   );
 
+  const isRedEye = tool === "redEye";
+
+  const redEyeAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document || selectedId === null) return;
+      const [x, y] = toDocPoint(event, document);
+      void runCommand("red_eye", {
+        id: selectedId,
+        x: Math.floor(x),
+        y: Math.floor(y),
+        darken: Math.round(brushOpacity * 100),
+      });
+    },
+    [document, selectedId, runCommand, brushOpacity],
+  );
+
   const selectLineAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
@@ -3092,6 +3108,10 @@ export default function App() {
         if (canPaint) magicEraseAt(event);
         return;
       }
+      if (isRedEye) {
+        if (canPaint) redEyeAt(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -3129,6 +3149,8 @@ export default function App() {
       selectWandAt,
       isMagicEraser,
       magicEraseAt,
+      isRedEye,
+      redEyeAt,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3747,6 +3769,15 @@ export default function App() {
             title="Sharpen: paint to sharpen (Flow sets the Strength)"
           >
             Sharpen
+          </button>
+          <button
+            className={`button button--quiet${tool === "redEye" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "redEye"}
+            onClick={() => setTool("redEye")}
+            title="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
+          >
+            Red Eye
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4991,6 +5022,7 @@ export default function App() {
               tool === "sponge" ||
               tool === "blur" ||
               tool === "sharpen" ||
+              tool === "redEye" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"

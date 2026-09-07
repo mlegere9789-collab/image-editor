@@ -103,6 +103,7 @@ export type Tool =
   | "sponge"
   | "blur"
   | "sharpen"
+  | "redEye"
   | "patternStamp"
   | "magicWand"
   | "selectRect"
