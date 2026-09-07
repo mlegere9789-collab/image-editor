@@ -145,6 +145,7 @@ export type Tool =
   | "healingBrush"
   | "spotHealingBrush"
   | "patch"
+  | "contentAwareMove"
   | "historyBrush"
   | "magicWand"
   | "lasso"

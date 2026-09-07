@@ -3135,7 +3135,7 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
-  const isPatch = tool === "patch";
+  const isPatch = tool === "patch" || tool === "contentAwareMove";
   const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
@@ -3528,7 +3528,9 @@ export default function App() {
           const dx = Math.round(x1 - start[0]);
           const dy = Math.round(y1 - start[1]);
           if (dx !== 0 || dy !== 0) {
-            void runCommand(isPatch ? "patch" : "move_pixels", { id: selectedId, dx, dy });
+            const command =
+              tool === "contentAwareMove" ? "content_aware_move" : isPatch ? "patch" : "move_pixels";
+            void runCommand(command, { id: selectedId, dx, dy });
           }
         }
         return;
@@ -4268,6 +4270,15 @@ export default function App() {
             title="Patch: select the area to repair, then drag it onto the area to sample from"
           >
             Patch
+          </button>
+          <button
+            className={`button button--quiet${tool === "contentAwareMove" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "contentAwareMove"}
+            onClick={() => setTool("contentAwareMove")}
+            title="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
+          >
+            Content-Aware Move
           </button>
           <button
             className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
@@ -5519,6 +5530,7 @@ export default function App() {
               tool === "healingBrush" ||
               tool === "spotHealingBrush" ||
               tool === "patch" ||
+              tool === "contentAwareMove" ||
               tool === "historyBrush" ||
               tool === "patternStamp"
             }

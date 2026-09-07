@@ -553,6 +553,19 @@ fn patch(state: State<'_, AppState>, id: LayerId, dx: i32, dy: i32) -> Result<Sn
     edit_checkpointed(&state, |document| document.patch(id, dx, dy))
 }
 
+/// Content-Aware Move tool: move the selected pixels of layer `id` by
+/// `(dx, dy)` and fill the vacated area from its surroundings. A whole,
+/// discrete action, so it checkpoints itself.
+#[tauri::command]
+fn content_aware_move(
+    state: State<'_, AppState>,
+    id: LayerId,
+    dx: i32,
+    dy: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.content_aware_move(id, dx, dy))
+}
+
 /// Select > Transform Selection: scale, rotate, and move the selection
 /// outline about its own centre without touching pixels.
 #[tauri::command]
@@ -3716,6 +3729,7 @@ pub fn run() {
             move_selection,
             move_pixels,
             patch,
+            content_aware_move,
             transform_selection,
             save_selection,
             load_selection,

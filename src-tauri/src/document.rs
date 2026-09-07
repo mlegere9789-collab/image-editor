@@ -7189,19 +7189,13 @@ impl Document {
                             continue;
                         }
                         let source = snapshot.as_ref().expect("taken above");
-                        let (cx, cy) = ((x0 + col as u32) as i64, (y0 + row as u32) as i64);
-                        let ring = (-2i64..=2).flat_map(|dy| {
-                            (-2i64..=2).filter_map(move |dx| {
-                                (dx.abs().max(dy.abs()) == 2).then_some((dx, dy))
-                            })
-                        });
-                        let samples = ring.map(|(dx, dy)| {
-                            (
-                                (cx + dx).clamp(0, width as i64 - 1) as usize,
-                                (cy + dy).clamp(0, height as i64 - 1) as usize,
-                            )
-                        });
-                        let mean = average_samples(source, width as usize, samples);
+                        let mean = Self::ring_mean(
+                            source,
+                            width,
+                            height,
+                            x0 + col as u32,
+                            y0 + row as u32,
+                        );
                         for (slot, &target) in
                             layer.pixels[base..base + 3].iter_mut().zip(mean.iter())
                         {
@@ -12077,6 +12071,64 @@ impl Document {
             self.selection = None;
         }
         Ok(Some(everything))
+    }
+
+    /// The mean of the pre-edit pixels on the square ring two pixels out
+    /// from `(x, y)` (Chebyshev distance exactly 2, sixteen samples,
+    /// edge-clamped) — the Spot Healing Brush's Proximity Match sample,
+    /// shared with the content-aware tools that fill a hole from its
+    /// surroundings.
+    fn ring_mean(source: &[u8], width: u32, height: u32, x: u32, y: u32) -> [u8; CHANNELS] {
+        let (w, h) = (width as i64, height as i64);
+        let (cx, cy) = (x as i64, y as i64);
+        let ring = (-2i64..=2).flat_map(|dy| {
+            (-2i64..=2).filter_map(move |dx| (dx.abs().max(dy.abs()) == 2).then_some((dx, dy)))
+        });
+        let samples = ring.map(|(dx, dy)| {
+            (
+                (cx + dx).clamp(0, w - 1) as usize,
+                (cy + dy).clamp(0, h - 1) as usize,
+            )
+        });
+        average_samples(source, width as usize, samples)
+    }
+
+    /// The Content-Aware Move tool (Move mode): [`Self::move_pixels`]'s
+    /// selected-pixel move, after which every vacated pixel — one the
+    /// selection covered that the moved pixels did not land back on — is
+    /// filled from its surroundings with [`Self::ring_mean`] of the
+    /// pre-move layer, all four channels, this project's explicit
+    /// content-aware fill (Photoshop's patch synthesis is proprietary).
+    /// Pixels that were already transparent stay transparent. The
+    /// selection travels with the pixels. A zero move returns `None`;
+    /// nothing selected, or a locked or unknown layer, errors. Extend
+    /// mode, Structure/Color, and Transform on Drop are documented scope
+    /// cuts.
+    pub fn content_aware_move(
+        &mut self,
+        id: LayerId,
+        dx: i32,
+        dy: i32,
+    ) -> Result<Option<Rect>, String> {
+        let bits = self.selected_bits()?;
+        if dx == 0 && dy == 0 {
+            self.layer(id)?;
+            return Ok(None);
+        }
+        let (width, height) = (self.width, self.height);
+        let snapshot = self.layer(id)?.pixels.clone();
+        let touched = self.move_pixels(id, dx, dy)?;
+        let layer = self.layer_mut(id)?;
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let base = idx * CHANNELS;
+            if layer.pixels[base + 3] != 0 || snapshot[base + 3] == 0 {
+                continue;
+            }
+            let (x, y) = (idx as u32 % width, idx as u32 / width);
+            let fill = Self::ring_mean(&snapshot, width, height, x, y);
+            layer.pixels[base..base + CHANNELS].copy_from_slice(&fill);
+        }
+        Ok(touched)
     }
 
     /// The Patch tool (Normal, Source mode): the active selection is the
@@ -20068,6 +20120,80 @@ mod tests {
         assert!(doc.patch(999, 1, 0).is_err());
         doc.set_locked(id, true).unwrap();
         assert!(doc.patch(id, 1, 0).is_err());
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+    }
+
+    #[test]
+    fn content_aware_move_moves_the_pixels_and_fills_the_hole_from_around_it() {
+        // A 200 spot on solid 100 moved one pixel right: the spot lands on
+        // (2, 1) and its old place is filled from the all-100 ring.
+        let mut pixels = solid(3, 3, [100, 0, 0, 255]);
+        pixels[(3 + 1) * 4] = 200;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.content_aware_move(id, 1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 2, 1), [200, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 0, 255]);
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 2,
+                y0: 1,
+                x1: 3,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn content_aware_move_fills_with_the_ring_means_of_the_pre_move_layer() {
+        // The left column moved onto the middle: the middle takes 10 40 70
+        // and the vacated column is filled with ramped_3x3's ring means at
+        // (0, y): 40, 47, 55.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.content_aware_move(id, 1, 0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![40, 10, 30], vec![47, 40, 60], vec![55, 70, 90]]
+        );
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
+    }
+
+    #[test]
+    fn content_aware_move_leaves_overlapped_and_transparent_pixels_alone() {
+        // Moving the two left columns right by one: column 1 is vacated but
+        // immediately re-covered by column 0's pixels, so only column 0 is
+        // filled. A transparent source pixel stays transparent.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 3.0).unwrap();
+        doc.content_aware_move(id, 1, 0).unwrap();
+        assert_eq!(red_channel_grid(&doc)[1], vec![47, 40, 50]);
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.content_aware_move(id, 1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 1), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1), [40, 0, 0, 0]);
+    }
+
+    #[test]
+    fn content_aware_move_off_the_canvas_still_fills_the_hole() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 0.0, 3.0, 3.0).unwrap();
+        doc.content_aware_move(id, 1, 0).unwrap();
+        assert_eq!(red_channel_grid(&doc)[0], vec![10, 20, 45]);
+        assert!(doc.selection().is_none());
+    }
+
+    #[test]
+    fn content_aware_move_rejects_no_selection_and_locks_and_ignores_zero() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc.content_aware_move(id, 1, 0).is_err());
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        assert_eq!(doc.content_aware_move(id, 0, 0).unwrap(), None);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.content_aware_move(id, 1, 0).is_err());
         assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
     }
 

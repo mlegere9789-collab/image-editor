@@ -11368,6 +11368,54 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1160 Rust tests total** (1155 → 1160, 1153 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 184 — Content-Aware Move tool
+
+`content_aware_move(id, dx, dy)` is the Content-Aware Move tool in its
+Move mode: Phase 173's selected-pixel move, after which every vacated
+pixel — one the selection covered that the moved pixels did not land
+back on — is filled from its surroundings with the ring mean of the
+pre-move layer (the sixteen pixels at Chebyshev distance 2,
+edge-clamped, all four channels), which is this project's explicit,
+stated content-aware fill; Photoshop's patch-synthesis fill is
+proprietary, and this is the honest small version of it. The Spot
+Healing Brush's ring sample moved into a shared `ring_mean` helper so
+the two tools agree byte for byte. Pixels that were already transparent
+stay transparent, the selection travels with the pixels (and is dropped
+if it leaves the canvas, as for Move), a zero move returns `None`, and
+nothing selected or a locked or unknown layer errors. Extend mode, the
+Structure and Color sliders, and Transform on Drop are documented
+scope cuts. A new **Content-Aware Move** tool button reuses the Move
+and Patch drag capture.
+
+**Verified two ways.** Five new `document.rs` tests, every fill value
+read off the Python-derived ring-mean grid Phase 182 established
+(`[[40, 42, 45], [47, 50, 52], [55, 57, 60]]` for `ramped_3x3`). A `200`
+spot on solid `100` moved one pixel right lands on `(2, 1)`, its old
+place is filled with `100`, and the outline follows to `(2, 1)–(3, 2)`.
+The left column of `ramped_3x3` moved onto the middle gives `[[40, 10,
+30], [47, 40, 60], [55, 70, 90]]` — the middle taking `10 40 70` and the
+vacated column its ring means `40, 47, 55`, opaque. Moving the two left
+columns right by one fills only column 0 (column 1 is vacated but
+immediately re-covered), and a transparent source pixel stays
+transparent. The right column moved off the canvas is filled (`45` at
+the top) and the selection dropped. Nothing selected and a locked layer
+error, and a zero move returns `None`. All five passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-one: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The drag wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1165 Rust tests total** (1160 → 1165, 1158 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
