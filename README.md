@@ -15337,10 +15337,16 @@ On a 3×3 source `10 … 80, 250` painted onto a blank layer, Dab reads
 the centre's `50` and is byte-identical to the History Brush, Tight
 with Area `1` averages the nine to `610 / 9 = 67`, and Loose reaches
 two out, edge-clamped, to `1890 / 25 = 75`, leaving the corner clear.
-Tolerance `10` skips a centre already holding the source's `50` (and
-one a shade off at `55`) while painting the corners `10` and `250`,
-and Tolerance `0` paints it. Area `51`, a short source, and a locked
-layer are refused. All five passed on the first run.
+Tolerance `5` skips a centre already holding the source's `50` while
+painting the corners `10` and `250`, Tolerance `10` skips a centre a
+shade off at `55`, and Tolerance `0` paints it. Area `51`, a short
+source, and a locked layer are refused. Four of the five passed on
+the first run: the tolerance test had expected a corner differing
+from the source by exactly `10` to be painted under Tolerance `10`,
+but "more than the tolerance" rightly leaves it; the test now uses
+Tolerance `5` there, and the code was not changed. That correction
+missed the commit that introduced the phase, which was pushed with
+the test still failing, and landed in the commit right after it.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous two hundred and four: this

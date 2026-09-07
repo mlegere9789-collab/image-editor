@@ -47860,7 +47860,8 @@ mod tests {
     fn art_history_tolerance_skips_pixels_already_like_the_source() {
         let source = art_source();
         // The layer already holds the source at the centre but not the
-        // corner: Tolerance 10 paints only where the layer differs by more.
+        // corner: Tolerance 5 paints only where the layer differs by more
+        // (the corner's 10 clears it; the centre's 0 does not).
         let (mut doc, id) = blank_3x3();
         doc.layer_mut(id).unwrap().pixels[(4 * 4)..(4 * 4 + 4)].copy_from_slice(&[50, 50, 50, 255]);
         doc.stroke(
@@ -47871,7 +47872,7 @@ mod tests {
                 source: &source,
                 style: ArtStyle::Dab,
                 area: 1,
-                tolerance: 10,
+                tolerance: 5,
             },
         )
         .unwrap();
