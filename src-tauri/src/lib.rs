@@ -2597,6 +2597,26 @@ fn add_layer_mask(
     })
 }
 
+/// Layer > Vector Mask > Current Path: mask layer `id` to the polygon
+/// through `points`, revealing (or hiding) its inside.
+#[tauri::command]
+fn add_vector_mask(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    reveal: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_vector_mask(id, &points, reveal)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Layer > Layer Mask > Apply (`apply` true) or Delete for layer `id`.
 #[tauri::command]
 fn remove_layer_mask(
@@ -4156,6 +4176,7 @@ pub fn run() {
             set_layer_linked,
             set_layer_clipped,
             add_layer_mask,
+            add_vector_mask,
             remove_layer_mask,
             rasterize_layer,
             flip_layer_horizontal,

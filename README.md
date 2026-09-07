@@ -13168,6 +13168,52 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1335 Rust tests total** (1330 → 1335, 1328 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 219 — Vector masks
+
+`Document::add_vector_mask(id, points, reveal)` is Layer > Vector Mask
+> Current Path: the polygon through `points` is rasterised — pixel
+centres inside it by the even-odd rule, the Polygonal Lasso's own
+test, after consecutive duplicate points are dropped — into the same
+8-bit mask a layer mask uses, white inside and black outside, or the
+reverse with `reveal` false, replacing any mask the layer had. From
+then on it *is* a layer mask: it composites, applies, deletes, turns,
+and crops exactly as Phase 218's do. A path needs three or more
+distinct points and must enclose at least one pixel centre. Keeping
+the path editable as vectors, and holding a vector mask beside a
+separate pixel mask, are documented scope cuts. A **Vector Mask** tool
+button reuses the lasso's trail capture and preview: draw a closed
+path on the canvas and pointer-up sends it through an
+`add_vector_mask` command, Alt hiding the inside instead of revealing
+it.
+
+**Verified two ways.** Five new `document.rs` tests through
+`composite_pixel`, every mask reasoned out from the even-odd rule. On
+a solid `5×5`, the diamond through the canvas's edge midpoints holds
+the centres with `|dx| + |dy| < 2.5` from the middle, so the composite
+shows the thirteen-pixel diamond `..#.. / .###. / ##### / .###. /
+..#..` and the layer reports a mask. On a `3×3`, the centre pixel's
+square as a path hides that pixel and shows the corners with `reveal`
+false, and the reverse with it true. Applying the mask bakes alpha
+`255` at the centre and `0` at a corner and removes it. Duplicate
+consecutive points are dropped, a two-point path errors, and a sliver
+that lies between pixel centres errors as enclosing nothing. An
+unknown layer and a `NaN` coordinate error with no mask added. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-six: this session's Xvfb instance was already confirmed, through
+a control test and a full Xvfb-and-application restart in Phase 52, to
+have stopped delivering synthetic `xdotool` pointer clicks to the
+webview entirely, and re-running that diagnostic again was judged
+unlikely to produce new information. The tool's wiring was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1340 Rust tests total** (1335 → 1340, 1333 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

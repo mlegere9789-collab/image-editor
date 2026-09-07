@@ -186,6 +186,7 @@ export type Tool =
   | "magicWand"
   | "lasso"
   | "magneticLasso"
+  | "vectorMask"
   | "objectSelect"
   | "objectSelectLasso"
   | "polygonLasso"

@@ -190,6 +190,7 @@ body {
 .canvas--selectionBrush,
 .canvas--quickSelection,
 .canvas--magneticLasso,
+.canvas--vectorMask,
 .canvas--objectSelect,
 .canvas--objectSelectLasso {
   cursor: crosshair;

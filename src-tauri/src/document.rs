@@ -3232,6 +3232,51 @@ impl Document {
         Ok(())
     }
 
+    /// Layer > Vector Mask > Current Path: masks layer `id` to the polygon
+    /// through `points` — white inside the polygon (pixel centres, by the
+    /// even-odd rule), black outside — or the reverse with `reveal` false.
+    /// The path is rasterised into the same 8-bit mask a layer mask uses
+    /// at the moment it is applied; keeping it editable as vectors is a
+    /// documented scope cut. Needs three or more distinct points that
+    /// enclose at least one pixel centre.
+    pub fn add_vector_mask(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        reveal: bool,
+    ) -> Result<(), String> {
+        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("Path coordinates must be finite numbers.".to_string());
+        }
+        let mut distinct: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+        for &point in points {
+            if distinct.last() != Some(&point) {
+                distinct.push(point);
+            }
+        }
+        if distinct.len() < 3 {
+            return Err("A vector mask needs a path with at least three points.".to_string());
+        }
+        self.layer(id)?;
+        let width = self.width;
+        let (inside, outside) = if reveal { (255u8, 0u8) } else { (0u8, 255u8) };
+        let mask: Vec<u8> = (0..self.width * self.height)
+            .map(|idx| {
+                let (x, y) = (idx % width, idx / width);
+                if point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, &distinct) {
+                    inside
+                } else {
+                    outside
+                }
+            })
+            .collect();
+        if !mask.contains(&inside) {
+            return Err("That path encloses no pixel.".to_string());
+        }
+        self.layer_mut(id)?.mask = Some(mask);
+        Ok(())
+    }
+
     /// Replaces layer `id`'s mask with `mask`, a document-sized 8-bit
     /// buffer — the way a painted or imported mask arrives.
     pub fn set_layer_mask(&mut self, id: LayerId, mask: Vec<u8>) -> Result<(), String> {
@@ -25419,6 +25464,109 @@ mod tests {
             [0, 255, 0, 255]
         );
         assert_eq!(crate::composite::composite_pixel(&doc, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_vector_mask_reveals_the_polygon() {
+        // The diamond (2.5, 0)-(5, 2.5)-(2.5, 5)-(0, 2.5) through a 5×5's
+        // edge midpoints holds the centres with |dx| + |dy| < 2.5 from the
+        // middle — the thirteen-pixel diamond — and none of the corners.
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc
+            .add_layer("l", &solid(5, 5, [0, 255, 0, 255]), 5, 5)
+            .unwrap();
+        let diamond = [(2.5, 0.0), (5.0, 2.5), (2.5, 5.0), (0.0, 2.5)];
+        doc.add_vector_mask(id, &diamond, true).unwrap();
+        let shown: Vec<String> = (0..5)
+            .map(|y| {
+                (0..5)
+                    .map(|x| {
+                        if crate::composite::composite_pixel(&doc, x, y)[3] == 255 {
+                            '#'
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        assert_eq!(shown, ["..#..", ".###.", "#####", ".###.", "..#.."]);
+        assert!(doc.view().layers[0].has_mask);
+    }
+
+    #[test]
+    fn a_vector_mask_can_hide_the_polygon_instead() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 255, 0, 255]), 3, 3)
+            .unwrap();
+        // The centre pixel's square, as a path.
+        let square = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)];
+        doc.add_vector_mask(id, &square, false).unwrap();
+        assert_eq!(crate::composite::composite_pixel(&doc, 1, 1), [0, 0, 0, 0]);
+        assert_eq!(
+            crate::composite::composite_pixel(&doc, 0, 0),
+            [0, 255, 0, 255]
+        );
+        doc.add_vector_mask(id, &square, true).unwrap();
+        assert_eq!(
+            crate::composite::composite_pixel(&doc, 1, 1),
+            [0, 255, 0, 255]
+        );
+        assert_eq!(crate::composite::composite_pixel(&doc, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_vector_mask_is_an_ordinary_mask_afterwards() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 255, 0, 255]), 3, 3)
+            .unwrap();
+        let square = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)];
+        doc.add_vector_mask(id, &square, true).unwrap();
+        doc.remove_layer_mask(id, true).unwrap();
+        assert!(!doc.view().layers[0].has_mask);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 255);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
+    }
+
+    #[test]
+    fn a_vector_mask_drops_duplicate_points_and_needs_an_area() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 255, 0, 255]), 3, 3)
+            .unwrap();
+        let square = [
+            (1.0, 1.0),
+            (1.0, 1.0),
+            (2.0, 1.0),
+            (2.0, 2.0),
+            (2.0, 2.0),
+            (1.0, 2.0),
+        ];
+        doc.add_vector_mask(id, &square, true).unwrap();
+        assert_eq!(crate::composite::composite_pixel(&doc, 1, 1)[3], 255);
+        assert!(doc
+            .add_vector_mask(id, &[(0.0, 0.0), (3.0, 3.0)], true)
+            .is_err());
+        // A sliver between pixel centres encloses none.
+        assert!(doc
+            .add_vector_mask(id, &[(0.1, 0.1), (0.2, 0.1), (0.2, 0.2)], true)
+            .is_err());
+    }
+
+    #[test]
+    fn a_vector_mask_rejects_bad_input() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [0, 255, 0, 255]), 3, 3)
+            .unwrap();
+        let square = [(1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0)];
+        assert!(doc.add_vector_mask(id + 1, &square, true).is_err());
+        assert!(doc
+            .add_vector_mask(id, &[(f32::NAN, 1.0), (2.0, 1.0), (2.0, 2.0)], true)
+            .is_err());
+        assert!(!doc.view().layers[0].has_mask);
     }
 
     #[test]

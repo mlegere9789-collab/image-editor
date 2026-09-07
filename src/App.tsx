@@ -3406,6 +3406,8 @@ export default function App() {
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
   const isMagneticLasso = tool === "magneticLasso";
+  // The Vector Mask tool draws a path with the lasso's capture.
+  const isVectorMask = tool === "vectorMask";
   const isObjectSelect = tool === "objectSelect";
   const isObjectSelectLasso = tool === "objectSelectLasso";
   // The Quick Selection tool shares the Selection Brush's stroke capture.
@@ -3643,7 +3645,7 @@ export default function App() {
         }
         return;
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
@@ -3750,6 +3752,7 @@ export default function App() {
       isMagneticLasso,
       isObjectSelect,
       isObjectSelectLasso,
+      isVectorMask,
       isSelectionBrush,
       isPolygonLasso,
       lassoPoints,
@@ -3828,7 +3831,7 @@ export default function App() {
       } else if (hoverBounds !== null) {
         setHoverBounds(null);
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
@@ -3851,6 +3854,7 @@ export default function App() {
       isMagneticLasso,
       isObjectSelectLasso,
       isObjectSelect,
+      isVectorMask,
       isSelectionBrush,
       isMarqueeTool,
       isRectangle,
@@ -3916,6 +3920,16 @@ export default function App() {
               mode,
             });
           }
+        }
+        return;
+      }
+      if (isVectorMask) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 3 && selectedId !== null) {
+          // Alt hides the path's inside instead of revealing it.
+          void runCommand("add_vector_mask", { id: selectedId, points: trail, reveal: !event.altKey });
         }
         return;
       }
@@ -4170,6 +4184,7 @@ export default function App() {
       isMagneticLasso,
       isObjectSelect,
       isObjectSelectLasso,
+      isVectorMask,
       magneticWidth,
       magneticContrast,
       smartGuides,
@@ -4955,6 +4970,15 @@ export default function App() {
             title="Layer > Layer Mask > Delete"
           >
             Delete Mask
+          </button>
+          <button
+            className={`button button--quiet${tool === "vectorMask" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "vectorMask"}
+            onClick={() => setTool("vectorMask")}
+            title="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
+          >
+            Vector Mask
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
