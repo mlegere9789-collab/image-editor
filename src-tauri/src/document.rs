@@ -353,6 +353,18 @@ pub enum CalcOutcome {
     Selection,
 }
 
+/// What the canvas shows — Photoshop's Channels panel selection: the
+/// composite, one colour channel of it as a grey, or an alpha channel.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ChannelView {
+    Composite,
+    Red,
+    Green,
+    Blue,
+    Alpha { name: String },
+}
+
 /// An alpha channel: one byte per document pixel, row-major, as
 /// Photoshop's Channels panel stores a saved grey — here made by
 /// Calculations and loadable as a selection.
@@ -1601,16 +1613,152 @@ impl Document {
         &self.channels
     }
 
+    /// The lowest `Alpha N` not yet taken.
+    fn next_channel_name(&self) -> String {
+        (1..)
+            .map(|n| format!("Alpha {n}"))
+            .find(|candidate| !self.channels.iter().any(|c| &c.name == candidate))
+            .expect("some number is always free")
+    }
+
+    fn channel_index(&self, name: &str) -> Result<usize, String> {
+        self.channels
+            .iter()
+            .position(|c| c.name == name)
+            .ok_or_else(|| format!("No channel named \"{name}\"."))
+    }
+
+    /// Channels panel > New Channel: adds an alpha channel holding `pixels`
+    /// (one byte per document pixel) named `name`, or the lowest free
+    /// `Alpha N` when `name` is blank; returns the name. Errors on the
+    /// wrong number of bytes or a name already taken.
+    pub fn add_channel(&mut self, name: &str, pixels: Vec<u8>) -> Result<String, String> {
+        let count = self.width as usize * self.height as usize;
+        if pixels.len() != count {
+            return Err(format!(
+                "A channel needs one byte per pixel ({count}), not {}.",
+                pixels.len()
+            ));
+        }
+        let name = match name.trim() {
+            "" => self.next_channel_name(),
+            given => {
+                if self.channels.iter().any(|c| c.name == given) {
+                    return Err(format!("A channel named \"{given}\" already exists."));
+                }
+                given.to_string()
+            }
+        };
+        self.channels.push(AlphaChannel {
+            name: name.clone(),
+            pixels,
+        });
+        Ok(name)
+    }
+
+    /// Renames alpha channel `old` to `new` — non-blank and not already
+    /// taken by another channel.
+    pub fn rename_channel(&mut self, old: &str, new: &str) -> Result<(), String> {
+        let index = self.channel_index(old)?;
+        let new = new.trim();
+        if new.is_empty() {
+            return Err("A channel needs a name.".to_string());
+        }
+        if self.channels.iter().any(|c| c.name == new) && new != old {
+            return Err(format!("A channel named \"{new}\" already exists."));
+        }
+        self.channels[index].name = new.to_string();
+        Ok(())
+    }
+
+    /// Moves alpha channel `name` one step up (toward the top of the
+    /// panel, index 0) or down; already at the end, it stays put.
+    pub fn move_channel(&mut self, name: &str, direction: MoveDirection) -> Result<(), String> {
+        let index = self.channel_index(name)?;
+        let target = match direction {
+            MoveDirection::Up if index > 0 => index - 1,
+            MoveDirection::Down if index + 1 < self.channels.len() => index + 1,
+            _ => return Ok(()),
+        };
+        self.channels.swap(index, target);
+        Ok(())
+    }
+
+    /// Deletes alpha channel `name`.
+    pub fn delete_channel(&mut self, name: &str) -> Result<(), String> {
+        let index = self.channel_index(name)?;
+        self.channels.remove(index);
+        Ok(())
+    }
+
+    /// Paints alpha channel `name` — the Channels panel's editing of a
+    /// selected channel: every pixel whose centre lies within `radius` of
+    /// the polyline through `points` (the Selection Brush's own hard
+    /// coverage, [`brush_bits`]) is set to `grey`. The selection is not
+    /// consulted: a channel is not layer pixels. Errors as `brush_bits`
+    /// does, or for an unknown channel.
+    pub fn paint_channel(
+        &mut self,
+        name: &str,
+        points: &[(f32, f32)],
+        radius: f32,
+        grey: u8,
+    ) -> Result<(), String> {
+        let index = self.channel_index(name)?;
+        let bits = brush_bits(self.width, self.height, points, radius)?;
+        for (pixel, hit) in self.channels[index].pixels.iter_mut().zip(bits) {
+            if hit {
+                *pixel = grey;
+            }
+        }
+        Ok(())
+    }
+
+    /// The canvas as the Channels panel shows it for `view`: the composite
+    /// itself, one of its colour channels as an opaque grey, or an alpha
+    /// channel as an opaque grey — document-sized RGBA8. Errors for an
+    /// unknown alpha channel.
+    pub fn channel_image(&self, view: &ChannelView) -> Result<Vec<u8>, String> {
+        let grey_of = |values: Vec<u8>| {
+            let mut pixels = Vec::with_capacity(values.len() * CHANNELS);
+            for v in values {
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+            pixels
+        };
+        Ok(match view {
+            ChannelView::Composite => crate::composite::flatten(self).pixels,
+            ChannelView::Red | ChannelView::Green | ChannelView::Blue => {
+                let offset = match view {
+                    ChannelView::Red => 0,
+                    ChannelView::Green => 1,
+                    _ => 2,
+                };
+                let composite = crate::composite::flatten(self).pixels;
+                grey_of(
+                    composite
+                        .chunks_exact(CHANNELS)
+                        .map(|px| px[offset])
+                        .collect(),
+                )
+            }
+            ChannelView::Alpha { name } => {
+                let index = self.channel_index(name)?;
+                grey_of(self.channels[index].pixels.clone())
+            }
+        })
+    }
+
     /// Loads alpha channel `name` as the selection: every pixel whose grey
     /// is `128` or more — the one-bit reading of Photoshop's partial
     /// selection. Errors for an unknown name.
     pub fn load_channel(&mut self, name: &str) -> Result<(), String> {
-        let channel = self
-            .channels
+        let index = self.channel_index(name)?;
+        let bits = self.channels[index]
+            .pixels
             .iter()
-            .find(|c| c.name == name)
-            .ok_or_else(|| format!("No channel named \"{name}\"."))?;
-        let bits = channel.pixels.iter().map(|&v| v >= 128).collect();
+            .map(|&v| v >= 128)
+            .collect();
         self.set_mask_selection(bits)
     }
 
@@ -1688,7 +1836,7 @@ impl Document {
                 Ok(CalcOutcome::Document(Box::new(document)))
             }
             CalcResult::NewChannel => {
-                let name = format!("Alpha {}", self.channels.len() + 1);
+                let name = self.next_channel_name();
                 self.channels.push(AlphaChannel {
                     name: name.clone(),
                     pixels: greys,
@@ -36813,6 +36961,126 @@ mod tests {
         doc.select_color_range_with(id, &ColorRange::Greens, true)
             .unwrap();
         assert_eq!(doc.selected_bits().unwrap(), [true, true]);
+    }
+
+    #[test]
+    fn channel_image_views_the_composite_and_its_channels() {
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("l", &[10, 20, 30, 255, 40, 50, 60, 128], 2, 1)
+            .unwrap();
+        assert_eq!(
+            doc.channel_image(&ChannelView::Composite).unwrap(),
+            vec![10, 20, 30, 255, 40, 50, 60, 128]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Red).unwrap(),
+            vec![10, 10, 10, 255, 40, 40, 40, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Green).unwrap(),
+            vec![20, 20, 20, 255, 50, 50, 50, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Blue).unwrap(),
+            vec![30, 30, 30, 255, 60, 60, 60, 255]
+        );
+    }
+
+    #[test]
+    fn channel_image_of_an_alpha_channel_needs_a_known_name() {
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("l", &[0; 8], 2, 1).unwrap();
+        let name = doc.add_channel("", vec![200, 10]).unwrap();
+        assert_eq!(name, "Alpha 1");
+        let view = ChannelView::Alpha {
+            name: "Alpha 1".to_string(),
+        };
+        assert_eq!(
+            doc.channel_image(&view).unwrap(),
+            vec![200, 200, 200, 255, 10, 10, 10, 255]
+        );
+        let missing = ChannelView::Alpha {
+            name: "Alpha 9".to_string(),
+        };
+        assert!(doc.channel_image(&missing).is_err());
+        // A channel needs exactly one byte per pixel; a given name is kept.
+        assert!(doc.add_channel("short", vec![1]).is_err());
+        assert_eq!(doc.add_channel("Mask", vec![0, 0]).unwrap(), "Mask");
+        assert!(doc.add_channel("Mask", vec![0, 0]).is_err());
+        assert_eq!(doc.view().channels, ["Alpha 1", "Mask"]);
+    }
+
+    #[test]
+    fn channels_rename_reorder_delete_and_number_afresh() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_channel("", vec![0]).unwrap();
+        doc.add_channel("", vec![0]).unwrap();
+        assert_eq!(doc.view().channels, ["Alpha 1", "Alpha 2"]);
+        doc.rename_channel("Alpha 1", "Hair").unwrap();
+        assert!(doc.rename_channel("Hair", " ").is_err());
+        assert!(doc.rename_channel("Hair", "Alpha 2").is_err());
+        assert!(doc.rename_channel("Alpha 1", "Old").is_err());
+        assert_eq!(doc.view().channels, ["Hair", "Alpha 2"]);
+        doc.move_channel("Hair", MoveDirection::Down).unwrap();
+        assert_eq!(doc.view().channels, ["Alpha 2", "Hair"]);
+        // At the end already: a no-op, not an error.
+        doc.move_channel("Hair", MoveDirection::Down).unwrap();
+        assert_eq!(doc.view().channels, ["Alpha 2", "Hair"]);
+        doc.move_channel("Hair", MoveDirection::Up).unwrap();
+        assert_eq!(doc.view().channels, ["Hair", "Alpha 2"]);
+        assert!(doc.move_channel("Nope", MoveDirection::Up).is_err());
+        doc.delete_channel("Hair").unwrap();
+        assert!(doc.delete_channel("Hair").is_err());
+        assert_eq!(doc.view().channels, ["Alpha 2"]);
+        // The next automatic name is the lowest free number.
+        assert_eq!(doc.add_channel("", vec![0]).unwrap(), "Alpha 1");
+        assert_eq!(doc.add_channel("", vec![0]).unwrap(), "Alpha 3");
+    }
+
+    #[test]
+    fn paint_channel_sets_the_covered_pixels_to_the_grey() {
+        let mut doc = Document::new(5, 1).unwrap();
+        doc.add_layer("l", &[0; 20], 5, 1).unwrap();
+        doc.add_channel("m", vec![0; 5]).unwrap();
+        // Radius 1 about (2.5, 0.5) reaches the centres at x = 1.5, 2.5, 3.5.
+        doc.paint_channel("m", &[(2.5, 0.5)], 1.0, 200).unwrap();
+        assert_eq!(doc.channels()[0].pixels, vec![0, 200, 200, 200, 0]);
+        doc.paint_channel("m", &[(0.5, 0.5)], 0.5, 90).unwrap();
+        assert_eq!(doc.channels()[0].pixels, vec![90, 200, 200, 200, 0]);
+        assert!(doc.paint_channel("x", &[(0.5, 0.5)], 1.0, 0).is_err());
+        assert!(doc.paint_channel("m", &[], 1.0, 0).is_err());
+        // Loading it selects the greys of 128 and up.
+        doc.load_channel("m").unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            [false, true, true, true, false]
+        );
+        // The layer's pixels are untouched.
+        assert_eq!(doc.layers()[0].pixels, vec![0; 20]);
+    }
+
+    #[test]
+    fn a_painted_channel_shows_in_its_view_and_the_composite_is_unchanged() {
+        let mut doc = Document::new(3, 1).unwrap();
+        doc.add_layer("l", &[7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255], 3, 1)
+            .unwrap();
+        doc.add_channel("m", vec![0; 3]).unwrap();
+        doc.paint_channel("m", &[(1.5, 0.5)], 0.5, 255).unwrap();
+        let view = ChannelView::Alpha {
+            name: "m".to_string(),
+        };
+        assert_eq!(
+            doc.channel_image(&view).unwrap(),
+            vec![0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Composite).unwrap(),
+            vec![7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255]
+        );
+        assert_eq!(
+            crate::composite::flatten(&doc).pixels,
+            vec![7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255]
+        );
     }
 
     #[test]

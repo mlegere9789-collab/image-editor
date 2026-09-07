@@ -266,6 +266,77 @@ fn sample_pixel_color(cache: &CompositeCache, x: u32, y: u32) -> Result<[u8; 4],
 
 /// Build the response the `composite://` protocol hands the webview: the
 /// cached PNG bytes, or 404 before anything has ever been composited.
+/// Decodes the `channel=` query value of a `composite://` request into the
+/// view to serve: `composite` (or none), `red`, `green`, `blue`, or
+/// `alpha:<percent-encoded name>`.
+fn channel_view_of(query: Option<&str>) -> Option<document::ChannelView> {
+    let value = query?
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("channel="))?;
+    Some(match value {
+        "composite" => document::ChannelView::Composite,
+        "red" => document::ChannelView::Red,
+        "green" => document::ChannelView::Green,
+        "blue" => document::ChannelView::Blue,
+        other => document::ChannelView::Alpha {
+            name: percent_decode(other.strip_prefix("alpha:")?),
+        },
+    })
+}
+
+/// Minimal percent-decoding for channel names in a query string (`%20`
+/// and friends, `+` as a space); malformed escapes are kept as they are.
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                Ok(byte) => {
+                    out.push(byte);
+                    i += 3;
+                }
+                Err(_) => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Serves one channel of the open document as a PNG — a view the Channels
+/// panel asks for by adding `channel=` to the composite URL. Rendered on
+/// request rather than cached: a channel view is a look, not the document.
+fn serve_channel(state: &AppState, view: &document::ChannelView) -> tauri::http::Response<Vec<u8>> {
+    let bytes = state.document.lock().ok().and_then(|guard| {
+        let document = guard.as_ref()?;
+        let pixels = document.channel_image(view).ok()?;
+        png::encode_pixels(document.width(), document.height(), &pixels).ok()
+    });
+    match bytes {
+        Some(bytes) => tauri::http::Response::builder()
+            .header(tauri::http::header::CONTENT_TYPE, "image/png")
+            .header(tauri::http::header::CACHE_CONTROL, "no-store")
+            .body(bytes)
+            .expect("a static response is always well-formed"),
+        None => tauri::http::Response::builder()
+            .status(tauri::http::StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .expect("a static response is always well-formed"),
+    }
+}
+
 fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
     let bytes = cache.bytes.lock().ok().and_then(|guard| guard.clone());
     match bytes {
@@ -1123,6 +1194,68 @@ fn calculations(
 fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.load_channel(&name)?;
+        Ok(None)
+    })
+}
+
+/// Channels panel > New Channel: a black alpha channel, named `name` or
+/// the next free `Alpha N`.
+#[tauri::command]
+fn add_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let count = document.width() as usize * document.height() as usize;
+        document.add_channel(&name, vec![0; count])?;
+        Ok(None)
+    })
+}
+
+/// Rename alpha channel `old` to `new`.
+#[tauri::command]
+fn rename_channel(
+    state: State<'_, AppState>,
+    old: String,
+    new: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_channel(&old, &new)?;
+        Ok(None)
+    })
+}
+
+/// Move alpha channel `name` one step up or down the Channels panel.
+#[tauri::command]
+fn move_channel(
+    state: State<'_, AppState>,
+    name: String,
+    direction: MoveDirection,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.move_channel(&name, direction)?;
+        Ok(None)
+    })
+}
+
+/// Delete alpha channel `name`.
+#[tauri::command]
+fn delete_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_channel(&name)?;
+        Ok(None)
+    })
+}
+
+/// Paint `grey` along `points` on alpha channel `name` — one step of a
+/// gesture the frontend checkpointed, like [`paint_stroke`].
+#[tauri::command]
+fn paint_channel(
+    state: State<'_, AppState>,
+    name: String,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    grey: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.paint_channel(&name, &points, radius, grey)?;
         Ok(None)
     })
 }
@@ -4311,8 +4444,14 @@ pub fn run() {
         // Serves the cached composite to `<img src="composite://composite.png?g=…">`
         // in the frontend, so a re-render ships raw PNG bytes over a normal
         // resource fetch instead of a base64 string through IPC/JSON.
-        .register_uri_scheme_protocol("composite", |ctx, _request| {
-            serve_composite(&ctx.app_handle().state::<AppState>().composite)
+        .register_uri_scheme_protocol("composite", |ctx, request| {
+            let state = ctx.app_handle().state::<AppState>();
+            match channel_view_of(request.uri().query()) {
+                Some(view) if view != document::ChannelView::Composite => {
+                    serve_channel(&state, &view)
+                }
+                _ => serve_composite(&state.composite),
+            }
         })
         .invoke_handler(tauri::generate_handler![
             open_document,
@@ -4342,6 +4481,11 @@ pub fn run() {
             apply_image,
             calculations,
             load_channel,
+            add_channel,
+            rename_channel,
+            move_channel,
+            delete_channel,
+            paint_channel,
             cut,
             paste,
             paste_into,

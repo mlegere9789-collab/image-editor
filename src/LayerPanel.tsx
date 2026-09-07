@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 
+import type React from "react";
 import type { BlendMode, BlendModeInfo, LayerGroup, LayerView, MoveDirection } from "./types";
 
 type Props = {
+  /** Extra panels rendered under the layer list (the Channels panel). */
+  children?: React.ReactNode;
   /** Bottom-to-top, as the model stores them. */
   layers: LayerView[];
   /** Layer groups; a header row is drawn above each group's top member. */
@@ -35,6 +38,7 @@ type Props = {
 };
 
 export default function LayerPanel({
+  children,
   layers,
   selectedId,
   blendModes,
@@ -343,6 +347,7 @@ export default function LayerPanel({
           </button>
         </div>
       )}
+      {children}
     </aside>
   );
 }

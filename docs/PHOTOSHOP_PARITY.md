@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 363.**
+**618 distinct capabilities tracked. Currently shipped: 368.**
 
 ## PART I — EVERY TOOL
 
@@ -383,11 +383,11 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Convert Alpha Channel to Spot Channel
 - [ ] Merge Spot Channel
 - [ ] Spot Channel Overprinting Order
-- [ ] Alpha Channel Reordering
-- [ ] Alpha Channel Renaming
-- [ ] Channel Thumbnail Options
-- [ ] Channel Selection for Editing
-- [ ] Composite Channel
+- [x] Alpha Channel Reordering (`move_channel(name, Up | Down)` swaps an alpha channel with its neighbour in the Channels panel; a channel at either end stays put — see README Phase 227)
+- [x] Alpha Channel Renaming (`rename_channel(old, new)`, non-blank and unique; double-click a channel in the panel — see README Phase 227)
+- [x] Channel Thumbnail Options (the Channels panel's Thumbnails select: None, Small, Medium, Large, each row's thumbnail served through the `composite://` protocol's new `channel=` query — see README Phase 227)
+- [x] Channel Selection for Editing (selecting an alpha channel in the panel shows it on the canvas and sends brush strokes to `paint_channel(name, points, radius, grey)`, the brush colour's luma laid down over the Selection Brush's hard coverage; New Channel adds a black one through `add_channel` — see README Phase 227)
+- [x] Composite Channel (`ChannelView::{Composite, Red, Green, Blue, Alpha}` and `channel_image(view)`: the RGB row shows the composite, the colour rows one channel of it as a grey — see README Phase 227)
 - [ ] RGB Color Mode
 - [ ] CMYK Color Mode
 - [ ] Grayscale Mode

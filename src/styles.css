@@ -503,6 +503,64 @@ body {
   font-size: 15px;
 }
 
+.channels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.channels__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.channels__thumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.channel__thumb {
+  flex: none;
+  object-fit: contain;
+  background: repeating-conic-gradient(#666 0 25%, #999 0 50%) 0 0 / 8px 8px;
+  border: 1px solid var(--border);
+  image-rendering: pixelated;
+}
+
+.channel__thumb--small {
+  width: 24px;
+  height: 24px;
+}
+
+.channel__thumb--medium {
+  width: 40px;
+  height: 40px;
+}
+
+.channel__thumb--large {
+  width: 64px;
+  height: 64px;
+}
+
+.channel__actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.channel__rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
 .color-range-preview {
   display: block;
   max-width: 100%;

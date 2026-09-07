@@ -13595,6 +13595,64 @@ by hand instead. Every other layer of this project's quality bar
 **1375 Rust tests total** (1370 → 1375, 1368 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 227 — The Channels panel
+
+The alpha channels Calculations introduced get their panel. A
+`ChannelView` is Composite, Red, Green, Blue, or `Alpha { name }`, and
+`channel_image(view)` renders what the canvas shows for it: the
+flattened composite itself, one of its colour channels as an opaque
+grey, or an alpha channel's bytes as an opaque grey. The `composite://`
+protocol now reads a `channel=` query — `red`, `green`, `blue`, or
+`alpha:<percent-encoded name>` — and serves that image on request,
+rendered fresh each time rather than cached, since a view is a look
+and not the document; without the query it serves the cached composite
+as before. Channels can be managed: `add_channel(name, pixels)` (blank
+name → the lowest free `Alpha N`, which Calculations now uses too, so
+deleting `Alpha 1` frees its number), `rename_channel` (non-blank,
+unique), `move_channel` (one step up or down, a no-op at the ends),
+`delete_channel`, and `paint_channel(name, points, radius, grey)`,
+which sets every pixel the Selection Brush's hard coverage
+(`brush_bits`) touches to `grey`, ignoring the selection. A Channels
+panel under the layers lists RGB, Red, Green, Blue, and every alpha
+channel with a thumbnail at the chosen size (None, Small, Medium,
+Large); clicking a row shows it on the canvas, double-clicking an alpha
+row renames it, and its buttons move, load, and delete it; New Channel
+adds a black one. With an alpha channel selected, brush strokes paint
+its grey — the brush colour's BT.601 luma — through `paint_channel`
+instead of the layer. A deleted channel's view falls back to the
+composite. Spot channels and channel overlays remain scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, all exact byte
+comparisons. A 2×1 layer `[10, 20, 30, 255] [40, 50, 60, 128]` views
+as itself for Composite and as opaque greys `10/40`, `20/50`, `30/60`
+for Red, Green, Blue. A channel added with a blank name is `Alpha 1`
+and views as `200/10` grey; an unknown name errors; a one-byte channel
+on a two-pixel document is refused, a given name is kept, and a
+duplicate name errors. Renaming `Alpha 1` to `Hair` works while a
+blank, a taken, and an unknown name error; moving `Hair` down swaps
+the two, again is a no-op, up swaps back, an unknown name errors;
+deleting `Hair` leaves `Alpha 2`, and the next blank names are `Alpha
+1` then `Alpha 3`. Painting grey `200` at radius `1` about `(2.5, 0.5)`
+on a five-pixel channel sets `[0, 200, 200, 200, 0]`, a second dab of
+`90` at radius `0.5` sets the first pixel, an unknown channel and no
+points error, loading selects `128` and up, and the layer is
+untouched. A painted channel views as its greys while Composite and
+`flatten` are unchanged. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The panel was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1380 Rust tests total** (1375 → 1380, 1373 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

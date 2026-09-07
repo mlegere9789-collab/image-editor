@@ -4,6 +4,7 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
 import LayerPanel from "./LayerPanel";
+import ChannelPanel, { channelQuery, type ChannelThumbs } from "./ChannelPanel";
 import type {
   Adjustment,
   ApplyBlend,
@@ -13,6 +14,7 @@ import type {
   BlendModeInfo,
   CalcResult,
   CalcSource,
+  ChannelView,
   ColorRange,
   ColorRangePreset,
   ColorSample,
@@ -361,6 +363,9 @@ export default function App() {
   const [calcMasked, setCalcMasked] = useState(false);
   const [calcMask, setCalcMask] = useState<ApplyMask>({ source: null, channel: "rgb", invert: false });
   const [calcResult, setCalcResult] = useState<CalcResult>("newChannel");
+  // The Channels panel: what the canvas shows, and the thumbnail size.
+  const [channelView, setChannelView] = useState<ChannelView>({ kind: "composite" });
+  const [channelThumbs, setChannelThumbs] = useState<ChannelThumbs>("small");
   // Load Channel: which alpha channel to load as the selection.
   const [showLoadChannelDialog, setShowLoadChannelDialog] = useState(false);
   const [loadChannelName, setLoadChannelName] = useState("");
@@ -3563,6 +3568,16 @@ export default function App() {
           opacity: Math.round(brushOpacity * 255),
           symmetry: mirrored,
         });
+      } else if (channelView.kind === "alpha") {
+        // Editing an alpha channel: the brush lays down the colour's luma.
+        const [r, g, b] = hexToRgb(brushColor);
+        const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+        void runCommand("paint_channel", {
+          name: channelView.name,
+          points,
+          radius: brushSize,
+          grey,
+        });
       } else {
         const [r, g, b] = hexToRgb(brushColor);
         const alpha = Math.round(brushOpacity * 255);
@@ -3587,6 +3602,7 @@ export default function App() {
       magicWandTolerance,
       sharpenProtectDetail,
       sharpenSampleAll,
+      channelView,
     ],
   );
 
@@ -4478,7 +4494,17 @@ export default function App() {
   );
 
   const layers = document?.layers ?? [];
-  const compositeSrc = generation !== null ? `composite://composite.png?g=${generation}` : null;
+  // A selected alpha channel that no longer exists falls back to the composite.
+  const shownChannel: ChannelView =
+    channelView.kind === "alpha" && !(document?.channels ?? []).includes(channelView.name)
+      ? { kind: "composite" }
+      : channelView;
+  const compositeSrc =
+    generation !== null
+      ? `composite://composite.png?g=${generation}${
+          shownChannel.kind === "composite" ? "" : `&channel=${channelQuery(shownChannel)}`
+        }`
+      : null;
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
@@ -17332,7 +17358,32 @@ export default function App() {
           onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
           onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
           onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
-        />
+        >
+          {hasDocument && (
+            <ChannelPanel
+              generation={generation}
+              channels={document?.channels ?? []}
+              view={shownChannel}
+              thumbs={channelThumbs}
+              disabled={busy}
+              onSelect={setChannelView}
+              onThumbs={setChannelThumbs}
+              onAdd={() => void runCommand("add_channel", { name: "" })}
+              onRename={(old, next) => {
+                void runCommand("rename_channel", { old, new: next }).then(() => {
+                  setChannelView((current) =>
+                    current.kind === "alpha" && current.name === old
+                      ? { kind: "alpha", name: next.trim() }
+                      : current,
+                  );
+                });
+              }}
+              onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
+              onDelete={(name) => void runCommand("delete_channel", { name })}
+              onLoad={(name) => void runCommand("load_channel", { name })}
+            />
+          )}
+        </LayerPanel>
       </div>
 
       <footer className="statusbar">

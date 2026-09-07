@@ -149,6 +149,16 @@ export type ColorRange =
   | { kind: "sampled"; samples: ColorSample[]; fuzziness: number; localized: number | null }
   | { kind: ColorRangePreset };
 
+/** Mirrors `ChannelView` in src-tauri/src/document.rs (serde tagged by
+ * `kind`): what the canvas shows — the composite, one colour channel as a
+ * grey, or an alpha channel. */
+export type ChannelView =
+  | { kind: "composite" }
+  | { kind: "red" }
+  | { kind: "green" }
+  | { kind: "blue" }
+  | { kind: "alpha"; name: string };
+
 /** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >
  * Calculations' two sources. */
 export type CalcSource = { layer: number | null; channel: ApplyChannel; invert: boolean };
