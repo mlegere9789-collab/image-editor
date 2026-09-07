@@ -6605,14 +6605,19 @@ impl Document {
                         layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
                         continue;
                     }
-                    Stroke::Dodge { exposure } => {
+                    Stroke::Dodge { exposure } | Stroke::Burn { exposure } => {
                         if layer.pixels[base + 3] == 0 {
                             continue;
                         }
                         let amount = f32::from(exposure) / 100.0 * c;
+                        let lighten = matches!(stroke, Stroke::Dodge { .. });
                         for slot in layer.pixels[base..base + 3].iter_mut() {
                             let cb = to_unit(*slot);
-                            *slot = to_byte(cb + (1.0 - cb) * amount);
+                            *slot = to_byte(if lighten {
+                                cb + (1.0 - cb) * amount
+                            } else {
+                                cb * (1.0 - amount)
+                            });
                         }
                         continue;
                     }
@@ -11697,6 +11702,12 @@ pub enum Stroke {
     /// Photoshop's Midtones range, with its Shadows/Highlights ranges and
     /// Protect Tones a documented scope cut.
     Dodge { exposure: u8 },
+    /// The Burn tool, [`Stroke::Dodge`]'s mirror: darkens each covered
+    /// pixel's colour toward black by `exposure` percent scaled by the
+    /// brush's coverage — per channel `c · (1 − exposure · coverage)` —
+    /// leaving alpha alone and skipping fully transparent pixels. Midtones
+    /// only, as for Dodge.
+    Burn { exposure: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -17804,6 +17815,78 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .is_err());
+    }
+
+    #[test]
+    fn burn_darkens_toward_black_by_exposure() {
+        // Exposure 50 at full coverage halves every channel: 100 -> 50,
+        // 200 -> 100, 255 -> 127.5 -> 128.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 255, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 100, 128, 255]);
+    }
+
+    #[test]
+    fn burn_at_full_exposure_is_black_and_at_zero_is_an_identity() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 200, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 0 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 200, 255]);
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn burn_scales_with_the_brushs_soft_edge_coverage() {
+        // The same 0.7929 edge coverage as Dodge's test: 200 * (1 - 0.5 *
+        // 0.7929) -> 120.7 -> 121.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 0, 0, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Burn { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 121);
+    }
+
+    #[test]
+    fn burn_leaves_alpha_alone_and_skips_transparent_pixels() {
+        let mut pixels = solid(3, 3, [100, 200, 0, 255]);
+        pixels[3] = 0;
+        pixels[(3 + 1) * 4 + 3] = 128;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 100, 0, 128]);
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 0, 0]);
+    }
+
+    #[test]
+    fn burn_undoes_dodge_only_approximately_and_respects_locks() {
+        // Dodge then Burn at the same exposure is not an identity (the two
+        // move by different amounts): 100 -> 178 -> 89.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 0, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 89);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Burn { exposure: 50 })
             .is_err());
     }
 

@@ -1788,6 +1788,21 @@ fn dodge_stroke(
     })
 }
 
+/// Burn tool: darken along `points` on layer `id` by `exposure` percent.
+/// See [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn burn_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    exposure: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Burn { exposure })
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -3177,6 +3192,7 @@ pub fn run() {
             paint_stroke,
             erase_stroke,
             dodge_stroke,
+            burn_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,

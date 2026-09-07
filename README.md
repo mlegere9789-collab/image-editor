@@ -10273,6 +10273,49 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1045 Rust tests total** (1040 → 1045, 1038 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 161 — Burn tool
+
+`Stroke::Burn { exposure }` is Dodge's mirror: every pixel the brush
+covers has its colour pulled toward black by `exposure` percent scaled
+by the brush's coverage — per channel `c · (1 − exposure · coverage)` —
+with alpha left alone and fully transparent pixels skipped, exactly as
+Dodge does. The two tools share one arm of `stroke`'s match, differing
+only in the direction of the move, so Burn's soft-edge behaviour,
+transparency handling, and stroke-coverage maxing are Dodge's by
+construction. Midtones only, with Shadows/Highlights and Protect Tones
+documented scope cuts, as for Dodge. A **Burn** tool button sits beside
+Dodge, driven by the same Flow-as-Exposure slider. One consequence
+worth stating: Dodge followed by Burn at the same exposure is not an
+identity — Dodge moves by a fraction of the distance to white and Burn
+by a fraction of the distance to black, which differ unless the pixel
+is mid-grey — and Photoshop's pair behave the same way.
+
+**Verified two ways.** Five new `document.rs` tests, the four
+non-trivial bytes cross-checked in Python emulating the Rust `f32`
+arithmetic. A radius-3 dot at exposure 50 on solid `(100, 200, 255)`
+halves every channel to `(50, 100, 128)` (`255 × 0.5 = 127.5 → 128`) at
+unchanged alpha. Exposure 0 is an identity and exposure 100 reaches
+pure black. The same radius-1 dot as Dodge's test covers pixel `(0, 0)`
+at `0.7929`, taking `200` to `200 × (1 − 0.5 × 0.7929) = 120.7 → 121`.
+A half-transparent pixel keeps its alpha `128` while its colour
+darkens, and a fully transparent pixel is untouched byte for byte.
+Dodge then Burn at exposure 50 takes `100 → 178 → 89`, and a locked
+layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and eight: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1050 Rust tests total** (1045 → 1050, 1043 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

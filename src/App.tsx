@@ -2939,8 +2939,8 @@ export default function App() {
       if (selectedId === null) return;
       if (tool === "eraser") {
         void runCommand("erase_stroke", { id: selectedId, points, radius: brushSize });
-      } else if (tool === "dodge") {
-        void runCommand("dodge_stroke", {
+      } else if (tool === "dodge" || tool === "burn") {
+        void runCommand(tool === "dodge" ? "dodge_stroke" : "burn_stroke", {
           id: selectedId,
           points,
           radius: brushSize,
@@ -3695,6 +3695,15 @@ export default function App() {
             title="Dodge: paint to lighten toward white (Flow sets the Exposure)"
           >
             Dodge
+          </button>
+          <button
+            className={`button button--quiet${tool === "burn" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "burn"}
+            onClick={() => setTool("burn")}
+            title="Burn: paint to darken toward black (Flow sets the Exposure)"
+          >
+            Burn
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4935,6 +4944,7 @@ export default function App() {
               tool === "eraser" ||
               tool === "magicEraser" ||
               tool === "dodge" ||
+              tool === "burn" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"
