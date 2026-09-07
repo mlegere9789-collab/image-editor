@@ -498,6 +498,9 @@ export default function App() {
   const [channelThumbs, setChannelThumbs] = useState<ChannelThumbs>("small");
   // View > Proof Colors: a colour-blindness proof of the composite, or off.
   const [proof, setProof] = useState<Proof | "off">("off");
+  // Proof Setup > Custom's Simulate Paper Color / Simulate Black Ink.
+  const [proofPaperColor, setProofPaperColor] = useState("#faf0e6");
+  const [proofInkColor, setProofInkColor] = useState("#14100a");
   // Load Channel: which alpha channel to load as the selection.
   const [showLoadChannelDialog, setShowLoadChannelDialog] = useState(false);
   const [loadChannelName, setLoadChannelName] = useState("");
@@ -5718,14 +5721,16 @@ export default function App() {
     channelView.kind === "alpha" && !(document?.channels ?? []).includes(channelView.name)
       ? { kind: "composite" }
       : channelView;
+  const proofQuery =
+    proof === "off"
+      ? ""
+      : proof === "paperink"
+        ? `&proof=paperink:${proofPaperColor.slice(1)}-${proofInkColor.slice(1)}`
+        : `&proof=${proof}`;
   const compositeSrc =
     generation !== null
       ? `composite://composite.png?g=${generation}${
-          shownChannel.kind === "composite"
-            ? proof === "off"
-              ? ""
-              : `&proof=${proof}`
-            : `&channel=${channelQuery(shownChannel)}`
+          shownChannel.kind === "composite" ? proofQuery : `&channel=${channelQuery(shownChannel)}`
         }`
       : null;
 
@@ -5922,7 +5927,7 @@ export default function App() {
               8 Bits/Channel
             </span>
           </label>
-          <label className="tools__slider" title="View > Proof Setup > Color Blindness, shown with Proof Colors on">
+          <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select
               value={proof}
@@ -5932,8 +5937,17 @@ export default function App() {
               <option value="off">Off</option>
               <option value="protanopia">Protanopia-type</option>
               <option value="deuteranopia">Deuteranopia-type</option>
+              <option value="paperink">Custom: Paper/Ink</option>
             </select>
           </label>
+          {proof === "paperink" && (
+            <label className="tools__slider" title="Proof Setup > Custom's Simulate Paper Color and Simulate Black Ink">
+              Paper
+              <input type="color" value={proofPaperColor} onChange={(event) => setProofPaperColor(event.target.value)} />
+              Ink
+              <input type="color" value={proofInkColor} onChange={(event) => setProofInkColor(event.target.value)} />
+            </label>
+          )}
           <button
             className="button button--quiet"
             onClick={() => setShowLayerCompsDialog(true)}

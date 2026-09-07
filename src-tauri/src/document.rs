@@ -544,13 +544,18 @@ pub fn parse_cube(text: &str) -> Result<Lut3d, String> {
     })
 }
 
-/// View > Proof Setup > Color Blindness: the two dichromacies Photoshop
-/// simulates.
+/// View > Proof Setup: the two dichromacies Photoshop's Color Blindness
+/// proof simulates, or a Custom proof's Simulate Paper Color and
+/// Simulate Black Ink, given as the paper white and ink black an
+/// output device would actually reach — a documented stand-in for
+/// Photoshop's own ICC-profile-driven white/black point compensation,
+/// which this app's colour management (a scope cut) does not model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Proof {
     Protanopia,
     Deuteranopia,
+    PaperInk { paper: [u8; 3], ink: [u8; 3] },
 }
 
 /// An sRGB pixel as a protanope or deuteranope would see it: linearised,
@@ -581,6 +586,9 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
             [0.0, 0.24167, 0.75833],
         ],
         Proof::Deuteranopia => [[0.625, 0.375, 0.0], [0.7, 0.3, 0.0], [0.0, 0.3, 0.7]],
+        Proof::PaperInk { .. } => {
+            unreachable!("simulate_color_blindness is only called for a dichromacy proof")
+        }
     };
     let l = [linear(r), linear(g), linear(b)];
     let mut out = [0u8; 3];
@@ -588,6 +596,24 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
         *slot = encode(row[0] * l[0] + row[1] * l[1] + row[2] * l[2]);
     }
     out
+}
+
+/// View > Proof Setup > Custom's Simulate Paper Color and Simulate
+/// Black Ink: each channel linearly rescaled from the full `0..=255`
+/// input range onto `ink[channel]..=paper[channel]` — the same
+/// white/black point compensation Photoshop's own soft proof applies
+/// for a device whose paper is not perfectly white and whose ink is not
+/// perfectly black, standing in here for the full ICC-profile-driven
+/// version this app's colour management does not model.
+pub fn simulate_paper_ink([r, g, b]: [u8; 3], paper: [u8; 3], ink: [u8; 3]) -> [u8; 3] {
+    let mix = |value: u8, paper: u8, ink: u8| {
+        to_byte(to_unit(ink) + to_unit(value) * (to_unit(paper) - to_unit(ink)))
+    };
+    [
+        mix(r, paper[0], ink[0]),
+        mix(g, paper[1], ink[1]),
+        mix(b, paper[2], ink[2]),
+    ]
 }
 
 /// Edit > Transform > Warp's mesh: the sixteen control points of a
@@ -4095,13 +4121,22 @@ impl Document {
         Ok(())
     }
 
-    /// The composite as a colour-blind viewer would see it — View > Proof
-    /// Colors with a Color Blindness proof: every pixel's colour through
-    /// [`simulate_color_blindness`], alpha kept. A view: nothing changes.
+    /// The composite as `proof` would show it — View > Proof Colors: a
+    /// Color Blindness proof through [`simulate_color_blindness`], or a
+    /// Custom proof's Simulate Paper Color / Simulate Black Ink through
+    /// [`simulate_paper_ink`]; alpha kept either way. A view: nothing
+    /// changes.
     pub fn proof_image(&self, proof: Proof) -> Vec<u8> {
         let mut pixels = crate::composite::flatten(self).pixels;
         for px in pixels.chunks_exact_mut(CHANNELS) {
-            let [r, g, b] = simulate_color_blindness([px[0], px[1], px[2]], proof);
+            let [r, g, b] = match proof {
+                Proof::Protanopia | Proof::Deuteranopia => {
+                    simulate_color_blindness([px[0], px[1], px[2]], proof)
+                }
+                Proof::PaperInk { paper, ink } => {
+                    simulate_paper_ink([px[0], px[1], px[2]], paper, ink)
+                }
+            };
             px[0] = r;
             px[1] = g;
             px[2] = b;
@@ -50008,5 +50043,46 @@ mod tests {
             )
             .unwrap();
         assert_eq!(preview, applied.layer(target).unwrap().pixels);
+    }
+
+    #[test]
+    fn simulate_paper_ink_rescales_0_255_onto_the_ink_paper_range() {
+        // Paper (250, 240, 230), ink (20, 15, 10): a warm off-white paper
+        // and a warm near-black ink. Cross-checked in Python emulating
+        // Rust f32 (struct.pack/unpack) and round-half-away-from-zero at
+        // every step.
+        let paper = [250, 240, 230];
+        let ink = [20, 15, 10];
+        assert_eq!(simulate_paper_ink([0, 0, 0], paper, ink), ink);
+        assert_eq!(simulate_paper_ink([255, 255, 255], paper, ink), paper);
+        assert_eq!(
+            simulate_paper_ink([128, 128, 128], paper, ink),
+            [135, 128, 120]
+        );
+        assert_eq!(simulate_paper_ink([1, 1, 1], paper, ink), [21, 16, 11]);
+        assert_eq!(
+            simulate_paper_ink([254, 254, 254], paper, ink),
+            [249, 239, 229]
+        );
+    }
+
+    #[test]
+    fn proof_image_simulates_paper_and_ink_and_keeps_alpha() {
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("l", &[128, 128, 128, 255, 0, 0, 0, 128], 2, 1)
+            .unwrap();
+        let proof = Proof::PaperInk {
+            paper: [250, 240, 230],
+            ink: [20, 15, 10],
+        };
+        assert_eq!(
+            doc.proof_image(proof),
+            vec![135, 128, 120, 255, 20, 15, 10, 128]
+        );
+        // It is a view: the layer itself is untouched.
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![128, 128, 128, 255, 0, 0, 0, 128]
+        );
     }
 }

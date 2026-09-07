@@ -15781,6 +15781,69 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1560 Rust tests total** (1555 → 1560, 1553 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 264 — Simulate Paper Color and Simulate Black Ink
+
+A third `Proof` variant alongside the two colour-blindness dichromacies:
+`Proof::PaperInk { paper, ink }`, Custom Proof Setup's own pair of
+checkboxes modelled together as one white/black point compensation,
+since they act on the same rescale. `simulate_paper_ink` maps each
+channel linearly from the full `0..=255` input range onto
+`ink[channel]..=paper[channel]` — input `0` lands exactly on the ink
+colour, input `255` exactly on the paper colour, everything between
+interpolated — which is the same simplified compensation Photoshop's
+own soft proof applies for an output device whose paper is not
+perfectly white and whose ink is not perfectly black. This app has no
+ICC profile of its own to read a real device's paper and ink from (a
+documented, already-standing scope cut), so the two colours are taken
+directly from a pair of colour pickers instead of a profile — the
+honest substitute already established for Object/Subject Selection's
+own neural-detection stand-ins. `proof_image` dispatches to
+`simulate_color_blindness` for the two dichromacies and to
+`simulate_paper_ink` for `PaperInk`, keeping alpha untouched either
+way, exactly as before. The `composite://` protocol's `proof=` query
+gains a third shape, `paperink:<paper hex>-<ink hex>`, decoded by a
+small `parse_hex_rgb` helper alongside the existing bare
+`protanopia`/`deuteranopia` strings — no new Tauri command was needed,
+since a proof has always been driven entirely by the URL the frontend
+already builds for the live `<img>` tag. The toolbar's Proof select
+gains a "Custom: Paper/Ink" option, revealing two `<input type="color">`
+pickers (defaulting to a warm paper white and a warm near-black ink)
+whose hex values feed that query string directly.
+
+**Verified two ways.** Five new tests — two in `document.rs`, three in
+`lib.rs` — covering both the new pixel math and the new query parsing.
+Paper `(250, 240, 230)`, ink `(20, 15, 10)`: value `0` gives exactly the
+ink colour, value `255` exactly the paper colour, and value `128` gives
+`(135, 128, 120)` — hand-derived from the linear-rescale formula and
+independently confirmed in a Python script emulating Rust `f32`
+arithmetic via `struct.pack`/`unpack`, including `f32::round`'s
+round-half-away-from-zero (not Python's own banker's `round`), for
+every intermediate operation. `proof_image` on a two-pixel document
+(one opaque grey, one transparent) applies that exact rescale to both
+RGB triples and leaves both alpha bytes and the layer's own pixels
+untouched. For the query side, `proof_of` parses `paperink:FAF0E6-14100A` into the
+exact byte triples `(250, 240, 230)` and `(20, 16, 10)` (`0x14 = 20`,
+`0x10 = 16`, `0x0A = 10`), alongside still parsing the unchanged
+`protanopia` and `deuteranopia` strings; a missing dash, a non-hex
+digit, a wrong-length hex run, and outright nonsense are all refused
+with `None`, and a query with no `proof=` key at all (or none supplied)
+returns `None` too. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and eleven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The new Proof option and its colour pickers were reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1565 Rust tests total** (1560 → 1565, 1558 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

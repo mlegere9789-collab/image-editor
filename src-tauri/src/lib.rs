@@ -306,8 +306,19 @@ fn sample_pixel_color(cache: &CompositeCache, x: u32, y: u32) -> Result<[u8; 4],
 /// Decodes the `channel=` query value of a `composite://` request into the
 /// view to serve: `composite` (or none), `red`, `green`, `blue`, or
 /// `alpha:<percent-encoded name>`.
+/// A `RRGGBB` hex triple, no `#`, as three raw bytes.
+fn parse_hex_rgb(hex: &str) -> Option<[u8; 3]> {
+    if hex.len() != 6 {
+        return None;
+    }
+    let byte = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    Some([byte(0)?, byte(2)?, byte(4)?])
+}
+
 /// Decodes the `proof=` query value of a `composite://` request:
-/// `protanopia` or `deuteranopia`.
+/// `protanopia`, `deuteranopia`, or `paperink:<paper hex>-<ink hex>`
+/// (each a bare `RRGGBB` triple) for Simulate Paper Color / Simulate
+/// Black Ink.
 fn proof_of(query: Option<&str>) -> Option<document::Proof> {
     let value = query?
         .split('&')
@@ -315,12 +326,20 @@ fn proof_of(query: Option<&str>) -> Option<document::Proof> {
     match value {
         "protanopia" => Some(document::Proof::Protanopia),
         "deuteranopia" => Some(document::Proof::Deuteranopia),
-        _ => None,
+        _ => {
+            let rest = value.strip_prefix("paperink:")?;
+            let (paper_hex, ink_hex) = rest.split_once('-')?;
+            Some(document::Proof::PaperInk {
+                paper: parse_hex_rgb(paper_hex)?,
+                ink: parse_hex_rgb(ink_hex)?,
+            })
+        }
     }
 }
 
-/// Serves the composite as a colour-blind viewer would see it — View >
-/// Proof Colors under a Color Blindness proof. Rendered on request.
+/// Serves the composite through a View > Proof Colors proof — a Color
+/// Blindness dichromacy, or a Custom proof's paper/ink simulation.
+/// Rendered on request.
 fn serve_proof(state: &AppState, proof: document::Proof) -> tauri::http::Response<Vec<u8>> {
     let bytes = state.document.lock().ok().and_then(|guard| {
         let document = guard.as_ref()?;
@@ -6484,5 +6503,39 @@ mod tests {
         }
 
         assert_eq!(state.history.lock().unwrap().undo.len(), MAX_HISTORY);
+    }
+
+    #[test]
+    fn proof_of_parses_paper_ink_hex_pairs() {
+        assert_eq!(
+            proof_of(Some("g=1&proof=paperink:FAF0E6-14100A")),
+            Some(document::Proof::PaperInk {
+                paper: [0xfa, 0xf0, 0xe6],
+                ink: [0x14, 0x10, 0x0a],
+            })
+        );
+        assert_eq!(
+            proof_of(Some("proof=protanopia")),
+            Some(document::Proof::Protanopia)
+        );
+        assert_eq!(
+            proof_of(Some("proof=deuteranopia")),
+            Some(document::Proof::Deuteranopia)
+        );
+    }
+
+    #[test]
+    fn proof_of_rejects_malformed_paper_ink_values() {
+        assert_eq!(proof_of(Some("proof=paperink:FAF0E6")), None);
+        assert_eq!(proof_of(Some("proof=paperink:GGGGGG-000000")), None);
+        assert_eq!(proof_of(Some("proof=paperink:FFF-000000")), None);
+        assert_eq!(proof_of(Some("proof=nonsense")), None);
+    }
+
+    #[test]
+    fn proof_of_returns_none_without_a_proof_query() {
+        assert_eq!(proof_of(None), None);
+        assert_eq!(proof_of(Some("g=1")), None);
+        assert_eq!(proof_of(Some("g=1&channel=red")), None);
     }
 }
