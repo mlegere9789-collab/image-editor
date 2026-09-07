@@ -484,6 +484,23 @@ fn move_selection(state: State<'_, AppState>, dx: i64, dy: i64) -> Result<Snapsh
     })
 }
 
+/// Select > Transform Selection: scale, rotate, and move the selection
+/// outline about its own centre without touching pixels.
+#[tauri::command]
+fn transform_selection(
+    state: State<'_, AppState>,
+    width_percent: f32,
+    height_percent: f32,
+    degrees: f32,
+    dx: f32,
+    dy: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.transform_selection(width_percent, height_percent, degrees, dx, dy)?;
+        Ok(None)
+    })
+}
+
 /// Select > Save Selection: store the active selection under `name`.
 #[tauri::command]
 fn save_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
@@ -3474,6 +3491,7 @@ pub fn run() {
             invert_selection,
             expand_selection,
             move_selection,
+            transform_selection,
             save_selection,
             load_selection,
             add_count_mark,

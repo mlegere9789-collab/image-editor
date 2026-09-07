@@ -280,6 +280,14 @@ export default function App() {
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
   const [applyImageInvert, setApplyImageInvert] = useState(false);
   const [applyImagePreserve, setApplyImagePreserve] = useState(false);
+  const [showTransformSelectionDialog, setShowTransformSelectionDialog] = useState(false);
+  const [transformSelection, setTransformSelection] = useState({
+    widthPercent: 100,
+    heightPercent: 100,
+    degrees: 0,
+    dx: 0,
+    dy: 0,
+  });
   const [showSaveSelectionDialog, setShowSaveSelectionDialog] = useState(false);
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
@@ -1181,6 +1189,11 @@ export default function App() {
     applyImageInvert,
     applyImagePreserve,
   ]);
+
+  const applyTransformSelection = useCallback(async () => {
+    await runCommand("transform_selection", transformSelection);
+    setShowTransformSelectionDialog(false);
+  }, [runCommand, transformSelection]);
 
   const applySaveSelection = useCallback(async () => {
     await runCommand("save_selection", { name: saveSelectionName });
@@ -3742,6 +3755,14 @@ export default function App() {
             title="Move the selection outline by an exact offset without moving pixels (arrow keys nudge it with a marquee tool active)"
           >
             Move Selection…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowTransformSelectionDialog(true)}
+            disabled={busy || !hasSelection}
+            title="Select > Transform Selection (scale, rotate, and move the outline about its centre without moving pixels)"
+          >
+            Transform Selection…
           </button>
           <button
             className="button button--quiet"
@@ -7020,6 +7041,62 @@ export default function App() {
                 disabled={busy || loadSelectionName === ""}
               >
                 Load
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showTransformSelectionDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTransformSelectionDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Transform Selection"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Select &gt; Transform Selection</h2>
+            <p className="modal__hint">
+              Scales and rotates the outline about its own centre, then moves it; pixels stay
+              put. The result is a pixel-mask selection clipped to the canvas.
+            </p>
+            {(
+              [
+                ["widthPercent", "Width (%)", 1],
+                ["heightPercent", "Height (%)", 1],
+                ["degrees", "Angle (°)", 0.1],
+                ["dx", "Horizontal (px)", 1],
+                ["dy", "Vertical (px)", 1],
+              ] as const
+            ).map(([key, label, step]) => (
+              <label className="control control--row" key={key}>
+                <span className="control__label">{label}</span>
+                <input
+                  type="number"
+                  step={step}
+                  value={transformSelection[key]}
+                  onChange={(event) =>
+                    setTransformSelection((current) => ({
+                      ...current,
+                      [key]: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTransformSelectionDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyTransformSelection} disabled={busy}>
+                Apply
               </button>
             </div>
           </div>

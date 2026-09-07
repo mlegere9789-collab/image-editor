@@ -1818,6 +1818,63 @@ impl Document {
         Ok(())
     }
 
+    /// Select > Transform Selection: scales the selection outline by
+    /// `width_percent` and `height_percent`, rotates it by `degrees`
+    /// (clockwise positive, as [`Self::rotate`]), and moves it by `(dx,
+    /// dy)` — all about the selection's own bounding-box centre — without
+    /// touching any pixels. Every canvas pixel's centre is mapped back
+    /// through the inverse transform (undo the move, then the rotation,
+    /// then the scale — the same arithmetic the layer transforms use) and
+    /// tested against the current selection, so a rotated ellipse stays an
+    /// ellipse and a scaled rectangle a rectangle; the result is a
+    /// [`SelectionShape::Mask`] clipped to the canvas. Errors when nothing
+    /// is selected, on a non-positive scale or a non-finite value, or when
+    /// the result would select nothing, leaving the selection intact.
+    /// Photoshop's on-canvas handle gesture is a documented scope cut.
+    pub fn transform_selection(
+        &mut self,
+        width_percent: f32,
+        height_percent: f32,
+        degrees: f32,
+        dx: f32,
+        dy: f32,
+    ) -> Result<(), String> {
+        if ![width_percent, height_percent, degrees, dx, dy]
+            .iter()
+            .all(|v| v.is_finite())
+        {
+            return Err("Transform values must be finite numbers.".to_string());
+        }
+        if width_percent <= 0.0 || height_percent <= 0.0 {
+            return Err("Scale percentages must be greater than zero.".to_string());
+        }
+        let selection = self
+            .selection
+            .clone()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        let b = selection.bounds;
+        let (cx, cy) = (
+            (b.x0 as f32 + b.x1 as f32) / 2.0,
+            (b.y0 as f32 + b.y1 as f32) / 2.0,
+        );
+        let (scale_x, scale_y) = (width_percent / 100.0, height_percent / 100.0);
+        let (sin, cos) = degrees.to_radians().sin_cos();
+        let mut bits = Vec::with_capacity(self.width as usize * self.height as usize);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let ox = x as f32 + 0.5 - dx - cx;
+                let oy = y as f32 + 0.5 - dy - cy;
+                let rx = cos * ox + sin * oy;
+                let ry = -sin * ox + cos * oy;
+                bits.push(selection.contains(cx + rx / scale_x, cy + ry / scale_y));
+            }
+        }
+        if !bits.contains(&true) {
+            return Err("That would leave nothing selected.".to_string());
+        }
+        self.set_mask_selection(bits)
+    }
+
     /// Select > Save Selection: stores the active selection under `name`
     /// for [`Self::load_selection`] to bring back later — shape, bounds,
     /// inversion, border, and a mask's bitmap all included — replacing any
@@ -27555,6 +27612,97 @@ mod tests {
             }
         );
         doc.move_selection(0, 0).unwrap();
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    fn selected_pixels(doc: &Document) -> Vec<(u32, u32)> {
+        let s = doc.selection().expect("a selection");
+        (0..doc.height())
+            .flat_map(|y| (0..doc.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| s.contains(x as f32 + 0.5, y as f32 + 0.5))
+            .collect()
+    }
+
+    #[test]
+    fn transform_selection_scales_about_the_selections_centre() {
+        // The 2x2 at (1, 1) on 6x6 has centre (2, 2); at 200% a pixel
+        // centre p maps back to 2 + (p - 2) / 2, inside [1, 3) for p in
+        // 0.5..=3.5, so the 4x4 at the origin is selected.
+        let mut doc = Document::new(6, 6).unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.transform_selection(200.0, 200.0, 0.0, 0.0, 0.0)
+            .unwrap();
+        let expected: Vec<(u32, u32)> = (0..4).flat_map(|y| (0..4).map(move |x| (x, y))).collect();
+        assert_eq!(selected_pixels(&doc), expected);
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Mask);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 4,
+                y1: 4
+            }
+        );
+    }
+
+    #[test]
+    fn transform_selection_rotates_a_bar_about_its_centre() {
+        // A 3x1 bar at (1, 2) on 5x5 turned 90 degrees becomes the 1x3 bar
+        // at (2, 1).
+        let mut doc = Document::new(5, 5).unwrap();
+        doc.select_rectangle(1.0, 2.0, 4.0, 3.0).unwrap();
+        doc.transform_selection(100.0, 100.0, 90.0, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(2, 1), (2, 2), (2, 3)]);
+    }
+
+    #[test]
+    fn transform_selection_keeps_an_ellipse_elliptical() {
+        // The 4x2 ellipse at (0, 1) on 4x4 covers the middle two rows; turned
+        // 90 degrees about (2, 2) it is the 2x4 ellipse covering the middle
+        // two columns.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_ellipse(0.0, 1.0, 4.0, 3.0).unwrap();
+        let wide: Vec<(u32, u32)> = (1..3).flat_map(|y| (0..4).map(move |x| (x, y))).collect();
+        assert_eq!(selected_pixels(&doc), wide);
+        doc.transform_selection(100.0, 100.0, 90.0, 0.0, 0.0)
+            .unwrap();
+        let tall: Vec<(u32, u32)> = (0..4).flat_map(|y| (1..3).map(move |x| (x, y))).collect();
+        assert_eq!(selected_pixels(&doc), tall);
+    }
+
+    #[test]
+    fn transform_selection_moves_and_identity_is_a_mask_of_the_same_pixels() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.transform_selection(100.0, 100.0, 0.0, 1.0, 0.0)
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(1, 0)]);
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.transform_selection(100.0, 100.0, 0.0, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(1, 1), (2, 1), (1, 2), (2, 2)]);
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Mask);
+    }
+
+    #[test]
+    fn transform_selection_rejects_bad_input_and_empty_results() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc
+            .transform_selection(100.0, 100.0, 0.0, 0.0, 0.0)
+            .unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        assert!(doc.transform_selection(0.0, 100.0, 0.0, 0.0, 0.0).is_err());
+        assert!(doc
+            .transform_selection(100.0, 100.0, f32::NAN, 0.0, 0.0)
+            .is_err());
+        let err = doc
+            .transform_selection(100.0, 100.0, 0.0, 10.0, 0.0)
+            .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 

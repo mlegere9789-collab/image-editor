@@ -10793,6 +10793,55 @@ instead. Every other layer of this project's quality bar
 **1100 Rust tests total** (1095 → 1100, 1093 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 172 — Select > Transform Selection
+
+`transform_selection(width_percent, height_percent, degrees, dx, dy)`
+scales, rotates, and moves the selection outline about its own
+bounding-box centre without touching any pixels. Every canvas pixel's
+centre is mapped back through the inverse transform — undo the move,
+then the rotation (clockwise positive, as Phase 136's `rotate`), then
+the scale, the same arithmetic the layer transforms use — and tested
+against the current selection with `Selection::contains`, so a rotated
+ellipse stays an ellipse, a scaled rectangle a rectangle, and a mask a
+mask; the result is a pixel-mask selection clipped to the canvas. It
+errors when nothing is selected, on a non-positive scale or a
+non-finite value, or when the result would select nothing, leaving the
+selection intact each time. Photoshop's on-canvas handle gesture is a
+documented scope cut; a new **Transform Selection…** dialog beside Move
+Selection takes the five values instead.
+
+**Verified two ways.** Five new `document.rs` tests reading the
+selection back pixel by pixel through a new `selected_pixels` helper,
+each expected set derived by hand from the inverse map and confirmed by
+a Python model of it in `f32` before the Rust tests ran. The `2×2` at
+`(1, 1)` on `6×6` scaled to 200% about its centre `(2, 2)` maps a pixel
+centre `p` back to `2 + (p − 2) / 2`, inside `[1, 3)` for `p` from `0.5`
+to `3.5`, so exactly the `4×4` at the origin is selected (`Mask`, bounds
+`(0, 0)–(4, 4)`). A `3×1` bar at `(1, 2)` on `5×5` turned 90° becomes
+the `1×3` bar at `(2, 1)`. The `4×2` ellipse at `(0, 1)` on `4×4` covers
+the middle two rows (each pixel centre at normalised distance²
+`0.8125`), and turned 90° about `(2, 2)` covers exactly the middle two
+columns. A one-pixel selection moved by `(1, 0)` lands at `(1, 0)`, and
+the identity transform of a `2×2` keeps the same four pixels as a
+`Mask`. Nothing selected errors with "Nothing is selected"; a zero
+scale and a NaN angle error; a move of 10 px off a 3-wide canvas errors
+with "nothing selected" and keeps the `Rectangle`. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and nineteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1105 Rust tests total** (1100 → 1105, 1098 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
