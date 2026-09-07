@@ -6605,6 +6605,17 @@ impl Document {
                         layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
                         continue;
                     }
+                    Stroke::Dodge { exposure } => {
+                        if layer.pixels[base + 3] == 0 {
+                            continue;
+                        }
+                        let amount = f32::from(exposure) / 100.0 * c;
+                        for slot in layer.pixels[base..base + 3].iter_mut() {
+                            let cb = to_unit(*slot);
+                            *slot = to_byte(cb + (1.0 - cb) * amount);
+                        }
+                        continue;
+                    }
                 };
                 if source_alpha <= 0.0 {
                     continue;
@@ -11679,6 +11690,13 @@ pub enum Stroke {
     /// pixel's own alpha scaled by `opacity` (`0..=255`). Errors when no
     /// pattern has been defined.
     PatternStamp { opacity: u8 },
+    /// The Dodge tool: lightens each covered pixel's colour toward white by
+    /// `exposure` percent (`0..=100`) scaled by the brush's coverage — per
+    /// channel `c + (1 − c) · exposure · coverage` — leaving alpha alone
+    /// and skipping fully transparent pixels, which have no tone to lift.
+    /// Photoshop's Midtones range, with its Shadows/Highlights ranges and
+    /// Protect Tones a documented scope cut.
+    Dodge { exposure: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -17714,6 +17732,79 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 1)[3], 0);
         // Colour is left alone; only alpha is erased.
         assert_eq!(&pixel(&doc, id, 1, 1)[..3], &[10, 20, 30]);
+    }
+
+    #[test]
+    fn dodge_lightens_toward_white_by_exposure() {
+        // Exposure 50 at full coverage: 100 -> 100/255 + (155/255) / 2 ->
+        // 177.5 -> 178; 0 -> 128; 200 -> 227.5 -> 228.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 200, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [178, 128, 228, 255]);
+    }
+
+    #[test]
+    fn dodge_at_full_exposure_is_white_and_at_zero_is_an_identity() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 200, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 0 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 200, 255]);
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn dodge_scales_with_the_brushs_soft_edge_coverage() {
+        // Radius 1 at (1, 1): pixel (0, 0)'s centre is sqrt(0.5) away, so
+        // coverage is 1 - 0.7071 + 0.5 = 0.7929 and 100 lifts by 155/255 *
+        // 0.5 * 0.7929 -> 161.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 0, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 161);
+    }
+
+    #[test]
+    fn dodge_leaves_alpha_alone_and_skips_transparent_pixels() {
+        // (0, 0) fully transparent, (1, 1) at alpha 128.
+        let mut pixels = solid(3, 3, [100, 0, 0, 255]);
+        pixels[3] = 0;
+        pixels[(3 + 1) * 4 + 3] = 128;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 128);
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [178, 128, 128, 128]);
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 0, 0, 0]);
+    }
+
+    #[test]
+    fn dodge_respects_the_selection_and_a_locked_layer() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 200, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [178, 128, 228, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 0, 200, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Dodge { exposure: 50 })
+            .is_err());
     }
 
     #[test]

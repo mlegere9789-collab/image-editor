@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 231.**
+**618 distinct capabilities tracked. Currently shipped: 232.**
 
 ## PART I — EVERY TOOL
 
@@ -38,7 +38,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] MIXER BRUSH TOOL
 - [ ] HISTORY BRUSH TOOL
 - [ ] ART HISTORY BRUSH TOOL
-- [ ] DODGE TOOL
+- [x] DODGE TOOL (`Stroke::Dodge { exposure }`, a brush that lightens each covered pixel's colour toward white by Exposure × coverage, alpha untouched, transparent pixels skipped — Photoshop's Midtones range; Shadows/Highlights and Protect Tones are documented scope cuts — see README Phase 160)
 - [ ] BURN TOOL
 - [ ] SPONGE TOOL
 - [ ] BLUR TOOL

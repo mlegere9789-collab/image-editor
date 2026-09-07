@@ -2939,6 +2939,13 @@ export default function App() {
       if (selectedId === null) return;
       if (tool === "eraser") {
         void runCommand("erase_stroke", { id: selectedId, points, radius: brushSize });
+      } else if (tool === "dodge") {
+        void runCommand("dodge_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          exposure: Math.round(brushOpacity * 100),
+        });
       } else if (tool === "patternStamp") {
         void runCommand("pattern_stamp_stroke", {
           id: selectedId,
@@ -3679,6 +3686,15 @@ export default function App() {
             title="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
           >
             Magic Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "dodge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "dodge"}
+            onClick={() => setTool("dodge")}
+            title="Dodge: paint to lighten toward white (Flow sets the Exposure)"
+          >
+            Dodge
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4915,7 +4931,11 @@ export default function App() {
             className="tools__color"
             value={brushColor}
             disabled={
-              !canPaint || tool === "eraser" || tool === "magicEraser" || tool === "patternStamp"
+              !canPaint ||
+              tool === "eraser" ||
+              tool === "magicEraser" ||
+              tool === "dodge" ||
+              tool === "patternStamp"
             }
             aria-label="Brush color"
             onChange={(event) => setBrushColor(event.target.value)}

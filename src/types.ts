@@ -98,6 +98,7 @@ export type Tool =
   | "brush"
   | "eraser"
   | "magicEraser"
+  | "dodge"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

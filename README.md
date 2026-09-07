@@ -10227,6 +10227,52 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1040 Rust tests total** (1035 → 1040, 1033 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 160 — Dodge tool
+
+`Stroke::Dodge { exposure }` is a new brush for `Document::stroke`: every
+pixel the brush covers has its colour lifted toward white by
+`exposure` percent (`0..=100`) scaled by the brush's coverage — per
+channel `c + (1 − c) · exposure · coverage` — so the stroke's soft
+1 px edge lightens less than its body, exactly as the Brush's edge
+paints less. Alpha is left alone, and fully transparent pixels are
+skipped: they have no tone to lift, and Photoshop's Dodge leaves them
+alone too. This is Photoshop's Midtones range; its Shadows and
+Highlights ranges (which weight the effect by the pixel's own tone)
+and Protect Tones are documented scope cuts. Coverage within one
+stroke is maxed rather than summed, as for every stroke here, so
+passing back over the same pixels in a single drag does not compound —
+a second stroke does. A new **Dodge** tool button sits beside the
+Magic Eraser; the Flow slider sets its Exposure, and the colour swatch
+is disabled for it as for the erasers.
+
+**Verified two ways.** Five new `document.rs` tests, the four
+non-trivial bytes cross-checked in Python emulating the Rust `f32`
+arithmetic (coverage from `point_segment_distance`, `to_unit`,
+`to_byte`). A radius-3 dot at exposure 50 on a solid `(100, 0, 200)`
+layer gives `(178, 128, 228)` — `100/255 + (155/255)/2 = 177.5 → 178`,
+`0 → 127.5 → 128`, `200 → 227.5 → 228` — at unchanged alpha. Exposure 0
+is an identity and exposure 100 reaches pure white. A radius-1 dot at
+`(1, 1)` covers pixel `(0, 0)` — whose centre is `√0.5` away — at
+`1 − 0.7071 + 0.5 = 0.7929`, lifting `100` to `161`. A half-transparent
+pixel keeps its alpha `128` while its colour lifts, and a fully
+transparent pixel is untouched byte for byte. A one-pixel selection
+confines the stroke, and a locked layer errors. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1045 Rust tests total** (1040 → 1045, 1038 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
