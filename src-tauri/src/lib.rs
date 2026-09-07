@@ -545,6 +545,14 @@ fn move_pixels(
     edit_checkpointed(&state, |document| document.move_pixels(id, dx, dy))
 }
 
+/// Patch tool: rebuild the selected pixels of layer `id` from the area
+/// `(dx, dy)` away, matched to their own tone. A whole, discrete action,
+/// so it checkpoints itself.
+#[tauri::command]
+fn patch(state: State<'_, AppState>, id: LayerId, dx: i32, dy: i32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.patch(id, dx, dy))
+}
+
 /// Select > Transform Selection: scale, rotate, and move the selection
 /// outline about its own centre without touching pixels.
 #[tauri::command]
@@ -3707,6 +3715,7 @@ pub fn run() {
             expand_selection,
             move_selection,
             move_pixels,
+            patch,
             transform_selection,
             save_selection,
             load_selection,

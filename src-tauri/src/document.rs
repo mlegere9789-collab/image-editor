@@ -12079,6 +12079,63 @@ impl Document {
         Ok(Some(everything))
     }
 
+    /// The Patch tool (Normal, Source mode): the active selection is the
+    /// area to repair, dragged by `(dx, dy)` onto the area to sample. Every
+    /// selected pixel `p` is rebuilt from the pre-patch pixel `p + (dx,
+    /// dy)` with the Healing Brush's heal — the sample shifted, per
+    /// channel, by the difference between the destination's and the
+    /// source's radius-1 local means, clamped — so the source's texture
+    /// arrives at the destination's tone; unlike the brush it replaces
+    /// outright (no coverage falloff) and leaves the selection where it
+    /// is. Alpha is untouched; a sample off the canvas or transparent
+    /// leaves its pixel alone; a zero drag does nothing and returns
+    /// `None`. Errors with nothing selected or on a locked or unknown
+    /// layer. Photoshop's Destination mode, Transparent option, Diffusion,
+    /// and Content-Aware patching are documented scope cuts.
+    pub fn patch(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        let bits = self.selected_bits()?;
+        if dx == 0 && dy == 0 {
+            self.layer(id)?;
+            return Ok(None);
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let bounds = SelectionMask {
+            width: self.width,
+            height: self.height,
+            bits: bits.clone(),
+        }
+        .bounds()
+        .expect("selected_bits guarantees a pixel");
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let source = layer.pixels.clone();
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let (px, py) = (idx as i64 % width, idx as i64 / width);
+            let (sx, sy) = (px + dx as i64, py + dy as i64);
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                continue;
+            }
+            let src = (sy * width + sx) as usize * CHANNELS;
+            if source[src + 3] == 0 {
+                continue;
+            }
+            let dest_mean = box_blur_at(&source, doc_width, width, height, py as u32, px as u32, 1);
+            let source_mean =
+                box_blur_at(&source, doc_width, width, height, sy as u32, sx as u32, 1);
+            let base = idx * CHANNELS;
+            for channel in 0..3 {
+                layer.pixels[base + channel] = (i32::from(source[src + channel])
+                    + i32::from(dest_mean[channel])
+                    - i32::from(source_mean[channel]))
+                .clamp(0, 255) as u8;
+            }
+        }
+        Ok(Some(bounds))
+    }
+
     /// Edit > Free Transform: [`Self::scale`], then [`Self::rotate`], then
     /// [`Self::skew`], then a transparent-fill move, applied in that fixed
     /// order to layer `id` as one edit — so the result is byte-for-byte
@@ -19937,6 +19994,81 @@ mod tests {
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::SpotHeal)
             .is_err());
+    }
+
+    #[test]
+    fn patch_rebuilds_the_selection_from_the_dragged_source_at_its_own_tone() {
+        // The centre patched from one pixel right: 60 + (50 - 56) = 54, the
+        // Healing Brush's own number; the outline stays put.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let rect = doc.patch(id, 1, 0).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+        assert_eq!(pixel(&doc, id, 1, 1), [54, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 1), [60, 0, 0, 255]);
+        assert_eq!(doc.selection().unwrap().bounds, rect.unwrap());
+    }
+
+    #[test]
+    fn patch_replaces_every_selected_pixel_outright() {
+        // The left column patched from the middle column: 13, 43, 73.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 3.0).unwrap();
+        doc.patch(id, 1, 0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![13, 20, 30], vec![43, 50, 60], vec![73, 80, 90]]
+        );
+    }
+
+    #[test]
+    fn patch_skips_sources_off_the_canvas_or_transparent() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 0.0, 3.0, 3.0).unwrap();
+        doc.patch(id, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.patch(id, -1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
+        doc.patch(id, 1, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 128);
+        assert_ne!(pixel(&doc, id, 1, 1)[0], 50);
+    }
+
+    #[test]
+    fn patch_reads_the_pre_patch_pixels() {
+        // Patching the two left columns from one pixel right: column 1's
+        // sources are column 2's ORIGINAL values, column 0's are column
+        // 1's original 20/50/80, not the freshly patched ones.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 3.0).unwrap();
+        doc.patch(id, 1, 0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![13, 24, 30], vec![43, 54, 60], vec![73, 84, 90]]
+        );
+    }
+
+    #[test]
+    fn patch_rejects_no_selection_and_locked_layers_and_ignores_a_zero_drag() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.patch(id, 1, 0).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        assert_eq!(doc.patch(id, 0, 0).unwrap(), None);
+        assert!(doc.patch(999, 1, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.patch(id, 1, 0).is_err());
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
     }
 
     #[test]

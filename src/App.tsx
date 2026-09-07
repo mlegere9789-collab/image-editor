@@ -3135,6 +3135,7 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
+  const isPatch = tool === "patch";
   const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
@@ -3318,8 +3319,8 @@ export default function App() {
         rulerStart.current = toDocPoint(event, document);
         return;
       }
-      if (isMove) {
-        if (!canPaint) return;
+      if (isMove || isPatch) {
+        if (!canPaint || (isPatch && !hasSelection)) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         moveStart.current = toDocPoint(event, document);
         return;
@@ -3423,6 +3424,8 @@ export default function App() {
       redEyeAt,
       isRuler,
       isMove,
+      isPatch,
+      hasSelection,
       isCloneStamp,
       cloneSource,
       isLasso,
@@ -3517,14 +3520,16 @@ export default function App() {
         }
         return;
       }
-      if (isMove) {
+      if (isMove || isPatch) {
         const start = moveStart.current;
         moveStart.current = null;
         if (start && document && selectedId !== null) {
           const [x1, y1] = toDocPoint(event, document);
           const dx = Math.round(x1 - start[0]);
           const dy = Math.round(y1 - start[1]);
-          if (dx !== 0 || dy !== 0) void runCommand("move_pixels", { id: selectedId, dx, dy });
+          if (dx !== 0 || dy !== 0) {
+            void runCommand(isPatch ? "patch" : "move_pixels", { id: selectedId, dx, dy });
+          }
         }
         return;
       }
@@ -3595,6 +3600,7 @@ export default function App() {
     [
       isLasso,
       isMove,
+      isPatch,
       isRuler,
       isMarqueeTool,
       isGradient,
@@ -4253,6 +4259,15 @@ export default function App() {
             title="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
           >
             Spot Healing
+          </button>
+          <button
+            className={`button button--quiet${tool === "patch" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "patch"}
+            onClick={() => setTool("patch")}
+            title="Patch: select the area to repair, then drag it onto the area to sample from"
+          >
+            Patch
           </button>
           <button
             className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
@@ -5503,6 +5518,7 @@ export default function App() {
               tool === "cloneStamp" ||
               tool === "healingBrush" ||
               tool === "spotHealingBrush" ||
+              tool === "patch" ||
               tool === "historyBrush" ||
               tool === "patternStamp"
             }

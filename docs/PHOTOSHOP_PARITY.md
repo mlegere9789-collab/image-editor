@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 254.**
+**618 distinct capabilities tracked. Currently shipped: 255.**
 
 ## PART I — EVERY TOOL
 
@@ -22,7 +22,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] REMOVE TOOL
 - [x] HEALING BRUSH TOOL (`Stroke::Heal { offset }`, the Clone Stamp's aligned Alt-click sampling with the classic heal — texture from the source, tone from the destination: the sample shifted per channel by the difference of the two radius-1 local means, clamped, mixed by coverage, alpha untouched; Diffusion, Sample All Layers, and pattern sources are documented scope cuts — see README Phase 181)
 - [x] SPOT HEALING BRUSH TOOL (`Stroke::SpotHeal`, Proximity Match: each covered pixel takes the mean of the sixteen pre-stroke pixels on the square ring two pixels out, edge-clamped, mixed by coverage, alpha untouched; Content-Aware, Create Texture, and Sample All Layers are documented scope cuts — see README Phase 182)
-- [ ] PATCH TOOL
+- [x] PATCH TOOL (`patch`, Normal/Source mode: the selection is the area to repair, dragged onto the area to sample; every selected pixel is rebuilt from the pre-patch pixel that offset away with the Healing Brush's tone-matched heal, replacing outright, alpha untouched, the outline left in place; Destination mode, Transparent, Diffusion, and Content-Aware patching are documented scope cuts — see README Phase 183)
 - [ ] CONTENT-AWARE MOVE TOOL
 - [x] RED EYE TOOL (`red_eye`, a click that finds the 4-connected region of red-dominant pixels — red more than 50 levels above the larger of green and blue — replaces each pixel's red with the mean of its green and blue, and darkens all three channels by Darken Amount; confined to the selection, alpha untouched; Pupil Size is a documented scope cut — see README Phase 165)
 - [x] CLONE STAMP TOOL (`Stroke::Clone { offset }`, a brush that paints the pre-stroke layer's pixel a fixed offset away — the Alt-clicked source minus the stroke's first point, kept across strokes as Photoshop's Aligned mode — composited by coverage times the sample's alpha, off-canvas samples skipped; Sample All Layers and the non-aligned mode are documented scope cuts — see README Phase 176)

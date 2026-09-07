@@ -11319,6 +11319,55 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1155 Rust tests total** (1150 → 1155, 1148 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 183 — Patch tool
+
+`patch(id, dx, dy)` is the Patch tool in its Normal, Source mode: the
+active selection is the area to repair, and the drag `(dx, dy)` says
+where to sample. Every selected pixel `p` is rebuilt from the pre-patch
+pixel `p + (dx, dy)` with the Healing Brush's heal — the sample shifted,
+per channel, by the difference between the destination's and the
+source's radius-1 local means, clamped — so the source's texture
+arrives at the destination's tone. Unlike the brush it replaces
+outright, with no coverage falloff, and it leaves the selection outline
+where it is, as Photoshop's Patch leaves the repaired area selected.
+Alpha is untouched; a sample off the canvas or fully transparent leaves
+its pixel alone; a zero drag does nothing and returns `None`; the
+selection's bounding box is reported dirty. Nothing selected, or a
+locked or unknown layer, errors. Photoshop's Destination mode, the
+Transparent option, Diffusion, and Content-Aware patching are documented
+scope cuts. A new **Patch** tool button reuses the Move tool's drag
+capture: with a selection made, drag from it onto the source area and
+the rounded offset is applied at pointer-up.
+
+**Verified two ways.** Five new `document.rs` tests, every expected
+byte read off the same Python-derived healed grid Phase 181 used. The
+centre pixel patched from one pixel right becomes `60 + (50 − 56) = 54`
+(the Healing Brush's own number), the source pixel is untouched, and
+the selection still sits at `(1, 1)–(2, 2)`, which is also the dirty
+box. The left column patched from the middle becomes `13, 43, 73`. The
+right column patched from off the canvas is untouched, and on
+`depth_ramped_3x3` a transparent source leaves the centre alone while
+an opaque one keeps its alpha `128`. The two left columns patched from
+one pixel right give `[[13, 24, 30], [43, 54, 60], [73, 84, 90]]` —
+column 0 built from column 1's *original* values, proving the snapshot
+read. Nothing selected errors with "Nothing is selected", a zero drag
+returns `None`, and an unknown or locked layer errors with the pixels
+intact. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and thirty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The drag wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1160 Rust tests total** (1155 → 1160, 1153 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
