@@ -497,6 +497,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.count-mark {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  min-width: 1.2em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: #d9480f;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 0 0 1px #fff;
+}
+
 .clipping {
   display: flex;
   align-items: center;

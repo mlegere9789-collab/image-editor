@@ -67,6 +67,8 @@ export type DocumentView = {
   hasPattern: boolean;
   /** Names stored by Select > Save Selection, in the order first saved. */
   savedSelections: string[];
+  /** The Count tool's marks, (x, y) in placement order; mark n is numbered n + 1. */
+  countMarks: [number, number][];
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
@@ -115,6 +117,7 @@ export type Tool =
   | "redEye"
   | "ruler"
   | "colorSampler"
+  | "count"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

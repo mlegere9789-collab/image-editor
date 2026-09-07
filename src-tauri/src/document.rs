@@ -96,6 +96,11 @@ pub struct Document {
     /// travelling through undo/redo with the document. Cleared, like the
     /// active selection, when the canvas changes size.
     saved_selections: Vec<(String, Selection)>,
+    /// The Count tool's numbered marks, in placement order — document
+    /// data in Photoshop too (they save with the file and undo), and
+    /// discarded, like every position-bound thing here, when the canvas
+    /// changes size.
+    count_marks: Vec<(u32, u32)>,
 }
 
 /// A rectangle of RGBA8 pixels captured by [`Document::define_pattern`],
@@ -971,6 +976,9 @@ pub struct DocumentView {
     pub has_pattern: bool,
     /// The names `save_selection` has stored, in the order first saved.
     pub saved_selections: Vec<String>,
+    /// The Count tool's marks, `(x, y)` in placement order; mark `n` is
+    /// numbered `n + 1`.
+    pub count_marks: Vec<(u32, u32)>,
 }
 
 impl Document {
@@ -989,6 +997,7 @@ impl Document {
             last_transform: None,
             pattern: None,
             saved_selections: Vec::new(),
+            count_marks: Vec::new(),
         })
     }
 
@@ -1019,6 +1028,7 @@ impl Document {
             can_transform_again: self.last_transform.is_some(),
             has_pattern: self.pattern.is_some(),
             saved_selections: self.saved_selection_names(),
+            count_marks: self.count_marks.clone(),
         }
     }
 
@@ -1816,6 +1826,33 @@ impl Document {
             .collect()
     }
 
+    /// The Count tool: places the next numbered mark at pixel `(x, y)` and
+    /// returns the running total, which is that mark's number. Marks are
+    /// document data, as in Photoshop — they undo and travel with the
+    /// document — and are cleared when the canvas changes size. Errors off
+    /// the canvas. Photoshop's multiple count groups, colours, and marker
+    /// sizes are documented scope cuts.
+    pub fn add_count_mark(&mut self, x: u32, y: u32) -> Result<usize, String> {
+        if x >= self.width || y >= self.height {
+            return Err(format!(
+                "({x}, {y}) is outside the {}×{} canvas.",
+                self.width, self.height
+            ));
+        }
+        self.count_marks.push((x, y));
+        Ok(self.count_marks.len())
+    }
+
+    /// The Count tool's Clear: removes every mark.
+    pub fn clear_count_marks(&mut self) {
+        self.count_marks.clear();
+    }
+
+    /// The Count tool's marks in placement order.
+    pub fn count_marks(&self) -> &[(u32, u32)] {
+        &self.count_marks
+    }
+
     pub fn selection(&self) -> Option<Selection> {
         self.selection.clone()
     }
@@ -2091,6 +2128,7 @@ impl Document {
         self.selection = None;
         self.last_selection = None;
         self.saved_selections.clear();
+        self.count_marks.clear();
     }
 
     /// Crops the whole document — the canvas and every layer in it — to
@@ -2124,6 +2162,7 @@ impl Document {
         self.selection = None;
         self.last_selection = None;
         self.saved_selections.clear();
+        self.count_marks.clear();
         Ok(())
     }
 
@@ -28498,6 +28537,62 @@ mod tests {
         let err = doc.sample_points(&eleven).unwrap_err();
         assert!(err.contains("ten"), "{err}");
         assert!(doc.sample_points(&eleven[..10]).is_ok());
+    }
+
+    #[test]
+    fn count_marks_number_in_placement_order() {
+        let (mut doc, _) = ramped_3x3();
+        assert_eq!(doc.add_count_mark(2, 0).unwrap(), 1);
+        assert_eq!(doc.add_count_mark(0, 2).unwrap(), 2);
+        assert_eq!(doc.add_count_mark(2, 0).unwrap(), 3);
+        assert_eq!(doc.count_marks(), &[(2, 0), (0, 2), (2, 0)]);
+        assert_eq!(doc.view().count_marks, vec![(2, 0), (0, 2), (2, 0)]);
+    }
+
+    #[test]
+    fn count_marks_clear() {
+        let (mut doc, _) = ramped_3x3();
+        doc.add_count_mark(1, 1).unwrap();
+        doc.clear_count_marks();
+        assert!(doc.count_marks().is_empty());
+        assert!(doc.view().count_marks.is_empty());
+        assert_eq!(doc.add_count_mark(1, 1).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_marks_reject_off_canvas_points() {
+        let (mut doc, _) = ramped_3x3();
+        assert!(doc.add_count_mark(3, 0).is_err());
+        assert!(doc.add_count_mark(0, 3).is_err());
+        assert!(doc.count_marks().is_empty());
+        assert_eq!(doc.add_count_mark(2, 2).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_marks_survive_pixel_edits_but_not_a_canvas_resize() {
+        let (mut doc, id) = ramped_3x3();
+        doc.add_count_mark(1, 1).unwrap();
+        doc.invert_colors(id).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        assert_eq!(doc.count_marks().len(), 1);
+        doc.rotate_document_90(true);
+        assert!(doc.count_marks().is_empty());
+        doc.add_count_mark(0, 0).unwrap();
+        doc.crop(Rect {
+            x0: 0,
+            y0: 0,
+            x1: 2,
+            y1: 2,
+        })
+        .unwrap();
+        assert!(doc.count_marks().is_empty());
+    }
+
+    #[test]
+    fn a_new_document_has_no_count_marks() {
+        let doc = Document::new(2, 2).unwrap();
+        assert!(doc.count_marks().is_empty());
+        assert!(doc.view().count_marks.is_empty());
     }
 
     #[test]

@@ -3032,6 +3032,19 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isColorSampler = tool === "colorSampler";
+  const isCount = tool === "count";
+
+  const placeCountMark = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document) return;
+      const [fx, fy] = toDocPoint(event, document);
+      const x = Math.floor(fx);
+      const y = Math.floor(fy);
+      if (x < 0 || y < 0 || x >= document.width || y >= document.height) return;
+      void runCommand("add_count_mark", { x, y });
+    },
+    [document, runCommand],
+  );
 
   const placeColorSampler = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3156,6 +3169,10 @@ export default function App() {
         placeColorSampler(event);
         return;
       }
+      if (isCount) {
+        placeCountMark(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -3198,6 +3215,8 @@ export default function App() {
       isRuler,
       isColorSampler,
       placeColorSampler,
+      isCount,
+      placeCountMark,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3855,6 +3874,15 @@ export default function App() {
             title="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
           >
             Color Sampler
+          </button>
+          <button
+            className={`button button--quiet${tool === "count" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "count"}
+            onClick={() => setTool("count")}
+            title="Count: click to place numbered marks; the running total shows in the status bar"
+          >
+            Count
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -5123,6 +5151,16 @@ export default function App() {
               title="Remove every color sampler"
             >
               Clear Samplers
+            </button>
+          )}
+          {tool === "count" && (
+            <button
+              className="button button--quiet"
+              onClick={() => void runCommand("clear_count_marks", {})}
+              disabled={busy || (document?.countMarks.length ?? 0) === 0}
+              title="Remove every count mark"
+            >
+              Clear Count
             </button>
           )}
           {tool === "sponge" && (
@@ -13836,6 +13874,18 @@ export default function App() {
                   )}
                 />
               )}
+              {document.countMarks.map(([x, y], index) => (
+                <span
+                  key={index}
+                  className="count-mark"
+                  style={{
+                    left: `${((x + 0.5) / document.width) * 100}%`,
+                    top: `${((y + 0.5) / document.height) * 100}%`,
+                  }}
+                >
+                  {index + 1}
+                </span>
+              ))}
               {!marqueePreview && document.selection && (
                 <>
                   <div
@@ -13941,6 +13991,11 @@ export default function App() {
               >
                 W {rulerReadout.width.toFixed(1)} H {rulerReadout.height.toFixed(1)} D{" "}
                 {rulerReadout.distance.toFixed(1)} A {rulerReadout.angle.toFixed(1)}°
+              </span>
+            )}
+            {document.countMarks.length > 0 && (
+              <span className="statusbar__levels" title="Count tool: marks placed">
+                Count {document.countMarks.length}
               </span>
             )}
             {samplerReadouts.map((rgba, index) => (

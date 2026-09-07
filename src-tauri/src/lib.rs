@@ -502,6 +502,24 @@ fn load_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, 
     })
 }
 
+/// Count tool: place the next numbered mark at `(x, y)`.
+#[tauri::command]
+fn add_count_mark(state: State<'_, AppState>, x: u32, y: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_count_mark(x, y)?;
+        Ok(None)
+    })
+}
+
+/// Count tool: remove every mark.
+#[tauri::command]
+fn clear_count_marks(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.clear_count_marks();
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
 #[tauri::command]
 fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
@@ -3381,6 +3399,8 @@ pub fn run() {
             move_selection,
             save_selection,
             load_selection,
+            add_count_mark,
+            clear_count_marks,
             contract_selection,
             smooth_selection,
             border_selection,

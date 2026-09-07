@@ -10612,6 +10612,50 @@ instead. Every other layer of this project's quality bar
 **1080 Rust tests total** (1075 → 1080, 1073 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 168 — Count tool
+
+`add_count_mark(x, y)` places the next numbered mark at a pixel and
+returns the running total, which is that mark's number;
+`clear_count_marks()` removes them all; `count_marks()` lists them in
+placement order, and the `DocumentView` carries them as `countMarks`.
+Unlike the Color Sampler's points, count marks are document data in
+Photoshop — they save with the file and undo — so they live on the
+`Document` here too: both commands go through the checkpointed edit
+path, so placing or clearing marks is one undo step each, and, like
+the active selection, the reselect memory, and the saved selections,
+marks are discarded when the canvas changes size (`rotate_document_90`,
+`crop`), their coordinates no longer meaning anything. A click off the
+canvas errors. Photoshop's multiple count groups, custom colours, and
+marker/label sizes are documented scope cuts. A new **Count** tool
+button places a mark per click, a **Clear Count** button appears in
+the tool options while it is active, every mark is drawn on the canvas
+as a numbered badge positioned by the same percentage mapping the
+selection outline uses, and the status bar shows `Count N`.
+
+**Verified two ways.** Five new `document.rs` tests reading the marks
+back through both the accessor and the view. Three marks at `(2, 0)`,
+`(0, 2)`, `(2, 0)` are numbered `1, 2, 3` and listed in that order —
+the same pixel may be counted twice, as in Photoshop. Clearing empties
+both readings and the next mark is numbered `1` again. Marks at `(3,
+0)` and `(0, 3)` on a `3×3` canvas error and leave the list empty. A
+mark survives a pixel edit and a selection change but not a document
+rotation or a crop. A new document has no marks. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new tool's wiring and the badge overlay
+were reviewed by hand instead. Every other layer of this project's
+quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**1085 Rust tests total** (1080 → 1085, 1078 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
