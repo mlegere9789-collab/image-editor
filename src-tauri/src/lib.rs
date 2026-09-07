@@ -558,10 +558,18 @@ fn quick_select(
     radius: f32,
     tolerance: u8,
     mode: Option<document::SelectionMode>,
+    hardness: Option<u8>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         let mode = mode.unwrap_or(document::SelectionMode::Add);
-        document.quick_select_with(mode, id, &points, radius, tolerance)?;
+        document.quick_select_hard(
+            mode,
+            id,
+            &points,
+            radius,
+            tolerance,
+            hardness.unwrap_or(100),
+        )?;
         Ok(None)
     })
 }
@@ -675,6 +683,22 @@ fn select_brush(
     edit_checkpointed(&state, |document| {
         let mode = mode.unwrap_or(document::SelectionMode::Add);
         document.select_brush_with(mode, &points, radius)?;
+        Ok(None)
+    })
+}
+
+/// The Selection Brush's Circle Selection: one circle about `(cx, cy)`.
+#[tauri::command]
+fn select_circle(
+    state: State<'_, AppState>,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::Add);
+        document.select_circle_with(mode, cx, cy, radius)?;
         Ok(None)
     })
 }
@@ -4909,6 +4933,7 @@ pub fn run() {
             select_polygon,
             select_lasso,
             select_brush,
+            select_circle,
             select_magnetic_lasso,
             select_object_rect,
             select_object_lasso,

@@ -312,6 +312,11 @@ export default function App() {
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
   const [marqueeAntiAlias, setMarqueeAntiAlias] = useState(true);
+  // Quick Selection's Hardness, the Selection Brush's Circle mode, and its
+  // overlay Opacity.
+  const [quickHardness, setQuickHardness] = useState(100);
+  const [brushCircleMode, setBrushCircleMode] = useState(false);
+  const [selectionOverlayOpacity, setSelectionOverlayOpacity] = useState(50);
   // Select and Mask: the Global Refinements and Output To.
   const [showSelectAndMask, setShowSelectAndMask] = useState(false);
   const [refine, setRefine] = useState<RefineEdge>({ smooth: 0, feather: 0, contrast: 0, shiftEdge: 0 });
@@ -4530,7 +4535,14 @@ export default function App() {
               radius: brushSize,
               tolerance: magicWandTolerance,
               mode,
+              hardness: quickHardness,
             });
+          } else if (brushCircleMode) {
+            // Circle Selection: the press is the centre, the drag its radius.
+            const [cx, cy] = trail[0];
+            const [ex, ey] = trail[trail.length - 1];
+            const radius = Math.max(0.5, Math.hypot(ex - cx, ey - cy));
+            void runCommand("select_circle", { cx, cy, radius, mode });
           } else {
             void runCommand("select_brush", { points: trail, radius: brushSize, mode });
           }
@@ -4736,6 +4748,8 @@ export default function App() {
       smartGuides,
       isSelectionBrush,
       brushSize,
+      quickHardness,
+      brushCircleMode,
       magicWandTolerance,
       isMove,
       isPatch,
@@ -7477,6 +7491,45 @@ export default function App() {
               />
               Anti-alias
             </label>
+          )}
+          {tool === "quickSelection" && (
+            <label className="tools__slider" title="Hardness: how much of the brush seeds the selection; a softer brush follows colour from its core">
+              Hardness
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={quickHardness}
+                disabled={!canPaint}
+                onChange={(event) => setQuickHardness(Number(event.target.value))}
+              />
+              {quickHardness}%
+            </label>
+          )}
+          {tool === "selectionBrush" && (
+            <>
+              <label className="tools__slider" title="Circle Selection: press for the centre and drag out the radius instead of painting">
+                <input
+                  type="checkbox"
+                  checked={brushCircleMode}
+                  disabled={!hasDocument}
+                  onChange={(event) => setBrushCircleMode(event.target.checked)}
+                />
+                Circle
+              </label>
+              <label className="tools__slider" title="Opacity of the selection overlay drawn while you brush">
+                Opacity
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={selectionOverlayOpacity}
+                  disabled={!hasDocument}
+                  onChange={(event) => setSelectionOverlayOpacity(Number(event.target.value))}
+                />
+                {selectionOverlayOpacity}%
+              </label>
+            </>
           )}
           {(tool === "magicWand" || tool === "magicEraser") && (
             <>
@@ -18169,12 +18222,29 @@ export default function App() {
                   preserveAspectRatio="none"
                   aria-hidden="true"
                 >
-                  {(tool === "selectionBrush" || tool === "quickSelection") && (
+                  {tool === "selectionBrush" && brushCircleMode && (
+                    <circle
+                      cx={lassoPoints[0][0]}
+                      cy={lassoPoints[0][1]}
+                      r={Math.max(
+                        0.5,
+                        Math.hypot(
+                          lassoPoints[lassoPoints.length - 1][0] - lassoPoints[0][0],
+                          lassoPoints[lassoPoints.length - 1][1] - lassoPoints[0][1],
+                        ),
+                      )}
+                      fill="#4c8dff"
+                      fillOpacity={selectionOverlayOpacity / 100}
+                      stroke="#4c8dff"
+                      strokeWidth={0.5}
+                    />
+                  )}
+                  {(tool === "quickSelection" || (tool === "selectionBrush" && !brushCircleMode)) && (
                     <polyline
                       points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
                       fill="none"
                       stroke="#4c8dff"
-                      strokeOpacity={0.5}
+                      strokeOpacity={selectionOverlayOpacity / 100}
                       strokeWidth={brushSize * 2}
                       strokeLinecap="round"
                       strokeLinejoin="round"

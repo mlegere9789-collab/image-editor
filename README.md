@@ -14326,6 +14326,51 @@ by hand instead. Every other layer of this project's quality bar
 **1445 Rust tests total** (1440 → 1445, 1438 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 241 — Quick Selection Hardness and the Selection Brush's Circle mode
+
+Three options-bar rows land on the brush-driven selection tools.
+`quick_select_hard(mode, id, points, radius, tolerance, hardness)` is
+Quick Selection with its Hardness: only the brush's core — `hardness`
+percent of its radius, never under half a pixel — seeds the colour
+grow, so a soft brush follows colour from its centre instead of
+seeding from its rim; `100` is the whole brush, and `quick_select_with`
+now delegates to it at `100`. `select_circle_with(mode, cx, cy,
+radius)` is the Selection Brush's Circle Selection: one circle whose
+pixel centres within the radius are selected, combined per mode like
+any brush, refusing a bad radius, a bad centre, or a circle that
+reaches no pixel. The Quick Selection options bar gains a Hardness
+slider, the Selection Brush a Circle checkbox — press for the centre,
+drag out the radius, previewed as a filled circle — and an Opacity
+slider for the overlay drawn while brushing.
+
+**Verified two ways.** Five new `document.rs` tests on a seven-pixel
+row `B B A A A B B`, every seed and grow traced by hand. At hardness
+`100`, radius `2.5` about the middle reaches columns `1..=5`, the blue
+rim seeds, and the grow at tolerance `0` takes all seven — exactly
+what the plain Quick Selection gives. At hardness `50` the core
+reaches `2..=4`, all red, and only the red stripe is selected; at `0`
+the half-pixel core seeds the centre column alone with the same
+result, and `101` is refused. A circle of radius `1.5` about the middle
+of a 5×5 takes the 3×3 block (corners `√2` away) and radius `1` the
+five-pixel plus. A big circle minus a small one leaves eight pixels,
+adding a corner dab makes nine, and the result is a mask selection.
+Radius `0` and `−1`, a NaN centre, and a circle off the canvas are
+refused with nothing selected. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The controls were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1450 Rust tests total** (1445 → 1450, 1443 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

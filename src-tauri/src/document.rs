@@ -4212,11 +4212,52 @@ impl Document {
         radius: f32,
         tolerance: u8,
     ) -> Result<(), String> {
+        self.quick_select_hard(mode, id, points, radius, tolerance, 100)
+    }
+
+    /// [`Self::quick_select_with`] with the tool's Hardness (`0..=100`):
+    /// only the brush's core — `hardness` percent of its radius, never
+    /// less than half a pixel — seeds the grow, so a soft brush lets the
+    /// selection follow colour rather than the brush's own rim. `100` is
+    /// the whole brush.
+    pub fn quick_select_hard(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        tolerance: u8,
+        hardness: u8,
+    ) -> Result<(), String> {
+        if hardness > 100 {
+            return Err(format!("Hardness must be 0..=100 percent, not {hardness}."));
+        }
         let (width, height) = (self.width, self.height);
-        let stroked = brush_bits(width, height, points, radius)?;
+        let core = (radius * f32::from(hardness) / 100.0).max(0.5);
+        let stroked = brush_bits(width, height, points, core.min(radius))?;
         let layer = self.layer(id)?;
         let grown = grow_bits(&layer.pixels, width, height, stroked, tolerance);
         self.combine_with(mode, mask_selection(width, height, grown)?)
+    }
+
+    /// The Selection Brush's Circle Selection: a single circle of
+    /// `radius` about `(cx, cy)` — every pixel whose centre lies within
+    /// it — combined with the selection per `mode`. Errors for a
+    /// non-positive or non-finite radius, a non-finite centre, or a
+    /// circle that reaches no pixel.
+    pub fn select_circle_with(
+        &mut self,
+        mode: SelectionMode,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+    ) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        let bits = brush_bits(width, height, &[(cx, cy)], radius)?;
+        if !bits.iter().any(|&b| b) {
+            return Err("The circle reaches no pixel of the canvas.".to_string());
+        }
+        self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
     /// Select > Similar: extends the current selection to every pixel of
@@ -40221,6 +40262,119 @@ mod tests {
             None
         );
         assert_eq!(doc.view().layers.len(), 3);
+    }
+
+    /// A 7×1 row: `B B A A A B B`, A red and B blue, all opaque.
+    fn stripe_row() -> (Document, LayerId) {
+        let mut doc = Document::new(7, 1).unwrap();
+        let mut pixels = Vec::new();
+        for x in 0..7 {
+            let colour: [u8; 4] = if (2..5).contains(&x) {
+                [255, 0, 0, 255]
+            } else {
+                [0, 0, 255, 255]
+            };
+            pixels.extend_from_slice(&colour);
+        }
+        let id = doc.add_layer("row", &pixels, 7, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn quick_selection_at_full_hardness_seeds_with_the_whole_brush() {
+        // Radius 2.5 about x = 3.5 reaches columns 1..=5, so the blue rim at
+        // 1 and 5 seeds too and the grow at tolerance 0 takes every column.
+        let (mut doc, id) = stripe_row();
+        doc.quick_select_hard(SelectionMode::New, id, &[(3.5, 0.5)], 2.5, 0, 100)
+            .unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), vec![true; 7]);
+        // Hardness 100 is exactly the plain Quick Selection.
+        let (mut plain, id_b) = stripe_row();
+        plain
+            .quick_select_with(SelectionMode::New, id_b, &[(3.5, 0.5)], 2.5, 0)
+            .unwrap();
+        assert_eq!(plain.selected_bits().unwrap(), doc.selected_bits().unwrap());
+    }
+
+    #[test]
+    fn quick_selection_hardness_shrinks_the_seed_to_the_brush_core() {
+        // Hardness 50 seeds within 1.25 of x = 3.5 — columns 2..=4, all red —
+        // so the grow stays in the red stripe.
+        let (mut doc, id) = stripe_row();
+        doc.quick_select_hard(SelectionMode::New, id, &[(3.5, 0.5)], 2.5, 0, 50)
+            .unwrap();
+        let f = false;
+        let t = true;
+        assert_eq!(doc.selected_bits().unwrap(), [f, f, t, t, t, f, f]);
+        // Hardness 0 keeps a half-pixel core: the centre column alone
+        // seeds, and the stripe still grows from it.
+        let (mut doc, id) = stripe_row();
+        doc.quick_select_hard(SelectionMode::New, id, &[(3.5, 0.5)], 2.5, 0, 0)
+            .unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), [f, f, t, t, t, f, f]);
+        assert!(doc
+            .quick_select_hard(SelectionMode::New, id, &[(3.5, 0.5)], 2.5, 0, 101)
+            .is_err());
+    }
+
+    #[test]
+    fn circle_selection_selects_the_pixels_within_the_radius() {
+        // Radius 1.5 about the middle of a 5×5 takes the 3×3 block (its
+        // corners are √2 away); radius 1 takes the plus.
+        let mut doc = Document::new(5, 5).unwrap();
+        doc.select_circle_with(SelectionMode::New, 2.5, 2.5, 1.5)
+            .unwrap();
+        let bits = doc.selected_bits().unwrap();
+        let on: Vec<(u32, u32)> = (0..25)
+            .filter(|&i| bits[i])
+            .map(|i| ((i % 5) as u32, (i / 5) as u32))
+            .collect();
+        let block: Vec<(u32, u32)> = (1..4).flat_map(|y| (1..4).map(move |x| (x, y))).collect();
+        assert_eq!(on, block);
+        doc.select_circle_with(SelectionMode::New, 2.5, 2.5, 1.0)
+            .unwrap();
+        let bits = doc.selected_bits().unwrap();
+        assert_eq!(bits.iter().filter(|&&b| b).count(), 5);
+        assert!(bits[12] && bits[7] && bits[17] && bits[11] && bits[13]);
+    }
+
+    #[test]
+    fn circle_selection_combines_like_any_brush() {
+        // A big circle minus a small one leaves a ring of 9 − 1 pixels.
+        let mut doc = Document::new(5, 5).unwrap();
+        doc.select_circle_with(SelectionMode::New, 2.5, 2.5, 1.5)
+            .unwrap();
+        doc.select_circle_with(SelectionMode::Subtract, 2.5, 2.5, 0.5)
+            .unwrap();
+        let bits = doc.selected_bits().unwrap();
+        assert_eq!(bits.iter().filter(|&&b| b).count(), 8);
+        assert!(!bits[12]);
+        doc.select_circle_with(SelectionMode::Add, 0.5, 0.5, 0.5)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap().iter().filter(|&&b| b).count(),
+            9
+        );
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Mask);
+    }
+
+    #[test]
+    fn circle_selection_validates() {
+        let mut doc = Document::new(5, 5).unwrap();
+        assert!(doc
+            .select_circle_with(SelectionMode::New, 2.5, 2.5, 0.0)
+            .is_err());
+        assert!(doc
+            .select_circle_with(SelectionMode::New, 2.5, 2.5, -1.0)
+            .is_err());
+        assert!(doc
+            .select_circle_with(SelectionMode::New, f32::NAN, 2.5, 1.0)
+            .is_err());
+        assert!(doc.selection().is_none());
+        // Off the canvas: nothing to select is an error, not an empty mask.
+        assert!(doc
+            .select_circle_with(SelectionMode::New, 20.0, 20.0, 1.0)
+            .is_err());
     }
 
     #[test]

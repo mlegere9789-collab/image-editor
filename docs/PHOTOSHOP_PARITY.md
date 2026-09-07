@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 406.**
+**618 distinct capabilities tracked. Currently shipped: 409.**
 
 ## PART I — EVERY TOOL
 
@@ -309,12 +309,12 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Object Selection — Object Finder Refresh
 - [x] Object Selection — Hard Edge (always on: the found object is a hard-edged pixel mask; the soft-edged alternative is a documented scope cut — see README Phase 209)
 - [x] Quick Selection — Brush Size (the stroke's radius is the Brush Size; a wider dab seeds more pixels and so a wider colour range — see README Phase 207)
-- [ ] Quick Selection — Hardness
-- [ ] Selection Brush Tool — Opacity
+- [x] Quick Selection — Hardness (`quick_select_hard(…, hardness)`: only the brush's core, `hardness` percent of its radius and never under half a pixel, seeds the colour grow; `100` is the whole brush; the tool's Hardness slider — see README Phase 241)
+- [x] Selection Brush Tool — Opacity (the Selection Brush's Opacity slider, the opacity of the overlay drawn while brushing or dragging a circle — see README Phase 241)
 - [x] Selection Brush Tool — Add Mode (`select_brush_with` with `SelectionMode::Add`, the tool's default — see README Phase 206)
 - [x] Selection Brush Tool — Subtract Mode (`select_brush_with` with `SelectionMode::Subtract`, Alt while painting — see README Phase 206)
 - [x] Selection Brush Tool — Brush Selection (the painted stroke itself, at the Brush Size, previewed as a translucent trail while dragging — see README Phase 206)
-- [ ] Selection Brush Tool — Circle Selection
+- [x] Selection Brush Tool — Circle Selection (`select_circle_with(mode, cx, cy, radius)`: press for the centre, drag the radius, every pixel centre within it selected and combined per mode — see README Phase 241)
 - [x] Move Selection (`move_selection`, shifting the selection outline by a pixel offset without moving pixels — a geometric selection that still fits keeps its shape, inversion, and border; one pushed off the canvas edge, or a pixel mask, moves as a mask with the off-canvas part dropped; arrow keys nudge it by 1 px, Shift+arrow by 10, with a marquee tool active, and a dialog takes an exact offset — see README Phase 156)
 - [x] Transform Selection (`transform_selection`, scaling, rotating, and moving the selection outline about its own bounding-box centre by inverse-mapping every canvas pixel through the same arithmetic the layer transforms use and testing the current selection there — pixels untouched, the result a pixel-mask selection clipped to the canvas; the on-canvas handle gesture is a documented scope cut — see README Phase 172)
 - [x] Copy
