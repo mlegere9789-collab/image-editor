@@ -255,6 +255,10 @@ export default function App() {
   const [showMoveSelectionDialog, setShowMoveSelectionDialog] = useState(false);
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
+  const [showSaveSelectionDialog, setShowSaveSelectionDialog] = useState(false);
+  const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
+  const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
+  const [loadSelectionName, setLoadSelectionName] = useState("");
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
@@ -1121,6 +1125,22 @@ export default function App() {
     });
     setShowMoveSelectionDialog(false);
   }, [runCommand, moveSelectionX, moveSelectionY]);
+
+  const applySaveSelection = useCallback(async () => {
+    await runCommand("save_selection", { name: saveSelectionName });
+    setShowSaveSelectionDialog(false);
+  }, [runCommand, saveSelectionName]);
+
+  const openLoadSelectionDialog = useCallback(() => {
+    const names = document?.savedSelections ?? [];
+    setLoadSelectionName((current) => (names.includes(current) ? current : (names[0] ?? "")));
+    setShowLoadSelectionDialog(true);
+  }, [document]);
+
+  const applyLoadSelection = useCallback(async () => {
+    await runCommand("load_selection", { name: loadSelectionName });
+    setShowLoadSelectionDialog(false);
+  }, [runCommand, loadSelectionName]);
 
   const setGeometryField = useCallback((key: keyof typeof geometry, value: number) => {
     setGeometry((settings) => ({ ...settings, [key]: value }));
@@ -3476,6 +3496,22 @@ export default function App() {
             title="Move the selection outline by an exact offset without moving pixels (arrow keys nudge it with a marquee tool active)"
           >
             Move Selection…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSaveSelectionDialog(true)}
+            disabled={busy || !hasSelection}
+            title="Select > Save Selection (store the selection under a name to load later)"
+          >
+            Save Selection…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openLoadSelectionDialog}
+            disabled={busy || (document?.savedSelections.length ?? 0) === 0}
+            title="Select > Load Selection (replace the selection with a saved one)"
+          >
+            Load Selection…
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
@@ -6269,6 +6305,94 @@ export default function App() {
               </button>
               <button className="button" onClick={applyGeometry} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSaveSelectionDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSaveSelectionDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Save Selection"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Select &gt; Save Selection</h2>
+            <p className="modal__hint">
+              Saving under a name that already exists replaces that saved selection.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Name</span>
+              <input
+                type="text"
+                value={saveSelectionName}
+                onChange={(event) => setSaveSelectionName(event.target.value)}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSaveSelectionDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applySaveSelection}
+                disabled={busy || saveSelectionName.trim() === ""}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLoadSelectionDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLoadSelectionDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Load Selection"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Select &gt; Load Selection</h2>
+            <label className="control control--row">
+              <span className="control__label">Saved selection</span>
+              <select
+                value={loadSelectionName}
+                onChange={(event) => setLoadSelectionName(event.target.value)}
+              >
+                {(document?.savedSelections ?? []).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLoadSelectionDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyLoadSelection}
+                disabled={busy || loadSelectionName === ""}
+              >
+                Load
               </button>
             </div>
           </div>

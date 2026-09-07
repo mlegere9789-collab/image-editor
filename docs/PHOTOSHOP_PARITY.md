@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 218.**
+**618 distinct capabilities tracked. Currently shipped: 219.**
 
 ## PART I — EVERY TOOL
 
@@ -337,7 +337,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Select > Modify > Smooth (duplicate of MODIFY > SMOOTH in PART II, already shipped there — checked here for consistency)
 - [ ] Select > Grow
 - [ ] Select > Similar
-- [ ] Save Selection
+- [x] Save Selection (`save_selection` / `load_selection`, named selections stored on the document — shape, bounds, inversion, border, and a mask's bitmap — replacing a same-named one on save, loaded back as a new selection, listed in the view, and cleared with the active selection when the canvas changes size; Photoshop's alpha-channel storage and Load's Add/Subtract/Intersect operations are documented scope cuts — see README Phase 157)
 - [ ] Calculations
 - [ ] Calculations — Source 1
 - [ ] Calculations — Source 1 Layer

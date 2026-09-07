@@ -479,6 +479,24 @@ fn move_selection(state: State<'_, AppState>, dx: i64, dy: i64) -> Result<Snapsh
     })
 }
 
+/// Select > Save Selection: store the active selection under `name`.
+#[tauri::command]
+fn save_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_selection(&name)?;
+        Ok(None)
+    })
+}
+
+/// Select > Load Selection: replace the selection with the one saved as `name`.
+#[tauri::command]
+fn load_selection(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.load_selection(&name)?;
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
 #[tauri::command]
 fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
@@ -3213,6 +3231,8 @@ pub fn run() {
             invert_selection,
             expand_selection,
             move_selection,
+            save_selection,
+            load_selection,
             contract_selection,
             smooth_selection,
             border_selection,

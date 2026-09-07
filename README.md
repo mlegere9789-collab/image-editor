@@ -10048,6 +10048,58 @@ by hand instead. Every other layer of this project's quality bar
 **1025 Rust tests total** (1020 → 1025, 1018 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 157 — Select > Save Selection / Load Selection
+
+`save_selection(name)` stores the active selection under a name —
+shape, bounds, inversion, border, and a mask's bitmap all included —
+and `load_selection(name)` brings it back as the active selection,
+Photoshop's "New Selection" load operation. Saving under a name that
+already exists replaces that saved selection (Photoshop's dialog offers
+to replace the channel), names are trimmed, and the saved list keeps
+its first-saved order. Photoshop stores saved selections as alpha
+channels in the Channels panel; this project has no channels, so they
+live as named selections on the `Document` (`saved_selections`) and
+travel through undo/redo with it — a mask's bitmap is shared through
+its `Arc`, so saving costs a pointer, not a canvas. Like the active
+selection and the reselect memory, saved selections are discarded when
+the canvas changes size (`rotate_document_90`, `crop`), since their
+coordinates would no longer mean anything. Load's Add/Subtract/
+Intersect operations and Save's channel-combination operations are
+documented scope cuts. The `DocumentView` gains `savedSelections`, the
+list of names, mirrored in `types.ts`; a **Save Selection…** dialog
+takes a name and a **Load Selection…** dialog offers the saved names in
+a drop-down, enabled only when there is something to load.
+
+**Verified two ways.** Five new `document.rs` tests, each asserting
+the selection read back pixel by pixel or field by field. An inverted
+ellipse `(0, 0)–(3, 2)` saved as "ring", deselected, replaced by a
+rectangle, and loaded again comes back an inverted `Ellipse` with the
+same bounds, and the view lists `["ring"]`. The four corners of
+`cornered_3x3` selected via Similar, saved, deselected, and loaded
+reproduce the exact `Mask` bitmap. Saving "a", then "b", then " a " (a
+different rectangle each time) leaves the names `["a", "b"]` in that
+order with "a" holding its newest rectangle `(2, 2)–(3, 3)` and "b" its
+own `(1, 1)–(2, 2)`. Saving with nothing selected errors with "Nothing
+is selected", a blank name errors mentioning "name", and loading a name
+never saved errors quoting it — all leaving the saved list empty and
+the active rectangle intact. A saved selection does not survive
+`rotate_document_90` or `crop`: the view's list empties and loading it
+errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and four: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The two dialogs' wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1030 Rust tests total** (1025 → 1030, 1023 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

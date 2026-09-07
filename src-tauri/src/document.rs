@@ -90,6 +90,12 @@ pub struct Document {
     /// as application-wide presets; here the one defined pattern lives on
     /// the document, so it travels through undo/redo like everything else.
     pattern: Option<Pattern>,
+    /// Select > Save Selection's named selections, in the order first
+    /// saved — Photoshop stores these as alpha channels; here they are the
+    /// selections themselves (a mask's bitmap shared through its `Arc`),
+    /// travelling through undo/redo with the document. Cleared, like the
+    /// active selection, when the canvas changes size.
+    saved_selections: Vec<(String, Selection)>,
 }
 
 /// A rectangle of RGBA8 pixels captured by [`Document::define_pattern`],
@@ -947,6 +953,8 @@ pub struct DocumentView {
     pub can_transform_again: bool,
     /// Whether `define_pattern` has captured a pattern for fills to tile.
     pub has_pattern: bool,
+    /// The names `save_selection` has stored, in the order first saved.
+    pub saved_selections: Vec<String>,
 }
 
 impl Document {
@@ -964,6 +972,7 @@ impl Document {
             last_selection: None,
             last_transform: None,
             pattern: None,
+            saved_selections: Vec::new(),
         })
     }
 
@@ -993,6 +1002,7 @@ impl Document {
             can_reselect: self.last_selection.is_some(),
             can_transform_again: self.last_transform.is_some(),
             has_pattern: self.pattern.is_some(),
+            saved_selections: self.saved_selection_names(),
         }
     }
 
@@ -1573,6 +1583,55 @@ impl Document {
         Ok(())
     }
 
+    /// Select > Save Selection: stores the active selection under `name`
+    /// for [`Self::load_selection`] to bring back later — shape, bounds,
+    /// inversion, border, and a mask's bitmap all included — replacing any
+    /// selection already saved under that name, the way Photoshop's dialog
+    /// offers to replace an existing channel. Photoshop stores saved
+    /// selections as alpha channels in the Channels panel; this project
+    /// has no channels panel, so they live as named selections on the
+    /// document and travel through undo/redo with it. Errors when nothing
+    /// is selected or the name is blank.
+    pub fn save_selection(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A saved selection needs a name.".to_string());
+        }
+        let selection = self
+            .selection
+            .clone()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        match self.saved_selections.iter_mut().find(|(n, _)| n == name) {
+            Some(slot) => slot.1 = selection,
+            None => self.saved_selections.push((name.to_string(), selection)),
+        }
+        Ok(())
+    }
+
+    /// Select > Load Selection: replaces the active selection with the one
+    /// saved under `name` (Photoshop's "New Selection" operation; its
+    /// Add/Subtract/Intersect operations are documented scope cuts for
+    /// now). Errors when no selection of that name has been saved. Works
+    /// with or without a current selection.
+    pub fn load_selection(&mut self, name: &str) -> Result<(), String> {
+        let saved = self
+            .saved_selections
+            .iter()
+            .find(|(n, _)| n == name.trim())
+            .map(|(_, s)| s.clone())
+            .ok_or_else(|| format!("No selection named \"{}\" has been saved.", name.trim()))?;
+        self.selection = Some(saved);
+        Ok(())
+    }
+
+    /// The names `save_selection` has stored, in the order first saved.
+    pub fn saved_selection_names(&self) -> Vec<String> {
+        self.saved_selections
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
     pub fn selection(&self) -> Option<Selection> {
         self.selection.clone()
     }
@@ -1847,6 +1906,7 @@ impl Document {
         self.height = new_height;
         self.selection = None;
         self.last_selection = None;
+        self.saved_selections.clear();
     }
 
     /// Crops the whole document — the canvas and every layer in it — to
@@ -1879,6 +1939,7 @@ impl Document {
         self.height = new_height;
         self.selection = None;
         self.last_selection = None;
+        self.saved_selections.clear();
         Ok(())
     }
 
@@ -26264,6 +26325,123 @@ mod tests {
         );
         doc.move_selection(0, 0).unwrap();
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    #[test]
+    fn save_and_load_selection_round_trip_a_geometric_selection() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_ellipse(0.0, 0.0, 3.0, 2.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.save_selection("ring").unwrap();
+        assert_eq!(doc.view().saved_selections, vec!["ring".to_string()]);
+        doc.deselect();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.load_selection("ring").unwrap();
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Ellipse);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 2
+            }
+        );
+        assert!(s.inverted);
+    }
+
+    #[test]
+    fn save_and_load_selection_keep_a_masks_bitmap() {
+        let (mut doc, id) = cornered_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.select_similar(id, 0).unwrap();
+        doc.save_selection("corners").unwrap();
+        doc.deselect();
+        doc.load_selection("corners").unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![true, false, true],
+                vec![false, false, false],
+                vec![true, false, true]
+            ]
+        );
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Mask);
+    }
+
+    #[test]
+    fn saving_under_an_existing_name_replaces_it_and_keeps_the_order() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.save_selection("a").unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.save_selection("b").unwrap();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.save_selection(" a ").unwrap();
+        assert_eq!(doc.saved_selection_names(), vec!["a", "b"]);
+        doc.load_selection("a").unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 2,
+                y0: 2,
+                x1: 3,
+                y1: 3
+            }
+        );
+        doc.load_selection("b").unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn save_and_load_selection_reject_bad_input() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc.save_selection("x").unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let err = doc.save_selection("   ").unwrap_err();
+        assert!(err.contains("name"), "{err}");
+        let err = doc.load_selection("missing").unwrap_err();
+        assert!(err.contains("missing"), "{err}");
+        assert!(doc.saved_selection_names().is_empty());
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            }
+        );
+    }
+
+    #[test]
+    fn resizing_the_canvas_discards_saved_selections() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.save_selection("a").unwrap();
+        doc.rotate_document_90(true);
+        assert!(doc.view().saved_selections.is_empty());
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.save_selection("b").unwrap();
+        doc.crop(Rect {
+            x0: 0,
+            y0: 0,
+            x1: 2,
+            y1: 2,
+        })
+        .unwrap();
+        assert!(doc.saved_selection_names().is_empty());
+        assert!(doc.load_selection("b").is_err());
     }
 
     #[test]

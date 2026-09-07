@@ -65,6 +65,8 @@ export type DocumentView = {
   canTransformAgain: boolean;
   /** Whether Edit > Define Pattern has captured a pattern for fills to tile. */
   hasPattern: boolean;
+  /** Names stored by Select > Save Selection, in the order first saved. */
+  savedSelections: string[];
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
