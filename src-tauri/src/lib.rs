@@ -1720,6 +1720,24 @@ fn flood_fill(
     })
 }
 
+/// Magic Eraser: erase to transparency, at `opacity`, every pixel of layer
+/// `id` the Magic Wand would select from a click at `(x, y)`. A whole,
+/// discrete action like the Paint Bucket, so it checkpoints itself.
+#[tauri::command]
+fn magic_erase(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    tolerance: u8,
+    contiguous: bool,
+    opacity: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.magic_erase(id, x, y, tolerance, contiguous, opacity)
+    })
+}
+
 /// Gradient (Linear): blends `start_color` to `end_color` from `(x0, y0)`
 /// to `(x1, y1)` on layer `id`. A whole, discrete action on its own, so it
 /// checkpoints itself, the same as [`flood_fill`].
@@ -3149,6 +3167,7 @@ pub fn run() {
             select_color_range,
             grow_selection,
             select_similar,
+            magic_erase,
             select_all,
             invert_selection,
             expand_selection,

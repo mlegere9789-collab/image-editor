@@ -9836,6 +9836,63 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1005 Rust tests total** (1000 → 1005, 998 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 153 — Magic Eraser tool
+
+`magic_erase(id, x, y, tolerance, contiguous, opacity)` erases to
+transparency every pixel of layer `id` that the Magic Wand would select
+from a click at `(x, y)` — within `tolerance` of the clicked colour on
+every RGBA channel, 4-connected from the click when `contiguous` is set
+or anywhere on the layer when not — scaling each pixel's alpha by `1 −
+opacity` (`opacity` in `0..=255`; `255` erases outright), the same
+multiply-toward-zero the Eraser stroke applies, so colour bytes are
+left alone and only coverage changes. The Wand's region computation
+moved out of `select_magic_wand` into a shared `wand_bits` function
+that both the Wand and the Magic Eraser call; the Wand's own tests run
+unchanged through it. Like every painting tool the eraser is confined
+to the active selection: only selected pixels of the region are erased,
+and a click on an unselected pixel erases nothing and reports `None`
+rather than erroring, as the Paint Bucket does. It otherwise returns
+the erased region's bounding box, and errors on a locked or unknown
+layer or a click off the canvas. Photoshop's Anti-alias and Sample All
+Layers options are documented scope cuts, as they were for the Wand.
+A new **Magic Eraser** tool button sits beside the Eraser; while it is
+active the Wand's Tolerance slider and Contiguous checkbox appear in
+the tool options (the two tools share them, as they share Photoshop's
+Tolerance), and the Flow slider sets the erasure's Opacity.
+
+**Verified two ways.** Five new `document.rs` tests, with the two
+non-trivial alpha values cross-checked in Python emulating the Rust
+`f32` arithmetic (`to_unit` = byte ÷ 255, `to_byte` = round half away
+from zero of unit × 255). On `ramped_3x3` a click at `(0, 0)` with
+tolerance `15` at full opacity clears exactly the Wand's own region —
+`(0, 0)` and `(1, 0)` go to alpha `0`, every other pixel stays `255`,
+the colour bytes `10` and `20` survive, and the returned box is `(0,
+0)–(2, 1)`. Opacity `128` on an opaque pixel gives `255 × (1 − 128/255)
+= 127.0` exactly → `127`; opacity `64` on `depth_ramped_3x3`'s alpha-128
+centre gives `128 × (1 − 64/255) = 95.87` → `96`. On the `3×1` row `10
+50 10` a contiguous click at the first pixel clears only it while a
+non-contiguous click clears both `10`s (box `(0, 0)–(3, 1)`) and leaves
+the `50` opaque. With `(0, 0)` and `(1, 0)` selected, tolerance `25`
+reaches the whole top row but erases only the two selected pixels (box
+`(0, 0)–(2, 1)`), and a click on the unselected `(2, 0)` changes nothing
+and returns `None`. An off-canvas click, an unknown layer, and a locked
+layer (error mentioning "locked", pixel untouched) all error. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1010 Rust tests total** (1005 → 1010, 1003 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

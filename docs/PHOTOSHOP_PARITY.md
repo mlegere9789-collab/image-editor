@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 214.**
+**618 distinct capabilities tracked. Currently shipped: 215.**
 
 ## PART I — EVERY TOOL
 
@@ -29,7 +29,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] PATTERN STAMP TOOL (`Stroke::PatternStamp`, the brush stroke machinery painting the pattern captured by Define Pattern instead of a flat colour — each pixel the pattern pixel at `(x mod w, y mod h)`, tiles aligned to the canvas origin as in Photoshop's default Aligned mode, blended source-over with the pattern's own alpha scaled by the tool's opacity; errors with no pattern. Photoshop's Impressionist option and unaligned mode are documented scope cuts — see README Phase 145)
 - [x] ERASER TOOL
 - [ ] BACKGROUND ERASER TOOL
-- [ ] MAGIC ERASER TOOL
+- [x] MAGIC ERASER TOOL (`magic_erase`, a click that erases to transparency every pixel the Magic Wand would select from it — within Tolerance of the clicked colour, contiguous or not — scaling alpha by 1 − Opacity exactly as the Eraser stroke does, confined to the active selection; Anti-alias and Sample All Layers are documented scope cuts — see README Phase 153)
 - [x] GRADIENT TOOL
 - [x] PAINT BUCKET TOOL
 - [x] BRUSH TOOL

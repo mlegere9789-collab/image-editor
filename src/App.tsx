@@ -2885,6 +2885,24 @@ export default function App() {
     [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous],
   );
 
+  const isMagicEraser = tool === "magicEraser";
+
+  const magicEraseAt = useCallback(
+    (event: React.PointerEvent<HTMLImageElement>) => {
+      if (!document || selectedId === null) return;
+      const [x, y] = toDocPoint(event, document);
+      void runCommand("magic_erase", {
+        id: selectedId,
+        x: Math.floor(x),
+        y: Math.floor(y),
+        tolerance: magicWandTolerance,
+        contiguous: magicWandContiguous,
+        opacity: Math.round(brushOpacity * 255),
+      });
+    },
+    [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous, brushOpacity],
+  );
+
   const selectLineAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
@@ -2949,6 +2967,10 @@ export default function App() {
         if (canPaint) selectWandAt(event);
         return;
       }
+      if (isMagicEraser) {
+        if (canPaint) magicEraseAt(event);
+        return;
+      }
       if (isLineSelect) {
         selectLineAt(event);
         return;
@@ -2984,6 +3006,8 @@ export default function App() {
       fillAt,
       isMagicWand,
       selectWandAt,
+      isMagicEraser,
+      magicEraseAt,
       isLineSelect,
       selectLineAt,
       isGradient,
@@ -3490,6 +3514,15 @@ export default function App() {
             onClick={() => setTool("eraser")}
           >
             Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "magicEraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magicEraser"}
+            onClick={() => setTool("magicEraser")}
+            title="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
+          >
+            Magic Eraser
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4725,7 +4758,9 @@ export default function App() {
             type="color"
             className="tools__color"
             value={brushColor}
-            disabled={!canPaint || tool === "eraser" || tool === "patternStamp"}
+            disabled={
+              !canPaint || tool === "eraser" || tool === "magicEraser" || tool === "patternStamp"
+            }
             aria-label="Brush color"
             onChange={(event) => setBrushColor(event.target.value)}
           />
@@ -4739,7 +4774,7 @@ export default function App() {
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
           )}
-          {tool === "magicWand" && (
+          {(tool === "magicWand" || tool === "magicEraser") && (
             <>
               <label className="tools__slider">
                 Tolerance

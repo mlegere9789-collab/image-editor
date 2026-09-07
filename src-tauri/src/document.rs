@@ -752,6 +752,59 @@ pub struct Clipboard {
     pixels: Vec<u8>,
 }
 
+/// The Magic Wand's region: one flag per pixel of the `width` × `height`
+/// RGBA8 `pixels`, set where the pixel is within `tolerance` of the pixel
+/// at `(x, y)` on every channel and — when `contiguous` — 4-connected to
+/// it through such pixels. `(x, y)` must be on the canvas.
+fn wand_bits(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    x: u32,
+    y: u32,
+    tolerance: u8,
+    contiguous: bool,
+) -> Vec<bool> {
+    let pixel_at = |px: u32, py: u32| -> &[u8] {
+        let base = (py as usize * width as usize + px as usize) * CHANNELS;
+        &pixels[base..base + CHANNELS]
+    };
+    let seed = pixel_at(x, y);
+    let matches = |px: u32, py: u32| {
+        pixel_at(px, py)
+            .iter()
+            .zip(seed.iter())
+            .all(|(&a, &b)| a.abs_diff(b) <= tolerance)
+    };
+    let mut bits = vec![false; width as usize * height as usize];
+    if contiguous {
+        bits[(y * width + x) as usize] = true;
+        let mut stack = vec![(x, y)];
+        while let Some((px, py)) = stack.pop() {
+            let neighbours = [
+                px.checked_sub(1).map(|nx| (nx, py)),
+                (px + 1 < width).then_some((px + 1, py)),
+                py.checked_sub(1).map(|ny| (px, ny)),
+                (py + 1 < height).then_some((px, py + 1)),
+            ];
+            for (nx, ny) in neighbours.into_iter().flatten() {
+                let idx = (ny * width + nx) as usize;
+                if !bits[idx] && matches(nx, ny) {
+                    bits[idx] = true;
+                    stack.push((nx, ny));
+                }
+            }
+        }
+    } else {
+        for py in 0..height {
+            for px in 0..width {
+                bits[(py * width + px) as usize] = matches(px, py);
+            }
+        }
+    }
+    bits
+}
+
 /// The per-channel `(min, max)` of every pixel of `pixels` flagged in
 /// `bits`, each widened by `tolerance` and saturated to `0..=255`.
 fn colour_range_of(pixels: &[u8], bits: &[bool], tolerance: u8) -> [(u8, u8); CHANNELS] {
@@ -1088,49 +1141,78 @@ impl Document {
             ));
         }
         let layer = self.layer(id)?;
-        let pixel_at = |px: u32, py: u32| -> [u8; 4] {
-            let base = (py as usize * width as usize + px as usize) * CHANNELS;
-            [
-                layer.pixels[base],
-                layer.pixels[base + 1],
-                layer.pixels[base + 2],
-                layer.pixels[base + 3],
-            ]
-        };
-        let seed = pixel_at(x, y);
-        let matches = |px: u32, py: u32| {
-            pixel_at(px, py)
-                .iter()
-                .zip(seed.iter())
-                .all(|(&a, &b)| a.abs_diff(b) <= tolerance)
-        };
-        let mut bits = vec![false; width as usize * height as usize];
-        if contiguous {
-            bits[(y * width + x) as usize] = true;
-            let mut stack = vec![(x, y)];
-            while let Some((px, py)) = stack.pop() {
-                let neighbours = [
-                    px.checked_sub(1).map(|nx| (nx, py)),
-                    (px + 1 < width).then_some((px + 1, py)),
-                    py.checked_sub(1).map(|ny| (px, ny)),
-                    (py + 1 < height).then_some((px, py + 1)),
-                ];
-                for (nx, ny) in neighbours.into_iter().flatten() {
-                    let idx = (ny * width + nx) as usize;
-                    if !bits[idx] && matches(nx, ny) {
-                        bits[idx] = true;
-                        stack.push((nx, ny));
-                    }
-                }
-            }
-        } else {
-            for py in 0..height {
-                for px in 0..width {
-                    bits[(py * width + px) as usize] = matches(px, py);
-                }
-            }
-        }
+        let bits = wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous);
         self.set_mask_selection(bits)
+    }
+
+    /// The Magic Eraser tool: erases to transparency every pixel of layer
+    /// `id` the Magic Wand would select from a click at `(x, y)` — within
+    /// `tolerance` of the clicked colour per RGBA channel, 4-connected from
+    /// the click when `contiguous` is set or anywhere on the layer when not
+    /// — scaling each pixel's alpha by `1 − opacity` (`opacity` in
+    /// `0..=255`, so `255` erases outright and `128` roughly halves), the
+    /// same multiply-toward-zero the Eraser stroke applies. Confined to the
+    /// active selection like every painting tool: only selected pixels of
+    /// the region are erased, and a click on an unselected pixel erases
+    /// nothing and returns `None`. Returns the erased region's bounding
+    /// box otherwise. Errors on a locked or unknown layer or a click off
+    /// the canvas. Photoshop's Anti-alias and Sample All Layers options are
+    /// documented scope cuts.
+    pub fn magic_erase(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        tolerance: u8,
+        contiguous: bool,
+        opacity: u8,
+    ) -> Result<Option<Rect>, String> {
+        let (width, height) = (self.width, self.height);
+        if x >= width || y >= height {
+            return Err(format!(
+                "({x}, {y}) is outside the {width}x{height} canvas."
+            ));
+        }
+        let selection = self.selection.clone();
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let in_selection = |px: u32, py: u32| {
+            selection
+                .as_ref()
+                .map(|s| s.contains(px as f32 + 0.5, py as f32 + 0.5))
+                .unwrap_or(true)
+        };
+        if !in_selection(x, y) {
+            return Ok(None);
+        }
+        let bits = wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous);
+        let keep = 1.0 - to_unit(opacity);
+        let mut erased: Option<Rect> = None;
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let (px, py) = (idx as u32 % width, idx as u32 / width);
+            if !in_selection(px, py) {
+                continue;
+            }
+            let alpha = &mut layer.pixels[idx * CHANNELS + 3];
+            *alpha = to_byte(to_unit(*alpha) * keep);
+            erased = Some(match erased {
+                None => Rect {
+                    x0: px,
+                    y0: py,
+                    x1: px + 1,
+                    y1: py + 1,
+                },
+                Some(r) => Rect {
+                    x0: r.x0.min(px),
+                    y0: r.y0.min(py),
+                    x1: r.x1.max(px + 1),
+                    y1: r.y1.max(py + 1),
+                },
+            });
+        }
+        Ok(erased)
     }
 
     /// Select > Color Range: replaces the selection with every pixel of
@@ -26468,6 +26550,104 @@ mod tests {
         doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
         assert!(doc.select_similar(999, 10).is_err());
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
+    }
+
+    fn alpha_grid(doc: &Document, id: LayerId) -> Vec<Vec<u8>> {
+        (0..3)
+            .map(|y| (0..3).map(|x| pixel(doc, id, x, y)[3]).collect())
+            .collect()
+    }
+
+    #[test]
+    fn magic_eraser_clears_the_wands_region() {
+        // The same region the wand selects from (0, 0) at tolerance 15 --
+        // (0, 0) and (1, 0) -- goes fully transparent; colour bytes stay.
+        let (mut doc, id) = ramped_3x3();
+        let rect = doc.magic_erase(id, 0, 0, 15, true, 255).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+        assert_eq!(
+            alpha_grid(&doc, id),
+            vec![vec![0, 0, 255], vec![255, 255, 255], vec![255, 255, 255]]
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 0), [20, 0, 0, 0]);
+    }
+
+    #[test]
+    fn magic_eraser_opacity_scales_alpha_toward_zero() {
+        // 255 * (1 - 128/255) = 127.0 exactly in f32, and 128 * (1 - 64/255)
+        // = 95.87 -> 96, the same multiply the Eraser stroke applies.
+        let (mut doc, id) = ramped_3x3();
+        doc.magic_erase(id, 1, 1, 0, true, 128).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 127);
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.magic_erase(id, 1, 1, 0, true, 64).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 96);
+    }
+
+    #[test]
+    fn magic_eraser_non_contiguous_reaches_across_the_layer() {
+        let row = [10, 0, 0, 255, 50, 0, 0, 255, 10, 0, 0, 255];
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("row", &row, 3, 1).unwrap();
+        doc.magic_erase(id, 0, 0, 0, true, 255).unwrap();
+        assert_eq!(doc.layers()[0].pixels[3], 0);
+        assert_eq!(doc.layers()[0].pixels[11], 255);
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("row", &row, 3, 1).unwrap();
+        let rect = doc.magic_erase(id, 0, 0, 0, false, 255).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!([p[3], p[7], p[11]], [0, 255, 0]);
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn magic_eraser_is_confined_to_the_selection() {
+        // Tolerance 25 from (0, 0) reaches the whole top row, but only the
+        // selected (0, 0) and (1, 0) are erased; a click on the unselected
+        // (2, 0) erases nothing and reports None.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        let rect = doc.magic_erase(id, 0, 0, 25, true, 255).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 1
+            })
+        );
+        assert_eq!(alpha_grid(&doc, id)[0], vec![0, 0, 255]);
+        assert_eq!(doc.magic_erase(id, 2, 0, 25, true, 255).unwrap(), None);
+        assert_eq!(alpha_grid(&doc, id)[0], vec![0, 0, 255]);
+    }
+
+    #[test]
+    fn magic_eraser_rejects_locked_unknown_and_off_canvas() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc.magic_erase(id, 3, 0, 0, true, 255).is_err());
+        assert!(doc.magic_erase(999, 0, 0, 0, true, 255).is_err());
+        doc.set_locked(id, true).unwrap();
+        let err = doc.magic_erase(id, 0, 0, 0, true, 255).unwrap_err();
+        assert!(err.contains("locked"), "{err}");
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 255);
     }
 
     #[test]

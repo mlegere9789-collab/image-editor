@@ -91,6 +91,7 @@ export type MoveDirection = "up" | "down";
 export type Tool =
   | "brush"
   | "eraser"
+  | "magicEraser"
   | "patternStamp"
   | "magicWand"
   | "selectRect"
