@@ -280,6 +280,9 @@ export default function App() {
   const [skewVertical, setSkewVertical] = useState(0);
   const [magicWandTolerance, setMagicWandTolerance] = useState(32);
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
+  const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
+  const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
+  const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
   const [showGeometryDialog, setShowGeometryDialog] = useState(false);
   const [geometry, setGeometry] = useState({
     vertical: 0,
@@ -1117,6 +1120,17 @@ export default function App() {
     await runCommand("camera_raw_geometry", { id: selectedId, settings: geometry });
     setShowGeometryDialog(false);
   }, [runCommand, selectedId, geometry]);
+
+  const applyColorRange = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(colorRangeColor);
+    await runCommand("select_color_range", {
+      id: selectedId,
+      color: [r, g, b],
+      fuzziness: colorRangeFuzziness,
+    });
+    setShowColorRangeDialog(false);
+  }, [runCommand, selectedId, colorRangeColor, colorRangeFuzziness]);
 
   const applyScale = useCallback(async () => {
     if (selectedId === null) return;
@@ -3341,6 +3355,14 @@ export default function App() {
             title="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
           >
             Magic Wand
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowColorRangeDialog(true)}
+            disabled={busy || !canPaint}
+            title="Select > Color Range (every pixel of the selected layer within Fuzziness of a chosen colour)"
+          >
+            Color Range…
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
@@ -6000,6 +6022,59 @@ export default function App() {
               </button>
               <button className="button" onClick={applyCameraRaw} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorRangeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorRangeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Range"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Select &gt; Color Range</h2>
+            <p className="modal__hint">
+              Selects every pixel of the selected layer whose red, green, and blue
+              are each within Fuzziness of the chosen colour, wherever it sits.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={colorRangeColor}
+                onChange={(event) => setColorRangeColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Fuzziness
+                <span className="control__value">{colorRangeFuzziness}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={colorRangeFuzziness}
+                onChange={(event) => setColorRangeFuzziness(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorRangeDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorRange} disabled={busy}>
+                Select
               </button>
             </div>
           </div>

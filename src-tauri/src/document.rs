@@ -1117,14 +1117,54 @@ impl Document {
                 }
             }
         }
+        self.set_mask_selection(bits)
+    }
+
+    /// Select > Color Range: replaces the selection with every pixel of
+    /// layer `id` whose RGB is within `fuzziness` of `color` — per channel,
+    /// `abs_diff <= fuzziness`, so the Magic Wand's tolerance test applied
+    /// to a chosen colour instead of a clicked pixel, and anywhere on the
+    /// layer (Color Range has no contiguous mode). Alpha is ignored: the
+    /// dialog samples colour, and Photoshop's own Color Range likewise
+    /// judges colour alone. The result is a [`SelectionShape::Mask`] like
+    /// the Wand's. Photoshop's Fuzziness also grades partial selection for
+    /// in-between colours, and its Localized Color Clusters, Detect Faces,
+    /// preset ranges (Reds … Skin Tones, Highlights/Midtones/Shadows) and
+    /// Invert checkbox are documented scope cuts — masks here are all-or-
+    /// nothing, and Select > Inverse already inverts. Errors on an unknown
+    /// layer, or when no pixel is within range, leaving the previous
+    /// selection intact either way.
+    pub fn select_color_range(
+        &mut self,
+        id: LayerId,
+        color: [u8; 3],
+        fuzziness: u8,
+    ) -> Result<(), String> {
+        let layer = self.layer(id)?;
+        let bits = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| {
+                px[..3]
+                    .iter()
+                    .zip(color.iter())
+                    .all(|(&a, &b)| a.abs_diff(b) <= fuzziness)
+            })
+            .collect();
+        self.set_mask_selection(bits)
+    }
+
+    /// Installs a canvas-sized pixel-mask selection, or errors (leaving the
+    /// current selection alone) when the mask selects nothing.
+    fn set_mask_selection(&mut self, bits: Vec<bool>) -> Result<(), String> {
         let mask = SelectionMask {
-            width,
-            height,
+            width: self.width,
+            height: self.height,
             bits,
         };
-        let bounds = mask
-            .bounds()
-            .expect("the clicked pixel always matches itself");
+        let Some(bounds) = mask.bounds() else {
+            return Err("No pixels are within range of that colour.".to_string());
+        };
         self.selection = Some(Selection {
             shape: SelectionShape::Mask,
             bounds,
@@ -26033,6 +26073,81 @@ mod tests {
         assert!(doc.selection().unwrap().contains(1.5, 1.5));
         assert!(doc.select_magic_wand(id, 3, 0, 0, true).is_err());
         assert!(doc.select_magic_wand(999, 0, 0, 0, true).is_err());
+    }
+
+    #[test]
+    fn color_range_selects_every_pixel_within_fuzziness_of_the_colour() {
+        // ramped_3x3 against (50, 0, 0) at fuzziness 10: the middle row's
+        // 40, 50, 60 are within 10; 30 above and 70 below are 20 away.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_color_range(id, [50, 0, 0], 10).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![true, true, true],
+                vec![false, false, false]
+            ]
+        );
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Mask);
+        assert_eq!(
+            selection.bounds,
+            Rect {
+                x0: 0,
+                y0: 1,
+                x1: 3,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn color_range_at_zero_fuzziness_is_an_exact_match() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_color_range(id, [50, 0, 0], 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![false, true, false],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn color_range_errors_and_keeps_the_old_selection_when_nothing_matches() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let err = doc.select_color_range(id, [200, 200, 200], 5).unwrap_err();
+        assert!(err.contains("No pixels"), "{err}");
+        let selection = doc.selection().unwrap();
+        assert_eq!(selection.shape, SelectionShape::Rectangle);
+        assert!(selection.contains(0.5, 0.5) && !selection.contains(1.5, 0.5));
+    }
+
+    #[test]
+    fn color_range_ignores_alpha() {
+        // depth_ramped_3x3's left column is fully transparent; (0, 1) = 40
+        // still matches on colour alone.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.select_color_range(id, [40, 0, 0], 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![true, false, false],
+                vec![false, false, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn color_range_rejects_an_unknown_layer() {
+        let (mut doc, _id) = ramped_3x3();
+        assert!(doc.select_color_range(999, [10, 0, 0], 0).is_err());
+        assert!(doc.selection().is_none());
     }
 
     #[test]

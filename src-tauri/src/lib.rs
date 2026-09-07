@@ -400,6 +400,21 @@ fn select_magic_wand(
     })
 }
 
+/// Select > Color Range: replace the selection with every pixel of layer
+/// `id` whose RGB is within `fuzziness` (per channel) of `color`.
+#[tauri::command]
+fn select_color_range(
+    state: State<'_, AppState>,
+    id: LayerId,
+    color: [u8; 3],
+    fuzziness: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_color_range(id, color, fuzziness)?;
+        Ok(None)
+    })
+}
+
 /// Select the entire canvas.
 #[tauri::command]
 fn select_all(state: State<'_, AppState>) -> Result<Snapshot, String> {
@@ -3103,6 +3118,7 @@ pub fn run() {
             select_rectangle,
             select_ellipse,
             select_magic_wand,
+            select_color_range,
             select_all,
             invert_selection,
             expand_selection,

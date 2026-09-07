@@ -9674,6 +9674,57 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **990 Rust tests total** (983 → 990, 983 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 150 — Select > Color Range
+
+`select_color_range(id, color, fuzziness)` is the second producer of
+Phase 149's pixel-mask selections and shows what that infrastructure
+bought: it is thirty lines. It replaces the selection with every pixel
+of layer `id` whose red, green, and blue are each within `fuzziness` of
+`color`, wherever on the layer it sits — a Chebyshev distance on RGB,
+alpha ignored, since Photoshop's Color Range judges colour and not
+coverage — and errors, leaving the current selection untouched, when
+no pixel qualifies (Photoshop's own "No pixels were selected" warning).
+The bitmap-to-selection tail the Magic Wand had inline (compute the
+bounding box, wrap the bitmap in an `Arc`, install it as a `Mask`
+selection) is now a shared `set_mask_selection` helper both commands
+use. Photoshop's Color Range is richer in ways that are documented
+scope cuts here: its selection is soft (partial selection falling off
+with distance, whereas every selection in this project is hard-edged),
+its colour can be sampled and refined with add/subtract eyedroppers,
+Localized Color Clusters weights by distance from the samples, and the
+Skin Tones, Highlights, Midtones, Shadows, and Out of Gamut presets
+select by criteria other than one colour. A new **Color Range…**
+dialog beside the Magic Wand takes a colour picker and a Fuzziness
+slider.
+
+**Verified two ways.** Five new `document.rs` tests on `ramped_3x3`,
+whose R ramp makes the expected sets obvious. Colour `(50, 0, 0)` at
+fuzziness `10` selects exactly the middle row — `40`, `50`, `60` are
+within `10`; `30` and `70` are `20` away — with bounds `(0, 1)–(3, 2)`
+and shape `Mask`; at fuzziness `0` only the centre pixel. `(200, 200,
+200)` at fuzziness `5` matches nothing: the call errors with a message
+mentioning "No pixels" and a previously made rectangle selection is
+still intact. Alpha is ignored: on `depth_ramped_3x3`, whose left
+column is fully transparent, colour `(40, 0, 0)` at fuzziness `0`
+still selects `(0, 1)`. The Magic Wand's own Phase 149 tests, now
+running through the shared helper, are unchanged; an unknown layer
+errors. All five passed on the first run; every expected pixel is read
+off the fixture.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-seven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**995 Rust tests total** (990 → 995, 988 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
