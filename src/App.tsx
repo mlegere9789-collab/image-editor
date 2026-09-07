@@ -455,6 +455,30 @@ export default function App() {
     y1: number;
   } | null>(null);
   const lastHoverPixel = useRef<string | null>(null);
+  // Show Transform Controls: the selected layer's bounds with eight handles;
+  // dragging one previews a new rectangle and, on release, scales the
+  // layer's content onto it.
+  const [showTransformControls, setShowTransformControls] = useState(false);
+  const [controlBounds, setControlBounds] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const [controlPreview, setControlPreview] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const handleDrag = useRef<{
+    handle: string;
+    start: { x0: number; y0: number; x1: number; y1: number };
+    clientX: number;
+    clientY: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
   const [magneticWidth, setMagneticWidth] = useState(10);
   const [magneticContrast, setMagneticContrast] = useState(32);
   const [sharpenProtectDetail, setSharpenProtectDetail] = useState(false);
@@ -3718,6 +3742,96 @@ export default function App() {
       sharpenSampleAll,
       channelView,
     ],
+  );
+
+  useEffect(() => {
+    if (!showTransformControls || tool !== "move" || selectedId === null || !document) {
+      setControlBounds(null);
+      return;
+    }
+    let cancelled = false;
+    void invoke<{ x0: number; y0: number; x1: number; y1: number } | null>("layer_bounds", {
+      id: selectedId,
+    })
+      .then((bounds) => {
+        if (!cancelled) setControlBounds(bounds);
+      })
+      .catch(() => {
+        if (!cancelled) setControlBounds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showTransformControls, tool, selectedId, document, generation]);
+
+  /** A handle drag's new rectangle: the edges that handle owns follow the
+   * pointer, rounded to whole pixels and kept at least one pixel wide. */
+  const draggedRect = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = handleDrag.current;
+      if (!drag || !document) return null;
+      const dx = (event.clientX - drag.clientX) * drag.scaleX;
+      const dy = (event.clientY - drag.clientY) * drag.scaleY;
+      let { x0, y0, x1, y1 } = drag.start;
+      if (drag.handle.includes("w")) x0 = Math.round(drag.start.x0 + dx);
+      if (drag.handle.includes("e")) x1 = Math.round(drag.start.x1 + dx);
+      if (drag.handle.includes("n")) y0 = Math.round(drag.start.y0 + dy);
+      if (drag.handle.includes("s")) y1 = Math.round(drag.start.y1 + dy);
+      x0 = Math.max(0, Math.min(x0, document.width - 1));
+      y0 = Math.max(0, Math.min(y0, document.height - 1));
+      x1 = Math.max(x0 + 1, Math.min(x1, document.width));
+      y1 = Math.max(y0 + 1, Math.min(y1, document.height));
+      return { x0, y0, x1, y1 };
+    },
+    [document],
+  );
+
+  const startHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>, handle: string) => {
+      if (!controlBounds || !document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      handleDrag.current = {
+        handle,
+        start: controlBounds,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scaleX: document.width / rect.width,
+        scaleY: document.height / rect.height,
+      };
+      setControlPreview(controlBounds);
+    },
+    [controlBounds, document],
+  );
+
+  const moveHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const next = draggedRect(event);
+      if (next) setControlPreview(next);
+    },
+    [draggedRect],
+  );
+
+  const endHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const next = draggedRect(event);
+      const drag = handleDrag.current;
+      handleDrag.current = null;
+      setControlPreview(null);
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (!next || !drag || selectedId === null) return;
+      const { x0, y0, x1, y1 } = next;
+      if (x0 === drag.start.x0 && y0 === drag.start.y0 && x1 === drag.start.x1 && y1 === drag.start.y1) {
+        return;
+      }
+      void runCommand("transform_to_bounds", { id: selectedId, x0, y0, x1, y1 });
+    },
+    [draggedRect, selectedId, runCommand],
   );
 
   const canPaint = document !== null && selectedId !== null;
@@ -7032,6 +7146,17 @@ export default function App() {
                 onChange={(event) => setSmartGuides(event.target.checked)}
               />
               Smart Guides
+            </label>
+          )}
+          {tool === "move" && (
+            <label className="tools__slider" title="Show Transform Controls: drag a handle to scale the layer's content onto a new rectangle">
+              <input
+                type="checkbox"
+                checked={showTransformControls}
+                disabled={!canPaint}
+                onChange={(event) => setShowTransformControls(event.target.checked)}
+              />
+              Show Transform Controls
             </label>
           )}
           {tool === "magneticLasso" && (
@@ -17832,6 +17957,27 @@ export default function App() {
                   style={overlayStyle(hoverBounds, document)}
                   aria-hidden="true"
                 />
+              )}
+              {showTransformControls && tool === "move" && controlBounds && (
+                <div
+                  className="transform-box"
+                  style={overlayStyle(controlPreview ?? controlBounds, document)}
+                >
+                  {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((handle) => (
+                    <div
+                      key={handle}
+                      className={`transform-handle transform-handle--${handle}`}
+                      role="slider"
+                      aria-label={`Transform handle ${handle}`}
+                      aria-valuenow={0}
+                      tabIndex={-1}
+                      onPointerDown={(event) => startHandleDrag(event, handle)}
+                      onPointerMove={moveHandleDrag}
+                      onPointerUp={endHandleDrag}
+                      onPointerCancel={endHandleDrag}
+                    />
+                  ))}
+                </div>
               )}
               {document.guides.map((guide) => (
                 <div

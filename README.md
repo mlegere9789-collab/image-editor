@@ -14120,6 +14120,55 @@ by hand instead. Every other layer of this project's quality bar
 **1425 Rust tests total** (1420 → 1425, 1418 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 237 — Show Transform Controls
+
+The Move tool gains Show Transform Controls. `transform_to_bounds(id,
+target)` is the drag's end: it scales the layer's opaque bounds by
+`target / bounds` per axis through `scale_about` with the pivot on the
+bounds' top-left *edge* (index `x0 − 0.5`, so that edge itself stays
+put under nearest-neighbour resampling — a pixel-centre pivot would
+let rounding creep the block one column outward) and then moves it
+by the difference of the two top-left corners; a target equal to the
+bounds changes nothing, and an empty target, one off the canvas, a
+layer with no opaque pixels, and a locked or unknown layer are
+refused. It is deliberately not recorded for Transform Again: a
+handle drag is a place, not a recipe. With the option on and the Move
+tool active, the selected layer's bounds are drawn with eight
+handles; dragging a corner moves both of its edges, a side handle
+one, the rectangle is rounded to whole pixels, kept at least a pixel
+wide, and clamped to the canvas, previewed live, and sent through a
+`transform_to_bounds` command on release. Rotation and skew from the
+handles, and the handles' reference point, are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every placement
+traced by hand through the inverse mapping. A 2×2 block at `(1, 1)`
+put onto `(0, 0)–(4, 4)` doubles about its top-left edge — output
+columns `1..=4` read sources `1, 1, 2, 2` — and slides to fill exactly
+the sixteen target pixels, its bounds now the target. A full 4×4 layer
+halved onto `(1, 1)–(3, 3)` reads sources `1` and `3` into columns `0`
+and `1` and slides right and down by one. A same-size target elsewhere
+is a pure move, and the bounds themselves as the target return `None`
+with the pixels untouched. One pixel onto a 3×4 target is `300%` wide
+and `400%` tall, filling columns `2..=4` and rows `2..=5` before
+sliding to the origin. A zero-width or zero-height target, one past
+the canvas edge, an unknown layer, an empty layer, and a locked layer
+are refused with the block untouched. All five passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The handles were reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1430 Rust tests total** (1425 → 1430, 1423 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

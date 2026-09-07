@@ -15781,6 +15781,64 @@ impl Document {
     /// positive: Photoshop's own dialog lets a negative percentage flip
     /// the layer, but that is already Edit > Transform > Flip here, so a
     /// zero or negative factor errors rather than silently mirroring.
+    /// Show Transform Controls: a handle drag that puts layer `id`'s opaque
+    /// bounds onto `target`. The content is scaled by `target / bounds`
+    /// per axis about the bounds' top-left *edge* (index `x0 − 0.5`, so
+    /// that edge itself stays put under nearest-neighbour resampling) and
+    /// then moved so its top-left corner lands on the target's. A target
+    /// equal to the bounds changes nothing (`None`); an empty target, one
+    /// off the canvas, a layer with no opaque pixels, and a locked or
+    /// unknown layer are refused. Not recorded for Transform Again: a
+    /// handle drag is a place, not a recipe.
+    pub fn transform_to_bounds(
+        &mut self,
+        id: LayerId,
+        target: Rect,
+    ) -> Result<Option<Rect>, String> {
+        if target.x1 <= target.x0 || target.y1 <= target.y0 {
+            return Err(
+                "The transform target must be at least one pixel wide and tall.".to_string(),
+            );
+        }
+        if target.x1 > self.width || target.y1 > self.height {
+            return Err("The transform target must lie on the canvas.".to_string());
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to transform.".to_string())?;
+        if bounds == target {
+            return Ok(None);
+        }
+        let (bw, bh) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+        let (tw, th) = (target.x1 - target.x0, target.y1 - target.y0);
+        if (bw, bh) != (tw, th) {
+            let pivot = (bounds.x0 as f32 - 0.5, bounds.y0 as f32 - 0.5);
+            self.scale_about(
+                id,
+                tw as f32 / bw as f32 * 100.0,
+                th as f32 / bh as f32 * 100.0,
+                Some(pivot),
+            )?;
+        }
+        let (dx, dy) = (
+            target.x0 as i32 - bounds.x0 as i32,
+            target.y0 as i32 - bounds.y0 as i32,
+        );
+        if (dx, dy) != (0, 0) {
+            self.translate(id, dx, dy)?;
+        }
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        }))
+    }
+
     /// Edit > Content-Aware Scale: resizes layer `id`'s opaque bounds to
     /// the Scaling Percentages by seam carving. Each pixel's energy is
     /// the sum of its absolute luma differences to its four clamped
@@ -39481,6 +39539,85 @@ mod tests {
             .unwrap();
         cloned.transform_again(id_c).unwrap();
         assert_eq!(filled(&cloned, id_c), [(0, 0), (1, 0), (0, 1), (1, 1)]);
+    }
+
+    /// A `size`×`size` document with an opaque 2×2 block at columns and
+    /// rows 1..=2.
+    fn block_in(size: u32) -> (Document, LayerId) {
+        let mut doc = Document::new(size, size).unwrap();
+        let mut pixels = vec![0u8; (size * size * 4) as usize];
+        for y in 1..3u32 {
+            for x in 1..3u32 {
+                let base = ((y * size + x) * 4) as usize;
+                pixels[base..base + 4].copy_from_slice(&[9, 9, 9, 255]);
+            }
+        }
+        let id = doc.add_layer("block", &pixels, size, size).unwrap();
+        (doc, id)
+    }
+
+    fn rect(x0: u32, y0: u32, x1: u32, y1: u32) -> Rect {
+        Rect { x0, y0, x1, y1 }
+    }
+
+    #[test]
+    fn transform_to_bounds_scales_a_block_up_onto_the_target() {
+        // The 2×2 block doubles about its top-left edge — nearest sampling
+        // fills columns 1..=4 — and then slides to the target's corner.
+        let (mut doc, id) = block_in(6);
+        doc.transform_to_bounds(id, rect(0, 0, 4, 4)).unwrap();
+        let expected: Vec<(u32, u32)> = (0..4).flat_map(|y| (0..4).map(move |x| (x, y))).collect();
+        assert_eq!(filled(&doc, id), expected);
+        assert_eq!(doc.layer_bounds(id).unwrap(), Some(rect(0, 0, 4, 4)));
+    }
+
+    #[test]
+    fn transform_to_bounds_scales_down_onto_the_target() {
+        // A 4×4 block halved onto (1, 1)–(3, 3): output columns 0 and 1
+        // read sources 1 and 3, then everything slides right and down by one.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("full", &[9; 64], 4, 4).unwrap();
+        doc.transform_to_bounds(id, rect(1, 1, 3, 3)).unwrap();
+        assert_eq!(filled(&doc, id), [(1, 1), (2, 1), (1, 2), (2, 2)]);
+    }
+
+    #[test]
+    fn transform_to_bounds_with_the_same_size_is_a_move_and_the_same_place_a_no_op() {
+        let (mut doc, id) = block_in(6);
+        doc.transform_to_bounds(id, rect(3, 3, 5, 5)).unwrap();
+        assert_eq!(filled(&doc, id), [(3, 3), (4, 3), (3, 4), (4, 4)]);
+        let (mut doc, id) = block_in(6);
+        let before = doc.layers()[0].pixels.clone();
+        assert_eq!(doc.transform_to_bounds(id, rect(1, 1, 3, 3)).unwrap(), None);
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn transform_to_bounds_stretches_each_axis_on_its_own() {
+        // One pixel at (2, 2) onto a 3×4 target at the origin: 300% wide
+        // and 400% tall about its top-left edge fills columns 2..=4 and rows
+        // 2..=5, then slides to (0, 0).
+        let mut doc = Document::new(8, 8).unwrap();
+        let mut pixels = vec![0u8; 256];
+        pixels[(2 * 8 + 2) * 4..(2 * 8 + 2) * 4 + 4].copy_from_slice(&[9, 9, 9, 255]);
+        let id = doc.add_layer("dot", &pixels, 8, 8).unwrap();
+        doc.transform_to_bounds(id, rect(0, 0, 3, 4)).unwrap();
+        let expected: Vec<(u32, u32)> = (0..4).flat_map(|y| (0..3).map(move |x| (x, y))).collect();
+        assert_eq!(filled(&doc, id), expected);
+    }
+
+    #[test]
+    fn transform_to_bounds_validates() {
+        let (mut doc, id) = block_in(6);
+        assert!(doc.transform_to_bounds(id, rect(2, 2, 2, 4)).is_err());
+        assert!(doc.transform_to_bounds(id, rect(2, 2, 4, 2)).is_err());
+        assert!(doc.transform_to_bounds(id, rect(0, 0, 7, 2)).is_err());
+        assert!(doc.transform_to_bounds(999, rect(0, 0, 2, 2)).is_err());
+        assert_eq!(filled(&doc, id), [(1, 1), (2, 1), (1, 2), (2, 2)]);
+        let empty = doc.add_layer("e", &[0; 144], 6, 6).unwrap();
+        assert!(doc.transform_to_bounds(empty, rect(0, 0, 2, 2)).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.transform_to_bounds(id, rect(0, 0, 2, 2)).is_err());
     }
 
     #[test]

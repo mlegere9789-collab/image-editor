@@ -629,6 +629,34 @@ body {
   box-sizing: border-box;
 }
 
+.transform-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed #4cc2ff;
+  box-sizing: border-box;
+}
+
+.transform-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  background: #fff;
+  border: 1px solid #4cc2ff;
+  box-sizing: border-box;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.transform-handle--nw { left: 0; top: 0; cursor: nwse-resize; }
+.transform-handle--n { left: 50%; top: 0; cursor: ns-resize; }
+.transform-handle--ne { left: 100%; top: 0; cursor: nesw-resize; }
+.transform-handle--e { left: 100%; top: 50%; cursor: ew-resize; }
+.transform-handle--se { left: 100%; top: 100%; cursor: nwse-resize; }
+.transform-handle--s { left: 50%; top: 100%; cursor: ns-resize; }
+.transform-handle--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.transform-handle--w { left: 0; top: 50%; cursor: ew-resize; }
+
 .guide-line {
   position: absolute;
   background: #22d3ee;

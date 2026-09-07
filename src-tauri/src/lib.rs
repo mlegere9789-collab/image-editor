@@ -1239,6 +1239,22 @@ fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, St
     })
 }
 
+/// Show Transform Controls: put layer `id`'s opaque bounds onto the
+/// rectangle a handle drag ended on.
+#[tauri::command]
+fn transform_to_bounds(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.transform_to_bounds(id, Rect { x0, y0, x1, y1 })
+    })
+}
+
 /// Edit > Content-Aware Scale on layer `id` with the options bar's values.
 #[tauri::command]
 fn content_aware_scale(
@@ -4622,6 +4638,7 @@ pub fn run() {
             convert_mode,
             color_lookup,
             content_aware_scale,
+            transform_to_bounds,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

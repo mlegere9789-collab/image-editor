@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 394.**
+**618 distinct capabilities tracked. Currently shipped: 395.**
 
 ## PART I — EVERY TOOL
 
@@ -332,7 +332,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Layer Auto-Select (`layer_at`, the topmost visible layer with an opaque pixel under the pointer, picked on press when the Move tool's Auto-Select is on — see README Phase 214)
 - [x] Layer Auto-Select — Layer (the Layer mode of Auto-Select; Group mode is a documented scope cut in this groupless layer model — see README Phase 214)
 - [x] Layer Auto-Select — Group (`group_at`, the group of the layer under the pointer, picked on press with the Move tool's Group option so the drag moves the whole group — see README Phase 216)
-- [ ] Show Transform Controls
+- [x] Show Transform Controls (a Move tool option drawing the selected layer's opaque bounds with eight handles; dragging one previews the new rectangle and, on release, `transform_to_bounds(id, target)` scales the content onto it about the bounds' top-left edge and moves it into place — see README Phase 237)
 - [x] Select > Modify > Border (duplicate of MODIFY > BORDER in PART II, already shipped there — checked here for consistency)
 - [x] Select > Modify > Smooth (duplicate of MODIFY > SMOOTH in PART II, already shipped there — checked here for consistency)
 - [x] Select > Grow (duplicate of GROW in PART II, already shipped there — checked here for consistency)
