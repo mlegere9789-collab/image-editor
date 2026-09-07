@@ -86,6 +86,8 @@ export type Note = {
 export type HistoryState = {
   canUndo: boolean;
   canRedo: boolean;
+  /** Whether a History Brush source has been set. */
+  hasHistorySource: boolean;
 };
 
 /** Mirrors `Snapshot` in src-tauri/src/lib.rs. */
@@ -137,6 +139,7 @@ export type Tool =
   | "note"
   | "patternStamp"
   | "cloneStamp"
+  | "historyBrush"
   | "magicWand"
   | "lasso"
   | "polygonLasso"

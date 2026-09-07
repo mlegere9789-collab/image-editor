@@ -53,6 +53,10 @@ struct AppState {
     /// undo, redo, and even opening a different document, none of which
     /// `Document`'s own state does.
     clipboard: Mutex<Option<Clipboard>>,
+    /// The state the History Brush paints from: a whole-document clone
+    /// taken when the user last pressed Set Source. Kept here, like the
+    /// clipboard, since it must outlive undo and redo.
+    history_source: Mutex<Option<Document>>,
 }
 
 /// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
@@ -88,6 +92,8 @@ struct Snapshot {
     generation: u64,
     can_undo: bool,
     can_redo: bool,
+    /// Whether a History Brush source has been set.
+    has_history_source: bool,
 }
 
 /// What [`checkpoint`] hands back: just the two flags of [`Snapshot`] that
@@ -97,6 +103,8 @@ struct Snapshot {
 struct HistoryState {
     can_undo: bool,
     can_redo: bool,
+    /// Whether a History Brush source has been set.
+    has_history_source: bool,
 }
 
 /// One entry in the blend-mode picker.
@@ -157,6 +165,7 @@ fn snapshot(state: &AppState, document: &Document, rect: Option<Rect>) -> Result
         generation,
         can_undo: !history.undo.is_empty(),
         can_redo: !history.redo.is_empty(),
+        has_history_source: has_history_source(state)?,
     })
 }
 
@@ -174,11 +183,20 @@ fn push_checkpoint(state: &AppState) -> Result<(), String> {
     Ok(())
 }
 
+fn has_history_source(state: &AppState) -> Result<bool, String> {
+    Ok(state
+        .history_source
+        .lock()
+        .map_err(|_| POISONED.to_string())?
+        .is_some())
+}
+
 fn history_state(state: &AppState) -> Result<HistoryState, String> {
     let history = state.history.lock().map_err(|_| POISONED.to_string())?;
     Ok(HistoryState {
         can_undo: !history.undo.is_empty(),
         can_redo: !history.redo.is_empty(),
+        has_history_source: has_history_source(state)?,
     })
 }
 
@@ -2013,6 +2031,50 @@ fn clone_stroke(
     })
 }
 
+/// History Brush: remember the current document as the state the brush
+/// paints from. Not an edit — nothing to checkpoint.
+#[tauri::command]
+fn set_history_source(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    *state
+        .history_source
+        .lock()
+        .map_err(|_| POISONED.to_string())? = Some(document.clone());
+    snapshot(&state, document, None)
+}
+
+/// History Brush: paint layer `id`'s pixels back from the remembered
+/// source along `points`. See [`paint_stroke`] for `points` and
+/// checkpointing.
+#[tauri::command]
+fn history_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+) -> Result<Snapshot, String> {
+    let source = {
+        let guard = state
+            .history_source
+            .lock()
+            .map_err(|_| POISONED.to_string())?;
+        let remembered = guard.as_ref().ok_or_else(|| {
+            "Set a history source first (History Brush > Set Source).".to_string()
+        })?;
+        remembered
+            .layers()
+            .iter()
+            .find(|layer| layer.id == id)
+            .ok_or_else(|| "The history source has no layer with that id.".to_string())?
+            .pixels
+            .clone()
+    };
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::History { source: &source })
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -3448,6 +3510,8 @@ pub fn run() {
             blur_stroke,
             sharpen_stroke,
             clone_stroke,
+            set_history_source,
+            history_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,

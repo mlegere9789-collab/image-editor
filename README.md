@@ -11043,6 +11043,54 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1125 Rust tests total** (1120 → 1125, 1118 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 177 — History Brush tool
+
+`Stroke::History { source }` paints, at each pixel the brush covers,
+the pixel at the same position in `source` — a document-sized RGBA8
+buffer holding an earlier state of the layer — composited source-over
+by coverage times the sample's alpha, the Clone Stamp with no offset
+and a different buffer. `Stroke` now carries a lifetime for that
+borrowed buffer; every existing variant is unchanged. A source of the
+wrong length errors before anything is painted. The app side supplies
+the buffer: a new `history_source` slot on `AppState` holds a whole-
+document clone taken when the user presses **Set Source** — kept
+beside the clipboard rather than in the undo stack, since it must
+outlive undo and redo — and the `history_stroke` command paints from
+that clone's layer of the same id (erroring if no source is set or the
+source has no such layer). The `HistoryState`/`Snapshot` gain
+`hasHistorySource`, mirrored in `types.ts`, so the tool options can say
+whether a source exists. Photoshop lets the History panel pick any
+history state or snapshot as the source; here the source is the one
+state remembered last — a documented scope cut. A new **History Brush**
+tool button sits beside the Clone Stamp with Set Source in its tool
+options; the colour swatch is disabled for it.
+
+**Verified two ways.** Five new `document.rs` tests, the one blended
+byte cross-checked in Python emulating the source-over arithmetic.
+With `ramped_3x3` remembered and then inverted (`50 → 205`), a
+full-coverage dot on `(0, 0)` brings back its `10` and leaves `(1, 1)`
+inverted; a stroke covering everything restores the layer byte for
+byte. The `0.7929` edge coverage composites the source's `10` over a
+solid `100` to `28.6 → 29`. A transparent source pixel
+(`depth_ramped_3x3`'s left column) paints nothing while an opaque one
+paints, and a one-pixel selection confines the restore (`(0, 0)` back
+to `10`, `(1, 0)` still `235`). A four-byte source errors mentioning
+"size", and a locked layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-four:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The Set Source and stroke wiring was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1130 Rust tests total** (1125 → 1130, 1123 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

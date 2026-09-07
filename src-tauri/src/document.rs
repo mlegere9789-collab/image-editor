@@ -7001,7 +7001,7 @@ impl Document {
         id: LayerId,
         points: &[(f32, f32)],
         radius: f32,
-        stroke: Stroke,
+        stroke: Stroke<'_>,
     ) -> Result<Option<Rect>, String> {
         if points.is_empty() {
             return Ok(None);
@@ -7029,6 +7029,11 @@ impl Document {
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        if let Stroke::History { source } = stroke {
+            if source.len() != layer.pixels.len() {
+                return Err("The history source is a different size from the document.".to_string());
+            }
         }
         // Neighbourhood tools read the layer as it stood before the stroke.
         let snapshot = matches!(
@@ -7121,6 +7126,11 @@ impl Document {
                         let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&source[src..src + CHANNELS]);
+                        (color, to_unit(color[3]) * c)
+                    }
+                    Stroke::History { source } => {
+                        let mut color = [0u8; CHANNELS];
+                        color.copy_from_slice(&source[base..base + CHANNELS]);
                         (color, to_unit(color[3]) * c)
                     }
                     Stroke::Dodge { exposure } | Stroke::Burn { exposure } => {
@@ -7237,7 +7247,7 @@ impl Document {
         id: LayerId,
         points: &[(f32, f32)],
         radius: f32,
-        stroke: Stroke,
+        stroke: Stroke<'_>,
         symmetry: Option<Symmetry>,
     ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width as f32, self.height as f32);
@@ -12411,7 +12421,7 @@ pub enum Symmetry {
 
 /// A tool [`Document::stroke`] applies.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Stroke {
+pub enum Stroke<'a> {
     /// Paints `color` (RGBA8) over the layer with normal, `source-over`
     /// blending — the same math the compositor uses to stack layers, applied
     /// here to a layer's own pixels instead of the accumulated backdrop.
@@ -12470,6 +12480,15 @@ pub enum Stroke {
     /// off-canvas samples are skipped. Sample All Layers and the
     /// non-aligned mode are documented scope cuts.
     Clone { offset: (i32, i32) },
+    /// The History Brush: paints, at each covered pixel, the pixel at the
+    /// same position in `source` — a document-sized RGBA8 buffer holding an
+    /// earlier state of the layer, remembered by the app as the history
+    /// source — composited source-over by coverage times the sample's
+    /// alpha, like the Clone Stamp with no offset. A `source` of the wrong
+    /// length errors before anything is painted. Photoshop's choice of any
+    /// history state or snapshot from the panel is a documented scope cut:
+    /// the source is whatever state was remembered last.
+    History { source: &'a [u8] },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -18652,7 +18671,7 @@ mod tests {
             .is_err());
     }
 
-    fn sponge(flow: u8, saturate: bool) -> Stroke {
+    fn sponge(flow: u8, saturate: bool) -> Stroke<'static> {
         Stroke::Sponge { flow, saturate }
     }
 
@@ -19208,7 +19227,7 @@ mod tests {
         assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
-    fn clone(offset: (i32, i32)) -> Stroke {
+    fn clone(offset: (i32, i32)) -> Stroke<'static> {
         Stroke::Clone { offset }
     }
 
@@ -19271,6 +19290,114 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
         doc.set_locked(id, true).unwrap();
         assert!(doc.stroke(id, &[(1.5, 1.5)], 0.5, clone((1, 0))).is_err());
+    }
+
+    #[test]
+    fn history_brush_paints_the_remembered_pixel_back() {
+        // Invert the whole layer, then brush one pixel back from the
+        // remembered original: (0, 0) returns to 10, (1, 1) stays inverted.
+        let (mut doc, id) = ramped_3x3();
+        let original = doc.layers()[0].pixels.clone();
+        doc.invert_colors(id).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [205, 255, 255, 255]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            0.5,
+            Stroke::History { source: &original },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [205, 255, 255, 255]);
+    }
+
+    #[test]
+    fn history_brush_over_everything_restores_the_source_exactly() {
+        let (mut doc, id) = ramped_3x3();
+        let original = doc.layers()[0].pixels.clone();
+        doc.invert_colors(id).unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::History { source: &original },
+        )
+        .unwrap();
+        assert_eq!(doc.layers()[0].pixels, original);
+    }
+
+    #[test]
+    fn history_brush_blends_by_coverage() {
+        // The 0.7929 edge coverage composites the source's 10 over a solid
+        // 100: 0.7929 * 10 + 0.2071 * 100 = 28.6 -> 29.
+        let (doc, _) = ramped_3x3();
+        let original = doc.layers()[0].pixels.clone();
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 0, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            1.0,
+            Stroke::History { source: &original },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [29, 0, 0, 255]);
+    }
+
+    #[test]
+    fn history_brush_respects_transparency_and_the_selection() {
+        // A transparent source pixel paints nothing; a selection confines
+        // the restore.
+        let (transparent, _) = depth_ramped_3x3();
+        let source = transparent.layers()[0].pixels.clone();
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 0, 0, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::History { source: &source })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 1), [100, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 1), [60, 0, 0, 255]);
+
+        let (mut doc, id) = ramped_3x3();
+        let original = doc.layers()[0].pixels.clone();
+        doc.invert_colors(id).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(
+            id,
+            &[(1.0, 1.0)],
+            3.0,
+            Stroke::History { source: &original },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 235);
+    }
+
+    #[test]
+    fn history_brush_rejects_a_mismatched_source_and_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc
+            .stroke(
+                id,
+                &[(1.0, 1.0)],
+                3.0,
+                Stroke::History { source: &[0u8; 4] },
+            )
+            .unwrap_err();
+        assert!(err.contains("size"), "{err}");
+        let original = doc.layers()[0].pixels.clone();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(
+                id,
+                &[(1.0, 1.0)],
+                3.0,
+                Stroke::History { source: &original }
+            )
+            .is_err());
     }
 
     #[test]

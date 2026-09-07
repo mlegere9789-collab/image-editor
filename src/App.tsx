@@ -194,6 +194,7 @@ export default function App() {
   const [dropping, setDropping] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
+  const [hasHistorySource, setHasHistorySource] = useState(false);
 
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [newWidth, setNewWidth] = useState(800);
@@ -854,6 +855,7 @@ export default function App() {
         setGeneration(snapshot.generation);
         setCanUndo(snapshot.canUndo);
         setCanRedo(snapshot.canRedo);
+        setHasHistorySource(snapshot.hasHistorySource);
 
         const { layers } = snapshot.document;
         setSelectedId((current) => {
@@ -894,6 +896,7 @@ export default function App() {
       .then((history) => {
         setCanUndo(history.canUndo);
         setCanRedo(history.canRedo);
+        setHasHistorySource(history.hasHistorySource);
       })
       .catch(() => {
         // A failed checkpoint just costs this gesture its undo step; the
@@ -3014,6 +3017,8 @@ export default function App() {
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
         });
+      } else if (tool === "historyBrush") {
+        void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
       } else if (tool === "cloneStamp") {
         void runCommand("clone_stroke", {
           id: selectedId,
@@ -4161,6 +4166,15 @@ export default function App() {
             title="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
           >
             Clone Stamp
+          </button>
+          <button
+            className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "historyBrush"}
+            onClick={() => setTool("historyBrush")}
+            title="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
+          >
+            History Brush
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5398,6 +5412,7 @@ export default function App() {
               tool === "sharpen" ||
               tool === "redEye" ||
               tool === "cloneStamp" ||
+              tool === "historyBrush" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"
@@ -5412,6 +5427,21 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "historyBrush" && (
+            <>
+              <button
+                className="button button--quiet"
+                onClick={() => void runCommand("set_history_source", {})}
+                disabled={busy || !hasDocument}
+                title="Remember the current document state as the History Brush's source"
+              >
+                Set Source
+              </button>
+              <span className="tools__slider">
+                {hasHistorySource ? "Source set" : "No source yet"}
+              </span>
+            </>
           )}
           {tool === "cloneStamp" && (
             <span className="tools__slider">
