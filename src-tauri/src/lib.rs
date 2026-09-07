@@ -436,6 +436,22 @@ fn select_lasso(
     })
 }
 
+/// Selection Brush tool: select within `radius` of a painted stroke,
+/// combined with the current selection per `mode` (Add by default).
+#[tauri::command]
+fn select_brush(
+    state: State<'_, AppState>,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::Add);
+        document.select_brush_with(mode, &points, radius)?;
+        Ok(None)
+    })
+}
+
 /// Magic Wand: replace the selection with every pixel of layer `id` within
 /// `tolerance` of the pixel at `(x, y)`, contiguous or not.
 #[tauri::command]
@@ -4039,6 +4055,7 @@ pub fn run() {
             select_ellipse,
             select_polygon,
             select_lasso,
+            select_brush,
             select_magic_wand,
             select_color_range,
             grow_selection,

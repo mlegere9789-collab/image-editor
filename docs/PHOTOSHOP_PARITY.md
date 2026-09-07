@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 295.**
+**618 distinct capabilities tracked. Currently shipped: 299.**
 
 ## PART I — EVERY TOOL
 
@@ -18,7 +18,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] OBJECT SELECTION TOOL
 - [ ] QUICK SELECTION TOOL
 - [x] MAGIC WAND TOOL (`select_magic_wand`, a click selects every pixel within a per-channel Tolerance of the clicked pixel's own colour — 4-connected from the click in Contiguous mode, anywhere on the layer otherwise — as the first pixel-mask selection: a new `SelectionShape::Mask` backed by a shared document-sized bitmap that every selection-respecting command already honours through `Selection::contains`. Anti-alias and Sample All Layers are documented scope cuts, and Modify > Expand/Contract/Smooth/Border reject mask selections for now — see README Phase 149)
-- [ ] SELECTION BRUSH TOOL
+- [x] SELECTION BRUSH TOOL (`select_brush_with`, a hard-edged round brush stroke — every pixel centre within the brush radius of the drag's polyline — combined with the current selection, adding by default; brush hardness and the overlay opacity are documented scope cuts — see README Phase 206)
 - [x] REMOVE TOOL (`Stroke::Remove`, the Spot Healing ring mean taken only over samples the stroke does not itself cover, so a brushed-over object is filled from outside the brushed area, falling back to the plain ring mean when everything is covered; Photoshop's neural model is replaced by this explicit proximity stand-in — see README Phase 186)
 - [x] HEALING BRUSH TOOL (`Stroke::Heal { offset }`, the Clone Stamp's aligned Alt-click sampling with the classic heal — texture from the source, tone from the destination: the sample shifted per channel by the difference of the two radius-1 local means, clamped, mixed by coverage, alpha untouched; Diffusion, Sample All Layers, and pattern sources are documented scope cuts — see README Phase 181)
 - [x] SPOT HEALING BRUSH TOOL (`Stroke::SpotHeal`, Proximity Match: each covered pixel takes the mean of the sixteen pre-stroke pixels on the square ring two pixels out, edge-clamped, mixed by coverage, alpha untouched; Content-Aware, Create Texture, and Sample All Layers are documented scope cuts — see README Phase 182)
@@ -311,9 +311,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Quick Selection — Brush Size
 - [ ] Quick Selection — Hardness
 - [ ] Selection Brush Tool — Opacity
-- [ ] Selection Brush Tool — Add Mode
-- [ ] Selection Brush Tool — Subtract Mode
-- [ ] Selection Brush Tool — Brush Selection
+- [x] Selection Brush Tool — Add Mode (`select_brush_with` with `SelectionMode::Add`, the tool's default — see README Phase 206)
+- [x] Selection Brush Tool — Subtract Mode (`select_brush_with` with `SelectionMode::Subtract`, Alt while painting — see README Phase 206)
+- [x] Selection Brush Tool — Brush Selection (the painted stroke itself, at the Brush Size, previewed as a translucent trail while dragging — see README Phase 206)
 - [ ] Selection Brush Tool — Circle Selection
 - [x] Move Selection (`move_selection`, shifting the selection outline by a pixel offset without moving pixels — a geometric selection that still fits keeps its shape, inversion, and border; one pushed off the canvas edge, or a pixel mask, moves as a mask with the off-canvas part dropped; arrow keys nudge it by 1 px, Shift+arrow by 10, with a marquee tool active, and a dialog takes an exact offset — see README Phase 156)
 - [x] Transform Selection (`transform_selection`, scaling, rotating, and moving the selection outline about its own bounding-box centre by inverse-mapping every canvas pixel through the same arithmetic the layer transforms use and testing the current selection there — pixels untouched, the result a pixel-mask selection clipped to the canvas; the on-canvas handle gesture is a documented scope cut — see README Phase 172)

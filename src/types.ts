@@ -165,6 +165,7 @@ export type Tool =
   | "magicWand"
   | "lasso"
   | "polygonLasso"
+  | "selectionBrush"
   | "selectRect"
   | "selectEllipse"
   | "selectRow"

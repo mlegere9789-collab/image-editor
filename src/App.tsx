@@ -3377,6 +3377,7 @@ export default function App() {
   const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
+  const isSelectionBrush = tool === "selectionBrush";
 
   const closeLasso = useCallback(
     (mode: SelectionMode) => {
@@ -3593,7 +3594,7 @@ export default function App() {
         moveStart.current = toDocPoint(event, document);
         return;
       }
-      if (isLasso) {
+      if (isLasso || isSelectionBrush) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
@@ -3697,6 +3698,7 @@ export default function App() {
       isCloneStamp,
       cloneSource,
       isLasso,
+      isSelectionBrush,
       isPolygonLasso,
       lassoPoints,
       closeLasso,
@@ -3751,7 +3753,7 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       readLevelsAt(event);
-      if (isLasso) {
+      if (isLasso || isSelectionBrush) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
@@ -3768,7 +3770,7 @@ export default function App() {
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, isLasso, isMarqueeTool, isRectangle, applyStroke, readLevelsAt],
+    [document, isLasso, isSelectionBrush, isMarqueeTool, isRectangle, applyStroke, readLevelsAt],
   );
 
   const endStroke = useCallback(
@@ -3797,6 +3799,18 @@ export default function App() {
               setShowCurvesDialog(true);
             })
             .catch((err) => setError(String(err)));
+        }
+        return;
+      }
+      if (isSelectionBrush) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 1) {
+          // The Selection Brush adds by default; Alt subtracts, Shift+Alt intersects.
+          const mode: SelectionMode =
+            event.shiftKey && event.altKey ? "intersect" : event.altKey ? "subtract" : "add";
+          void runCommand("select_brush", { points: trail, radius: brushSize, mode });
         }
         return;
       }
@@ -3969,6 +3983,8 @@ export default function App() {
     },
     [
       isLasso,
+      isSelectionBrush,
+      brushSize,
       isMove,
       isPatch,
       isRuler,
@@ -4615,6 +4631,15 @@ export default function App() {
             title="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
           >
             Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectionBrush"}
+            onClick={() => setTool("selectionBrush")}
+            title="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
+          >
+            Selection Brush
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -15621,6 +15646,17 @@ export default function App() {
                   preserveAspectRatio="none"
                   aria-hidden="true"
                 >
+                  {tool === "selectionBrush" && (
+                    <polyline
+                      points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
+                      fill="none"
+                      stroke="#4c8dff"
+                      strokeOpacity={0.5}
+                      strokeWidth={brushSize * 2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  )}
                   <polyline
                     points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
                     fill="none"

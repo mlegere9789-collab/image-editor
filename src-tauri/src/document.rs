@@ -1318,6 +1318,83 @@ impl Document {
         self.select_polygon_with(mode, &distinct)
     }
 
+    /// The Selection Brush tool: paints a selection with a round brush of
+    /// `radius` along `points`, combined with the current selection per
+    /// `mode` (the tool adds by default and subtracts with Alt held). A
+    /// pixel is selected when its centre lies within `radius` of the
+    /// stroke's polyline — [`point_segment_distance`], the brush tools' own
+    /// capsule, but hard-edged, since a selection here is a bitmap;
+    /// Photoshop's brush hardness and its overlay opacity are documented
+    /// scope cuts. A single point paints a dot. Only pixels inside the
+    /// stroke's radius-grown bounding box are tested. Errors for no
+    /// points, a non-positive radius, non-finite coordinates, a stroke
+    /// that touches no pixel, or a combination that leaves nothing
+    /// selected.
+    pub fn select_brush_with(
+        &mut self,
+        mode: SelectionMode,
+        points: &[(f32, f32)],
+        radius: f32,
+    ) -> Result<(), String> {
+        if points.is_empty() {
+            return Err("A selection brush stroke needs at least one point.".to_string());
+        }
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Brush radius must be a positive number.".to_string());
+        }
+        if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("Selection coordinates must be finite numbers.".to_string());
+        }
+        let segments: Vec<((f32, f32), (f32, f32))> = if points.len() == 1 {
+            vec![(points[0], points[0])]
+        } else {
+            points.windows(2).map(|pair| (pair[0], pair[1])).collect()
+        };
+        let (min_x, max_x) = points
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(x, _)| {
+                (lo.min(x), hi.max(x))
+            });
+        let (min_y, max_y) = points
+            .iter()
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, y)| {
+                (lo.min(y), hi.max(y))
+            });
+        let (width, height) = (self.width, self.height);
+        let x0 = ((min_x - radius).floor().max(0.0) as u32).min(width);
+        let y0 = ((min_y - radius).floor().max(0.0) as u32).min(height);
+        let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
+        let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
+        let mut bits = vec![false; width as usize * height as usize];
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                if segments
+                    .iter()
+                    .any(|&(a, b)| point_segment_distance(px, py, a, b) <= radius)
+                {
+                    bits[(y * width + x) as usize] = true;
+                }
+            }
+        }
+        let mask = SelectionMask {
+            width,
+            height,
+            bits,
+        };
+        let Some(bounds) = mask.bounds() else {
+            return Err("The selection brush touched no pixels.".to_string());
+        };
+        let new = Selection {
+            shape: SelectionShape::Mask,
+            bounds,
+            inverted: false,
+            border: None,
+            mask: Some(Arc::new(mask)),
+        };
+        self.combine_with(mode, new)
+    }
+
     /// [`Self::combine_selection`]'s engine over an already-built `new`
     /// selection of any shape.
     fn combine_with(&mut self, mode: SelectionMode, new: Selection) -> Result<(), String> {
@@ -23125,6 +23202,135 @@ mod tests {
     fn curve_with_point_rejects_an_invalid_curve() {
         assert!(curve_with_point(&[(0, 0)], 10, 5).is_err());
         assert!(curve_with_point(&[(0, 0), (0, 255)], 10, 5).is_err());
+    }
+
+    fn selection_grid(doc: &Document) -> Vec<String> {
+        let s = doc.selection().expect("a selection");
+        (0..doc.height())
+            .map(|y| {
+                (0..doc.width())
+                    .map(|x| {
+                        if s.contains(x as f32 + 0.5, y as f32 + 0.5) {
+                            '#'
+                        } else {
+                            '.'
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn selection_brush_selects_within_the_radius_of_the_stroke() {
+        let (mut doc, _id) = blank_5x5();
+        doc.select_brush_with(SelectionMode::New, &[(0.5, 2.5), (4.5, 2.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", ".....", "#####", ".....", "....."]
+        );
+        doc.select_brush_with(SelectionMode::New, &[(0.5, 2.5), (4.5, 2.5)], 1.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", "#####", "#####", "#####", "....."]
+        );
+        // A diagonal at half a pixel: only the centres on the line.
+        doc.select_brush_with(SelectionMode::New, &[(0.5, 0.5), (4.5, 4.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#....", ".#...", "..#..", "...#.", "....#"]
+        );
+    }
+
+    #[test]
+    fn selection_brush_single_point_paints_a_dot() {
+        let (mut doc, _id) = blank_5x5();
+        doc.select_brush_with(SelectionMode::New, &[(2.5, 2.5)], 1.0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", "..#..", ".###.", "..#..", "....."]
+        );
+        doc.select_brush_with(SelectionMode::New, &[(2.5, 2.5)], 1.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", ".###.", ".###.", ".###.", "....."]
+        );
+    }
+
+    #[test]
+    fn selection_brush_adds_to_and_subtracts_from_the_selection() {
+        let (mut doc, _id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.select_brush_with(SelectionMode::Add, &[(2.5, 2.5)], 1.0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["##...", "###..", ".###.", "..#..", "....."]
+        );
+        doc.select_brush_with(SelectionMode::Subtract, &[(0.5, 0.5), (4.5, 0.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", "###..", ".###.", "..#..", "....."]
+        );
+        doc.select_brush_with(SelectionMode::Intersect, &[(2.5, 0.5), (2.5, 4.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", "..#..", "..#..", "..#..", "....."]
+        );
+    }
+
+    #[test]
+    fn selection_brush_add_with_nothing_selected_starts_a_selection() {
+        let (mut doc, _id) = blank_5x5();
+        doc.select_brush_with(SelectionMode::Add, &[(0.5, 0.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#....", ".....", ".....", ".....", "....."]
+        );
+        // Off the canvas edge: only the on-canvas part is selected.
+        doc.select_brush_with(SelectionMode::New, &[(-1.0, 4.5), (0.5, 4.5)], 0.5)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", ".....", ".....", ".....", "#...."]
+        );
+    }
+
+    #[test]
+    fn selection_brush_rejects_bad_strokes() {
+        let (mut doc, _id) = blank_5x5();
+        assert!(doc.select_brush_with(SelectionMode::New, &[], 1.0).is_err());
+        assert!(doc
+            .select_brush_with(SelectionMode::New, &[(2.5, 2.5)], 0.0)
+            .is_err());
+        assert!(doc
+            .select_brush_with(SelectionMode::New, &[(f32::NAN, 2.5)], 1.0)
+            .is_err());
+        // Entirely off the canvas touches nothing.
+        assert!(doc
+            .select_brush_with(SelectionMode::New, &[(9.0, 9.0)], 0.5)
+            .is_err());
+        // Subtracting with nothing selected, and subtracting everything.
+        assert!(doc
+            .select_brush_with(SelectionMode::Subtract, &[(2.5, 2.5)], 1.0)
+            .is_err());
+        doc.select_brush_with(SelectionMode::New, &[(2.5, 2.5)], 0.5)
+            .unwrap();
+        assert!(doc
+            .select_brush_with(SelectionMode::Subtract, &[(2.5, 2.5)], 1.0)
+            .is_err());
+        assert_eq!(
+            selection_grid(&doc),
+            [".....", ".....", "..#..", ".....", "....."]
+        );
     }
 
     #[test]

@@ -12500,6 +12500,56 @@ early return. Every other layer of this project's quality bar
 **1270 Rust tests total** (1265 → 1270, 1263 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 206 — Selection Brush tool
+
+`Document::select_brush_with(mode, points, radius)` is Photoshop's
+Selection Brush: paint a stroke and every pixel whose centre lies
+within the brush radius of the drag's polyline — `point_segment_
+distance`, the brush tools' own capsule, but hard-edged, since a
+selection here is a bitmap — joins the selection, combined with the
+current one per `mode`. The tool adds by default, subtracts with Alt,
+and intersects with Shift+Alt, through the same `combine_with` engine
+the marquees, lassos, and Magic Wand use, so a stroke can also start a
+selection from nothing. A single point paints a dot, only the pixels
+inside the stroke's radius-grown bounding box are tested, and the
+mask goes through `SelectionMask::bounds` so a stroke that touches no
+pixel, or a subtraction that would empty the selection, errors.
+Photoshop's brush hardness and the overlay's opacity are documented
+scope cuts. A new **Selection Brush** tool button sits after Lasso; it
+reuses the lasso's trail capture, previews the stroke as a translucent
+blue band at the current Brush Size, and sends the trail through a
+`select_brush` command at pointer-up.
+
+**Verified two ways.** Five new `document.rs` tests, every mask drawn
+first by a Python model of the pixel-centre distance to each segment.
+On a `5×5`, a stroke along `y = 2.5` at radius `0.5` selects the middle
+row, at `1.5` the middle three rows, and a `(0.5, 0.5)`→`(4.5, 4.5)`
+diagonal at `0.5` selects only the five centres on the line. A single
+point at the centre selects a plus at radius `1` (the diagonal
+neighbours sit `1.414` away) and the `3×3` at `1.5`. Adding that plus
+to a `2×2` corner rectangle gives `## / ### / .### / ..#`; subtracting
+a stroke along the top row then clears it; intersecting with a
+vertical stroke leaves the middle column of what remained. Adding
+with nothing selected starts a selection, and a stroke hanging off the
+left edge selects only its on-canvas pixel. No points, a zero radius,
+a `NaN` coordinate, a stroke entirely off the canvas, subtracting with
+nothing selected, and subtracting the whole selection all error with
+the selection intact. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+fifty-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1275 Rust tests total** (1270 → 1275, 1268 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

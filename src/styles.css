@@ -187,6 +187,10 @@ body {
   cursor: copy;
 }
 
+.canvas--selectionBrush {
+  cursor: crosshair;
+}
+
 .canvas--paintBucket {
   cursor: cell;
 }
