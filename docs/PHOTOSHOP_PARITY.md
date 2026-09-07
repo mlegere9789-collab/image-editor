@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 292.**
+**618 distinct capabilities tracked. Currently shipped: 293.**
 
 ## PART I — EVERY TOOL
 
@@ -459,7 +459,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Curves Black Point (the Curves dialog's Black Point eyedropper, the same `levels_black_point` — see README Phase 196)
 - [x] Curves Gray Point (the Curves dialog's Gray Point eyedropper, the same `levels_gray_point` — see README Phase 197)
 - [x] Curves White Point (the Curves dialog's White Point eyedropper, the same `levels_white_point` — see README Phase 196)
-- [ ] Curves Show Clipping
+- [x] Curves Show Clipping (`Document::curves_clipping`, a read-only count of the selected pixels the four curves would drive to pure black and pure white, shown live in the dialog; Photoshop's Alt-drag overlay is a documented scope cut — see README Phase 203)
 - [x] Curves Show Channel Overlays (`Document::curves_channels`, one point list per channel applied before the RGB composite's, edited through a Channel select; the graph draws every channel's curve in its colour with the active one on top — see README Phase 202)
 - [x] Curves Histogram (the Curves dialog's graph draws the layer's luminosity histogram — the mean of the three channel counts — behind the curve — see README Phase 201)
 - [x] Curves Baseline (the dashed identity diagonal under the curve in the Curves graph — see README Phase 201)

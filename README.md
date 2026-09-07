@@ -12365,6 +12365,49 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1255 Rust tests total** (1250 → 1255, 1248 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 203 — Curves Show Clipping
+
+`Document::curves_clipping(id, rgb, red, green, blue)` is the Curves
+dialog's Show Clipping readout: a read-only count of how many of the
+layer's pixels — the selection's, or the whole layer's — the four
+curves would drive to pure black (every channel `0`) and to pure
+white (every channel `255`), applying the channel curves before the
+composite exactly as `curves_channels` does. Photoshop paints the
+clipped pixels over the image while an endpoint is Alt-dragged; a
+live count is this project's readout, a documented scope cut. The
+dialog gains a **Show Clipping** checkbox that, while on, refetches
+the counts through a read-only `curves_clipping` command every time
+any channel's points change and shows them as "N black · M white".
+
+**Verified two ways.** Five new `document.rs` tests on the four-pixel
+Curves fixture `[10, 64, 128]`, `[60, 200, 100]`, `[0, 192, 255]`,
+`[30, 30, 30]`, every count worked out by hand from the tables. Four
+identity lists count nothing. A composite crushed to `0` through input
+`100` and lifted to `255` from `150` drives only `[30, 30, 30]` to
+black — the others keep at least one channel off `0` — for `(1, 0)`; a
+composite that jumps to `255` at input `10` makes three pixels white,
+the `[0, 192, 255]` one staying out because its red is `0`, for `(0,
+3)`. A red list that lifts red to `255` everywhere changes nothing
+under an identity composite but makes that fourth pixel white too
+under the jumping one, `(0, 4)`, proving the channel-first order. With
+only the last pixel selected the crush counts `(1, 0)`; with the first
+three, `(0, 0)`; and the pixels are untouched either way. A one-point
+list and an unknown layer error. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The readout's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1260 Rust tests total** (1255 → 1260, 1253 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

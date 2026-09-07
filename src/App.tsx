@@ -520,6 +520,9 @@ export default function App() {
     blue: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
   });
   const [curveLuts, setCurveLuts] = useState<Partial<Record<LevelsChannel, number[]>>>({});
+  // Show Clipping: how many pixels the current curves drive to black/white.
+  const [curveShowClipping, setCurveShowClipping] = useState(false);
+  const [curveClipping, setCurveClipping] = useState<[number, number] | null>(null);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
@@ -1754,7 +1757,14 @@ export default function App() {
         setCurveLuts(Object.fromEntries(channels.map((channel, i) => [channel, luts[i]]))),
       )
       .catch(() => setCurveLuts({}));
-  }, [showCurvesDialog, curveLists]);
+    if (curveShowClipping && selectedId !== null) {
+      void invoke<[number, number]>("curves_clipping", { id: selectedId, ...lists })
+        .then(setCurveClipping)
+        .catch(() => setCurveClipping(null));
+    } else {
+      setCurveClipping(null);
+    }
+  }, [showCurvesDialog, curveLists, curveShowClipping, selectedId]);
 
   const setCurveNode = useCallback((index: number, axis: 0 | 1, value: number) => {
     const clamped = Math.max(0, Math.min(255, Math.round(value)));
@@ -9839,6 +9849,19 @@ export default function App() {
                 </svg>
               );
             })()}
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={curveShowClipping}
+                onChange={(event) => setCurveShowClipping(event.target.checked)}
+              />
+              Show Clipping
+              {curveClipping && (
+                <span className="control__value">
+                  {curveClipping[0]} black · {curveClipping[1]} white
+                </span>
+              )}
+            </label>
             <label className="tools__slider">
               <input
                 type="checkbox"

@@ -3289,6 +3289,22 @@ fn curves_channels(
     })
 }
 
+/// The Curves dialog's Show Clipping readout: how many pixels the four
+/// curves would drive to pure black and pure white. Read-only.
+#[tauri::command]
+fn curves_clipping(
+    state: State<'_, AppState>,
+    id: LayerId,
+    rgb: Vec<(u8, u8)>,
+    red: Vec<(u8, u8)>,
+    green: Vec<(u8, u8)>,
+    blue: Vec<(u8, u8)>,
+) -> Result<(u32, u32), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.curves_clipping(id, &rgb, &red, &green, &blue)
+}
+
 /// The Curves dialog's graph: the 256-entry lookup table `points` describe.
 /// Read-only; needs no document.
 #[tauri::command]
@@ -3952,6 +3968,7 @@ pub fn run() {
             curves_points,
             curves_lookup,
             curves_channels,
+            curves_clipping,
             levels_black_point,
             levels_white_point,
             levels_gray_point,

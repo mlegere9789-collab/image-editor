@@ -11899,6 +11899,56 @@ impl Document {
         })
     }
 
+    /// The Curves dialog's Show Clipping readout: how many of layer `id`'s
+    /// pixels — the active selection's, or the whole layer's — the given
+    /// curves (the same four lists [`Self::curves_channels`] takes) would
+    /// drive to pure black (every channel `0`) and to pure white (every
+    /// channel `255`). Read-only; the layer is not changed. Photoshop
+    /// paints the clipped pixels over the image while an endpoint is
+    /// dragged with Alt held; a count is this project's readout.
+    pub fn curves_clipping(
+        &self,
+        id: LayerId,
+        rgb: &[(u8, u8)],
+        red: &[(u8, u8)],
+        green: &[(u8, u8)],
+        blue: &[(u8, u8)],
+    ) -> Result<(u32, u32), String> {
+        let master = curve_lookup(rgb)?;
+        let (red, green, blue) = (
+            curve_lookup(red)?,
+            curve_lookup(green)?,
+            curve_lookup(blue)?,
+        );
+        let layer = self.layer(id)?;
+        let bounds = self.copy_bounds();
+        let doc_width = self.width as usize;
+        let (mut black, mut white) = (0u32, 0u32);
+        for row in bounds.y0..bounds.y1 {
+            for col in bounds.x0..bounds.x1 {
+                let keep = self
+                    .selection
+                    .as_ref()
+                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
+                if !keep {
+                    continue;
+                }
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let out = [
+                    master[red[layer.pixels[base] as usize] as usize],
+                    master[green[layer.pixels[base + 1] as usize] as usize],
+                    master[blue[layer.pixels[base + 2] as usize] as usize],
+                ];
+                if out == [0, 0, 0] {
+                    black += 1;
+                } else if out == [255, 255, 255] {
+                    white += 1;
+                }
+            }
+        }
+        Ok((black, white))
+    }
+
     /// [`Self::curves`] in Photoshop's Point mode: the curve is defined by
     /// any number (at least two) of `(input, output)` control points at
     /// arbitrary input positions, sorted by input here so a caller can
@@ -22767,6 +22817,132 @@ mod tests {
             .curves_channels(
                 id,
                 &steep,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn curves_clipping_counts_nothing_for_the_identity() {
+        let (doc, id) = curves_points_fixture();
+        let idents = [IDENTITY_POINTS; 4];
+        assert_eq!(
+            doc.curves_clipping(id, &idents[0], &idents[1], &idents[2], &idents[3])
+                .unwrap(),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn curves_clipping_counts_pixels_driven_to_black_and_white() {
+        // A composite that is 0 up to 100 and 255 from 150: pixels
+        // [10,64,128] → [0,0,255] (neither), [60,200,100] → [0,255,0]
+        // (neither), [0,192,255] → [0,255,255] (neither), [30,30,30] →
+        // [0,0,0] (black).
+        let (doc, id) = curves_points_fixture();
+        let crush = [(0, 0), (100, 0), (150, 255), (255, 255)];
+        assert_eq!(
+            doc.curves_clipping(
+                id,
+                &crush,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .unwrap(),
+            (1, 0)
+        );
+        // Lifting the composite to 255 from input 10 makes every pixel but
+        // the [0,192,255] one white: [0, ...] stays 0 in red.
+        let lift = [(0, 0), (9, 0), (10, 255), (255, 255)];
+        assert_eq!(
+            doc.curves_clipping(
+                id,
+                &lift,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .unwrap(),
+            (0, 3)
+        );
+    }
+
+    #[test]
+    fn curves_clipping_applies_the_channel_curves_first() {
+        // Red lifted to 255 everywhere makes [0,192,255] all-255 only once
+        // the composite's identity passes it through; the crush composite
+        // then decides for the rest.
+        let (doc, id) = curves_points_fixture();
+        let all_white = [(0, 255), (255, 255)];
+        assert_eq!(
+            doc.curves_clipping(
+                id,
+                &IDENTITY_POINTS,
+                &all_white,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .unwrap(),
+            (0, 0)
+        );
+        let lift = [(0, 0), (9, 0), (10, 255), (255, 255)];
+        assert_eq!(
+            doc.curves_clipping(id, &lift, &all_white, &IDENTITY_POINTS, &IDENTITY_POINTS)
+                .unwrap(),
+            (0, 4)
+        );
+    }
+
+    #[test]
+    fn curves_clipping_counts_only_the_selection_and_leaves_pixels_alone() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.select_rectangle(3.0, 0.0, 4.0, 1.0).unwrap();
+        let crush = [(0, 0), (100, 0), (150, 255), (255, 255)];
+        assert_eq!(
+            doc.curves_clipping(
+                id,
+                &crush,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .unwrap(),
+            (1, 0)
+        );
+        doc.select_rectangle(0.0, 0.0, 3.0, 1.0).unwrap();
+        assert_eq!(
+            doc.curves_clipping(
+                id,
+                &crush,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .unwrap(),
+            (0, 0)
+        );
+        assert_eq!(pixel(&doc, id, 3, 0), [30, 30, 30, 255]);
+    }
+
+    #[test]
+    fn curves_clipping_rejects_bad_lists_and_unknown_layers() {
+        let (doc, id) = curves_points_fixture();
+        assert!(doc
+            .curves_clipping(
+                id,
+                &[(0, 0)],
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS,
+                &IDENTITY_POINTS
+            )
+            .is_err());
+        assert!(doc
+            .curves_clipping(
+                id + 1,
+                &IDENTITY_POINTS,
                 &IDENTITY_POINTS,
                 &IDENTITY_POINTS,
                 &IDENTITY_POINTS
