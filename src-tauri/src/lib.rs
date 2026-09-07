@@ -3424,6 +3424,74 @@ fn rasterize_smart_object(state: State<'_, AppState>, id: LayerId) -> Result<Sna
     })
 }
 
+/// The Frame tool: a masked, empty frame layer.
+#[tauri::command]
+fn add_frame_layer(
+    state: State<'_, AppState>,
+    name: String,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    elliptical: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_frame_layer(name, x0, y0, x1, y1, elliptical)?;
+        Ok(None)
+    })
+}
+
+/// Place layer `source` into frame layer `frame`.
+#[tauri::command]
+fn place_into_frame(
+    state: State<'_, AppState>,
+    frame: LayerId,
+    source: LayerId,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.place_into_frame(frame, source)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Select > Focus Area on layer `id`.
+#[tauri::command]
+fn select_focus_area(
+    state: State<'_, AppState>,
+    id: LayerId,
+    range: u8,
+    spread: u32,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_focus_area_with(
+            mode.unwrap_or(document::SelectionMode::New),
+            id,
+            range,
+            spread,
+        )?;
+        Ok(None)
+    })
+}
+
+/// Select > Sky on layer `id`.
+#[tauri::command]
+fn select_sky(
+    state: State<'_, AppState>,
+    id: LayerId,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_sky_with(mode.unwrap_or(document::SelectionMode::New), id)?;
+        Ok(None)
+    })
+}
+
 /// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
 /// rendered from `fill`.
 #[tauri::command]
@@ -5149,6 +5217,10 @@ pub fn run() {
             smart_object_from_layers,
             set_smart_transform,
             rasterize_smart_object,
+            add_frame_layer,
+            place_into_frame,
+            select_focus_area,
+            select_sky,
             set_fill,
             add_vector_mask,
             remove_layer_mask,

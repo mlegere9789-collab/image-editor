@@ -6984,6 +6984,178 @@ impl Document {
         Ok(())
     }
 
+    /// The Frame tool: a new top layer named `name` with nothing on it and
+    /// a layer mask that shows only the frame — every pixel whose centre
+    /// lies in the box `(x0, y0)`–`(x1, y1)` (pixel-edge coordinates) or,
+    /// with `elliptical`, in the ellipse inscribed in it — so whatever is
+    /// placed into it is clipped to the frame. Returns the layer's id.
+    /// Errors for a non-finite or empty box.
+    pub fn add_frame_layer(
+        &mut self,
+        name: impl Into<String>,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        elliptical: bool,
+    ) -> Result<LayerId, String> {
+        if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+            return Err("Frame corners must be finite coordinates.".to_string());
+        }
+        if x1 <= x0 || y1 <= y0 {
+            return Err("A frame must be wider and taller than zero.".to_string());
+        }
+        let (cx, cy) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        let (rx, ry) = ((x1 - x0) / 2.0, (y1 - y0) / 2.0);
+        let mut mask = Vec::with_capacity(self.width as usize * self.height as usize);
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                let inside = if elliptical {
+                    let (nx, ny) = ((px - cx) / rx, (py - cy) / ry);
+                    nx * nx + ny * ny <= 1.0
+                } else {
+                    px >= x0 && px < x1 && py >= y0 && py < y1
+                };
+                mask.push(if inside { 255 } else { 0 });
+            }
+        }
+        let id = self.push_pixel_layer(name, vec![0u8; self.buffer_len()]);
+        self.set_layer_mask(id, mask)?;
+        Ok(id)
+    }
+
+    /// Places layer `source` into frame layer `frame`: the frame takes the
+    /// source's pixels, the source layer is removed, and the frame's mask
+    /// clips them to the frame. Errors for a frame without a mask (not a
+    /// frame), a layer placed into itself, or an unknown layer.
+    pub fn place_into_frame(&mut self, frame: LayerId, source: LayerId) -> Result<(), String> {
+        if frame == source {
+            return Err("A layer cannot be placed into itself.".to_string());
+        }
+        if self.layer(frame)?.mask.is_none() {
+            return Err("That layer is not a frame.".to_string());
+        }
+        let pixels = self.layer(source)?.pixels.clone();
+        self.layer_mut(frame)?.pixels = pixels;
+        self.layers.retain(|l| l.id != source);
+        Ok(())
+    }
+
+    /// Select > Focus Area's finder: a pixel is in focus when the strongest
+    /// Sobel edge within `spread` pixels of it (Chebyshev), taken as the
+    /// largest of the three colour channels' [`sobel_at`] magnitudes, is at
+    /// least `255 · (100 − range) / 100` — so In-Focus Range `100` takes
+    /// everything and `0` only the hardest edges. Errors for a range over
+    /// `100`, a spread over `10`, or an unknown layer.
+    pub fn focus_bits(&self, id: LayerId, range: u8, spread: u32) -> Result<Vec<bool>, String> {
+        if range > 100 {
+            return Err("Focus Area's In-Focus Range must be between 0 and 100.".to_string());
+        }
+        if spread > 10 {
+            return Err("Focus Area's Spread must be between 0 and 10 pixels.".to_string());
+        }
+        let layer = self.layer(id)?;
+        let (w, h) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let sharpness: Vec<u8> = (0..self.height)
+            .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let s = sobel_at(&layer.pixels, doc_width, (w, h), (y, x));
+                s[0].max(s[1]).max(s[2])
+            })
+            .collect();
+        let threshold = 255 * (100 - range as u32) / 100;
+        let r = spread as i64;
+        let mut bits = Vec::with_capacity(sharpness.len());
+        for y in 0..h {
+            for x in 0..w {
+                let mut best = 0u8;
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (sx, sy) = (x + dx, y + dy);
+                        if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                            continue;
+                        }
+                        best = best.max(sharpness[(sy * w + sx) as usize]);
+                    }
+                }
+                bits.push(u32::from(best) >= threshold);
+            }
+        }
+        Ok(bits)
+    }
+
+    /// Select > Focus Area: [`Self::focus_bits`] combined with the current
+    /// selection per `mode`. Errors when nothing is in focus.
+    pub fn select_focus_area_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        range: u8,
+        spread: u32,
+    ) -> Result<(), String> {
+        let bits = self.focus_bits(id, range, spread)?;
+        if !bits.contains(&true) {
+            return Err("Nothing on the layer is in focus at that range.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// Select > Sky's finder: a pixel is sky-coloured when blue is its
+    /// strongest channel and its luma is at least `80`, or when it is
+    /// near white (every channel `200` or more, a cloud), and it is sky
+    /// when it is joined to the top edge through sky-coloured pixels
+    /// (4-connected), so a blue lake below the horizon is not sky. Errors
+    /// for an unknown layer.
+    pub fn sky_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
+        let layer = self.layer(id)?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let skyish: Vec<bool> = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| {
+                let [r, g, b] = [px[0], px[1], px[2]];
+                let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+                px[3] > 0
+                    && ((b >= r && b >= g && luma >= 80.0) || (r >= 200 && g >= 200 && b >= 200))
+            })
+            .collect();
+        let mut bits = vec![false; w * h];
+        let mut stack: Vec<usize> = (0..w).filter(|&x| skyish[x]).collect();
+        for &x in &stack {
+            bits[x] = true;
+        }
+        while let Some(idx) = stack.pop() {
+            let (x, y) = (idx % w, idx / w);
+            let neighbours = [
+                (x > 0).then(|| idx - 1),
+                (x + 1 < w).then(|| idx + 1),
+                (y > 0).then(|| idx - w),
+                (y + 1 < h).then(|| idx + w),
+            ];
+            for n in neighbours.into_iter().flatten() {
+                if skyish[n] && !bits[n] {
+                    bits[n] = true;
+                    stack.push(n);
+                }
+            }
+        }
+        Ok(bits)
+    }
+
+    /// Select > Sky: [`Self::sky_bits`] combined with the current selection
+    /// per `mode`. Errors when no sky is found.
+    pub fn select_sky_with(&mut self, mode: SelectionMode, id: LayerId) -> Result<(), String> {
+        let bits = self.sky_bits(id)?;
+        if !bits.contains(&true) {
+            return Err("No sky was found on the layer.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
     /// Selection: gives layer `id` a mask built from `source`, replacing
     /// any mask it had. The selection variants need a selection.
@@ -47255,5 +47427,171 @@ mod tests {
             .set_smart_transform(999, FreeTransform::default())
             .is_err());
         assert_eq!(doc.layers()[0].pixels, shrunk);
+    }
+
+    #[test]
+    fn frame_layer_masks_a_rectangle_or_ellipse_and_place_fills_it() {
+        let mut doc = Document::new(4, 4).unwrap();
+        let frame = doc
+            .add_frame_layer("Frame", 1.0, 1.0, 3.0, 3.0, false)
+            .unwrap();
+        let mask = doc.layers()[0].mask.as_ref().unwrap();
+        let inside: Vec<usize> = mask
+            .iter()
+            .enumerate()
+            .filter(|(_, &m)| m == 255)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(inside, vec![5, 6, 9, 10]);
+        assert!(mask.iter().all(|&m| m == 0 || m == 255));
+        assert!(filled(&doc, frame).is_empty());
+        // An elliptical frame over the whole canvas drops the four corners.
+        let mut round = Document::new(4, 4).unwrap();
+        round
+            .add_frame_layer("Frame", 0.0, 0.0, 4.0, 4.0, true)
+            .unwrap();
+        let mask = round.layers()[0].mask.as_ref().unwrap();
+        assert_eq!(mask.iter().filter(|&&m| m == 255).count(), 12);
+        assert_eq!(mask[0], 0);
+        assert_eq!(mask[1], 255);
+        // Placing a layer into the frame moves its pixels in and removes it;
+        // the composite shows them only inside the frame.
+        let (mut doc, _) = ramped_4x4();
+        let picture = doc.layers()[0].id;
+        let frame = doc
+            .add_frame_layer("Frame", 1.0, 1.0, 3.0, 3.0, false)
+            .unwrap();
+        doc.place_into_frame(frame, picture).unwrap();
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].id, frame);
+        assert_eq!(pixel(&doc, frame, 1, 1), [60, 0, 0, 255]);
+        assert_eq!(
+            crate::composite::composite_pixel(&doc, 1, 1),
+            [60, 0, 0, 255]
+        );
+        assert_eq!(crate::composite::composite_pixel(&doc, 0, 0)[3], 0);
+        assert!(doc.layers()[0].mask.is_some());
+    }
+
+    #[test]
+    fn frame_tool_refuses_bad_frames_and_non_frames() {
+        let (mut doc, id) = ramped_4x4();
+        assert!(doc
+            .add_frame_layer("Frame", 2.0, 0.0, 2.0, 4.0, false)
+            .unwrap_err()
+            .contains("wide"));
+        assert!(doc
+            .add_frame_layer("Frame", f32::NAN, 0.0, 2.0, 4.0, false)
+            .unwrap_err()
+            .contains("finite"));
+        assert_eq!(doc.layers().len(), 1);
+        let frame = doc
+            .add_frame_layer("Frame", 0.0, 0.0, 2.0, 2.0, false)
+            .unwrap();
+        assert!(doc
+            .place_into_frame(id, frame)
+            .unwrap_err()
+            .contains("frame"));
+        assert!(doc
+            .place_into_frame(frame, frame)
+            .unwrap_err()
+            .contains("itself"));
+        assert!(doc.place_into_frame(frame, 999).is_err());
+        assert_eq!(doc.layers().len(), 2);
+    }
+
+    #[test]
+    fn focus_area_selects_where_detail_is_sharp_within_the_spread() {
+        // A six-pixel row, black then white: the Sobel edge is 255 on the
+        // two pixels either side of the step and nothing elsewhere, so a
+        // spread of one pixel selects columns 1–4 and a spread of two all six.
+        let (mut doc, id) = row_doc(&[vec![
+            grey(0),
+            grey(0),
+            grey(0),
+            grey(255),
+            grey(255),
+            grey(255),
+        ]]);
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 1)
+            .unwrap();
+        let bits = doc.selected_bits().unwrap();
+        assert_eq!(bits, vec![false, true, true, true, true, false]);
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 2)
+            .unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), vec![true; 6]);
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 0)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![false, false, true, true, false, false]
+        );
+        // A gentle ramp (steps of 10, Sobel 40) needs a wide range: at 50
+        // (threshold 128) nothing is sharp, at 90 (threshold 26) it all is.
+        let (mut soft, sid) = row_doc(&[vec![grey(0), grey(10), grey(20), grey(30)]]);
+        assert!(soft
+            .select_focus_area_with(SelectionMode::New, sid, 50, 0)
+            .unwrap_err()
+            .contains("focus"));
+        soft.select_focus_area_with(SelectionMode::New, sid, 90, 0)
+            .unwrap();
+        assert_eq!(soft.selected_bits().unwrap(), vec![true; 4]);
+        assert!(soft
+            .select_focus_area_with(SelectionMode::New, sid, 101, 0)
+            .unwrap_err()
+            .contains("Range"));
+        assert!(soft
+            .select_focus_area_with(SelectionMode::New, sid, 50, 11)
+            .unwrap_err()
+            .contains("Spread"));
+    }
+
+    #[test]
+    fn sky_selection_takes_sky_coloured_pixels_joined_to_the_top_edge() {
+        // Top row blue sky, a white cloud in the middle joined to it, green
+        // ground below, and a stray blue pixel at the bottom left that
+        // touches no sky.
+        let sky = [100, 150, 255, 255];
+        let cloud = [250, 250, 250, 255];
+        let ground = [50, 150, 50, 255];
+        let (mut doc, id) = row_doc(&[
+            vec![sky, sky, sky],
+            vec![ground, cloud, ground],
+            vec![sky, ground, ground],
+        ]);
+        doc.select_sky_with(SelectionMode::New, id).unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![true, true, true, false, true, false, false, false, false]
+        );
+        // Add mode unions with what is selected; no sky at all is refused.
+        doc.select_rectangle(0.0, 2.0, 1.0, 3.0).unwrap();
+        doc.select_sky_with(SelectionMode::Add, id).unwrap();
+        assert!(doc.selected_bits().unwrap()[6]);
+        assert_eq!(
+            doc.selected_bits().unwrap().iter().filter(|&&b| b).count(),
+            5
+        );
+        let (mut dark, did) = row_doc(&[vec![ground, ground], vec![[20, 20, 60, 255], ground]]);
+        assert!(dark
+            .select_sky_with(SelectionMode::New, did)
+            .unwrap_err()
+            .contains("sky"));
+        assert!(dark.select_sky_with(SelectionMode::New, 999).is_err());
+    }
+
+    #[test]
+    fn sky_and_focus_bits_are_exposed_for_masks() {
+        let sky = [100, 150, 255, 255];
+        let ground = [50, 150, 50, 255];
+        let (doc, id) = row_doc(&[vec![sky, ground], vec![ground, ground]]);
+        assert_eq!(doc.sky_bits(id).unwrap(), vec![true, false, false, false]);
+        let (sharp, sid) = row_doc(&[vec![grey(0), grey(255)]]);
+        // Both pixels see the step: Sobel 255 each.
+        assert_eq!(sharp.focus_bits(sid, 50, 0).unwrap(), vec![true, true]);
+        assert_eq!(sharp.focus_bits(sid, 0, 0).unwrap(), vec![true, true]);
+        let (flat, fid) = row_doc(&[vec![grey(90), grey(90)]]);
+        assert_eq!(flat.focus_bits(fid, 99, 0).unwrap(), vec![false, false]);
+        assert_eq!(flat.focus_bits(fid, 100, 0).unwrap(), vec![true, true]);
     }
 }

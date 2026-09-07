@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 465.**
+**618 distinct capabilities tracked. Currently shipped: 468.**
 
 ## PART I — EVERY TOOL
 
@@ -61,7 +61,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] STAR TOOL (`Document::draw_star`, Pixels mode: the Polygon tool's construction with an inner vertex at Star Ratio percent of the drag radius midway between each pair of points, filled by the even-odd pixel-centre rule; smooth indents, stroke, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 191)
 - [x] LINE TOOL (`Document::draw_line`, Pixels mode: a straight line of a given weight painted by the pixel-centre rule — perpendicular distance at most half the weight and projection between the ends, so butt caps — in a flat colour, confined by the selection; arrowheads, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 189)
 - [x] CUSTOM SHAPE TOOL (`draw_custom_shape`, any polygon of three or more points painted by the shape tools' even-odd pixel-centre fill in Pixels mode, or held live as a `ShapeSpec::Custom` shape layer; Photoshop's shape library and Bézier paths are documented scope cuts — see README Phase 254)
-- [ ] FRAME TOOL
+- [x] FRAME TOOL (`add_frame_layer`, an empty layer whose layer mask shows only the drawn box or inscribed ellipse by the pixel-centre rule, and `place_into_frame`, which moves a layer's pixels into the frame and removes it so the mask clips them; Photoshop's placing from files and frame resizing are documented scope cuts — see README Phase 256)
 - [x] EYEDROPPER TOOL
 - [x] COLOR SAMPLER TOOL (`sample_points` over a new `composite::composite_pixel`, up to ten placed sample points whose composited RGBA — every visible layer flattened with its opacity and blend mode — is re-read after every edit and shown in the status bar; Current Layer sampling and sample-size averaging are documented scope cuts — see README Phase 167)
 - [x] RULER TOOL (`measure` / `ruler_measure`, a drag whose width, height, straight-line distance, and angle — degrees counter-clockwise from horizontal, y up on screen, Photoshop's Info-panel convention — are read out in the status bar; Straighten Layer and the protractor's second leg are documented scope cuts — see README Phase 166)
@@ -75,8 +75,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] RESELECT
 - [x] INVERSE
 - [x] COLOR RANGE (`select_color_range`, a pixel-mask selection of every pixel of the selected layer whose R, G, and B are each within Fuzziness of a chosen colour, wherever it sits — the same mask machinery the Magic Wand introduced, with an explicit colour instead of a click and no contiguity. Photoshop's soft partial selection, sampled-colours eyedroppers, Localized Color Clusters, and the Skin Tones/Highlights/etc. presets are documented scope cuts — see README Phase 150)
-- [ ] FOCUS AREA
-- [ ] SKY SELECTION
+- [x] FOCUS AREA (`select_focus_area_with` / `focus_bits`: a pixel is in focus when the strongest Sobel edge within Spread pixels of it clears `255 · (100 − range) / 100`, combined with the selection by mode; Photoshop's Image Noise Level and Soften Edge are documented scope cuts — see README Phase 256)
+- [x] SKY SELECTION (`select_sky_with` / `sky_bits`: sky-coloured pixels — blue strongest and luma ≥ 80, or near-white clouds — joined 4-connected to the top edge, combined with the selection by mode; Photoshop's trained model is a documented scope cut — see README Phase 256)
 - [x] SUBJECT SELECTION (`select_subject_with`, the Object Selection finder over the whole canvas: the canvas edge's most common colour is the background and the largest connected thing that is not it is the subject — an explicit stand-in for Photoshop's neural detection — see README Phase 210)
 - [ ] SELECT PEOPLE
 - [x] MODIFY > BORDER

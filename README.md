@@ -15234,6 +15234,71 @@ fully green.
 **1520 Rust tests total** (1515 → 1520, 1513 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 256 — The Frame tool, Focus Area, and Select Sky
+
+Three rows from three corners of the toolbox. `add_frame_layer(name,
+x0, y0, x1, y1, elliptical)` is the Frame tool: a new, empty top layer
+whose layer mask shows only the frame — every pixel whose centre lies
+in the box (pixel-edge coordinates) or, elliptically, in the ellipse
+inscribed in it — and `place_into_frame(frame, source)` moves a
+layer's pixels into the frame and removes the layer, so the mask clips
+them; a frame is any masked layer, a layer cannot be placed into
+itself, and an empty or non-finite box is refused. `focus_bits(id,
+range, spread)` is Select > Focus Area's finder: each pixel's
+sharpness is the largest of its three channels' Sobel magnitudes, a
+pixel is in focus when the strongest sharpness within `spread` pixels
+of it (Chebyshev, `0..=10`) is at least `255 · (100 − range) / 100`,
+so In-Focus Range `100` takes everything and `0` only the hardest
+edges, and `select_focus_area_with` combines those bits with the
+selection by mode, refusing an empty result. `sky_bits(id)` is Select
+> Sky's finder: a pixel is sky-coloured when blue is its strongest
+channel and its luma is at least `80`, or when every channel is `200`
+or more (a cloud), and it is sky when it is joined to the top edge
+through sky-coloured pixels, 4-connected — so a blue lake below the
+horizon is not sky — and `select_sky_with` combines them by mode,
+refusing a skyless picture. A **Frame…** dialog draws a box or
+elliptical frame and places the selected layer into a chosen frame;
+**Focus Area…** has In-Focus Range and Spread; **Select Sky** is one
+click, all three honouring the selection mode. Photoshop's frame
+resizing and placing from files, Focus Area's Image Noise Level and
+Soften Edge, and Select Sky's trained model are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every mask byte
+and bit traced by hand. A frame over `(1, 1)`–`(3, 3)` on 4×4 masks
+exactly the four centre pixels and holds no pixels; an elliptical
+frame over the whole canvas shows `12` pixels, the corners (`d² =
+1.125`) dropped; placing the ramp into a frame leaves one masked
+layer whose pixel `(1, 1)` is `60` and composites to `60` there and
+transparent at the corner. A zero-width and a NaN frame add no layer,
+and placing into a plain layer, into itself, or from an unknown layer
+is refused. On a black-then-white six-pixel row the Sobel edge is
+`255` on the two pixels either side of the step, so Spread `1` selects
+columns `1`–`4`, Spread `2` all six, and Spread `0` the two; a ramp in
+steps of `10` (Sobel `40`) is refused at Range `50` (threshold `128`)
+and all selected at `90` (threshold `26`); Range `101` and Spread `11`
+are refused. Blue sky over a cloud over green ground with a stray blue
+pixel at the bottom left selects the top row and the cloud, not the
+stray, Add mode unions with a rectangle for five pixels, and a
+skyless picture is refused. The finders are exposed on their own:
+one sky pixel of four, a two-pixel step in focus at Range `50` and
+`0`, and a flat grey out of focus at `99` but in at `100`. All five
+passed on the first run; clippy asked only for `assert!` over a
+literal-bool `assert_eq!` in one test.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and three:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialogs were reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1525 Rust tests total** (1520 → 1525, 1518 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

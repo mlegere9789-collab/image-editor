@@ -763,6 +763,14 @@ export default function App() {
   // Smart Objects: the members to wrap and the transform to show through.
   const [showSmartDialog, setShowSmartDialog] = useState(false);
   const [smartMembers, setSmartMembers] = useState<number[]>([]);
+  // The Frame tool and Select > Focus Area.
+  const [showFrameDialog, setShowFrameDialog] = useState(false);
+  const [frameBox, setFrameBox] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [frameElliptical, setFrameElliptical] = useState(false);
+  const [frameTarget, setFrameTarget] = useState<number | null>(null);
+  const [showFocusDialog, setShowFocusDialog] = useState(false);
+  const [focusRange, setFocusRange] = useState(50);
+  const [focusSpread, setFocusSpread] = useState(2);
   const [customPoints, setCustomPoints] = useState("0,0\n1,0\n0.5,1");
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
@@ -2683,6 +2691,32 @@ export default function App() {
     await runCommand("rasterize_smart_object", { id: selectedId });
     setShowSmartDialog(false);
   }, [runCommand, selectedId]);
+
+  const openFrameDialog = useCallback(() => {
+    if (document) {
+      setFrameBox([Math.round(document.width / 4), Math.round(document.height / 4), Math.round((3 * document.width) / 4), Math.round((3 * document.height) / 4)]);
+    }
+    setFrameTarget(document?.layers.find((layer) => layer.hasMask && layer.name.startsWith("Frame"))?.id ?? null);
+    setShowFrameDialog(true);
+  }, [document]);
+
+  const addFrameLayer = useCallback(async () => {
+    const [x0, y0, x1, y1] = frameBox;
+    await runCommand("add_frame_layer", { name: "Frame", x0, y0, x1, y1, elliptical: frameElliptical });
+    setShowFrameDialog(false);
+  }, [runCommand, frameBox, frameElliptical]);
+
+  const placeIntoFrame = useCallback(async () => {
+    if (selectedId === null || frameTarget === null) return;
+    await runCommand("place_into_frame", { frame: frameTarget, source: selectedId });
+    setShowFrameDialog(false);
+  }, [runCommand, selectedId, frameTarget]);
+
+  const applyFocusArea = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("select_focus_area", { id: selectedId, range: focusRange, spread: focusSpread, mode: selectionMode });
+    setShowFocusDialog(false);
+  }, [runCommand, selectedId, focusRange, focusSpread, selectionMode]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -6186,6 +6220,24 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowFocusDialog(true)}
+            disabled={busy || selectedId === null}
+            title="Select > Focus Area: select where the picture is sharp"
+          >
+            Focus Area…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("select_sky", { id: selectedId, mode: selectionMode });
+            }}
+            disabled={busy || selectedId === null}
+            title="Select > Sky: sky-coloured pixels joined to the top edge"
+          >
+            Select Sky
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
               void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
@@ -6323,6 +6375,14 @@ export default function App() {
             title="Layer > Smart Objects: convert, create from layers, transform from the source, rasterize"
           >
             Smart Object…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openFrameDialog}
+            disabled={busy || !hasDocument}
+            title="Frame tool: a masked frame layer that clips whatever is placed into it"
+          >
+            Frame…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -13472,6 +13532,93 @@ export default function App() {
           </div>
         </div>
       )}
+      {showFrameDialog && (
+        <div className="modal-overlay" onClick={() => setShowFrameDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Frame" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Frame tool</h2>
+            <p className="modal__hint">
+              A frame is an empty layer masked to a box or ellipse; placing the selected layer
+              into it moves the layer&apos;s pixels in and clips them to the frame.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Box (x0, y0, x1, y1)</span>
+              {frameBox.map((v, i) => (
+                <input
+                  type="number"
+                  step={0.5}
+                  value={v}
+                  key={i}
+                  onChange={(event) => setFrameBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                />
+              ))}
+              <label className="control control--row">
+                <input type="checkbox" checked={frameElliptical} onChange={(event) => setFrameElliptical(event.target.checked)} />
+                <span className="control__label">Elliptical</span>
+              </label>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Place selected layer into</span>
+              <select value={frameTarget ?? ""} onChange={(event) => setFrameTarget(event.target.value === "" ? null : Number(event.target.value))}>
+                <option value="">(choose a frame)</option>
+                {(document?.layers ?? [])
+                  .filter((layer) => layer.hasMask && layer.id !== selectedId)
+                  .map((layer) => (
+                    <option value={layer.id} key={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFrameDialog(false)}>
+                Cancel
+              </button>
+              <button className="button button--quiet" onClick={placeIntoFrame} disabled={busy || selectedId === null || frameTarget === null}>
+                Place into frame
+              </button>
+              <button className="button" onClick={addFrameLayer} disabled={busy}>
+                Add frame
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFocusDialog && (
+        <div className="modal-overlay" onClick={() => setShowFocusDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Focus Area" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Select &gt; Focus Area</h2>
+            <p className="modal__hint">
+              Selects where the picture is sharp: a pixel is in focus when the strongest edge
+              within Spread pixels of it clears the In-Focus Range. Combines with the current
+              selection by the selection mode.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                In-Focus Range
+                <span className="control__value">{focusRange}</span>
+              </span>
+              <input type="range" min={0} max={100} value={focusRange} onChange={(event) => setFocusRange(Number(event.target.value))} />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Spread (px)
+                <span className="control__value">{focusSpread}</span>
+              </span>
+              <input type="range" min={0} max={10} value={focusSpread} onChange={(event) => setFocusSpread(Number(event.target.value))} />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFocusDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applyFocusArea} disabled={busy}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSmartDialog && (
         <div className="modal-overlay" onClick={() => setShowSmartDialog(false)} role="presentation">
           <div className="modal" role="dialog" aria-label="Smart Objects" onClick={(event) => event.stopPropagation()}>
