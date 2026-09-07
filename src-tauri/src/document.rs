@@ -265,6 +265,18 @@ pub struct Selection {
 
 /// How a new marquee combines with the selection already there — the four
 /// mode buttons in Photoshop's selection-tool options bar (Shift, Alt, and
+/// The neighbourhood Filter > Blur > Shape Blur averages over: every
+/// pixel within `radius` of the centre by the shape's own metric —
+/// Chebyshev for `Square` (the box blur), Manhattan for `Diamond`,
+/// Euclidean for `Circle`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ShapeBlurKernel {
+    Square,
+    Diamond,
+    Circle,
+}
+
 /// Which channel Image > Adjustments > Levels remaps: the RGB composite
 /// (all three together, the dialog's default) or one of Red, Green, or
 /// Blue on its own — Photoshop's own Channel dropdown.
@@ -3341,6 +3353,25 @@ impl Document {
     /// 1x1 "blur" is a no-op, not worth a menu item) or a locked/unknown
     /// layer.
     pub fn box_blur(&mut self, id: LayerId, radius: u32) -> Result<Option<Rect>, String> {
+        self.shape_blur(id, ShapeBlurKernel::Square, radius)
+    }
+
+    /// Filter > Blur > Shape Blur: [`Self::box_blur`]'s flat, edge-clamped
+    /// average, taken over the pixels inside a `kernel` shape of the
+    /// given `radius` rather than a square — a diamond (`|dx| + |dy| ≤
+    /// r`) or a disc (`dx² + dy² ≤ r²`) — so the blur's "bokeh" takes that
+    /// shape. `Square` is exactly the box blur, which now delegates here.
+    /// Photoshop draws the kernel from any custom-shape preset; the three
+    /// built-in shapes are a documented scope cut. Every sample counts
+    /// equally and the average truncates, as `average_samples` does. Alpha
+    /// is averaged with the colour, as in the box blur. Errors for a zero
+    /// radius or a locked or unknown layer.
+    pub fn shape_blur(
+        &mut self,
+        id: LayerId,
+        kernel: ShapeBlurKernel,
+        radius: u32,
+    ) -> Result<Option<Rect>, String> {
         if radius == 0 {
             return Err("Blur radius must be at least 1 pixel.".to_string());
         }
@@ -3362,7 +3393,25 @@ impl Document {
                 if !keep {
                     continue;
                 }
-                let averaged = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let averaged = match kernel {
+                    ShapeBlurKernel::Square => {
+                        box_blur_at(&source, doc_width, width, height, row, col, r)
+                    }
+                    _ => {
+                        let samples = (-r..=r).flat_map(|dy| {
+                            let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+                            (-r..=r).filter_map(move |dx| {
+                                let inside = match kernel {
+                                    ShapeBlurKernel::Diamond => dx.abs() + dy.abs() <= r,
+                                    _ => dx * dx + dy * dy <= r * r,
+                                };
+                                let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+                                inside.then_some((sx, sy))
+                            })
+                        });
+                        average_samples(&source, doc_width, samples)
+                    }
+                };
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
                 layer.pixels[dst..dst + CHANNELS].copy_from_slice(&averaged);
             }
@@ -22205,6 +22254,101 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.auto_color(id, 0, 0).is_err());
         assert_eq!(pixel(&doc, id, 0, 0), [40, 60, 80, 255]);
+    }
+
+    /// A `size × size` grey ramp, pixel `(x, y)` holding `step × (y × size + x)`.
+    fn grey_ramp_square(size: u32, step: u8) -> (Document, LayerId) {
+        let pixels: Vec<u8> = (0..size * size)
+            .flat_map(|i| {
+                let v = step * i as u8;
+                [v, v, v, 255]
+            })
+            .collect();
+        let mut doc = Document::new(size, size).unwrap();
+        let id = doc.add_layer("ramp", &pixels, size, size).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn shape_blur_square_is_the_box_blur() {
+        let (mut doc, id) = grey_ramp_square(7, 3);
+        doc.shape_blur(id, ShapeBlurKernel::Square, 3).unwrap();
+        let (mut plain, plain_id) = grey_ramp_square(7, 3);
+        plain.box_blur(plain_id, 3).unwrap();
+        assert_eq!(red_channel_grid(&doc), red_channel_grid(&plain));
+        // 49 clamped samples: the corner averages 20, the centre 72.
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 20);
+        assert_eq!(pixel(&doc, id, 3, 3)[0], 72);
+    }
+
+    #[test]
+    fn shape_blur_diamond_averages_a_diamond() {
+        // 25 samples at radius 3 on the 7×7 ramp (Python model): corner
+        // 13, (1, 0) 15, (3, 0) 20, centre 72, far corner 130.
+        let (mut doc, id) = grey_ramp_square(7, 3);
+        doc.shape_blur(id, ShapeBlurKernel::Diamond, 3).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 13);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 15);
+        assert_eq!(pixel(&doc, id, 3, 0)[0], 20);
+        assert_eq!(pixel(&doc, id, 3, 3)[0], 72);
+        assert_eq!(pixel(&doc, id, 6, 6)[0], 130);
+        // Radius 1 on a 5×5 ramp: the plus of five samples; the clamped
+        // corner reads (0 + 0 + 5 + 0 + 25) / 5 = 6, the centre 60.
+        let (mut doc, id) = grey_ramp_square(5, 5);
+        doc.shape_blur(id, ShapeBlurKernel::Diamond, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 6);
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 60);
+    }
+
+    #[test]
+    fn shape_blur_circle_averages_a_disc() {
+        // 29 samples at radius 3: the disc also takes the (±2, ±2) corners
+        // the diamond leaves out, so its edges read a little higher.
+        let (mut doc, id) = grey_ramp_square(7, 3);
+        doc.shape_blur(id, ShapeBlurKernel::Circle, 3).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 14);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 16);
+        assert_eq!(pixel(&doc, id, 3, 0)[0], 22);
+        assert_eq!(pixel(&doc, id, 3, 3)[0], 72);
+        assert_eq!(pixel(&doc, id, 6, 6)[0], 129);
+        // At radius 2 the lattice disc and diamond are the same 13 points.
+        let (mut disc, disc_id) = grey_ramp_square(5, 5);
+        disc.shape_blur(disc_id, ShapeBlurKernel::Circle, 2)
+            .unwrap();
+        let (mut diamond, diamond_id) = grey_ramp_square(5, 5);
+        diamond
+            .shape_blur(diamond_id, ShapeBlurKernel::Diamond, 2)
+            .unwrap();
+        assert_eq!(red_channel_grid(&disc), red_channel_grid(&diamond));
+        assert_eq!(pixel(&disc, disc_id, 0, 0)[0], 11);
+    }
+
+    #[test]
+    fn shape_blur_is_confined_to_the_selection_and_averages_alpha() {
+        let (mut doc, id) = grey_ramp_square(5, 5);
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.shape_blur(id, ShapeBlurKernel::Circle, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2), [60, 60, 60, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 2), [55, 55, 55, 255]);
+        // Alpha joins the average: a transparent centre in an opaque plus
+        // becomes (0 + 4 × 255) / 5 = 204.
+        let mut doc = Document::new(3, 3).unwrap();
+        let mut pixels = solid(3, 3, [100, 100, 100, 255]);
+        pixels[(3 + 1) * 4 + 3] = 0;
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.shape_blur(id, ShapeBlurKernel::Diamond, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 100, 100, 204]);
+    }
+
+    #[test]
+    fn shape_blur_propagates_errors() {
+        let (mut doc, id) = grey_ramp_square(5, 5);
+        assert!(doc.shape_blur(id, ShapeBlurKernel::Circle, 0).is_err());
+        assert!(doc.shape_blur(id + 1, ShapeBlurKernel::Circle, 1).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.shape_blur(id, ShapeBlurKernel::Diamond, 1).is_err());
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 60);
     }
 
     #[test]

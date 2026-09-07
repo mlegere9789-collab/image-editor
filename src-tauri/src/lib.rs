@@ -1033,6 +1033,18 @@ fn box_blur(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snap
     edit_checkpointed(&state, |document| document.box_blur(id, radius))
 }
 
+/// Filter > Blur > Shape Blur on layer `id`: a flat average over a square,
+/// diamond, or disc of the given radius.
+#[tauri::command]
+fn shape_blur(
+    state: State<'_, AppState>,
+    id: LayerId,
+    kernel: document::ShapeBlurKernel,
+    radius: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.shape_blur(id, kernel, radius))
+}
+
 /// Filter > Sharpen > Unsharp Mask on layer `id`.
 #[tauri::command]
 fn unsharp_mask(
@@ -3742,6 +3754,7 @@ pub fn run() {
             delete_selection,
             fill_selection,
             box_blur,
+            shape_blur,
             unsharp_mask,
             smart_sharpen,
             reduce_noise,

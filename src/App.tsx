@@ -14,6 +14,7 @@ import type {
   MoveDirection,
   SelectionMode,
   SelectionShape,
+  ShapeBlurKernel,
   Snapshot,
   Symmetry,
   Tool,
@@ -517,6 +518,9 @@ export default function App() {
 
   const [showBoxBlurDialog, setShowBoxBlurDialog] = useState(false);
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
+  const [showShapeBlurDialog, setShowShapeBlurDialog] = useState(false);
+  const [shapeBlurRadius, setShapeBlurRadius] = useState(4);
+  const [shapeBlurKernel, setShapeBlurKernel] = useState<ShapeBlurKernel>("circle");
   const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
   const [gaussianBlurRadius, setGaussianBlurRadius] = useState(2);
   const [showSurfaceBlurDialog, setShowSurfaceBlurDialog] = useState(false);
@@ -1757,6 +1761,16 @@ export default function App() {
     await runCommand("fill_selection", { id: selectedId, color: [r, g, b, 255] });
     setShowFillDialog(false);
   }, [runCommand, selectedId, fillColor]);
+
+  const applyShapeBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("shape_blur", {
+      id: selectedId,
+      kernel: shapeBlurKernel,
+      radius: shapeBlurRadius,
+    });
+    setShowShapeBlurDialog(false);
+  }, [runCommand, selectedId, shapeBlurKernel, shapeBlurRadius]);
 
   const applyBoxBlur = useCallback(async () => {
     if (selectedId === null) return;
@@ -4917,6 +4931,14 @@ export default function App() {
             title="Filter > Blur > Box Blur"
           >
             Box Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowShapeBlurDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Blur > Shape Blur"
+          >
+            Shape Blur
           </button>
           <button
             className="button button--quiet"
@@ -9980,6 +10002,57 @@ export default function App() {
         </div>
       )}
 
+      {showShapeBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowShapeBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Shape Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Blur &gt; Shape Blur</h2>
+            <label className="control">
+              <span className="control__label">Shape</span>
+              <select
+                value={shapeBlurKernel}
+                onChange={(event) => setShapeBlurKernel(event.target.value as ShapeBlurKernel)}
+              >
+                <option value="circle">Circle</option>
+                <option value="diamond">Diamond</option>
+                <option value="square">Square</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{shapeBlurRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={40}
+                value={shapeBlurRadius}
+                onChange={(event) => setShapeBlurRadius(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowShapeBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyShapeBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showUnsharpMaskDialog && (
         <div
           className="modal-overlay"

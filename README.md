@@ -12171,6 +12171,58 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1235 Rust tests total** (1230 → 1235, 1228 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 199 — Filter > Blur > Shape Blur
+
+`Document::shape_blur(id, kernel, radius)` is Photoshop's Shape Blur
+with three built-in kernels. It is the box blur's flat, edge-clamped,
+truncating average — the same `average_samples` — taken over the
+pixels inside a shape of the given radius rather than a square: a
+diamond (`|dx| + |dy| ≤ r`, Manhattan distance) or a disc (`dx² + dy² ≤
+r²`, Euclidean), so the blur's "bokeh" takes that shape. `Square` is
+exactly the box blur, which now delegates to `shape_blur`, and every
+sample still counts equally, including edge pixels sampled more than
+once through clamping. Photoshop draws the kernel from any custom-shape
+preset; the three built-ins are a documented scope cut. Alpha is
+averaged with the colour, as the box blur always has. A zero radius, a
+locked layer, and an unknown layer error. A **Shape Blur** button after
+Box Blur opens a dialog with a Shape select (Circle, Diamond, Square)
+and a Radius slider, applied through a `shape_blur` command.
+
+**Verified two ways.** Five new `document.rs` tests on grey ramps whose
+pixel `(x, y)` holds `step × (y × size + x)`, every value first
+produced by a Python model of clamp-and-truncate over each lattice
+shape. On the `7×7` ramp (step `3`) at radius `3`, the square's 49
+clamped samples give `20` at the corner and `72` at the centre and are
+byte-identical to `box_blur`; the diamond's 25 samples give `13`, `15`,
+`20` along the top row, `72` at the centre, and `130` at the far
+corner; the disc's 29 samples — it also takes the `(±2, ±2)` corners
+the diamond leaves out — give `14`, `16`, `22`, `72`, and `129`. At
+radius `1` on the `5×5` ramp (step `5`) the diamond is the plus of five
+samples, so the clamped corner reads `(0 + 0 + 5 + 0 + 25) / 5 = 6` and
+the centre `60`; at radius `2` the lattice disc and diamond are the
+same thirteen points and the two grids are identical, with `11` at the
+corner. A one-pixel selection confines the blur to its pixel, and a
+transparent centre in an opaque plus averages to alpha `(0 + 4 × 255)
+/ 5 = 204`. A zero radius, an unknown layer, and a locked layer error
+with the pixels intact. All five passed on the first run once a test
+helper was renamed: the fixture builder collided with an existing
+`ramp_square` in the test module and the compiler caught it before any
+test ran.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and forty-six:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new dialog was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1240 Rust tests total** (1235 → 1240, 1233 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
