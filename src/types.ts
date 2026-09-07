@@ -36,7 +36,20 @@ export type LayerView = {
   hasMask: boolean;
   /** The live adjustment of an adjustment layer; `null` for a pixel layer. */
   adjustment: Adjustment | null;
+  /** The recipe of a fill layer; `null` for any other layer. */
+  fill: Fill | null;
 };
+
+/** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged
+ * by `kind`): what a live fill layer paints. */
+export type Fill =
+  | { kind: "solidColor"; color: [number, number, number, number] }
+  | {
+      kind: "gradient";
+      startColor: [number, number, number, number];
+      endColor: [number, number, number, number];
+    }
+  | { kind: "pattern" };
 
 /** Mirrors `Adjustment` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`). */

@@ -13269,6 +13269,65 @@ by hand instead. Every other layer of this project's quality bar
 **1345 Rust tests total** (1340 → 1345, 1338 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 221 — Fill layers
+
+Layer > New Fill Layer becomes a live layer kind rather than a baked
+one. A `Fill` is Solid Color with its colour, Gradient with its two
+end colours, or Pattern, and a layer carrying a `fill`
+(`add_fill_layer(name, fill)`) is an ordinary pixel layer whose pixels
+were rendered from that recipe over the whole canvas by a private
+`render_fill`: every pixel the colour; the Gradient tool's own
+projection onto the top-left-to-bottom-right diagonal and lerp,
+carried out op for op as `gradient_fill` does onto a transparent
+buffer, so the result is byte-identical to `add_gradient_layer`; or
+the defined pattern tiled from the top-left corner exactly as
+`add_pattern_layer` tiles it. The selection is deliberately ignored —
+a fill layer's content is the fill itself, and Reveal Selection is the
+mask step. `set_fill(id, fill)` re-renders the layer from a new recipe,
+replacing any paint on it as editing a fill's recipe would, while its
+name, opacity, blend mode, mask, link, clip, and lock all survive; a
+pixel layer, or a Pattern fill with no pattern defined, is refused
+with the layer untouched. The layer view carries `fill`, the panel
+shows a badge, and a **Fill Layer…** dialog picks the kind (Solid
+Color from the brush colour, Gradient from the brush and gradient-end
+colours, Pattern from the defined pattern) and either adds a new layer
+or re-renders the selected fill layer through `add_fill_layer` and
+`set_fill` commands. The three baked generators stay as they were.
+Photoshop's gradient style, angle, and scale, its pattern scale and
+Link with Layer, and painting on a fill layer's mask instead of its
+pixels are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, the gradient
+bytes first computed in Python emulating `f32`. A `[10, 20, 30]` solid
+fill on a 3×2 document fills every pixel, reports its recipe in the
+view, and re-tunes to `[1, 2, 3, 128]` everywhere. A red-to-
+translucent-blue gradient fill on a 4×2 document is byte-identical to
+`add_gradient_layer`, with `[217, 0, 38, 226]` at `(0, 0)` (`t =
+0.15`), `[140, 0, 115, 169]` at `(1, 1)`, and `[38, 0, 217, 93]` at
+`(3, 1)` (`t = 0.85`), and the baked layer refuses `set_fill`. A
+Pattern fill is refused before a pattern is defined, adding nothing,
+and a `1 2` tile then repeats `1 2 1 2` across both rows. Re-tuning a
+fill at 50% opacity under a Hide All mask keeps its name, opacity, and
+mask, composites nothing through the mask, and a Pattern re-tune with
+no pattern leaves the pixels alone. A solid fill added under a
+one-pixel selection still fills the pixel outside it, a red brush dab
+on it paints, and re-tuning restores the fill there. All five passed
+on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1350 Rust tests total** (1345 → 1350, 1343 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

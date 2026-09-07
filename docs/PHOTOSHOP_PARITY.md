@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 328.**
+**618 distinct capabilities tracked. Currently shipped: 329.**
 
 ## PART I — EVERY TOOL
 
@@ -95,7 +95,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] TEXT LAYER
 - [ ] SHAPE LAYER
 - [x] ADJUSTMENT LAYER (`add_adjustment_layer` / `set_adjustment`, a layer carrying a live Invert, Brightness/Contrast, Threshold, or Posterize applied at composite time to everything beneath it at the layer's opacity, through its mask and clipping, byte-identical to the destructive command via a shared `apply_adjustment`; the other adjustment kinds as live layers are a documented scope cut — see README Phase 220)
-- [ ] FILL LAYER
+- [x] FILL LAYER (`add_fill_layer` / `set_fill`, a layer tagged with a `Fill` recipe — Solid Color, top-left-to-bottom-right Gradient, or the defined Pattern — rendered over the whole canvas by the same math as the three baked generators and re-renderable from a new recipe with its name, opacity, mask, link, clip, and lock kept; Photoshop's gradient style/angle/scale and pattern scale options remain documented scope cuts — see README Phase 221)
 - [ ] SMART OBJECT
 - [x] LAYER MASK (`add_layer_mask` / `set_layer_mask` / `remove_layer_mask`, a document-sized 8-bit mask per layer multiplied into its alpha at composite time, started as Reveal All, Hide All, Reveal Selection, or Hide Selection, applied or deleted, turned and cropped with the document; painting directly on the mask and mask density/feather are documented scope cuts — see README Phase 218)
 - [x] VECTOR MASK (`add_vector_mask`, a drawn path rasterised — pixel centres inside the polygon by the even-odd rule — into the layer's 8-bit mask, revealing or hiding the path's inside; keeping the path editable as vectors, and combining a vector mask with a separate pixel mask, are documented scope cuts — see README Phase 219)

@@ -9,6 +9,7 @@ import type {
   BlendMode,
   BlendModeInfo,
   DocumentView,
+  Fill,
   GuideOrientation,
   HistoryState,
   LevelsChannel,
@@ -522,6 +523,9 @@ export default function App() {
   const [adjustmentContrast, setAdjustmentContrast] = useState(0);
   const [adjustmentLevel, setAdjustmentLevel] = useState(128);
   const [adjustmentLevels, setAdjustmentLevels] = useState(4);
+  // Fill layer dialog: which of the three live fills to add or re-tune.
+  const [showFillLayerDialog, setShowFillLayerDialog] = useState(false);
+  const [fillLayerKind, setFillLayerKind] = useState<Fill["kind"]>("solidColor");
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
@@ -1741,6 +1745,34 @@ export default function App() {
     await runCommand("set_adjustment", { id: selectedId, adjustment: currentAdjustment() });
     setShowAdjustmentDialog(false);
   }, [runCommand, selectedId, currentAdjustment]);
+
+  /** The fill the dialog currently describes: the brush colour for Solid
+   * Color, the brush and gradient-end colours for Gradient. */
+  const currentFill = useCallback((): Fill => {
+    const [r, g, b] = hexToRgb(brushColor);
+    switch (fillLayerKind) {
+      case "solidColor":
+        return { kind: "solidColor", color: [r, g, b, 255] };
+      case "gradient": {
+        const [er, eg, eb] = hexToRgb(gradientEndColor);
+        return { kind: "gradient", startColor: [r, g, b, 255], endColor: [er, eg, eb, 255] };
+      }
+      default:
+        return { kind: "pattern" };
+    }
+  }, [fillLayerKind, brushColor, gradientEndColor]);
+
+  const addFillLayer = useCallback(async () => {
+    const fill = currentFill();
+    await runCommand("add_fill_layer", { name: `${fill.kind} fill`, fill });
+    setShowFillLayerDialog(false);
+  }, [runCommand, currentFill]);
+
+  const retuneFillLayer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("set_fill", { id: selectedId, fill: currentFill() });
+    setShowFillLayerDialog(false);
+  }, [runCommand, selectedId, currentFill]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -5025,6 +5057,14 @@ export default function App() {
             title="Layer > New Adjustment Layer: a live Invert, Brightness/Contrast, Threshold, or Posterize over everything beneath it"
           >
             Adjustment Layer…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowFillLayerDialog(true)}
+            disabled={busy || !hasDocument}
+            title="Layer > New Fill Layer as a live, re-tunable Solid Color, Gradient, or Pattern fill"
+          >
+            Fill Layer…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -10255,6 +10295,76 @@ export default function App() {
                 Update Selected
               </button>
               <button className="button" onClick={addAdjustmentLayer} disabled={busy}>
+                Add Layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showFillLayerDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFillLayerDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Fill Layer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Fill Layer</h2>
+            <label className="control">
+              <span className="control__label">Fill</span>
+              <select
+                value={fillLayerKind}
+                onChange={(event) => setFillLayerKind(event.target.value as Fill["kind"])}
+              >
+                <option value="solidColor">Solid Color (brush colour)</option>
+                <option value="gradient">Gradient (brush → gradient end colour)</option>
+                <option value="pattern">Pattern (the defined pattern)</option>
+              </select>
+            </label>
+            {fillLayerKind !== "pattern" && (
+              <label className="control">
+                <span className="control__label">{fillLayerKind === "gradient" ? "Start" : "Color"}</span>
+                <input
+                  type="color"
+                  value={brushColor}
+                  onChange={(event) => setBrushColor(event.target.value)}
+                />
+              </label>
+            )}
+            {fillLayerKind === "gradient" && (
+              <label className="control">
+                <span className="control__label">End</span>
+                <input
+                  type="color"
+                  value={gradientEndColor}
+                  onChange={(event) => setGradientEndColor(event.target.value)}
+                />
+              </label>
+            )}
+            {fillLayerKind === "pattern" && !document?.hasPattern && (
+              <p className="modal__hint">No pattern is defined yet (Edit &gt; Define Pattern).</p>
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFillLayerDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={retuneFillLayer}
+                disabled={busy || !layers.find((l) => l.id === selectedId)?.fill}
+                title="Re-render the selected fill layer from these settings"
+              >
+                Update Selected
+              </button>
+              <button
+                className="button"
+                onClick={addFillLayer}
+                disabled={busy || (fillLayerKind === "pattern" && !document?.hasPattern)}
+              >
                 Add Layer
               </button>
             </div>

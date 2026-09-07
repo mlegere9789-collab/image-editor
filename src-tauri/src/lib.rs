@@ -2654,6 +2654,43 @@ fn set_adjustment(
     })
 }
 
+/// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
+/// rendered from `fill`.
+#[tauri::command]
+fn add_fill_layer(
+    state: State<'_, AppState>,
+    name: String,
+    fill: document::Fill,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_fill_layer(name, fill)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Re-render fill layer `id` from `fill`.
+#[tauri::command]
+fn set_fill(
+    state: State<'_, AppState>,
+    id: LayerId,
+    fill: document::Fill,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_fill(id, fill)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Layer > Layer Mask > Apply (`apply` true) or Delete for layer `id`.
 #[tauri::command]
 fn remove_layer_mask(
@@ -4215,6 +4252,8 @@ pub fn run() {
             add_layer_mask,
             add_adjustment_layer,
             set_adjustment,
+            add_fill_layer,
+            set_fill,
             add_vector_mask,
             remove_layer_mask,
             rasterize_layer,

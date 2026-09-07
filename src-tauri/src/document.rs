@@ -48,6 +48,10 @@ pub struct Layer {
     /// applied live to everything composited beneath it, at the layer's
     /// opacity, through its mask and clipping like any other layer.
     pub adjustment: Option<Adjustment>,
+    /// A fill layer: the recipe its pixels were rendered from, so
+    /// [`Document::set_fill`] can re-render them. The pixels are ordinary
+    /// otherwise — paintable, movable, filterable like any other layer's.
+    pub fill: Option<Fill>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -68,6 +72,8 @@ pub struct LayerView {
     pub has_mask: bool,
     /// The live adjustment of an adjustment layer; `None` for a pixel layer.
     pub adjustment: Option<Adjustment>,
+    /// The recipe of a fill layer; `None` for any other layer.
+    pub fill: Option<Fill>,
 }
 
 impl Layer {
@@ -83,6 +89,7 @@ impl Layer {
             clipped: self.clipped,
             has_mask: self.mask.is_some(),
             adjustment: self.adjustment,
+            fill: self.fill,
         }
     }
 
@@ -210,6 +217,27 @@ impl Adjustment {
             _ => Ok(()),
         }
     }
+}
+
+/// What a fill layer paints — Layer > New Fill Layer's three kinds, kept
+/// on the layer so the fill can be re-tuned after the fact instead of
+/// only baked once as [`Document::add_solid_color_layer`],
+/// [`Document::add_gradient_layer`], and [`Document::add_pattern_layer`]
+/// do.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum Fill {
+    /// Every pixel `color`, alpha included.
+    SolidColor { color: [u8; 4] },
+    /// A linear gradient from `start_color` at the top-left corner to
+    /// `end_color` at the bottom-right corner.
+    Gradient {
+        start_color: [u8; 4],
+        end_color: [u8; 4],
+    },
+    /// The pattern Edit > Define Pattern captured, tiled from the top-left
+    /// corner.
+    Pattern,
 }
 
 /// One pixel's RGB through `adjustment` — byte for byte the formula the
@@ -3178,6 +3206,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         });
         Ok(id)
@@ -3216,6 +3245,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         });
         id
@@ -3304,6 +3334,104 @@ impl Document {
             return Err("That is not an adjustment layer.".to_string());
         }
         layer.adjustment = Some(adjustment);
+        Ok(())
+    }
+
+    /// Renders `fill` over the whole canvas — the selection deliberately
+    /// ignored, since a fill layer's content is the fill itself (Photoshop
+    /// turns an active selection into the new layer's mask instead; here
+    /// Reveal Selection does that as a separate step). Solid Color is
+    /// every pixel the colour; Gradient runs [`Self::gradient_fill`]'s own
+    /// projection and lerp along the top-left-to-bottom-right diagonal
+    /// onto a transparent buffer, op for op, so it stays byte-identical to
+    /// [`Self::add_gradient_layer`]; Pattern tiles the defined pattern from
+    /// the top-left corner exactly as [`Self::add_pattern_layer`] does.
+    /// Errors only for Pattern with no pattern defined.
+    fn render_fill(&self, fill: Fill) -> Result<Vec<u8>, String> {
+        let mut pixels = vec![0u8; self.buffer_len()];
+        match fill {
+            Fill::SolidColor { color } => {
+                for pixel in pixels.chunks_exact_mut(CHANNELS) {
+                    pixel.copy_from_slice(&color);
+                }
+            }
+            Fill::Gradient {
+                start_color,
+                end_color,
+            } => {
+                let (dx, dy) = (self.width as f32, self.height as f32);
+                let len_sq = dx * dx + dy * dy;
+                for py in 0..self.height {
+                    for px in 0..self.width {
+                        let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                        let t = ((cx * dx + cy * dy) / len_sq).clamp(0.0, 1.0);
+                        let base = (py as usize * self.width as usize + px as usize) * CHANNELS;
+                        let source_alpha = lerp(to_unit(start_color[3]), to_unit(end_color[3]), t);
+                        for channel in 0..3 {
+                            let cs = lerp(
+                                to_unit(start_color[channel]),
+                                to_unit(end_color[channel]),
+                                t,
+                            );
+                            let out = if source_alpha > 0.0 {
+                                (source_alpha * cs) / source_alpha
+                            } else {
+                                0.0
+                            };
+                            pixels[base + channel] = to_byte(out);
+                        }
+                        pixels[base + 3] = to_byte(source_alpha);
+                    }
+                }
+            }
+            Fill::Pattern => {
+                let pattern = self.pattern.as_ref().ok_or_else(|| {
+                    "No pattern has been defined yet (Edit > Define Pattern).".to_string()
+                })?;
+                let (pw, ph) = (pattern.width as usize, pattern.height as usize);
+                for y in 0..self.height as usize {
+                    for x in 0..self.width as usize {
+                        let src = ((y % ph) * pw + (x % pw)) * CHANNELS;
+                        let dst = (y * self.width as usize + x) * CHANNELS;
+                        pixels[dst..dst + CHANNELS]
+                            .copy_from_slice(&pattern.pixels[src..src + CHANNELS]);
+                    }
+                }
+            }
+        }
+        Ok(pixels)
+    }
+
+    /// Layer > New Fill Layer as a *live* fill: a new top layer rendered
+    /// from `fill` by [`Self::render_fill`] and tagged with it, so
+    /// [`Self::set_fill`] can re-render it later — the Properties-panel
+    /// re-tuning the three baked generators cannot offer. Errors for a
+    /// Pattern fill with no pattern defined, adding nothing.
+    pub fn add_fill_layer(
+        &mut self,
+        name: impl Into<String>,
+        fill: Fill,
+    ) -> Result<LayerId, String> {
+        let pixels = self.render_fill(fill)?;
+        let id = self.push_pixel_layer(name, pixels);
+        self.layer_mut(id)?.fill = Some(fill);
+        Ok(id)
+    }
+
+    /// Re-tunes fill layer `id` to `fill`, re-rendering its pixels from
+    /// scratch — any paint on the layer is replaced, as editing a fill's
+    /// recipe would in Photoshop — while its name, opacity, blend mode,
+    /// mask, link, clip, and lock are all kept. Errors for a layer that is
+    /// not a fill layer, or a Pattern fill with no pattern defined; either
+    /// way the layer is untouched.
+    pub fn set_fill(&mut self, id: LayerId, fill: Fill) -> Result<(), String> {
+        if self.layer(id)?.fill.is_none() {
+            return Err("That is not a fill layer.".to_string());
+        }
+        let pixels = self.render_fill(fill)?;
+        let layer = self.layer_mut(id)?;
+        layer.pixels = pixels;
+        layer.fill = Some(fill);
         Ok(())
     }
 
@@ -4478,6 +4606,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         });
         id
@@ -8580,6 +8709,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         });
 
@@ -8621,6 +8751,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         }];
         Ok(id)
@@ -8662,6 +8793,7 @@ impl Document {
             clipped: false,
             mask: None,
             adjustment: None,
+            fill: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -25797,6 +25929,136 @@ mod tests {
             .set_adjustment(adj, Adjustment::Posterize { levels: 0 })
             .is_err());
         assert_eq!(doc.view().layers[1].adjustment, Some(Adjustment::Invert));
+    }
+
+    #[test]
+    fn a_solid_fill_layer_can_be_retuned() {
+        let mut doc = Document::new(3, 2).unwrap();
+        let fill = Fill::SolidColor {
+            color: [10, 20, 30, 255],
+        };
+        let id = doc.add_fill_layer("fill", fill).unwrap();
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(pixel(&doc, id, x, y), [10, 20, 30, 255]);
+            }
+        }
+        assert_eq!(doc.view().layers[0].fill, Some(fill));
+        let retuned = Fill::SolidColor {
+            color: [1, 2, 3, 128],
+        };
+        doc.set_fill(id, retuned).unwrap();
+        for y in 0..2 {
+            for x in 0..3 {
+                assert_eq!(pixel(&doc, id, x, y), [1, 2, 3, 128]);
+            }
+        }
+        assert_eq!(doc.view().layers[0].fill, Some(retuned));
+    }
+
+    #[test]
+    fn a_gradient_fill_layer_matches_the_gradient_tool() {
+        let mut doc = Document::new(4, 2).unwrap();
+        let (start, end) = ([255, 0, 0, 255], [0, 0, 255, 64]);
+        let baked = doc.add_gradient_layer("baked", start, end);
+        let live = doc
+            .add_fill_layer(
+                "live",
+                Fill::Gradient {
+                    start_color: start,
+                    end_color: end,
+                },
+            )
+            .unwrap();
+        assert_eq!(doc.layers()[1].pixels, doc.layers()[0].pixels);
+        // t = (cx·4 + cy·2) / 20: 0.15 at (0, 0), 0.85 at (3, 1).
+        assert_eq!(pixel(&doc, live, 0, 0), [217, 0, 38, 226]);
+        assert_eq!(pixel(&doc, live, 3, 1), [38, 0, 217, 93]);
+        assert_eq!(pixel(&doc, live, 1, 1), [140, 0, 115, 169]);
+        assert!(doc.view().layers[0].fill.is_none());
+        assert!(doc.set_fill(baked, Fill::Pattern).is_err());
+    }
+
+    #[test]
+    fn a_pattern_fill_layer_needs_a_pattern_and_tiles_it() {
+        let mut doc = Document::new(4, 2).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            1, 0, 0, 255,  2, 0, 0, 255,  3, 0, 0, 255,  4, 0, 0, 255,
+            5, 0, 0, 255,  6, 0, 0, 255,  7, 0, 0, 255,  8, 0, 0, 255,
+        ];
+        let base = doc.add_layer("base", &pixels, 4, 2).unwrap();
+        assert!(doc.add_fill_layer("p", Fill::Pattern).is_err());
+        assert_eq!(doc.view().layers.len(), 1);
+        // A 2x1 tile reading 1 2.
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.define_pattern(base).unwrap();
+        doc.deselect();
+        let id = doc.add_fill_layer("p", Fill::Pattern).unwrap();
+        for y in 0..2 {
+            assert_eq!(pixel(&doc, id, 0, y)[0], 1);
+            assert_eq!(pixel(&doc, id, 1, y)[0], 2);
+            assert_eq!(pixel(&doc, id, 2, y)[0], 1);
+            assert_eq!(pixel(&doc, id, 3, y)[0], 2);
+        }
+        assert_eq!(doc.view().layers[1].fill, Some(Fill::Pattern));
+    }
+
+    #[test]
+    fn set_fill_keeps_the_layers_settings_and_refuses_bad_targets() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_fill_layer(
+                "f",
+                Fill::SolidColor {
+                    color: [9, 9, 9, 255],
+                },
+            )
+            .unwrap();
+        doc.set_opacity(id, 0.5).unwrap();
+        doc.add_layer_mask(id, MaskSource::HideAll).unwrap();
+        // No pattern defined: refused, and nothing about the layer changes.
+        assert!(doc.set_fill(id, Fill::Pattern).is_err());
+        assert_eq!(pixel(&doc, id, 1, 0), [9, 9, 9, 255]);
+        doc.set_fill(
+            id,
+            Fill::SolidColor {
+                color: [0, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        let layer = &doc.layers()[0];
+        assert_eq!(layer.name, "f");
+        assert_eq!(layer.opacity, 0.5);
+        assert_eq!(layer.mask.as_deref(), Some(&[0u8, 0][..]));
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        // A hidden fill through its Hide All mask composites nothing.
+        assert_eq!(crate::composite::composite_pixel(&doc, 1, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_fill_layer_renders_over_the_selection_and_re_render_drops_paint() {
+        let mut doc = Document::new(3, 1).unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let fill = Fill::SolidColor {
+            color: [9, 9, 9, 255],
+        };
+        let id = doc.add_fill_layer("f", fill).unwrap();
+        // Outside the selection too: the fill is the layer's content.
+        assert_eq!(pixel(&doc, id, 2, 0), [9, 9, 9, 255]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            1.0,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 0, 0, 255]);
+        doc.set_fill(id, fill).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [9, 9, 9, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [9, 9, 9, 255]);
     }
 
     #[test]

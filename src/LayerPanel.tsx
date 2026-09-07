@@ -185,6 +185,12 @@ export default function LayerPanel({
                     ◐
                   </span>
                 )}
+                {layer.fill && (
+                  <span className="layer__meta" title={`Fill layer: ${layer.fill.kind}`}>
+                    {" "}
+                    ▨
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>
