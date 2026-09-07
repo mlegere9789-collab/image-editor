@@ -502,6 +502,12 @@ export default function App() {
     [0, 0],
     [255, 255],
   ]);
+  // The Curves graph: the layer's luminosity histogram behind the curve,
+  // the curve's lookup table, and which point is being edited (its
+  // input/output get the intersection lines).
+  const [curveHistogram, setCurveHistogram] = useState<number[] | null>(null);
+  const [curveLut, setCurveLut] = useState<number[] | null>(null);
+  const [curveFocus, setCurveFocus] = useState<number | null>(null);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
@@ -1681,6 +1687,32 @@ export default function App() {
     }
     setShowCurvesDialog(false);
   }, [runCommand, selectedId, curvePoints, curvesPointMode, curveNodes]);
+
+  const openCurvesDialog = useCallback(() => {
+    if (selectedId === null) return;
+    setCurveFocus(null);
+    setShowCurvesDialog(true);
+    void invoke<number[][]>("histogram", { id: selectedId })
+      .then((counts) =>
+        setCurveHistogram(
+          Array.from({ length: 256 }, (_, v) =>
+            Math.round(((counts[0]?.[v] ?? 0) + (counts[1]?.[v] ?? 0) + (counts[2]?.[v] ?? 0)) / 3),
+          ),
+        ),
+      )
+      .catch(() => setCurveHistogram(null));
+  }, [selectedId]);
+
+  // Keep the drawn curve in step with whichever point list is live.
+  useEffect(() => {
+    if (!showCurvesDialog) return;
+    const points: [number, number][] = curvesPointMode
+      ? curveNodes
+      : IDENTITY_CURVE.map((input, i) => [input, curvePoints[i] ?? input]);
+    void invoke<number[]>("curves_lookup", { points })
+      .then(setCurveLut)
+      .catch(() => setCurveLut(null));
+  }, [showCurvesDialog, curvesPointMode, curveNodes, curvePoints]);
 
   const setCurveNode = useCallback((index: number, axis: 0 | 1, value: number) => {
     const clamped = Math.max(0, Math.min(255, Math.round(value)));
@@ -4918,7 +4950,7 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => setShowCurvesDialog(true)}
+            onClick={openCurvesDialog}
             disabled={busy || !canPaint}
             title="Image > Adjustments > Curves"
           >
@@ -9662,6 +9694,75 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Curves</h2>
+            {(() => {
+              const focusPoint: [number, number] | null =
+                curveFocus === null
+                  ? null
+                  : curvesPointMode
+                    ? (curveNodes[curveFocus] ?? null)
+                    : [IDENTITY_CURVE[curveFocus] ?? 0, curvePoints[curveFocus] ?? 0];
+              const peak = Math.max(1, ...(curveHistogram ?? [0]));
+              return (
+                <svg
+                  className="histogram"
+                  viewBox="0 0 256 256"
+                  preserveAspectRatio="none"
+                  role="img"
+                  aria-label="Curves graph: histogram, baseline, and the curve"
+                >
+                  {curveHistogram && (
+                    <path
+                      fill="#9aa0a8"
+                      fillOpacity={0.35}
+                      d={
+                        `M0,256 ` +
+                        curveHistogram
+                          .map((count, value) => `L${value},${256 - (count / peak) * 256}`)
+                          .join(" ") +
+                        " L255,256 Z"
+                      }
+                    />
+                  )}
+                  <line
+                    x1={0}
+                    y1={256}
+                    x2={255}
+                    y2={1}
+                    stroke="#9aa0a8"
+                    strokeDasharray="4 4"
+                    strokeWidth={1}
+                  />
+                  {focusPoint && (
+                    <>
+                      <line
+                        x1={focusPoint[0]}
+                        y1={0}
+                        x2={focusPoint[0]}
+                        y2={256}
+                        stroke="#4c8dff"
+                        strokeWidth={1}
+                      />
+                      <line
+                        x1={0}
+                        y1={255 - focusPoint[1]}
+                        x2={256}
+                        y2={255 - focusPoint[1]}
+                        stroke="#4c8dff"
+                        strokeWidth={1}
+                      />
+                    </>
+                  )}
+                  {curveLut && (
+                    <polyline
+                      fill="none"
+                      stroke="#e6e8ea"
+                      strokeWidth={2}
+                      points={curveLut.map((out, input) => `${input},${255 - out}`).join(" ")}
+                    />
+                  )}
+                </svg>
+              );
+            })()}
             <label className="tools__slider">
               <input
                 type="checkbox"
@@ -9680,6 +9781,7 @@ export default function App() {
                       min={0}
                       max={255}
                       value={input}
+                      onFocus={() => setCurveFocus(index)}
                       onChange={(event) => setCurveNode(index, 0, Number(event.target.value))}
                     />
                   </label>
@@ -9690,6 +9792,7 @@ export default function App() {
                       min={0}
                       max={255}
                       value={output}
+                      onFocus={() => setCurveFocus(index)}
                       onChange={(event) => setCurveNode(index, 1, Number(event.target.value))}
                     />
                   </label>
@@ -9723,6 +9826,7 @@ export default function App() {
                   min={0}
                   max={255}
                   value={value}
+                  onFocus={() => setCurveFocus(index)}
                   onChange={(event) => setCurvePoint(index, Number(event.target.value))}
                 />
               </label>

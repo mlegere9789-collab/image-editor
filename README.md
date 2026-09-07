@@ -12271,6 +12271,51 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1245 Rust tests total** (1240 → 1245, 1238 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 201 — Curves graph: histogram, baseline, intersection line
+
+The Curves dialog gains Photoshop's graph. A new pure `curve_lookup(
+points) -> [u8; 256]` builds the lookup table a point list describes —
+the validation, sorting, straight-segment interpolation with half-up
+rounding, and flat extension beyond the outer points that
+`curves_points` used to do per pixel; `curves_points` now builds the
+table once and indexes it, byte-for-byte the same result. A read-only
+`curves_lookup` command exposes the table, and the dialog draws, in a
+`256×256` SVG: the selected layer's luminosity **histogram** (the mean
+of the three channel counts from the existing `histogram` command,
+fetched when the dialog opens) as a grey area; the dashed identity
+diagonal, Photoshop's **baseline**; the curve itself as a polyline
+through the 256 table entries, refetched whenever the sliders or the
+Point-mode list change; and the **intersection line** — a vertical
+guide at the input and a horizontal one at the output of whichever
+point's control last took focus. Show Clipping, Channel Overlays, and
+the on-image adjustment tool remain open.
+
+**Verified two ways.** Five new `document.rs` tests on `curve_lookup`,
+every value hand-computed with the segment formula. The two endpoints
+give the identity table. `(0, 0)`→`(128, 255)`→`(255, 255)` maps `10 →
+19.9 → 20`, `60 → 119.5 → 120`, `64 → 127.5 → 128`, `100 → 199.2 →
+199`, and `128`, `200`, `255 → 255`. `(192, 255)` and `(64, 0)` listed
+backwards give `0` through input `64`, `72` at `100`, `128` at `128`,
+and `255` from `192` up. For the five fixed inputs with outputs `0,
+100, 128, 192, 255`, `curves_points` on the four-pixel fixture is
+exactly the table applied per channel, with `lut[10] = 16`. No
+points, one point, duplicate inputs, and a duplicate among three all
+error. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+forty-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The graph's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1250 Rust tests total** (1245 → 1250, 1243 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

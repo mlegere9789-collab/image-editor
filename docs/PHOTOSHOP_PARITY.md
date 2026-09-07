@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 288.**
+**618 distinct capabilities tracked. Currently shipped: 291.**
 
 ## PART I — EVERY TOOL
 
@@ -461,9 +461,9 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Curves White Point (the Curves dialog's White Point eyedropper, the same `levels_white_point` — see README Phase 196)
 - [ ] Curves Show Clipping
 - [ ] Curves Show Channel Overlays
-- [ ] Curves Histogram
-- [ ] Curves Baseline
-- [ ] Curves Intersection Line
+- [x] Curves Histogram (the Curves dialog's graph draws the layer's luminosity histogram — the mean of the three channel counts — behind the curve — see README Phase 201)
+- [x] Curves Baseline (the dashed identity diagonal under the curve in the Curves graph — see README Phase 201)
+- [x] Curves Intersection Line (vertical and horizontal guide lines through the point being edited, at its input and output — see README Phase 201)
 - [x] Curves Auto (the Curves dialog's Auto button: Auto Tone with the Levels dialog's Clip percentages, the same `auto_tone_clipped` — see README Phase 198)
 - [x] Auto Tone (`auto_tone`, a two-pass sample-then-remap linear stretch: each RGB channel independently maps its own sampled minimum to 0 and maximum to 255, the same per-channel formula `levels` already applies with typed-in bounds instead of automatically sampled ones — see README Phase 111)
 - [x] Auto Contrast (`auto_contrast`, the same linear stretch as `auto_tone` but with one shared low/high computed across all three channels together, preserving colour balance the way independent per-channel stretching can't — see README Phase 111)

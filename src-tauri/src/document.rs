@@ -11879,28 +11879,9 @@ impl Document {
         id: LayerId,
         points: &[(u8, u8)],
     ) -> Result<Option<Rect>, String> {
-        if points.len() < 2 {
-            return Err("A curve needs at least two points.".to_string());
-        }
-        let mut nodes: Vec<(u8, u8)> = points.to_vec();
-        nodes.sort_by_key(|&(x, _)| x);
-        if nodes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
-            return Err("Curve points must have distinct input values.".to_string());
-        }
+        let lut = curve_lookup(points)?;
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let apply = |c: u8| {
-                let x = c as f32;
-                let seg = match nodes.iter().position(|&(nx, _)| nx > c) {
-                    Some(0) => return nodes[0].1,
-                    Some(i) => i - 1,
-                    None => return nodes[nodes.len() - 1].1,
-                };
-                let (x0, y0) = (nodes[seg].0 as f32, nodes[seg].1 as f32);
-                let (x1, y1) = (nodes[seg + 1].0 as f32, nodes[seg + 1].1 as f32);
-                let t = (x - x0) / (x1 - x0);
-                (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
-            };
-            [apply(r), apply(g), apply(b), a]
+            [lut[r as usize], lut[g as usize], lut[b as usize], a]
         })
     }
 
@@ -13619,6 +13600,43 @@ pub enum Stroke<'a> {
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
+/// The 256-entry lookup table a Curves point list describes — the table
+/// [`Document::curves_points`] applies, and the line the Curves dialog
+/// draws. `points` are `(input, output)` control points in any order,
+/// sorted by input here, joined by straight segments (the output at an
+/// input is rounded half-up), and flat beyond the outer points. Errors
+/// for fewer than two points or two points sharing an input.
+pub fn curve_lookup(points: &[(u8, u8)]) -> Result<[u8; 256], String> {
+    if points.len() < 2 {
+        return Err("A curve needs at least two points.".to_string());
+    }
+    let mut nodes: Vec<(u8, u8)> = points.to_vec();
+    nodes.sort_by_key(|&(x, _)| x);
+    if nodes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err("Curve points must have distinct input values.".to_string());
+    }
+    let mut lut = [0u8; 256];
+    for (c, out) in lut.iter_mut().enumerate() {
+        let x = c as f32;
+        let seg = match nodes.iter().position(|&(nx, _)| nx as usize > c) {
+            Some(0) => {
+                *out = nodes[0].1;
+                continue;
+            }
+            Some(i) => i - 1,
+            None => {
+                *out = nodes[nodes.len() - 1].1;
+                continue;
+            }
+        };
+        let (x0, y0) = (nodes[seg].0 as f32, nodes[seg].1 as f32);
+        let (x1, y1) = (nodes[seg + 1].0 as f32, nodes[seg + 1].1 as f32);
+        let t = (x - x0) / (x1 - x0);
+        *out = (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8;
+    }
+    Ok(lut)
+}
+
 /// The Sharpen tool's Protect Detail gate: a channel whose local contrast
 /// is below this many levels is left alone. Photoshop's own Protect Detail
 /// is an undisclosed halo-and-noise suppressor; a fixed contrast threshold
@@ -22565,6 +22583,54 @@ mod tests {
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, sharpen(100, true, true))
             .is_err());
+    }
+
+    #[test]
+    fn curve_lookup_of_the_endpoints_is_the_identity() {
+        let lut = curve_lookup(&[(0, 0), (255, 255)]).unwrap();
+        assert!(lut.iter().enumerate().all(|(i, &v)| v as usize == i));
+    }
+
+    #[test]
+    fn curve_lookup_interpolates_and_rounds_half_up() {
+        let lut = curve_lookup(&[(0, 0), (128, 255), (255, 255)]).unwrap();
+        assert_eq!((lut[10], lut[60], lut[64], lut[100]), (20, 120, 128, 199));
+        assert_eq!((lut[128], lut[200], lut[255]), (255, 255, 255));
+    }
+
+    #[test]
+    fn curve_lookup_is_flat_beyond_the_outer_points() {
+        let lut = curve_lookup(&[(192, 255), (64, 0)]).unwrap();
+        assert_eq!((lut[0], lut[10], lut[63], lut[64]), (0, 0, 0, 0));
+        assert_eq!(
+            (lut[100], lut[128], lut[192], lut[255]),
+            (72, 128, 255, 255)
+        );
+    }
+
+    #[test]
+    fn curve_lookup_is_what_curves_points_applies() {
+        let points = [(0, 0), (64, 100), (128, 128), (192, 192), (255, 255)];
+        let lut = curve_lookup(&points).unwrap();
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_points(id, &points).unwrap();
+        let before = curves_points_fixture().0;
+        for x in 0..4 {
+            let [r, g, b, a] = pixel(&before, id, x, 0);
+            assert_eq!(
+                pixel(&doc, id, x, 0),
+                [lut[r as usize], lut[g as usize], lut[b as usize], a]
+            );
+        }
+        assert_eq!(lut[10], 16);
+    }
+
+    #[test]
+    fn curve_lookup_rejects_bad_points() {
+        assert!(curve_lookup(&[]).is_err());
+        assert!(curve_lookup(&[(0, 0)]).is_err());
+        assert!(curve_lookup(&[(0, 0), (0, 255)]).is_err());
+        assert!(curve_lookup(&[(0, 0), (255, 255), (255, 0)]).is_err());
     }
 
     #[test]

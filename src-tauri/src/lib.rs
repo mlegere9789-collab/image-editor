@@ -3273,6 +3273,13 @@ fn curves(state: State<'_, AppState>, id: LayerId, points: [u8; 5]) -> Result<Sn
     edit_checkpointed(&state, |document| document.curves(id, points))
 }
 
+/// The Curves dialog's graph: the 256-entry lookup table `points` describe.
+/// Read-only; needs no document.
+#[tauri::command]
+fn curves_lookup(points: Vec<(u8, u8)>) -> Result<Vec<u8>, String> {
+    document::curve_lookup(&points).map(|lut| lut.to_vec())
+}
+
 /// Levels/Curves Black Point eyedropper: make pixel `(x, y)` of layer `id`
 /// black, per channel.
 #[tauri::command]
@@ -3927,6 +3934,7 @@ pub fn run() {
             levels,
             curves,
             curves_points,
+            curves_lookup,
             levels_black_point,
             levels_white_point,
             levels_gray_point,
