@@ -40,6 +40,8 @@ export type LayerView = {
   fill: Fill | null;
   /** The type of a text layer; `null` for any other layer. */
   text: TextLayer | null;
+  /** The shape of a shape layer; `null` for any other layer. */
+  shape: ShapeLayer | null;
 };
 
 /** Mirrors `ApplyChannel` in src-tauri/src/document.rs: Apply Image's
@@ -68,6 +70,22 @@ export type TextLayer = {
   size: number;
   color: [number, number, number, number];
   vertical: boolean;
+};
+
+/** Mirrors `ShapeSpec` / `ShapeLayer` in src-tauri/src/document.rs: a
+ * shape layer's shape (serde tagged by `kind`) and paint. */
+export type ShapeSpec =
+  | { kind: "rectangle"; x0: number; y0: number; x1: number; y1: number; radius: number }
+  | { kind: "ellipse"; x0: number; y0: number; x1: number; y1: number }
+  | { kind: "triangle"; x0: number; y0: number; x1: number; y1: number }
+  | { kind: "polygon"; cx: number; cy: number; x: number; y: number; sides: number }
+  | { kind: "star"; cx: number; cy: number; x: number; y: number; points: number; ratio: number }
+  | { kind: "line"; x0: number; y0: number; x1: number; y1: number; weight: number }
+  | { kind: "custom"; points: [number, number][] };
+export type ShapeLayer = {
+  spec: ShapeSpec;
+  fill: [number, number, number, number] | null;
+  stroke: [[number, number, number, number], number] | null;
 };
 
 /** Mirrors `Fill` in src-tauri/src/document.rs (serde internally tagged

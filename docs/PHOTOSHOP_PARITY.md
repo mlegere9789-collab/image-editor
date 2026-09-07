@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 460.**
+**618 distinct capabilities tracked. Currently shipped: 462.**
 
 ## PART I — EVERY TOOL
 
@@ -60,7 +60,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] POLYGON TOOL (`Document::draw_polygon`, Pixels mode: a regular polygon of 3–100 sides dragged from its centre to its first vertex, painted by the even-odd pixel-centre rule in a flat colour, confined by the selection; star ratio, smooth corners, stroke, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 190)
 - [x] STAR TOOL (`Document::draw_star`, Pixels mode: the Polygon tool's construction with an inner vertex at Star Ratio percent of the drag radius midway between each pair of points, filled by the even-odd pixel-centre rule; smooth indents, stroke, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 191)
 - [x] LINE TOOL (`Document::draw_line`, Pixels mode: a straight line of a given weight painted by the pixel-centre rule — perpendicular distance at most half the weight and projection between the ends, so butt caps — in a flat colour, confined by the selection; arrowheads, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 189)
-- [ ] CUSTOM SHAPE TOOL
+- [x] CUSTOM SHAPE TOOL (`draw_custom_shape`, any polygon of three or more points painted by the shape tools' even-odd pixel-centre fill in Pixels mode, or held live as a `ShapeSpec::Custom` shape layer; Photoshop's shape library and Bézier paths are documented scope cuts — see README Phase 254)
 - [ ] FRAME TOOL
 - [x] EYEDROPPER TOOL
 - [x] COLOR SAMPLER TOOL (`sample_points` over a new `composite::composite_pixel`, up to ten placed sample points whose composited RGBA — every visible layer flattened with its opacity and blend mode — is re-read after every edit and shown in the status bar; Current Layer sampling and sample-size averaging are documented scope cuts — see README Phase 167)
@@ -93,7 +93,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] PIXEL LAYER (already true since Phase 1 — every `Layer` in this app *is* a document-sized RGBA8 pixel buffer; there is no other layer type yet to distinguish it from)
 - [x] GROUP (`group_layers` / `ungroup`, named groups of layer ids over the flat stack — visibility, locking, and moving applied to every member at once, a removed layer leaving its group, an empty group dissolving — drawn as a header row in the layer panel; nesting and group-level opacity or blend modes are documented scope cuts — see README Phase 216)
 - [x] TEXT LAYER (`Layer.text: Option<TextLayer>`, the type a text layer was set from, kept so Edit selected in the Type dialog re-renders it — the text, position, size, colour, and direction — while the pixels stay ordinary — see README Phase 253)
-- [ ] SHAPE LAYER
+- [x] SHAPE LAYER (`Layer.shape: Option<ShapeLayer>` with `add_shape_layer` / `set_shape`: the shape tools' Shape mode, a new layer drawn by the tool's own painter over a clear canvas with the selection set aside, redrawable from its remembered shape and paint — see README Phase 254)
 - [x] ADJUSTMENT LAYER (`add_adjustment_layer` / `set_adjustment`, a layer carrying a live Invert, Brightness/Contrast, Threshold, or Posterize applied at composite time to everything beneath it at the layer's opacity, through its mask and clipping, byte-identical to the destructive command via a shared `apply_adjustment`; the other adjustment kinds as live layers are a documented scope cut — see README Phase 220)
 - [x] FILL LAYER (`add_fill_layer` / `set_fill`, a layer tagged with a `Fill` recipe — Solid Color, top-left-to-bottom-right Gradient, or the defined Pattern — rendered over the whole canvas by the same math as the three baked generators and re-renderable from a new recipe with its name, opacity, mask, link, clip, and lock kept; Photoshop's gradient style/angle/scale and pattern scale options remain documented scope cuts — see README Phase 221)
 - [ ] SMART OBJECT

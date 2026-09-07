@@ -33,6 +33,8 @@ import type {
   PerspectiveAuto,
   PerspectivePlane,
   TextLayer,
+  ShapeLayer,
+  ShapeSpec,
   WarpMesh,
   WarpStyle,
   PuppetMesh,
@@ -754,6 +756,11 @@ export default function App() {
   const [typeY, setTypeY] = useState(0);
   const [typeSize, setTypeSize] = useState(4);
   const [typeVertical, setTypeVertical] = useState(false);
+  // The shape tools' Shape mode and the Custom Shape tool.
+  const [showShapeLayerDialog, setShowShapeLayerDialog] = useState(false);
+  const [shapeKind, setShapeKind] = useState<ShapeSpec["kind"]>("rectangle");
+  const [shapeBox, setShapeBox] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [customPoints, setCustomPoints] = useState("0,0\n1,0\n0.5,1");
   const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
@@ -2567,6 +2574,74 @@ export default function App() {
     await runCommand("set_text", { id: selectedId, text: currentText() });
     setShowTypeDialog(false);
   }, [runCommand, selectedId, currentText]);
+
+  /** The polygon the Custom Shape field describes: one `x,y` per line. */
+  const parsedCustomPoints = useCallback((): [number, number][] => {
+    return customPoints
+      .split("\n")
+      .map((line) => line.split(",").map((v) => Number(v.trim())))
+      .filter((pair) => pair.length === 2 && pair.every((v) => Number.isFinite(v)))
+      .map(([x, y]) => [x, y] as [number, number]);
+  }, [customPoints]);
+
+  /** The shape the dialog describes, painted with the shape tools' options. */
+  const currentShape = useCallback((): ShapeLayer => {
+    const [r, g, b] = hexToRgb(brushColor);
+    const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
+    const [x0, y0, x1, y1] = shapeBox;
+    const spec: ShapeSpec =
+      shapeKind === "rectangle"
+        ? { kind: "rectangle", x0, y0, x1, y1, radius: shapeRadius }
+        : shapeKind === "ellipse"
+          ? { kind: "ellipse", x0, y0, x1, y1 }
+          : shapeKind === "triangle"
+            ? { kind: "triangle", x0, y0, x1, y1 }
+            : shapeKind === "polygon"
+              ? { kind: "polygon", cx: x0, cy: y0, x: x1, y: y1, sides: polygonSides }
+              : shapeKind === "star"
+                ? { kind: "star", cx: x0, cy: y0, x: x1, y: y1, points: polygonSides, ratio: starRatio }
+                : shapeKind === "line"
+                  ? { kind: "line", x0, y0, x1, y1, weight: lineWeight }
+                  : { kind: "custom", points: parsedCustomPoints() };
+    return {
+      spec,
+      fill: shapeFill ? [r, g, b, 255] : null,
+      stroke: shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null,
+    };
+  }, [brushColor, shapeStrokeColor, shapeBox, shapeKind, shapeRadius, polygonSides, starRatio, lineWeight, parsedCustomPoints, shapeFill, shapeStrokeWidth]);
+
+  const openShapeLayerDialog = useCallback(() => {
+    const existing = document?.layers.find((layer) => layer.id === selectedId)?.shape ?? null;
+    if (existing) {
+      setShapeKind(existing.spec.kind);
+      const s = existing.spec;
+      if ("x0" in s) setShapeBox([s.x0, s.y0, s.x1, s.y1]);
+      else if ("cx" in s) setShapeBox([s.cx, s.cy, s.x, s.y]);
+      else setCustomPoints(s.points.map(([x, y]) => `${x},${y}`).join("\n"));
+    } else if (document) {
+      setShapeBox([Math.round(document.width / 4), Math.round(document.height / 4), Math.round((3 * document.width) / 4), Math.round((3 * document.height) / 4)]);
+    }
+    setShowShapeLayerDialog(true);
+  }, [document, selectedId]);
+
+  const addShapeLayer = useCallback(async () => {
+    const shape = currentShape();
+    await runCommand("add_shape_layer", { name: `${shape.spec.kind} shape`, shape });
+    setShowShapeLayerDialog(false);
+  }, [runCommand, currentShape]);
+
+  const retuneShapeLayer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("set_shape", { id: selectedId, shape: currentShape() });
+    setShowShapeLayerDialog(false);
+  }, [runCommand, selectedId, currentShape]);
+
+  const paintCustomShape = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(brushColor);
+    await runCommand("draw_custom_shape", { id: selectedId, points: parsedCustomPoints(), color: [r, g, b, 255] });
+    setShowShapeLayerDialog(false);
+  }, [runCommand, selectedId, brushColor, parsedCustomPoints]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -6191,6 +6266,14 @@ export default function App() {
             title="Horizontal / Vertical Type tool: a text layer in the built-in 5×7 face, in the brush colour"
           >
             Type…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openShapeLayerDialog}
+            disabled={busy || !hasDocument}
+            title="Shape mode of the shape tools, and the Custom Shape tool: a live shape layer, or a custom polygon painted in place"
+          >
+            Shape Layer…
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -13340,6 +13423,71 @@ export default function App() {
           </div>
         </div>
       )}
+      {showShapeLayerDialog && (
+        <div className="modal-overlay" onClick={() => setShowShapeLayerDialog(false)} role="presentation">
+          <div className="modal" role="dialog" aria-label="Shape Layer" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Shape Layer</h2>
+            <p className="modal__hint">
+              A live shape drawn by the shape tools&apos; own painters with their Fill, Stroke,
+              Radius, Sides, Star Ratio, and Weight options. Custom takes one x,y per line and
+              can also be painted straight onto the selected layer.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Shape</span>
+              <select value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeSpec["kind"])}>
+                <option value="rectangle">Rectangle</option>
+                <option value="ellipse">Ellipse</option>
+                <option value="triangle">Triangle</option>
+                <option value="polygon">Polygon</option>
+                <option value="star">Star</option>
+                <option value="line">Line</option>
+                <option value="custom">Custom</option>
+              </select>
+            </label>
+            {shapeKind === "custom" ? (
+              <label className="control">
+                <span className="control__label">Points (x,y per line)</span>
+                <textarea rows={4} value={customPoints} onChange={(event) => setCustomPoints(event.target.value)} />
+              </label>
+            ) : (
+              <label className="control control--row">
+                <span className="control__label">{shapeKind === "polygon" || shapeKind === "star" ? "Centre, first vertex" : "Box (x0, y0, x1, y1)"}</span>
+                {shapeBox.map((v, i) => (
+                  <input
+                    type="number"
+                    step={0.5}
+                    value={v}
+                    key={i}
+                    onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                  />
+                ))}
+              </label>
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowShapeLayerDialog(false)}>
+                Cancel
+              </button>
+              {shapeKind === "custom" && (
+                <button className="button button--quiet" onClick={paintCustomShape} disabled={busy || !canPaint} title="Custom Shape tool, Pixels mode: paint onto the selected layer">
+                  Paint on layer
+                </button>
+              )}
+              <button
+                className="button button--quiet"
+                onClick={retuneShapeLayer}
+                disabled={busy || !(document?.layers.find((layer) => layer.id === selectedId)?.shape)}
+                title="Redraw the selected shape layer"
+              >
+                Edit selected
+              </button>
+              <button className="button" onClick={addShapeLayer} disabled={busy}>
+                Add shape layer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showTypeDialog && (
         <div className="modal-overlay" onClick={() => setShowTypeDialog(false)} role="presentation">
           <div className="modal" role="dialog" aria-label="Type" onClick={(event) => event.stopPropagation()}>

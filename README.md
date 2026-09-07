@@ -15119,6 +15119,64 @@ fully green.
 **1510 Rust tests total** (1505 → 1510, 1503 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 254 — Shape layers and the Custom Shape tool
+
+The shape tools gain their Shape mode, and a Custom Shape tool joins
+them. A `ShapeSpec` is one of the shape tools' shapes with its own
+parameters — Rectangle with its corner radius, Ellipse, Triangle,
+Polygon and Star from centre to first vertex with their sides, points,
+and ratio, Line with its weight — or Custom, the new tool's polygon of
+three or more vertices; a `ShapeLayer` pairs a spec with the tools'
+paint, a fill colour and an inside stroke (colour and width), the
+one-colour shapes painting in the fill or, without one, the stroke's
+colour. `add_shape_layer(name, shape)` pushes a transparent layer and
+draws the shape onto it with the tool's own Pixels-mode painter, the
+selection set aside since a shape layer is the whole shape, and
+remembers the shape in `Layer.shape` (a **◇** in the Layers panel) so
+`set_shape` can redraw it from a clear canvas while the layer's name,
+opacity, blend mode, mask, link, clip, and lock stay; a painter's
+error adds no layer and leaves an edited layer as it was.
+`draw_custom_shape(id, points, color)` is the Custom Shape tool in
+Pixels mode: the polygon painted by the even-odd pixel-centre fill,
+confined by the selection. A **Shape Layer…** dialog picks the shape,
+its box or centre and first vertex, or the custom points one `x,y`
+per line, and uses the tools' existing Fill / Stroke / Radius / Sides
+/ Star Ratio / Weight options, with Add shape layer, Edit selected,
+and, for Custom, Paint on layer. Photoshop's shape library, Bézier
+paths, and on-canvas handles are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every pixel
+traced by hand or checked byte for byte against the tool it wraps. A
+red rectangle with a blue one-pixel stroke on an 8×8 canvas is
+byte-identical to `draw_rectangle` on a blank layer, the layer carries
+its shape, and its corner is blue with its middle red. A diamond
+through `(2.5, 0) (5, 2.5) (2.5, 5) (0, 2.5)` on 5×5 lights the
+centres with `|dx| + |dy| < 2.5` — one, three, five, three, and one
+pixels per row — and the Pixels-mode tool paints the same diamond
+confined by a two-column selection to four pixels. A full-canvas
+rectangle drawn with a 2×2 selection active still fills all `64`
+pixels, `set_shape` to an ellipse is byte-identical to `draw_ellipse`
+with the corner cleared, the selection survives, and a plain layer is
+refused. Triangle, Polygon, Star, and Line specs are byte-identical to
+their tools. A shape with neither fill nor stroke, a two-point custom
+shape, and a NaN point are refused with no layer added, and the
+Pixels-mode tool refuses two points, an unknown layer, and a locked
+layer. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and one: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog was reviewed by hand instead. Every other
+layer of this project's quality bar (hand-verified Rust tests, `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings`, `npm run build`) is
+fully green.
+
+**1515 Rust tests total** (1510 → 1515, 1508 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

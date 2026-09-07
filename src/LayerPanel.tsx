@@ -201,6 +201,12 @@ export default function LayerPanel({
                     T
                   </span>
                 )}
+                {layer.shape && (
+                  <span className="layer__meta" title={`Shape layer: ${layer.shape.spec.kind}`}>
+                    {" "}
+                    ◇
+                  </span>
+                )}
               </span>
               <span className="layer__meta">{Math.round(shownOpacity(layer) * 100)}%</span>
             </li>

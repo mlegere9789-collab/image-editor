@@ -3328,6 +3328,55 @@ fn set_text(
     })
 }
 
+/// The shape tools' Shape mode: a new shape layer drawn from `shape`.
+#[tauri::command]
+fn add_shape_layer(
+    state: State<'_, AppState>,
+    name: String,
+    shape: document::ShapeLayer,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_shape_layer(name, &shape)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// Redraw shape layer `id` as `shape`.
+#[tauri::command]
+fn set_shape(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shape: document::ShapeLayer,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_shape(id, &shape)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
+/// The Custom Shape tool (Pixels mode): paint the polygon through `points`.
+#[tauri::command]
+fn draw_custom_shape(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.draw_custom_shape(id, &points, color)
+    })
+}
+
 /// Layer > New Fill Layer as a live, re-tunable fill: a new top layer
 /// rendered from `fill`.
 #[tauri::command]
@@ -5046,6 +5095,9 @@ pub fn run() {
             add_fill_layer,
             add_text_layer,
             set_text,
+            add_shape_layer,
+            set_shape,
+            draw_custom_shape,
             set_fill,
             add_vector_mask,
             remove_layer_mask,

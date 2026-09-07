@@ -55,6 +55,9 @@ pub struct Layer {
     /// A text layer: the type its pixels were set from, so
     /// [`Document::set_text`] can set it again.
     pub text: Option<TextLayer>,
+    /// A shape layer: the shape its pixels were drawn from, so
+    /// [`Document::set_shape`] can draw it again.
+    pub shape: Option<ShapeLayer>,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -79,6 +82,8 @@ pub struct LayerView {
     pub fill: Option<Fill>,
     /// The type of a text layer; `None` for any other layer.
     pub text: Option<TextLayer>,
+    /// The shape of a shape layer; `None` for any other layer.
+    pub shape: Option<ShapeLayer>,
 }
 
 impl Layer {
@@ -96,6 +101,7 @@ impl Layer {
             adjustment: self.adjustment,
             fill: self.fill,
             text: self.text.clone(),
+            shape: self.shape.clone(),
         }
     }
 
@@ -1276,6 +1282,69 @@ pub fn text_size(text: &TextLayer) -> (u32, u32) {
     } else {
         (run(longest, 5), run(count, 7))
     }
+}
+
+/// What a shape layer draws: one of the shape tools' shapes with its own
+/// parameters, or a Custom Shape's polygon — see [`Document::add_shape_layer`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ShapeSpec {
+    Rectangle {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        radius: u32,
+    },
+    Ellipse {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    },
+    Triangle {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+    },
+    Polygon {
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        sides: u32,
+    },
+    Star {
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        points: u32,
+        ratio: u32,
+    },
+    Line {
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        weight: u32,
+    },
+    /// The Custom Shape tool's polygon: its vertices in order.
+    Custom {
+        points: Vec<(f32, f32)>,
+    },
+}
+
+/// A shape layer's shape and paint: the fill colour and the inside stroke
+/// (colour and width) the Rectangle and Ellipse tools take; the other
+/// shapes paint in the fill colour, or the stroke's when there is no fill.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShapeLayer {
+    pub spec: ShapeSpec,
+    pub fill: Option<[u8; 4]>,
+    pub stroke: Option<([u8; 4], u32)>,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -6338,6 +6407,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         });
         Ok(id)
@@ -6378,6 +6448,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         });
         id
@@ -6649,6 +6720,118 @@ impl Document {
         let layer = self.layer_mut(id)?;
         layer.pixels = pixels;
         layer.text = Some(text.clone());
+        Ok(())
+    }
+
+    /// The Custom Shape tool in its Pixels mode: paints the polygon
+    /// through `points` (at least three finite vertices, in order) in
+    /// `color` on layer `id` by the shape tools' even-odd pixel-centre
+    /// fill, confined by the selection. Photoshop's shape library is a
+    /// documented scope cut: the shape is whatever polygon is given.
+    pub fn draw_custom_shape(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        if points.len() < 3 {
+            return Err("A custom shape needs at least three points.".to_string());
+        }
+        if points
+            .iter()
+            .any(|(x, y)| !(x.is_finite() && y.is_finite()))
+        {
+            return Err("Custom shape points must be finite coordinates.".to_string());
+        }
+        self.paint_polygon(id, points, color)
+    }
+
+    /// Draws `shape` onto layer `id` with the shape tools' own painters —
+    /// the selection set aside, since a shape layer is the whole shape.
+    fn draw_shape_layer(&mut self, id: LayerId, shape: &ShapeLayer) -> Result<(), String> {
+        if shape.fill.is_none() && shape.stroke.is_none() {
+            return Err("A shape layer needs a fill, a stroke, or both.".to_string());
+        }
+        let color = shape
+            .fill
+            .or(shape.stroke.map(|(c, _)| c))
+            .expect("checked above");
+        let selection = self.selection.take();
+        let result = match shape.spec.clone() {
+            ShapeSpec::Rectangle {
+                x0,
+                y0,
+                x1,
+                y1,
+                radius,
+            } => self.draw_rectangle(id, x0, y0, x1, y1, radius, shape.fill, shape.stroke),
+            ShapeSpec::Ellipse { x0, y0, x1, y1 } => {
+                self.draw_ellipse(id, x0, y0, x1, y1, shape.fill, shape.stroke)
+            }
+            ShapeSpec::Triangle { x0, y0, x1, y1 } => self.draw_triangle(id, x0, y0, x1, y1, color),
+            ShapeSpec::Polygon {
+                cx,
+                cy,
+                x,
+                y,
+                sides,
+            } => self.draw_polygon(id, cx, cy, x, y, sides, color),
+            ShapeSpec::Star {
+                cx,
+                cy,
+                x,
+                y,
+                points,
+                ratio,
+            } => self.draw_star(id, cx, cy, x, y, points, ratio, color),
+            ShapeSpec::Line {
+                x0,
+                y0,
+                x1,
+                y1,
+                weight,
+            } => self.draw_line(id, x0, y0, x1, y1, weight, color),
+            ShapeSpec::Custom { points } => self.draw_custom_shape(id, &points, color),
+        };
+        self.selection = selection;
+        result.map(|_| ())
+    }
+
+    /// The shape tools in their Shape mode: a new top layer named `name`
+    /// holding `shape` drawn by the tool's own Pixels-mode painter over a
+    /// transparent canvas, the selection set aside, remembering the shape
+    /// so [`Self::set_shape`] can draw it again. The pixels are ordinary
+    /// otherwise. Errors as the painter does, adding no layer.
+    pub fn add_shape_layer(
+        &mut self,
+        name: impl Into<String>,
+        shape: &ShapeLayer,
+    ) -> Result<LayerId, String> {
+        let id = self.push_pixel_layer(name, vec![0u8; self.buffer_len()]);
+        if let Err(err) = self.draw_shape_layer(id, shape) {
+            self.layers.retain(|l| l.id != id);
+            return Err(err);
+        }
+        self.layer_mut(id)?.shape = Some(shape.clone());
+        Ok(id)
+    }
+
+    /// Redraws shape layer `id` as `shape` from a clear canvas — paint on
+    /// the layer is replaced, as editing a live shape would — keeping its
+    /// name, opacity, blend mode, mask, link, clip, and lock. Errors for a
+    /// layer that is not a shape layer, or as the painter does, leaving
+    /// the layer untouched.
+    pub fn set_shape(&mut self, id: LayerId, shape: &ShapeLayer) -> Result<(), String> {
+        if self.layer(id)?.shape.is_none() {
+            return Err("That is not a shape layer.".to_string());
+        }
+        let before = self.layer(id)?.pixels.clone();
+        self.layer_mut(id)?.pixels.fill(0);
+        if let Err(err) = self.draw_shape_layer(id, shape) {
+            self.layer_mut(id)?.pixels = before;
+            return Err(err);
+        }
+        self.layer_mut(id)?.shape = Some(shape.clone());
         Ok(())
     }
 
@@ -7913,6 +8096,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         });
         id
@@ -12017,6 +12201,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         });
 
@@ -12060,6 +12245,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         }];
         Ok(id)
@@ -12103,6 +12289,7 @@ impl Document {
             adjustment: None,
             fill: None,
             text: None,
+            shape: None,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -46497,5 +46684,279 @@ mod tests {
             .unwrap();
         assert!(doc.set_text(id, &text("", 0, 0, 1, false)).is_err());
         assert_eq!(lit(&doc, id).len(), 11);
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+
+    fn shape(spec: ShapeSpec) -> ShapeLayer {
+        ShapeLayer {
+            spec,
+            fill: Some(RED),
+            stroke: None,
+        }
+    }
+
+    #[test]
+    fn shape_layer_draws_the_shape_tools_pixels_and_remembers_the_shape() {
+        let mut doc = Document::new(8, 8).unwrap();
+        let rect = ShapeLayer {
+            spec: ShapeSpec::Rectangle {
+                x0: 1.0,
+                y0: 1.0,
+                x1: 6.0,
+                y1: 5.0,
+                radius: 0,
+            },
+            fill: Some(RED),
+            stroke: Some(([0, 0, 255, 255], 1)),
+        };
+        let id = doc.add_shape_layer("shape", &rect).unwrap();
+        let mut plain = Document::new(8, 8).unwrap();
+        let pid = plain.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+        plain
+            .draw_rectangle(
+                pid,
+                1.0,
+                1.0,
+                6.0,
+                5.0,
+                0,
+                Some(RED),
+                Some(([0, 0, 255, 255], 1)),
+            )
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        assert_eq!(doc.layers()[0].shape.as_ref().unwrap(), &rect);
+        assert!(doc.layers()[0].view().shape.is_some());
+        assert_eq!(pixel(&doc, id, 1, 1), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, id, 3, 3), RED);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn custom_shape_fills_any_polygon_by_the_even_odd_centre_rule() {
+        // A diamond on 5×5: a centre is inside when |dx| + |dy| < 2.5, so
+        // rows light 1, 3, 5, 3, 1 pixels.
+        let diamond = vec![(2.5, 0.0), (5.0, 2.5), (2.5, 5.0), (0.0, 2.5)];
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc
+            .add_shape_layer(
+                "diamond",
+                &shape(ShapeSpec::Custom {
+                    points: diamond.clone(),
+                }),
+            )
+            .unwrap();
+        assert_eq!(
+            filled(&doc, id),
+            vec![
+                (2, 0),
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (0, 2),
+                (1, 2),
+                (2, 2),
+                (3, 2),
+                (4, 2),
+                (1, 3),
+                (2, 3),
+                (3, 3),
+                (2, 4)
+            ]
+        );
+        // The Custom Shape tool in Pixels mode paints the same polygon onto
+        // a layer, confined by the selection.
+        let mut pixels = Document::new(5, 5).unwrap();
+        let pid = pixels.add_layer("plain", &[0; 5 * 5 * 4], 5, 5).unwrap();
+        pixels.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        pixels.draw_custom_shape(pid, &diamond, RED).unwrap();
+        assert_eq!(filled(&pixels, pid), vec![(1, 1), (0, 2), (1, 2), (1, 3)]);
+    }
+
+    #[test]
+    fn set_shape_re_renders_and_a_shape_layer_ignores_the_selection() {
+        let mut doc = Document::new(8, 8).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        let id = doc
+            .add_shape_layer(
+                "shape",
+                &shape(ShapeSpec::Rectangle {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 8.0,
+                    y1: 8.0,
+                    radius: 0,
+                }),
+            )
+            .unwrap();
+        assert_eq!(filled(&doc, id).len(), 64);
+        doc.set_shape(
+            id,
+            &shape(ShapeSpec::Ellipse {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 8.0,
+                y1: 8.0,
+            }),
+        )
+        .unwrap();
+        let mut plain = Document::new(8, 8).unwrap();
+        let pid = plain.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+        plain
+            .draw_ellipse(pid, 0.0, 0.0, 8.0, 8.0, Some(RED), None)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert!(matches!(
+            doc.layers()[0].shape.as_ref().unwrap().spec,
+            ShapeSpec::Ellipse { .. }
+        ));
+        // The selection survives untouched, and a plain layer is refused.
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+        let plain_id = doc.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+        assert!(doc
+            .set_shape(
+                plain_id,
+                &shape(ShapeSpec::Ellipse {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 8.0,
+                    y1: 8.0
+                })
+            )
+            .unwrap_err()
+            .contains("shape layer"));
+    }
+
+    #[test]
+    fn every_shape_spec_matches_its_pixels_mode_tool() {
+        let specs = [
+            ShapeSpec::Triangle {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 8.0,
+                y1: 8.0,
+            },
+            ShapeSpec::Polygon {
+                cx: 4.0,
+                cy: 4.0,
+                x: 7.0,
+                y: 4.0,
+                sides: 5,
+            },
+            ShapeSpec::Star {
+                cx: 4.0,
+                cy: 4.0,
+                x: 7.5,
+                y: 4.0,
+                points: 5,
+                ratio: 50,
+            },
+            ShapeSpec::Line {
+                x0: 0.5,
+                y0: 0.5,
+                x1: 7.5,
+                y1: 6.5,
+                weight: 2,
+            },
+        ];
+        for spec in specs {
+            let mut doc = Document::new(8, 8).unwrap();
+            doc.add_shape_layer("shape", &shape(spec.clone())).unwrap();
+            let mut plain = Document::new(8, 8).unwrap();
+            let pid = plain.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+            match spec {
+                ShapeSpec::Triangle { x0, y0, x1, y1 } => {
+                    plain.draw_triangle(pid, x0, y0, x1, y1, RED).unwrap()
+                }
+                ShapeSpec::Polygon {
+                    cx,
+                    cy,
+                    x,
+                    y,
+                    sides,
+                } => plain.draw_polygon(pid, cx, cy, x, y, sides, RED).unwrap(),
+                ShapeSpec::Star {
+                    cx,
+                    cy,
+                    x,
+                    y,
+                    points,
+                    ratio,
+                } => plain
+                    .draw_star(pid, cx, cy, x, y, points, ratio, RED)
+                    .unwrap(),
+                ShapeSpec::Line {
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    weight,
+                } => plain.draw_line(pid, x0, y0, x1, y1, weight, RED).unwrap(),
+                _ => unreachable!(),
+            };
+            assert_eq!(doc.layers()[0].pixels, plain.layers()[0].pixels);
+            assert!(!filled(&doc, doc.layers()[0].id).is_empty());
+        }
+    }
+
+    #[test]
+    fn shape_layers_refuse_bad_shapes_and_leave_nothing_behind() {
+        let mut doc = Document::new(8, 8).unwrap();
+        let bare = ShapeLayer {
+            spec: ShapeSpec::Rectangle {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 4.0,
+                y1: 4.0,
+                radius: 0,
+            },
+            fill: None,
+            stroke: None,
+        };
+        assert!(doc
+            .add_shape_layer("shape", &bare)
+            .unwrap_err()
+            .contains("fill"));
+        assert!(doc
+            .add_shape_layer(
+                "shape",
+                &shape(ShapeSpec::Custom {
+                    points: vec![(0.0, 0.0), (4.0, 0.0)]
+                })
+            )
+            .unwrap_err()
+            .contains("three"));
+        assert!(doc
+            .add_shape_layer(
+                "shape",
+                &shape(ShapeSpec::Custom {
+                    points: vec![(0.0, 0.0), (4.0, 0.0), (f32::NAN, 4.0)]
+                })
+            )
+            .unwrap_err()
+            .contains("finite"));
+        assert!(doc.layers().is_empty());
+        let id = doc.add_layer("plain", &[0; 8 * 8 * 4], 8, 8).unwrap();
+        assert!(doc
+            .draw_custom_shape(id, &[(0.0, 0.0), (4.0, 0.0)], RED)
+            .is_err());
+        assert!(doc
+            .draw_custom_shape(999, &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)], RED)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .draw_custom_shape(id, &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)], RED)
+            .unwrap_err()
+            .contains("locked"));
     }
 }
