@@ -4778,6 +4778,16 @@ fn camera_raw_masked(
     })
 }
 
+/// Camera Raw Filter > Remove / Heal / Clone: one retouch spot on layer `id`.
+#[tauri::command]
+fn camera_raw_retouch(
+    state: State<'_, AppState>,
+    id: LayerId,
+    spot: document::RetouchSpot,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.camera_raw_retouch(id, &spot))
+}
+
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
 fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
@@ -5213,6 +5223,7 @@ pub fn run() {
             parametric_curve,
             camera_raw_filter,
             camera_raw_masked,
+            camera_raw_retouch,
             rotate,
             scale,
             skew,

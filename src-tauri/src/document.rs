@@ -902,6 +902,34 @@ pub enum CameraRawMask {
     },
 }
 
+/// Camera Raw Filter's retouch tools — see [`Document::camera_raw_retouch`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RetouchMode {
+    /// Remove: fill the spot from the ring around it.
+    Remove,
+    /// Heal: the source's texture with the destination's tone.
+    Heal,
+    /// Clone: the source copied outright.
+    Clone,
+}
+
+/// One Camera Raw retouch spot: a circle of `radius` at `(x, y)` (pixel
+/// coordinates, centres at `.5`), the `source` circle Heal and Clone
+/// read from, Feather (`0..=100`, the share of the radius over which the
+/// spot fades out) and Opacity (`0..=100`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RetouchSpot {
+    pub mode: RetouchMode,
+    pub x: f32,
+    pub y: f32,
+    pub radius: f32,
+    pub source: Option<(f32, f32)>,
+    pub feather: u8,
+    pub opacity: u8,
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -17271,6 +17299,198 @@ impl Document {
             for c in 0..CHANNELS {
                 let (a, b) = (old[c] as f32, px[c] as f32);
                 px[c] = (a + (b - a) * w).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        Ok(touched)
+    }
+
+    /// Camera Raw Filter > Remove / Heal / Clone: one retouch spot on layer
+    /// `id`. Every pixel whose centre lies within `spot.radius` of the
+    /// spot takes coverage `1` out to `radius · (1 − feather/100)` and
+    /// then fades linearly to `0` at the radius, times `opacity/100`,
+    /// times the selection's coverage; the pre-edit layer is what every
+    /// spot reads. Clone reads the pixel the source offset away (the
+    /// source centre minus the spot centre, rounded to whole pixels) and
+    /// blends every channel toward it; Heal reads the same pixel and
+    /// blends the colour toward `source + mean(destination) −
+    /// mean(source)`, the 3×3 means of the Healing Brush, skipping a
+    /// transparent source pixel; Remove blends the colour toward the mean
+    /// of the ring two pixels out that the spot does not itself cover
+    /// (the whole ring when it covers all of it), the Remove tool's own
+    /// fill. A source off the canvas leaves a pixel alone. Photoshop's
+    /// automatic source choice and its spot list are documented scope
+    /// cuts. Errors for a Heal or Clone without a source, a non-finite or
+    /// non-positive size or position, Feather or Opacity over `100`, or a
+    /// locked or unknown layer.
+    pub fn camera_raw_retouch(
+        &mut self,
+        id: LayerId,
+        spot: &RetouchSpot,
+    ) -> Result<Option<Rect>, String> {
+        let RetouchSpot {
+            mode,
+            x,
+            y,
+            radius,
+            source,
+            feather,
+            opacity,
+        } = *spot;
+        if !(x.is_finite() && y.is_finite() && radius.is_finite()) {
+            return Err("The retouch spot must have finite coordinates and size.".to_string());
+        }
+        if radius <= 0.0 {
+            return Err("The retouch spot's Size must be greater than zero.".to_string());
+        }
+        if feather > 100 {
+            return Err(
+                "The retouch spot's Feather must be between 0 and 100 percent.".to_string(),
+            );
+        }
+        if opacity > 100 {
+            return Err(
+                "The retouch spot's Opacity must be between 0 and 100 percent.".to_string(),
+            );
+        }
+        let offset = match (mode, source) {
+            (RetouchMode::Remove, _) => (0i64, 0i64),
+            (_, Some((sx, sy))) if sx.is_finite() && sy.is_finite() => {
+                ((sx - x).round() as i64, (sy - y).round() as i64)
+            }
+            (_, Some(_)) => {
+                return Err("The retouch spot's source must have finite coordinates.".to_string())
+            }
+            (_, None) => return Err("Heal and Clone need a source to read from.".to_string()),
+        };
+        let selection = self.selection.clone();
+        let (width, height) = (self.width, self.height);
+        let (w, h) = (width as i64, height as i64);
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let snapshot = layer.pixels.clone();
+        let inner = radius * (1.0 - feather as f32 / 100.0);
+        let coverage_at = |px: i64, py: i64| -> f32 {
+            let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+            let d = ((cx - x) * (cx - x) + (cy - y) * (cy - y)).sqrt();
+            let c = if d <= inner {
+                1.0
+            } else if d >= radius {
+                0.0
+            } else {
+                (radius - d) / (radius - inner)
+            };
+            c * opacity as f32 / 100.0
+        };
+        let x_lo = ((x - radius).floor().max(0.0)) as i64;
+        let x_hi = ((x + radius).ceil().min(w as f32 - 1.0)) as i64;
+        let y_lo = ((y - radius).floor().max(0.0)) as i64;
+        let y_hi = ((y + radius).ceil().min(h as f32 - 1.0)) as i64;
+        let mut touched: Option<Rect> = None;
+        for py in y_lo..=y_hi {
+            for px in x_lo..=x_hi {
+                let mut c = coverage_at(px, py);
+                if let Some(s) = &selection {
+                    c *= s.coverage(px as f32 + 0.5, py as f32 + 0.5);
+                }
+                if c <= 0.0 {
+                    continue;
+                }
+                let base = (py as usize * width as usize + px as usize) * CHANNELS;
+                let target: [u8; CHANNELS] = match mode {
+                    RetouchMode::Clone | RetouchMode::Heal => {
+                        let (sx, sy) = (px + offset.0, py + offset.1);
+                        if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                            continue;
+                        }
+                        let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
+                        let mut colour = [0u8; CHANNELS];
+                        colour.copy_from_slice(&snapshot[src..src + CHANNELS]);
+                        if mode == RetouchMode::Clone {
+                            colour
+                        } else {
+                            if colour[3] == 0 {
+                                continue;
+                            }
+                            let dest_mean = box_blur_at(
+                                &snapshot,
+                                width as usize,
+                                w,
+                                h,
+                                py as u32,
+                                px as u32,
+                                1,
+                            );
+                            let source_mean = box_blur_at(
+                                &snapshot,
+                                width as usize,
+                                w,
+                                h,
+                                sy as u32,
+                                sx as u32,
+                                1,
+                            );
+                            let mut healed = colour;
+                            for channel in 0..3 {
+                                healed[channel] =
+                                    (i32::from(colour[channel]) + i32::from(dest_mean[channel])
+                                        - i32::from(source_mean[channel]))
+                                    .clamp(0, 255) as u8;
+                            }
+                            healed[3] = snapshot[base + 3];
+                            healed
+                        }
+                    }
+                    RetouchMode::Remove => {
+                        if snapshot[base + 3] == 0 {
+                            continue;
+                        }
+                        let ring: Vec<(i64, i64)> = (-2i64..=2)
+                            .flat_map(|dy| {
+                                (-2i64..=2).filter_map(move |dx| {
+                                    (dx.abs().max(dy.abs()) == 2).then_some((dx, dy))
+                                })
+                            })
+                            .map(|(dx, dy)| ((px + dx).clamp(0, w - 1), (py + dy).clamp(0, h - 1)))
+                            .collect();
+                        let outside: Vec<(usize, usize)> = ring
+                            .iter()
+                            .filter(|&&(sx, sy)| coverage_at(sx, sy) <= 0.0)
+                            .map(|&(sx, sy)| (sx as usize, sy as usize))
+                            .collect();
+                        let mut mean = if outside.is_empty() {
+                            average_samples(
+                                &snapshot,
+                                width as usize,
+                                ring.iter().map(|&(sx, sy)| (sx as usize, sy as usize)),
+                            )
+                        } else {
+                            average_samples(&snapshot, width as usize, outside.into_iter())
+                        };
+                        mean[3] = snapshot[base + 3];
+                        mean
+                    }
+                };
+                for (slot, &value) in layer.pixels[base..base + CHANNELS].iter_mut().zip(&target) {
+                    let dest = *slot as f32;
+                    *slot = (dest + (value as f32 - dest) * c).round().clamp(0.0, 255.0) as u8;
+                }
+                let here = Rect {
+                    x0: px as u32,
+                    y0: py as u32,
+                    x1: px as u32 + 1,
+                    y1: py as u32 + 1,
+                };
+                touched = Some(match touched {
+                    None => here,
+                    Some(r) => Rect {
+                        x0: r.x0.min(here.x0),
+                        y0: r.y0.min(here.y0),
+                        x1: r.x1.max(here.x1),
+                        y1: r.y1.max(here.y1),
+                    },
+                });
             }
         }
         Ok(touched)
@@ -45278,6 +45498,146 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .camera_raw_masked(id, inverting_raw(), &radial(0.0, 0.0, 4.0, 4.0, 0, false))
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    fn spot(
+        mode: RetouchMode,
+        x: f32,
+        source: Option<f32>,
+        radius: f32,
+        feather: u8,
+        opacity: u8,
+    ) -> RetouchSpot {
+        RetouchSpot {
+            mode,
+            x,
+            y: 0.5,
+            radius,
+            source: source.map(|sx| (sx, 0.5)),
+            feather,
+            opacity,
+        }
+    }
+
+    #[test]
+    fn camera_raw_clone_spot_copies_from_its_source_and_fades_by_feather_and_opacity() {
+        // Spot at 3.5 of radius 1.5 covers pixels 2–4; the source at 1.5
+        // is two pixels left, so they read pixels 0–2.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, Some(1.5), 1.5, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 10, 20, 30]);
+        // Feather 50: full inside 0.75, 2/3 at the outer pixels.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, Some(1.5), 1.5, 50, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 17, 20, 90]);
+        // Opacity 50 halves every blend.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, Some(1.5), 1.5, 0, 50))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 20, 110, 120]);
+    }
+
+    #[test]
+    fn camera_raw_heal_spot_keeps_the_destination_tone() {
+        // Healing pixel 3 from pixel 1: texture 20, destination mean
+        // (30 + 200 + 210) / 3 = 146, source mean 20 → 146.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Heal, 3.5, Some(1.5), 0.6, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 146, 210]);
+        // Cloning the same spot copies the 20 outright.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, Some(1.5), 0.6, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 20, 210]);
+    }
+
+    #[test]
+    fn camera_raw_remove_spot_fills_from_the_uncovered_ring() {
+        // One pixel: the ring two out (edge-clamped, 5·[x−2] + 2·[x−1] +
+        // 2·[x] + 2·[x+1] + 5·[x+2]) minus the covered centre samples:
+        // (100 + 60 + 420 + 1050) / 14 = 116.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 0.6, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 116, 210]);
+        // Three pixels: each fills from the ring samples the spot does not
+        // cover — 12, 20 — and pixel 4, whose ring is all covered, from
+        // the whole ring (2440 / 16 = 152).
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.5, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 12, 20, 152]);
+    }
+
+    #[test]
+    fn camera_raw_retouch_respects_the_selection_and_skips_what_it_cannot_read() {
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.select_rectangle(3.0, 0.0, 4.0, 1.0).unwrap();
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, Some(1.5), 1.5, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 20, 210]);
+        // A source off the canvas leaves the pixel alone; a transparent
+        // source pixel is not healed from.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        doc.deselect();
+        doc.camera_raw_retouch(id, &spot(RetouchMode::Clone, 0.5, Some(-1.5), 0.6, 0, 100))
+            .unwrap();
+        assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 30, 200, 210]);
+        let mut clear = Document::new(3, 1).unwrap();
+        let cid = clear
+            .add_layer(
+                "clear",
+                &[0, 0, 0, 0, 50, 50, 50, 255, 90, 90, 90, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        clear
+            .camera_raw_retouch(cid, &spot(RetouchMode::Heal, 1.5, Some(0.5), 0.6, 0, 100))
+            .unwrap();
+        assert_eq!(pixel(&clear, cid, 1, 0), [50, 50, 50, 255]);
+    }
+
+    #[test]
+    fn camera_raw_retouch_refuses_bad_spots_and_layers() {
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Heal, 3.5, None, 1.0, 0, 100))
+            .unwrap_err()
+            .contains("source"));
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Clone, 3.5, None, 1.0, 0, 100))
+            .unwrap_err()
+            .contains("source"));
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 0.0, 0, 100))
+            .unwrap_err()
+            .contains("Size"));
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Remove, f32::NAN, None, 1.0, 0, 100))
+            .unwrap_err()
+            .contains("finite"));
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.0, 101, 100))
+            .unwrap_err()
+            .contains("Feather"));
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.0, 0, 101))
+            .unwrap_err()
+            .contains("Opacity"));
+        assert!(doc
+            .camera_raw_retouch(999, &spot(RetouchMode::Remove, 3.5, None, 1.0, 0, 100))
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.0, 0, 100))
             .unwrap_err()
             .contains("locked"));
         assert_eq!(doc.layers()[0].pixels, before);

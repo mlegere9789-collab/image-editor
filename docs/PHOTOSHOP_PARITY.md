@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 452.**
+**618 distinct capabilities tracked. Currently shipped: 455.**
 
 ## PART I — EVERY TOOL
 
@@ -641,7 +641,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Subject Mask (`CameraRawMask::Subject { tolerance }`, Select Subject's subject at weight 1 — see README Phase 250)
 - [x] Radial Gradient (`CameraRawMask::Radial`, an ellipse at full weight to `1 − feather/100` of its radius fading to nothing at its edge, invertible — see README Phase 250)
 - [x] Color Range Mask (`CameraRawMask::ColorRange`, Color Range's own Chebyshev fuzziness test on one sampled colour, invertible — see README Phase 250)
-- [ ] Remove Tool — Camera Raw
-- [ ] Heal — Camera Raw
-- [ ] Clone — Camera Raw
+- [x] Remove Tool — Camera Raw (`camera_raw_retouch` with `RetouchMode::Remove`: a circular spot filled from the mean of the ring two pixels out that the spot does not cover, the Remove tool's own fill, faded by Feather and Opacity — see README Phase 251)
+- [x] Heal — Camera Raw (`RetouchMode::Heal`: the source spot's texture with the destination's 3×3-mean tone, the Healing Brush's own formula — see README Phase 251)
+- [x] Clone — Camera Raw (`RetouchMode::Clone`: the source spot copied outright, every channel — see README Phase 251)
 - [ ] Generative Remove — Camera Raw

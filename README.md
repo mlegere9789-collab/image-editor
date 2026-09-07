@@ -14941,6 +14941,65 @@ by hand instead. Every other layer of this project's quality bar
 **1495 Rust tests total** (1490 → 1495, 1488 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 251 — Camera Raw Filter's Remove, Heal, and Clone
+
+Camera Raw's retouch tools land as spots. A `RetouchSpot` is a circle
+of `radius` at `(x, y)`, the `source` circle Heal and Clone read from,
+and the panel's Feather (`0..=100`, the share of the radius over which
+the spot fades out) and Opacity. `camera_raw_retouch(id, spot)` gives
+every pixel whose centre lies within the radius a coverage of `1` out
+to `radius · (1 − feather/100)`, fading linearly to `0` at the radius,
+times `opacity/100`, times the selection's coverage, and blends it
+toward the mode's value from the pre-edit layer: Clone reads the pixel
+the source offset away (source centre minus spot centre, rounded to
+whole pixels) and blends every channel toward it; Heal reads the same
+pixel and blends the colour toward `source + mean(destination) −
+mean(source)`, the Healing Brush's own 3×3 means, skipping a
+transparent source; Remove blends the colour toward the mean of the
+ring two pixels out that the spot does not itself cover — the whole
+ring when it covers all of it — the Remove tool's own fill. A source
+off the canvas leaves a pixel alone. The Camera Raw dialog gains a
+Retouch row — mode, Spot X / Y, Source X / Y, Size, Feather, Opacity —
+and an **Apply spot** button that applies one spot at a time.
+Photoshop's automatic source choice, its spot list with visualisation,
+and on-canvas dragging are documented scope cuts. A Heal or Clone
+without a source, a non-finite or non-positive size or position,
+Feather or Opacity over `100`, and a locked or unknown layer are
+refused.
+
+**Verified two ways.** Five new `document.rs` tests, every blend and
+mean traced by hand and cross-checked in `f32` by an independent
+Python script, on the row `10 20 30 200 210`. A Clone spot at `3.5` of
+radius `1.5` from a source at `1.5` copies pixels `0`–`2` onto `2`–`4`
+(`10 20 10 20 30`); Feather `50` fades the outer two by two thirds
+(`17`, `90`); Opacity `50` halves every blend (`20 110 120`). A Heal
+spot on pixel `3` from pixel `1` keeps the destination's tone —
+texture `20` plus mean `146` minus mean `20` is `146` — where a Clone
+copies `20`. A Remove spot on pixel `3` fills it from the ring two
+out minus its covered centre samples, `1630 / 14 = 116`; a
+three-pixel Remove fills `12` and `20` from the uncovered samples and
+`152` from the whole ring where every sample is covered. A one-pixel
+selection confines a Clone to pixel `3`, a source off the canvas
+leaves the pixel alone, and a transparent source pixel is not healed
+from. A Heal or Clone without a source, Size `0`, a NaN position,
+Feather `101`, Opacity `101`, an unknown layer, and a locked layer are
+refused with the row untouched. All five passed on the first run;
+clippy asked only for an iterator in the blend loop.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+ninety-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1500 Rust tests total** (1495 → 1500, 1493 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

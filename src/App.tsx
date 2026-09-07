@@ -39,6 +39,8 @@ import type {
   PuppetWarpOptions,
   PathBlurOptions,
   CameraRawMask,
+  RetouchMode,
+  RetouchSpot,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -587,6 +589,16 @@ export default function App() {
   const [rawMaskInvert, setRawMaskInvert] = useState(false);
   const [rawMaskColor, setRawMaskColor] = useState("#ff0000");
   const [rawMaskFuzziness, setRawMaskFuzziness] = useState(40);
+  // Camera Raw Filter > Remove / Heal / Clone: the next spot to apply.
+  const [retouch, setRetouch] = useState<RetouchSpot>({
+    mode: "heal",
+    x: 0.5,
+    y: 0.5,
+    radius: 8,
+    source: [0.5, 0.5],
+    feather: 50,
+    opacity: 100,
+  });
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
     tint: 0,
@@ -1555,6 +1567,14 @@ export default function App() {
     rawMaskColor,
     rawMaskFuzziness,
   ]);
+
+  const applyRetouchSpot = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_retouch", {
+      id: selectedId,
+      spot: { ...retouch, source: retouch.mode === "remove" ? null : retouch.source },
+    });
+  }, [runCommand, selectedId, retouch]);
 
   const applyRotate = useCallback(async () => {
     if (selectedId === null) return;
@@ -9271,6 +9291,73 @@ export default function App() {
                 value={cameraRaw.defringe}
                 onChange={(event) => setCameraRawSlider("defringe", Number(event.target.value))}
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Retouch</span>
+              <select
+                value={retouch.mode}
+                onChange={(event) => setRetouch((r) => ({ ...r, mode: event.target.value as RetouchMode }))}
+                title="Camera Raw Filter > Remove / Heal / Clone"
+              >
+                <option value="remove">Remove</option>
+                <option value="heal">Heal</option>
+                <option value="clone">Clone</option>
+              </select>
+              <span className="control__label">Spot X / Y</span>
+              <input type="number" step={0.5} value={retouch.x} onChange={(event) => setRetouch((r) => ({ ...r, x: Number(event.target.value) }))} />
+              <input type="number" step={0.5} value={retouch.y} onChange={(event) => setRetouch((r) => ({ ...r, y: Number(event.target.value) }))} />
+              {retouch.mode !== "remove" && (
+                <>
+                  <span className="control__label">Source X / Y</span>
+                  <input
+                    type="number"
+                    step={0.5}
+                    value={retouch.source?.[0] ?? 0.5}
+                    onChange={(event) =>
+                      setRetouch((r) => ({ ...r, source: [Number(event.target.value), r.source?.[1] ?? 0.5] }))
+                    }
+                  />
+                  <input
+                    type="number"
+                    step={0.5}
+                    value={retouch.source?.[1] ?? 0.5}
+                    onChange={(event) =>
+                      setRetouch((r) => ({ ...r, source: [r.source?.[0] ?? 0.5, Number(event.target.value)] }))
+                    }
+                  />
+                </>
+              )}
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Size</span>
+              <input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={retouch.radius}
+                onChange={(event) => setRetouch((r) => ({ ...r, radius: Number(event.target.value) }))}
+              />
+              <span className="control__label">Feather %</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={retouch.feather}
+                onChange={(event) => setRetouch((r) => ({ ...r, feather: Number(event.target.value) }))}
+              />
+              <span className="control__value">{retouch.feather}</span>
+              <span className="control__label">Opacity %</span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={retouch.opacity}
+                onChange={(event) => setRetouch((r) => ({ ...r, opacity: Number(event.target.value) }))}
+              />
+              <span className="control__value">{retouch.opacity}</span>
+              <button className="button button--quiet" onClick={() => void applyRetouchSpot()} disabled={busy} title="Apply this retouch spot now">
+                Apply spot
+              </button>
             </label>
             <label className="control control--row">
               <span className="control__label">Masking</span>

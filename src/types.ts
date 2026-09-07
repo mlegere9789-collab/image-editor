@@ -261,6 +261,19 @@ export type CameraRawMask =
   | { kind: "radial"; x0: number; y0: number; x1: number; y1: number; feather: number; invert: boolean }
   | { kind: "colorRange"; color: [number, number, number]; fuzziness: number; invert: boolean };
 
+/** Mirrors `RetouchSpot` / `RetouchMode` in src-tauri/src/document.rs:
+ * one Camera Raw Remove / Heal / Clone spot. */
+export type RetouchMode = "remove" | "heal" | "clone";
+export type RetouchSpot = {
+  mode: RetouchMode;
+  x: number;
+  y: number;
+  radius: number;
+  source: [number, number] | null;
+  feather: number;
+  opacity: number;
+};
+
 /** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
  * draws (vertices, where the pins move them, triangles as indices). */
