@@ -13,6 +13,9 @@ import type {
   BlendModeInfo,
   CalcResult,
   CalcSource,
+  ColorRange,
+  ColorRangePreset,
+  ColorSample,
   DocumentView,
   Fill,
   GuideOrientation,
@@ -416,6 +419,17 @@ export default function App() {
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
   const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
+  // Color Range's Select list: "sampled" with a list of samples, or a preset;
+  // Localized Color Clusters with its Range; Invert; and the Grayscale
+  // Selection Preview drawn from `color_range_bits`.
+  const [colorRangeSelect, setColorRangeSelect] = useState<"sampled" | ColorRangePreset>("sampled");
+  const [colorRangeSamples, setColorRangeSamples] = useState<ColorSample[]>([]);
+  const [colorRangeLocalized, setColorRangeLocalized] = useState(false);
+  const [colorRangeRange, setColorRangeRange] = useState(50);
+  const [colorRangeInvert, setColorRangeInvert] = useState(false);
+  const [colorRangePreview, setColorRangePreview] = useState<"none" | "grayscale">("none");
+  const [colorRangeSampling, setColorRangeSampling] = useState(false);
+  const colorRangePreviewCanvas = useRef<HTMLCanvasElement | null>(null);
   const [showGeometryDialog, setShowGeometryDialog] = useState(false);
   const [geometry, setGeometry] = useState({
     vertical: 0,
@@ -1466,16 +1480,68 @@ export default function App() {
     setShowGeometryDialog(false);
   }, [runCommand, selectedId, geometry]);
 
+  /** The Color Range the dialog currently describes: the sample list, or
+   * with none sampled the colour picker's colour, or a preset. */
+  const currentColorRange = useCallback((): ColorRange => {
+    if (colorRangeSelect !== "sampled") return { kind: colorRangeSelect };
+    const [r, g, b] = hexToRgb(colorRangeColor);
+    const samples =
+      colorRangeSamples.length > 0 ? colorRangeSamples : [{ color: [r, g, b] as [number, number, number], position: null }];
+    const localized = colorRangeLocalized && samples.every((s) => s.position !== null);
+    return {
+      kind: "sampled",
+      samples,
+      fuzziness: colorRangeFuzziness,
+      localized: localized ? colorRangeRange : null,
+    };
+  }, [
+    colorRangeSelect,
+    colorRangeColor,
+    colorRangeSamples,
+    colorRangeLocalized,
+    colorRangeRange,
+    colorRangeFuzziness,
+  ]);
+
   const applyColorRange = useCallback(async () => {
     if (selectedId === null) return;
-    const [r, g, b] = hexToRgb(colorRangeColor);
-    await runCommand("select_color_range", {
+    await runCommand("select_color_range_with", {
       id: selectedId,
-      color: [r, g, b],
-      fuzziness: colorRangeFuzziness,
+      range: currentColorRange(),
+      invert: colorRangeInvert,
     });
     setShowColorRangeDialog(false);
-  }, [runCommand, selectedId, colorRangeColor, colorRangeFuzziness]);
+  }, [runCommand, selectedId, currentColorRange, colorRangeInvert]);
+
+  /** Selection Preview: draw which pixels the current range would select,
+   * white on black, into the dialog's canvas. */
+  const refreshColorRangePreview = useCallback(async () => {
+    if (selectedId === null || !document) return;
+    const canvas = colorRangePreviewCanvas.current;
+    if (!canvas) return;
+    try {
+      const bits = await invoke<boolean[]>("color_range_bits", {
+        id: selectedId,
+        range: currentColorRange(),
+      });
+      canvas.width = document.width;
+      canvas.height = document.height;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+      const image = context.createImageData(document.width, document.height);
+      for (let i = 0; i < bits.length; i += 1) {
+        const on = bits[i] !== colorRangeInvert;
+        const value = on ? 255 : 0;
+        image.data[i * 4] = value;
+        image.data[i * 4 + 1] = value;
+        image.data[i * 4 + 2] = value;
+        image.data[i * 4 + 3] = 255;
+      }
+      context.putImageData(image, 0, 0);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [selectedId, document, currentColorRange, colorRangeInvert]);
 
   const growSelection = useCallback(async () => {
     if (selectedId === null) return;
@@ -3742,6 +3808,22 @@ export default function App() {
   const handlePointerDown = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
+      if (colorRangeSampling) {
+        if (selectedId === null) return;
+        const [x, y] = toDocPoint(event, document);
+        const px = Math.floor(x);
+        const py = Math.floor(y);
+        void invoke<[number, number, number, number]>("rgb_levels", { id: selectedId, x: px, y: py })
+          .then(([r, g, b]) => {
+            setColorRangeSamples((samples) => [...samples, { color: [r, g, b], position: [px, py] }]);
+          })
+          .catch((err) => setError(String(err)))
+          .finally(() => {
+            setColorRangeSampling(false);
+            setShowColorRangeDialog(true);
+          });
+        return;
+      }
       if (curveOnImage) {
         if (selectedId === null) return;
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -3952,6 +4034,7 @@ export default function App() {
       levelsEyedropper,
       selectedId,
       runCommand,
+      colorRangeSampling,
       curveOnImage,
     ],
   );
@@ -6802,6 +6885,21 @@ export default function App() {
               />
             </label>
           )}
+          {colorRangeSampling && (
+            <span className="tools__slider">
+              Click the picture to add that pixel&apos;s colour to the Color Range samples
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setColorRangeSampling(false);
+                  setShowColorRangeDialog(true);
+                }}
+                title="Back to the Color Range dialog"
+              >
+                Cancel
+              </button>
+            </span>
+          )}
           {curveOnImage && (
             <span className="tools__slider">
               Press on the picture and drag up or down to adjust the curve there
@@ -8278,30 +8376,162 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Color Range</h2>
             <p className="modal__hint">
-              Selects every pixel of the selected layer whose red, green, and blue
-              are each within Fuzziness of the chosen colour, wherever it sits.
+              Sampled Colors selects every pixel of the selected layer whose red, green,
+              and blue are each within Fuzziness of any sample, wherever it sits; the
+              presets pick a hue sector, a tone band, or skin tones.
             </p>
             <label className="control control--row">
-              <span className="control__label">Color</span>
-              <input
-                type="color"
-                value={colorRangeColor}
-                onChange={(event) => setColorRangeColor(event.target.value)}
-              />
+              <span className="control__label">Select</span>
+              <select
+                value={colorRangeSelect}
+                onChange={(event) =>
+                  setColorRangeSelect(event.target.value as "sampled" | ColorRangePreset)
+                }
+              >
+                <option value="sampled">Sampled Colors</option>
+                <option value="reds">Reds</option>
+                <option value="yellows">Yellows</option>
+                <option value="greens">Greens</option>
+                <option value="cyans">Cyans</option>
+                <option value="blues">Blues</option>
+                <option value="magentas">Magentas</option>
+                <option value="highlights">Highlights</option>
+                <option value="midtones">Midtones</option>
+                <option value="shadows">Shadows</option>
+                <option value="skinTones">Skin Tones</option>
+              </select>
             </label>
-            <label className="control">
-              <span className="control__label">
-                Fuzziness
-                <span className="control__value">{colorRangeFuzziness}</span>
-              </span>
+            {colorRangeSelect === "sampled" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Color</span>
+                  <input
+                    type="color"
+                    value={colorRangeColor}
+                    onChange={(event) => setColorRangeColor(event.target.value)}
+                  />
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      const [r, g, b] = hexToRgb(colorRangeColor);
+                      setColorRangeSamples((samples) => [...samples, { color: [r, g, b], position: null }]);
+                    }}
+                    title="Add this colour to the samples"
+                  >
+                    Add
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setColorRangeSampling(true);
+                      setShowColorRangeDialog(false);
+                    }}
+                    title="Eyedropper: click the picture to add that pixel's colour (with its position, for Localized Color Clusters)"
+                  >
+                    Sample on image
+                  </button>
+                </label>
+                {colorRangeSamples.length > 0 && (
+                  <div className="control control--row">
+                    <span className="control__label">Samples</span>
+                    {colorRangeSamples.map((sample, index) => (
+                      <button
+                        key={`${index}-${sample.color.join(",")}`}
+                        className="button button--quiet"
+                        style={{ background: `rgb(${sample.color.join(",")})` }}
+                        onClick={() =>
+                          setColorRangeSamples((samples) => samples.filter((_, i) => i !== index))
+                        }
+                        title={`rgb(${sample.color.join(", ")})${
+                          sample.position ? ` at ${sample.position[0]}, ${sample.position[1]}` : ""
+                        } — click to remove`}
+                      >
+                        {" "}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <label className="control">
+                  <span className="control__label">
+                    Fuzziness
+                    <span className="control__value">{colorRangeFuzziness}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={colorRangeFuzziness}
+                    onChange={(event) => setColorRangeFuzziness(Number(event.target.value))}
+                  />
+                </label>
+                <label className="control control--row">
+                  <input
+                    type="checkbox"
+                    checked={colorRangeLocalized}
+                    disabled={
+                      colorRangeSamples.length === 0 ||
+                      colorRangeSamples.some((s) => s.position === null)
+                    }
+                    onChange={(event) => setColorRangeLocalized(event.target.checked)}
+                  />
+                  <span className="control__label">Localized Color Clusters (needs on-image samples)</span>
+                </label>
+                {colorRangeLocalized && (
+                  <label className="control">
+                    <span className="control__label">
+                      Range (% of the diagonal)
+                      <span className="control__value">{colorRangeRange}</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={colorRangeRange}
+                      onChange={(event) => setColorRangeRange(Number(event.target.value))}
+                    />
+                  </label>
+                )}
+              </>
+            )}
+            <label className="control control--row">
               <input
-                type="range"
-                min={0}
-                max={255}
-                value={colorRangeFuzziness}
-                onChange={(event) => setColorRangeFuzziness(Number(event.target.value))}
+                type="checkbox"
+                checked={colorRangeInvert}
+                onChange={(event) => setColorRangeInvert(event.target.checked)}
               />
+              <span className="control__label">Invert</span>
             </label>
+            <label className="control control--row">
+              <span className="control__label">Selection Preview</span>
+              <select
+                value={colorRangePreview}
+                onChange={(event) => {
+                  const value = event.target.value as "none" | "grayscale";
+                  setColorRangePreview(value);
+                  if (value === "grayscale") void refreshColorRangePreview();
+                }}
+              >
+                <option value="none">None</option>
+                <option value="grayscale">Grayscale</option>
+              </select>
+              {colorRangePreview === "grayscale" && (
+                <button
+                  className="button button--quiet"
+                  onClick={() => void refreshColorRangePreview()}
+                  disabled={busy}
+                  title="Redraw the preview for the current settings"
+                >
+                  Refresh
+                </button>
+              )}
+            </label>
+            {colorRangePreview === "grayscale" && (
+              <canvas
+                ref={colorRangePreviewCanvas}
+                className="color-range-preview"
+                aria-label="Selection preview: selected pixels in white"
+              />
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

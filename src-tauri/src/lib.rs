@@ -599,6 +599,33 @@ fn select_color_range(
     })
 }
 
+/// Select > Color Range with the full Select list and Invert.
+#[tauri::command]
+fn select_color_range_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    range: document::ColorRange,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_color_range_with(id, &range, invert)?;
+        Ok(None)
+    })
+}
+
+/// Color Range's Selection Preview: which pixels of layer `id` `range`
+/// would select, one flag per pixel, row-major. Read-only.
+#[tauri::command]
+fn color_range_bits(
+    state: State<'_, AppState>,
+    id: LayerId,
+    range: document::ColorRange,
+) -> Result<Vec<bool>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.color_range_bits(id, &range)
+}
+
 /// Select > Grow: extend the selection to adjacent pixels of layer `id`
 /// within `tolerance` of the colours already selected.
 #[tauri::command]
@@ -4552,6 +4579,8 @@ pub fn run() {
             quick_select,
             select_magic_wand,
             select_color_range,
+            select_color_range_with,
+            color_range_bits,
             grow_selection,
             select_similar,
             magic_erase,

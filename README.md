@@ -13530,6 +13530,71 @@ by hand instead. Every other layer of this project's quality bar
 **1370 Rust tests total** (1365 → 1370, 1363 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 226 — Color Range's Select list
+
+Select > Color Range grows from one colour to its whole dialog. A
+`ColorRange` is Sampled Colors — a list of `ColorSample`s, each a
+colour and, when taken off the image, the pixel it came from — with
+Fuzziness and optional Localized Color Clusters (a Range in percent
+of the canvas diagonal), or one of the presets: Reds, Yellows, Greens,
+Cyans, Blues, Magentas, Highlights, Midtones, Shadows, Skin Tones.
+`color_range_bits(id, range)` is the read-only judge, one flag per
+pixel: a sampled pixel matches when some sample is within Fuzziness
+per channel and, localized, when that sample's position is within
+Range of it; the hue presets are the 60° sectors centred on 0°, 60°,
+… 300° of `rgb_to_hsl`'s hue, a pixel with no hue matching none; the
+tone presets are BT.601 luma `<= 65`, `105..=150`, and `>= 190`,
+Photoshop's default bands; Skin Tones is the classic RGB rule (R > 95,
+G > 40, B > 20, spread > 15, R − G > 15, R > G, R > B). It errors on
+an unknown layer, no samples, a Range over 100, or Localized without
+positions. `select_color_range_with(id, range, invert)` flips the
+flags when asked and replaces the selection, refusing an empty result
+— so a no-match range inverted selects everything; the old
+`select_color_range` is one sample, not inverted. The dialog gains
+the Select list, an Add button and an on-image **Sample on image**
+eyedropper building a removable swatch list, Localized Color Clusters
+with Range (enabled once every sample carries a position), Invert,
+and a Grayscale Selection Preview drawn from `color_range_bits` into a
+canvas. Graded partial selection, the matte and Quick Mask previews,
+and Detect Faces are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, the two hue
+boundaries first computed in Python emulating `f32`. On a row of pure
+red, `(255, 127, 0)` at `29.88°`, `(255, 128, 0)` at `30.12°`,
+yellow, green, cyan, blue, magenta, and a grey, each hue preset picks
+exactly its sector — the two oranges falling to Reds and Yellows
+either side of `30°` — and the grey never. Greys `30, 65, 66, 104,
+105, 150, 151, 189, 190, 200` split into Shadows `{30, 65}`, Midtones
+`{105, 150}`, and Highlights `{190, 200}`; `[220, 180, 150]` and
+`[150, 100, 50]` are skin, while a grey, pure red, and `[100, 120,
+80]` are not. Two samples select the union, Fuzziness `10` reaches
+`[0, 10, 0]` and `[0, 0, 10]` from `[10, 0, 0]` but not a grey, Invert
+flips the mask, and the old entry point still works. On five red pixels the diagonal
+is `√26 ≈ 5.10`, so Range `50%` reaches `2.55` pixels — `0..=2` — from
+a sample at `x = 0`, `0%` its own pixel, `100%` all, and samples at
+both ends at `20%` select the ends and their neighbours. An unknown
+layer, no samples, Localized without positions, and Range `101` error;
+a no-match preset refuses and leaves the selection, inverted it
+selects all. Four of the five passed on the first run: the Fuzziness
+`10` expectation had overlooked that `[0, 0, 10]` is also within `10`
+of `[10, 0, 0]` in every channel; the code was right and the
+expectation was corrected. An existing test also caught the no-match
+error's wording having drifted from "No pixels", which was restored.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1375 Rust tests total** (1370 → 1375, 1368 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

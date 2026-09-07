@@ -223,6 +223,40 @@ impl Adjustment {
     }
 }
 
+/// One colour sampled for Select > Color Range, with the pixel it was
+/// sampled from when it came off the image — what Localized Color
+/// Clusters measures distance from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColorSample {
+    pub color: [u8; 3],
+    pub position: Option<(u32, u32)>,
+}
+
+/// Select > Color Range's Select list: sampled colours with Fuzziness and
+/// optional Localized Color Clusters (a Range in percent of the canvas
+/// diagonal), or one of Photoshop's preset ranges — six hue sectors, three
+/// tone bands, and skin tones.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ColorRange {
+    Sampled {
+        samples: Vec<ColorSample>,
+        fuzziness: u8,
+        localized: Option<u8>,
+    },
+    Reds,
+    Yellows,
+    Greens,
+    Cyans,
+    Blues,
+    Magentas,
+    Highlights,
+    Midtones,
+    Shadows,
+    SkinTones,
+}
+
 /// Apply Image's Channel list for an RGB source: the composite, one
 /// colour channel applied as a grey, or the source's transparency — its
 /// alpha as an opaque grey covering the whole canvas, as Photoshop's
@@ -2821,18 +2855,143 @@ impl Document {
         color: [u8; 3],
         fuzziness: u8,
     ) -> Result<(), String> {
+        let range = ColorRange::Sampled {
+            samples: vec![ColorSample {
+                color,
+                position: None,
+            }],
+            fuzziness,
+            localized: None,
+        };
+        self.select_color_range_with(id, &range, false)
+    }
+
+    /// [`Self::select_color_range`] with the dialog's full Select list and
+    /// its Invert checkbox: the pixels [`Self::color_range_bits`] picks,
+    /// flipped when `invert` is set, replace the selection. Errors as
+    /// `color_range_bits` does, or when nothing would be selected — so a
+    /// no-match range inverted selects everything, as Photoshop's would.
+    pub fn select_color_range_with(
+        &mut self,
+        id: LayerId,
+        range: &ColorRange,
+        invert: bool,
+    ) -> Result<(), String> {
+        let mut bits = self.color_range_bits(id, range)?;
+        if invert {
+            for bit in &mut bits {
+                *bit = !*bit;
+            }
+        }
+        if !bits.iter().any(|&b| b) {
+            return Err("No pixels of the layer are within the colour range.".to_string());
+        }
+        self.set_mask_selection(bits)
+    }
+
+    /// Which pixels of layer `id` Select > Color Range would pick for
+    /// `range`, one flag per pixel — the dialog's Selection Preview.
+    /// Sampled Colors: a pixel matches when some sample is within
+    /// `fuzziness` per channel (the Magic Wand's test), and, with Localized
+    /// Color Clusters on, when that sample's position lies within Range
+    /// percent of the canvas diagonal of the pixel; every sample then needs
+    /// a position, and Range is `0..=100`. The presets judge each pixel on
+    /// its own: Reds through Magentas are the 60° hue sectors centred on
+    /// 0°, 60°, … 300° (a pixel with no hue matches none); Shadows,
+    /// Midtones, and Highlights are BT.601 luma `<= 65`, `105..=150`, and
+    /// `>= 190`, Photoshop's default bands; Skin Tones is the classic
+    /// RGB rule — R > 95, G > 40, B > 20, spread > 15, R − G > 15, R > G,
+    /// R > B. Alpha is ignored throughout. Errors on an unknown layer, no
+    /// samples, or a bad Localized setting.
+    pub fn color_range_bits(&self, id: LayerId, range: &ColorRange) -> Result<Vec<bool>, String> {
         let layer = self.layer(id)?;
+        let width = self.width as usize;
+        let limit = match range {
+            ColorRange::Sampled {
+                samples, localized, ..
+            } => {
+                if samples.is_empty() {
+                    return Err("Color Range needs at least one sampled colour.".to_string());
+                }
+                match localized {
+                    Some(percent) if *percent > 100 => {
+                        return Err(format!("Range must be 0..=100 percent, not {percent}."));
+                    }
+                    Some(percent) => {
+                        if samples.iter().any(|s| s.position.is_none()) {
+                            return Err(
+                                "Localized Color Clusters needs every colour sampled from the image."
+                                    .to_string(),
+                            );
+                        }
+                        let diagonal =
+                            ((self.width as f32).powi(2) + (self.height as f32).powi(2)).sqrt();
+                        Some(diagonal * f32::from(*percent) / 100.0)
+                    }
+                    None => None,
+                }
+            }
+            _ => None,
+        };
         let bits = layer
             .pixels
             .chunks_exact(CHANNELS)
-            .map(|px| {
-                px[..3]
-                    .iter()
-                    .zip(color.iter())
-                    .all(|(&a, &b)| a.abs_diff(b) <= fuzziness)
+            .enumerate()
+            .map(|(i, px)| {
+                let (r, g, b) = (px[0], px[1], px[2]);
+                match range {
+                    ColorRange::Sampled {
+                        samples, fuzziness, ..
+                    } => samples.iter().any(|sample| {
+                        let close = px[..3]
+                            .iter()
+                            .zip(sample.color.iter())
+                            .all(|(&a, &c)| a.abs_diff(c) <= *fuzziness);
+                        close
+                            && match (limit, sample.position) {
+                                (Some(limit), Some((sx, sy))) => {
+                                    let (x, y) = ((i % width) as f32, (i / width) as f32);
+                                    let (dx, dy) = (x - sx as f32, y - sy as f32);
+                                    (dx * dx + dy * dy).sqrt() <= limit
+                                }
+                                _ => true,
+                            }
+                    }),
+                    ColorRange::Reds
+                    | ColorRange::Yellows
+                    | ColorRange::Greens
+                    | ColorRange::Cyans
+                    | ColorRange::Blues
+                    | ColorRange::Magentas => {
+                        let (hue, saturation, _) = rgb_to_hsl(r, g, b);
+                        let centre = match range {
+                            ColorRange::Reds => 0.0,
+                            ColorRange::Yellows => 60.0,
+                            ColorRange::Greens => 120.0,
+                            ColorRange::Cyans => 180.0,
+                            ColorRange::Blues => 240.0,
+                            _ => 300.0,
+                        };
+                        let distance = (hue - centre).abs().min(360.0 - (hue - centre).abs());
+                        saturation > 0.0 && distance < 30.0
+                    }
+                    ColorRange::Highlights | ColorRange::Midtones | ColorRange::Shadows => {
+                        let luma = ApplyChannel::Rgb.value([r, g, b, 255]);
+                        match range {
+                            ColorRange::Highlights => luma >= 190,
+                            ColorRange::Midtones => (105..=150).contains(&luma),
+                            _ => luma <= 65,
+                        }
+                    }
+                    ColorRange::SkinTones => {
+                        let max = r.max(g).max(b);
+                        let min = r.min(g).min(b);
+                        r > 95 && g > 40 && b > 20 && max - min > 15 && r > g && r - g > 15 && r > b
+                    }
+                }
             })
             .collect();
-        self.set_mask_selection(bits)
+        Ok(bits)
     }
 
     /// Select > Grow: extends the current selection to every pixel of layer
@@ -36448,6 +36607,212 @@ mod tests {
             .is_err());
         assert!(doc.view().channels.is_empty());
         assert!(doc.view().selection.is_none());
+    }
+
+    fn colour_row(colors: &[[u8; 3]]) -> (Document, LayerId) {
+        let mut doc = Document::new(colors.len() as u32, 1).unwrap();
+        let mut pixels = Vec::new();
+        for c in colors {
+            pixels.extend_from_slice(&[c[0], c[1], c[2], 255]);
+        }
+        let id = doc
+            .add_layer("row", &pixels, colors.len() as u32, 1)
+            .unwrap();
+        (doc, id)
+    }
+
+    fn range_bits(doc: &Document, id: LayerId, range: ColorRange) -> Vec<bool> {
+        doc.color_range_bits(id, &range).unwrap()
+    }
+
+    #[test]
+    fn color_range_hue_presets_pick_their_sixty_degree_sector() {
+        // Red 0°, orange-red (255,127,0) 29.9°, orange (255,128,0) 30.1°,
+        // yellow 60°, green 120°, cyan 180°, blue 240°, magenta 300°, and a
+        // grey with no hue at all.
+        let (doc, id) = colour_row(&[
+            [255, 0, 0],
+            [255, 127, 0],
+            [255, 128, 0],
+            [255, 255, 0],
+            [0, 255, 0],
+            [0, 255, 255],
+            [0, 0, 255],
+            [255, 0, 255],
+            [128, 128, 128],
+        ]);
+        let f = false;
+        let t = true;
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Reds),
+            [t, t, f, f, f, f, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Yellows),
+            [f, f, t, t, f, f, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Greens),
+            [f, f, f, f, t, f, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Cyans),
+            [f, f, f, f, f, t, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Blues),
+            [f, f, f, f, f, f, t, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Magentas),
+            [f, f, f, f, f, f, f, t, f]
+        );
+    }
+
+    #[test]
+    fn color_range_tone_presets_and_skin_tones() {
+        // Greys 30, 65, 66, 104, 105, 150, 151, 189, 190, 200 and their luma
+        // bands: Shadows ≤ 65, Midtones 105..=150, Highlights ≥ 190.
+        let greys: Vec<[u8; 3]> = [30u8, 65, 66, 104, 105, 150, 151, 189, 190, 200]
+            .iter()
+            .map(|&g| [g, g, g])
+            .collect();
+        let (doc, id) = colour_row(&greys);
+        let f = false;
+        let t = true;
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Shadows),
+            [t, t, f, f, f, f, f, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Midtones),
+            [f, f, f, f, t, t, f, f, f, f]
+        );
+        assert_eq!(
+            range_bits(&doc, id, ColorRange::Highlights),
+            [f, f, f, f, f, f, f, f, t, t]
+        );
+        // Skin: [220,180,150] and [150,100,50] pass every rule; grey has no
+        // spread, pure red has too little green, and [100,120,80] has green
+        // above red.
+        let (doc, id) = colour_row(&[
+            [220, 180, 150],
+            [150, 100, 50],
+            [200, 200, 200],
+            [255, 0, 0],
+            [100, 120, 80],
+        ]);
+        assert_eq!(range_bits(&doc, id, ColorRange::SkinTones), [t, t, f, f, f]);
+    }
+
+    fn sampled(colors: &[[u8; 3]], fuzziness: u8) -> ColorRange {
+        ColorRange::Sampled {
+            samples: colors
+                .iter()
+                .map(|&color| ColorSample {
+                    color,
+                    position: None,
+                })
+                .collect(),
+            fuzziness,
+            localized: None,
+        }
+    }
+
+    #[test]
+    fn color_range_sampled_colors_union_and_invert() {
+        let (mut doc, id) = colour_row(&[[10, 0, 0], [0, 10, 0], [0, 0, 10], [100, 100, 100]]);
+        let f = false;
+        let t = true;
+        let two = sampled(&[[10, 0, 0], [0, 0, 10]], 0);
+        assert_eq!(range_bits(&doc, id, two.clone()), [t, f, t, f]);
+        // Fuzziness 10 reaches [0, 10, 0] and [0, 0, 10] from [10, 0, 0] —
+        // each 10 apart in two channels — but not the grey.
+        assert_eq!(
+            range_bits(&doc, id, sampled(&[[10, 0, 0]], 10)),
+            [t, t, t, f]
+        );
+        doc.select_color_range_with(id, &two, true).unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), [f, t, f, t]);
+        doc.select_color_range_with(id, &two, false).unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), [t, f, t, f]);
+        // The old single-colour entry point is one sample, not inverted.
+        doc.select_color_range(id, [100, 100, 100], 0).unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), [f, f, f, t]);
+    }
+
+    #[test]
+    fn color_range_localized_clusters_limit_the_reach() {
+        // Five red pixels in a row; the diagonal is √26 ≈ 5.10, so Range
+        // 50% reaches 2.55 pixels from the sample at x=0: pixels 0..=2.
+        // Range 0 keeps the sample's own pixel only; 100% reaches all.
+        let (doc, id) = colour_row(&[[255, 0, 0]; 5]);
+        let at = |range: u8| ColorRange::Sampled {
+            samples: vec![ColorSample {
+                color: [255, 0, 0],
+                position: Some((0, 0)),
+            }],
+            fuzziness: 0,
+            localized: Some(range),
+        };
+        let f = false;
+        let t = true;
+        assert_eq!(range_bits(&doc, id, at(50)), [t, t, t, f, f]);
+        assert_eq!(range_bits(&doc, id, at(0)), [t, f, f, f, f]);
+        assert_eq!(range_bits(&doc, id, at(100)), [t, t, t, t, t]);
+        // Two samples: each reaches on its own — x=0 and x=4 at range 20%
+        // (1.02 pixels) select the two ends and their neighbours.
+        let both = ColorRange::Sampled {
+            samples: vec![
+                ColorSample {
+                    color: [255, 0, 0],
+                    position: Some((0, 0)),
+                },
+                ColorSample {
+                    color: [255, 0, 0],
+                    position: Some((4, 0)),
+                },
+            ],
+            fuzziness: 0,
+            localized: Some(20),
+        };
+        assert_eq!(range_bits(&doc, id, both), [t, t, f, t, t]);
+    }
+
+    #[test]
+    fn color_range_validates_and_needs_a_match() {
+        let (mut doc, id) = colour_row(&[[255, 0, 0], [0, 0, 255]]);
+        assert!(doc.color_range_bits(999, &ColorRange::Reds).is_err());
+        assert!(doc.color_range_bits(id, &sampled(&[], 0)).is_err());
+        let unplaced = ColorRange::Sampled {
+            samples: vec![ColorSample {
+                color: [255, 0, 0],
+                position: None,
+            }],
+            fuzziness: 0,
+            localized: Some(50),
+        };
+        assert!(doc.color_range_bits(id, &unplaced).is_err());
+        let too_far = ColorRange::Sampled {
+            samples: vec![ColorSample {
+                color: [255, 0, 0],
+                position: Some((0, 0)),
+            }],
+            fuzziness: 0,
+            localized: Some(101),
+        };
+        assert!(doc.color_range_bits(id, &too_far).is_err());
+        // Nothing green: the selection is refused and stays as it was.
+        doc.select_all().unwrap();
+        assert!(doc
+            .select_color_range_with(id, &ColorRange::Greens, false)
+            .is_err());
+        assert_eq!(doc.selected_bits().unwrap(), [true, true]);
+        // Inverting a no-match range selects everything, as Photoshop's
+        // Invert would.
+        doc.select_color_range_with(id, &ColorRange::Greens, true)
+            .unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), [true, true]);
     }
 
     #[test]

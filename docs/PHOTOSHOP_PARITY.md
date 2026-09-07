@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 356.**
+**618 distinct capabilities tracked. Currently shipped: 363.**
 
 ## PART I — EVERY TOOL
 
@@ -285,13 +285,13 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Select and Mask — Output To
 - [x] Select > Modify > Expand
 - [x] Select > Modify > Contract
-- [ ] Color Range — Sampled Colors
-- [ ] Color Range — Fuzziness
-- [ ] Color Range — Localized Color Clusters
-- [ ] Color Range — Range
-- [ ] Color Range — Selection Preview
-- [ ] Color Range — Invert
-- [ ] Color Range — Skin Tones
+- [x] Color Range — Sampled Colors (`ColorRange::Sampled { samples, … }` in `color_range_bits` / `select_color_range_with`: any number of sampled colours, a pixel matching when it is within Fuzziness of any of them; samples come from the colour picker or an on-image eyedropper that records the pixel — see README Phase 226)
+- [x] Color Range — Fuzziness (per-channel `abs_diff <= fuzziness` against each sample, the Magic Wand's test; Photoshop's graded partial selection is a documented scope cut of the one-bit mask — see README Phase 226)
+- [x] Color Range — Localized Color Clusters (`localized: Some(range)`: a matching sample must also lie within Range percent of the canvas diagonal of the pixel; needs every sample taken on the image — see README Phase 226)
+- [x] Color Range — Range (the Localized Color Clusters reach, 0–100 percent of the canvas diagonal — see README Phase 226)
+- [x] Color Range — Selection Preview (the read-only `color_range_bits` command drawn as a Grayscale preview, white where selected, in the dialog; the Black Matte, White Matte, and Quick Mask previews are documented scope cuts — see README Phase 226)
+- [x] Color Range — Invert (`select_color_range_with(…, invert)` flips every flag before selecting — see README Phase 226)
+- [x] Color Range — Skin Tones (`ColorRange::SkinTones`, the classic RGB rule R > 95, G > 40, B > 20, spread > 15, R − G > 15, R > G, R > B; the Reds…Magentas hue sectors and Highlights/Midtones/Shadows luma bands ship alongside; Detect Faces is a documented scope cut — see README Phase 226)
 - [x] Select Subject (duplicate of SUBJECT SELECTION in PART II, shipped there — checked here for consistency)
 - [ ] Select Subject — Device Processing
 - [ ] Select Subject — Cloud Processing

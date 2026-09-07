@@ -131,6 +131,24 @@ export type DocumentView = {
   channels: string[];
 };
 
+/** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
+ * Select > Color Range's Select list (serde tagged by `kind`). */
+export type ColorSample = { color: [number, number, number]; position: [number, number] | null };
+export type ColorRangePreset =
+  | "reds"
+  | "yellows"
+  | "greens"
+  | "cyans"
+  | "blues"
+  | "magentas"
+  | "highlights"
+  | "midtones"
+  | "shadows"
+  | "skinTones";
+export type ColorRange =
+  | { kind: "sampled"; samples: ColorSample[]; fuzziness: number; localized: number | null }
+  | { kind: ColorRangePreset };
+
 /** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >
  * Calculations' two sources. */
 export type CalcSource = { layer: number | null; channel: ApplyChannel; invert: boolean };
