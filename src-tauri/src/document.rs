@@ -1384,6 +1384,51 @@ impl Document {
         Ok(())
     }
 
+    /// Moving a selection: shifts the selection outline by `(dx, dy)`
+    /// pixels without touching any layer's pixels — what dragging from
+    /// inside a selection with a marquee tool does in Photoshop, and what
+    /// its arrow keys nudge. A geometric selection whose shifted bounding
+    /// box still fits on the canvas keeps its shape, inversion, and border
+    /// exactly and simply moves; one pushed partly off the canvas is
+    /// rasterised first and moved as a pixel mask, since a clipped ellipse
+    /// is no longer an ellipse — pixels moved off the canvas are dropped
+    /// and nothing comes in from beyond it. A mask selection always moves
+    /// as a mask. Errors when nothing is selected or the move would leave
+    /// nothing selected, leaving the selection intact either way.
+    pub fn move_selection(&mut self, dx: i64, dy: i64) -> Result<(), String> {
+        let (width, height) = (self.width as i64, self.height as i64);
+        let selection = self
+            .selection
+            .as_ref()
+            .ok_or_else(|| "Nothing is selected.".to_string())?;
+        let b = selection.bounds;
+        let (x0, y0) = (b.x0 as i64 + dx, b.y0 as i64 + dy);
+        let (x1, y1) = (b.x1 as i64 + dx, b.y1 as i64 + dy);
+        let fits = x0 >= 0 && y0 >= 0 && x1 <= width && y1 <= height;
+        if selection.shape != SelectionShape::Mask && fits {
+            let selection = self.selection.as_mut().expect("checked above");
+            selection.bounds = Rect {
+                x0: x0 as u32,
+                y0: y0 as u32,
+                x1: x1 as u32,
+                y1: y1 as u32,
+            };
+            return Ok(());
+        }
+        let bits = self.selected_bits()?;
+        let mut moved = vec![false; bits.len()];
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let (px, py) = (idx as i64 % width + dx, idx as i64 / width + dy);
+            if (0..width).contains(&px) && (0..height).contains(&py) {
+                moved[(py * width + px) as usize] = true;
+            }
+        }
+        if !moved.contains(&true) {
+            return Err("That would leave nothing selected.".to_string());
+        }
+        self.set_mask_selection(moved)
+    }
+
     /// Select > Modify > Expand: grow the selected region outward by
     /// `amount` pixels on every side, clamped to the canvas edge. An error
     /// if nothing is selected, or `amount` is zero (Photoshop's own dialog
@@ -26105,6 +26150,120 @@ mod tests {
         doc.set_visible(id, false).unwrap();
         let err = doc.copy_merged().unwrap_err();
         assert!(err.contains("visible"), "{err}");
+    }
+
+    #[test]
+    fn move_selection_shifts_a_geometric_selection_in_place() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_ellipse(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.move_selection(1, 2).unwrap();
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Ellipse);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 1,
+                y0: 2,
+                x1: 3,
+                y1: 4
+            }
+        );
+        doc.move_selection(-1, -2).unwrap();
+        assert_eq!(
+            doc.selection().unwrap().bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn move_selection_keeps_inversion_and_border() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.move_selection(1, 1).unwrap();
+        let s = doc.selection().unwrap();
+        assert!(s.inverted);
+        assert!(s.contains(0.5, 0.5) && !s.contains(1.5, 1.5) && s.contains(3.5, 3.5));
+
+        doc.select_rectangle(0.0, 0.0, 3.0, 3.0).unwrap();
+        doc.border_selection(1).unwrap();
+        doc.move_selection(1, 1).unwrap();
+        let s = doc.selection().unwrap();
+        assert_eq!(s.border, Some(1));
+        assert!(s.contains(1.5, 1.5) && !s.contains(2.5, 2.5) && s.contains(3.5, 3.5));
+        assert!(!s.contains(0.5, 0.5));
+    }
+
+    #[test]
+    fn move_selection_clips_at_the_canvas_edge_as_a_mask() {
+        // The 2x2 at (1, 1) moved right by one would span x 2..4 on a
+        // 3-wide canvas, so it becomes the mask of its surviving column.
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.move_selection(1, 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, false, false],
+                vec![false, false, true],
+                vec![false, false, true]
+            ]
+        );
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Mask);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 2,
+                y0: 1,
+                x1: 3,
+                y1: 3
+            }
+        );
+    }
+
+    #[test]
+    fn move_selection_moves_a_mask_and_drops_what_leaves_the_canvas() {
+        let (mut doc, id) = cornered_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.select_similar(id, 0).unwrap();
+        doc.move_selection(1, 0).unwrap();
+        assert_eq!(
+            selected_grid(&doc),
+            vec![
+                vec![false, true, false],
+                vec![false, false, false],
+                vec![false, true, false]
+            ]
+        );
+    }
+
+    #[test]
+    fn move_selection_errors_when_nothing_is_or_would_be_selected() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc.move_selection(1, 0).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let err = doc.move_selection(3, 0).unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Rectangle);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            }
+        );
+        doc.move_selection(0, 0).unwrap();
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
     #[test]

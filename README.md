@@ -9992,6 +9992,62 @@ hand instead. Every other layer of this project's quality bar
 **1020 Rust tests total** (1015 → 1020, 1013 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 156 — Move Selection
+
+`move_selection(dx, dy)` shifts the selection outline by a pixel offset
+without touching any layer's pixels — what dragging from inside a
+selection with a marquee tool does in Photoshop, and what its arrow
+keys nudge. A geometric selection whose shifted bounding box still fits
+on the canvas keeps its shape, inversion, and border exactly and simply
+moves. One pushed partly past the canvas edge is rasterised first
+(through Phase 151's `selected_bits`) and moved as a pixel mask, because
+a clipped ellipse is no longer an ellipse and the shape-plus-box
+representation cannot say "an ellipse with its right third missing" —
+pixels moved off the canvas are dropped and nothing comes in from
+beyond it, matching Photoshop's own clipping of a selection at the
+canvas edge. A mask selection always moves as a mask. Nothing selected,
+or a move that would leave nothing selected, errors and leaves the
+selection intact. In the frontend the arrow keys nudge the selection by
+1 px (10 px with Shift) whenever a marquee tool is active and something
+is selected — the plain-arrow branch of the keyboard handler that until
+now had nothing to do — and a new **Move Selection…** dialog beside
+Similar takes an exact horizontal and vertical offset. Photoshop's
+drag-to-move gesture on the marquee itself is a documented scope cut,
+as is Transform Selection (next on the list).
+
+**Verified two ways.** Five new `document.rs` tests, every expected
+value hand-derived and the three mask cases reproduced by a
+four-line Python model of the bitmap shift before the Rust tests ran.
+A `2×2` ellipse at the origin of a `4×4` canvas moved by `(1, 2)` is
+still an `Ellipse` with bounds `(1, 2)–(3, 4)`, and `(−1, −2)` brings it
+back. An inverted `2×2` rectangle moved by `(1, 1)` stays inverted —
+`(0, 0)` selected, `(1, 1)` not, `(3, 3)` selected — and a `3×3`
+rectangle with a 1 px border moved by `(1, 1)` keeps `border = 1`, with
+`(1, 1)` and `(3, 3)` on the band, `(2, 2)` in the hole, and `(0, 0)`
+outside. The `2×2` at `(1, 1)` of `ramped_3x3` moved right by one would
+span columns `2..4` on a 3-wide canvas, so it becomes the `Mask` of its
+surviving column, bounds `(2, 1)–(3, 3)`. The four corners of
+`cornered_3x3` (selected via Similar) moved right by one leave exactly
+`(1, 0)` and `(1, 2)`, the right-hand corners having left the canvas.
+Nothing selected errors with "Nothing is selected"; a single selected
+pixel moved three columns off errors with "nothing selected" and stays a
+`Rectangle` at `(0, 0)–(1, 1)`; a `(0, 0)` move is a harmless no-op. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's and the arrow keys' wiring was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1025 Rust tests total** (1020 → 1025, 1018 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

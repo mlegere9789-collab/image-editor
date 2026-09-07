@@ -252,6 +252,9 @@ export default function App() {
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [rotateDegrees, setRotateDegrees] = useState(45);
+  const [showMoveSelectionDialog, setShowMoveSelectionDialog] = useState(false);
+  const [moveSelectionX, setMoveSelectionX] = useState(0);
+  const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
@@ -1110,6 +1113,14 @@ export default function App() {
     await runCommand("rotate", { id: selectedId, degrees: rotateDegrees });
     setShowRotateDialog(false);
   }, [runCommand, selectedId, rotateDegrees]);
+
+  const applyMoveSelection = useCallback(async () => {
+    await runCommand("move_selection", {
+      dx: Math.trunc(moveSelectionX),
+      dy: Math.trunc(moveSelectionY),
+    });
+    setShowMoveSelectionDialog(false);
+  }, [runCommand, moveSelectionX, moveSelectionY]);
 
   const setGeometryField = useCallback((key: keyof typeof geometry, value: number) => {
     setGeometry((settings) => ({ ...settings, [key]: value }));
@@ -2684,7 +2695,25 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!(event.metaKey || event.ctrlKey)) return;
+      if (!(event.metaKey || event.ctrlKey)) {
+        // Arrow keys nudge the selection outline while a marquee tool is
+        // active, as in Photoshop: 1 px, or 10 px with Shift.
+        const marquee = tool === "selectRect" || tool === "selectEllipse";
+        if (!marquee || !hasSelection || busy || isTypingTarget(event.target)) return;
+        const step = event.shiftKey ? 10 : 1;
+        const nudges: Record<string, [number, number]> = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+        };
+        const delta = nudges[event.key];
+        if (delta) {
+          event.preventDefault();
+          void runCommand("move_selection", { dx: delta[0], dy: delta[1] });
+        }
+        return;
+      }
       if (isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
       if (key === "z" && !event.shiftKey) {
@@ -2751,6 +2780,7 @@ export default function App() {
     canPaste,
     pasteClipboard,
     runCommand,
+    tool,
   ]);
 
   useEffect(() => {
@@ -3438,6 +3468,14 @@ export default function App() {
             title="Select > Similar (extend the selection to every pixel anywhere on the layer within the Magic Wand's Tolerance of its colours)"
           >
             Similar
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowMoveSelectionDialog(true)}
+            disabled={busy || !hasSelection}
+            title="Move the selection outline by an exact offset without moving pixels (arrow keys nudge it with a marquee tool active)"
+          >
+            Move Selection…
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
@@ -6231,6 +6269,56 @@ export default function App() {
               </button>
               <button className="button" onClick={applyGeometry} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMoveSelectionDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMoveSelectionDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Move Selection"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Move Selection</h2>
+            <p className="modal__hint">
+              Shifts the selection outline only; pixels stay put. A selection pushed past the
+              canvas edge is clipped there.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Horizontal (px)</span>
+              <input
+                type="number"
+                step={1}
+                value={moveSelectionX}
+                onChange={(event) => setMoveSelectionX(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Vertical (px)</span>
+              <input
+                type="number"
+                step={1}
+                value={moveSelectionY}
+                onChange={(event) => setMoveSelectionY(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMoveSelectionDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyMoveSelection} disabled={busy}>
+                Move
               </button>
             </div>
           </div>

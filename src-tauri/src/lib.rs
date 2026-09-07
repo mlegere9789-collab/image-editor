@@ -470,6 +470,15 @@ fn expand_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot,
     })
 }
 
+/// Move the selection outline by `(dx, dy)` pixels without moving pixels.
+#[tauri::command]
+fn move_selection(state: State<'_, AppState>, dx: i64, dy: i64) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.move_selection(dx, dy)?;
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
 #[tauri::command]
 fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
@@ -3203,6 +3212,7 @@ pub fn run() {
             select_all,
             invert_selection,
             expand_selection,
+            move_selection,
             contract_selection,
             smooth_selection,
             border_selection,

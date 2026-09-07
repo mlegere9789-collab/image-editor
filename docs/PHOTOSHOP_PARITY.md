@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 217.**
+**618 distinct capabilities tracked. Currently shipped: 218.**
 
 ## PART I — EVERY TOOL
 
@@ -315,7 +315,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Selection Brush Tool — Subtract Mode
 - [ ] Selection Brush Tool — Brush Selection
 - [ ] Selection Brush Tool — Circle Selection
-- [ ] Move Selection
+- [x] Move Selection (`move_selection`, shifting the selection outline by a pixel offset without moving pixels — a geometric selection that still fits keeps its shape, inversion, and border; one pushed off the canvas edge, or a pixel mask, moves as a mask with the off-canvas part dropped; arrow keys nudge it by 1 px, Shift+arrow by 10, with a marquee tool active, and a dialog takes an exact offset — see README Phase 156)
 - [ ] Transform Selection
 - [x] Copy
 - [x] Copy Merged (`copy_merged`, Edit > Copy of the on-screen composite — every visible layer flattened with its opacity and blend mode — within the active selection's shape or the whole canvas; hidden layers contribute nothing and an all-hidden document errors — see README Phase 155)
