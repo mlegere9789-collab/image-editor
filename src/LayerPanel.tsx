@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 
-import type { BlendMode, BlendModeInfo, LayerView, MoveDirection } from "./types";
+import type { BlendMode, BlendModeInfo, LayerGroup, LayerView, MoveDirection } from "./types";
 
 type Props = {
   /** Bottom-to-top, as the model stores them. */
   layers: LayerView[];
+  /** Layer groups; a header row is drawn above each group's top member. */
+  groups: LayerGroup[];
   selectedId: number | null;
   blendModes: BlendModeInfo[];
   disabled: boolean;
@@ -12,6 +14,8 @@ type Props = {
   onToggleVisible: (id: number, visible: boolean) => void;
   onToggleLocked: (id: number, locked: boolean) => void;
   onToggleLinked: (id: number, linked: boolean) => void;
+  onGroupVisible: (index: number, visible: boolean) => void;
+  onUngroup: (index: number) => void;
   onOpacity: (id: number, opacity: number) => void;
   /** Called once, when an opacity drag starts, so the whole drag undoes as
    * one step rather than one step per `onOpacity` call it makes. */
@@ -38,6 +42,9 @@ export default function LayerPanel({
   onToggleVisible,
   onToggleLocked,
   onToggleLinked,
+  groups,
+  onGroupVisible,
+  onUngroup,
   onOpacity,
   onOpacityDragStart,
   onBlendMode,
@@ -89,9 +96,36 @@ export default function LayerPanel({
           {topFirst.map((layer) => (
             <li
               key={layer.id}
-              className={`layer${layer.id === selectedId ? " layer--selected" : ""}`}
+              className={`layer${layer.id === selectedId ? " layer--selected" : ""}${
+                groups.some((group) => group.members.includes(layer.id)) ? " layer--grouped" : ""
+              }`}
               onClick={() => onSelect(layer.id)}
             >
+              {groups.map((group, index) =>
+                group.members[group.members.length - 1] === layer.id ? (
+                  <div className="layer__group" key={group.name} onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      className="layer__eye"
+                      checked={group.members.every(
+                        (id) => layers.find((l) => l.id === id)?.visible ?? true,
+                      )}
+                      disabled={disabled}
+                      aria-label={`Show or hide group ${group.name}`}
+                      onChange={(event) => onGroupVisible(index, event.target.checked)}
+                    />
+                    <span className="layer__name">📁 {group.name}</span>
+                    <button
+                      className="button button--quiet"
+                      disabled={disabled}
+                      onClick={() => onUngroup(index)}
+                      title="Ungroup these layers"
+                    >
+                      Ungroup
+                    </button>
+                  </div>
+                ) : null,
+              )}
               <input
                 type="checkbox"
                 className="layer__eye"

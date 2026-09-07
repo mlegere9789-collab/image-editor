@@ -117,6 +117,8 @@ pub struct Document {
     layer_comps: Vec<LayerComp>,
     /// View > New Guide's guides, in placement order, deduplicated.
     guides: Vec<Guide>,
+    /// Layer > Group Layers' groups, in creation order.
+    groups: Vec<LayerGroup>,
 }
 
 /// One layer's recorded state inside a [`LayerComp`].
@@ -133,6 +135,19 @@ pub struct LayerCompState {
 pub struct LayerComp {
     pub name: String,
     pub states: Vec<LayerCompState>,
+}
+
+/// Layer > Group Layers: a named set of layer ids. Groups are metadata
+/// over the flat layer stack — visibility, locking, linking, and moving
+/// can be applied to every member at once — rather than a nested layer
+/// tree; a group composites exactly as its members do (Photoshop's
+/// Pass Through), and a layer belongs to at most one group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerGroup {
+    pub name: String,
+    /// Bottom to top, in stack order.
+    pub members: Vec<LayerId>,
 }
 
 /// Which way a [`Guide`] runs.
@@ -1197,6 +1212,8 @@ pub struct DocumentView {
     pub layer_comps: Vec<String>,
     /// The ruler guides, in placement order.
     pub guides: Vec<Guide>,
+    /// Layer groups, in creation order; members are ids, bottom to top.
+    pub groups: Vec<LayerGroup>,
 }
 
 impl Document {
@@ -1219,6 +1236,7 @@ impl Document {
             notes: Vec::new(),
             layer_comps: Vec::new(),
             guides: Vec::new(),
+            groups: Vec::new(),
         })
     }
 
@@ -1253,7 +1271,124 @@ impl Document {
             notes: self.notes.clone(),
             layer_comps: self.layer_comp_names(),
             guides: self.guides.clone(),
+            groups: self.groups.clone(),
         }
+    }
+
+    /// Layer > Group Layers: puts `ids` (one or more existing layers, none
+    /// already grouped) into a new group called `name`, members kept in
+    /// stack order bottom to top. Returns the group's index. Nesting is a
+    /// documented scope cut.
+    pub fn group_layers(&mut self, ids: &[LayerId], name: &str) -> Result<usize, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A group needs a name.".to_string());
+        }
+        if ids.is_empty() {
+            return Err("A group needs at least one layer.".to_string());
+        }
+        for &id in ids {
+            self.layer(id)?;
+            if self.group_of(id).is_some() {
+                return Err("A layer can only belong to one group.".to_string());
+            }
+        }
+        let members: Vec<LayerId> = self
+            .layers
+            .iter()
+            .map(|layer| layer.id)
+            .filter(|id| ids.contains(id))
+            .collect();
+        self.groups.push(LayerGroup {
+            name: name.to_string(),
+            members,
+        });
+        Ok(self.groups.len() - 1)
+    }
+
+    /// Layer > Ungroup Layers: dissolves group `index`, leaving its layers
+    /// where they are.
+    pub fn ungroup(&mut self, index: usize) -> Result<(), String> {
+        if index >= self.groups.len() {
+            return Err("There is no such group.".to_string());
+        }
+        self.groups.remove(index);
+        Ok(())
+    }
+
+    /// The index of the group layer `id` belongs to, if any.
+    pub fn group_of(&self, id: LayerId) -> Option<usize> {
+        self.groups
+            .iter()
+            .position(|group| group.members.contains(&id))
+    }
+
+    /// Shows or hides every member of group `index` at once.
+    pub fn set_group_visible(&mut self, index: usize, visible: bool) -> Result<(), String> {
+        let members = self.group_members(index)?;
+        for id in members {
+            self.set_visible(id, visible)?;
+        }
+        Ok(())
+    }
+
+    /// Locks or unlocks every member of group `index` at once.
+    pub fn set_group_locked(&mut self, index: usize, locked: bool) -> Result<(), String> {
+        let members = self.group_members(index)?;
+        for id in members {
+            self.set_locked(id, locked)?;
+        }
+        Ok(())
+    }
+
+    /// Moves every member of group `index` by `(dx, dy)` — whole layers, or
+    /// their selected pixels with a selection active — refusing if any
+    /// member is locked. The selection moves once.
+    pub fn move_group(&mut self, index: usize, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        let members = self.group_members(index)?;
+        if dx == 0 && dy == 0 {
+            return Ok(None);
+        }
+        for &id in &members {
+            let layer = self.layer(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+        }
+        let everything = Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        };
+        if self.selection.is_none() {
+            for &id in &members {
+                self.translate(id, dx, dy)?;
+            }
+            return Ok(Some(everything));
+        }
+        let bits = self.selected_bits()?;
+        for &id in &members {
+            self.move_layer_pixels(id, dx, dy, &bits)?;
+        }
+        if self.move_selection(dx as i64, dy as i64).is_err() {
+            self.selection = None;
+        }
+        Ok(Some(everything))
+    }
+
+    /// The Move tool's Auto-Select in Group mode: the group of the layer
+    /// under `(x, y)`, or `None` when that layer is ungrouped or nothing
+    /// is there.
+    pub fn group_at(&self, x: u32, y: u32) -> Option<usize> {
+        self.layer_at(x, y).and_then(|id| self.group_of(id))
+    }
+
+    fn group_members(&self, index: usize) -> Result<Vec<LayerId>, String> {
+        self.groups
+            .get(index)
+            .map(|group| group.members.clone())
+            .ok_or_else(|| "There is no such group.".to_string())
     }
 
     /// View > New Guide: adds a guide at `position` — a pixel boundary from
@@ -8071,6 +8206,11 @@ impl Document {
     pub fn remove_layer(&mut self, id: LayerId) -> Result<(), String> {
         let index = self.index_of(id)?;
         self.layers.remove(index);
+        // A removed layer leaves its group; a group left empty dissolves.
+        for group in &mut self.groups {
+            group.members.retain(|member| *member != id);
+        }
+        self.groups.retain(|group| !group.members.is_empty());
         Ok(())
     }
 
@@ -24868,6 +25008,86 @@ mod tests {
             .unwrap();
         assert_eq!(doc.snap_move(empty, 2, 0, 3).unwrap(), (2, 0));
         assert!(doc.snap_move(mover + 100, 1, 1, 1).is_err());
+    }
+
+    #[test]
+    fn group_layers_keeps_stack_order_and_validates() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        // Listed top-first, stored bottom-first.
+        let index = doc.group_layers(&[blue, red], "Pair").unwrap();
+        assert_eq!(index, 0);
+        assert_eq!(doc.view().groups[0].members, vec![red, blue]);
+        assert_eq!(doc.view().groups[0].name, "Pair");
+        assert_eq!(doc.group_of(red), Some(0));
+        assert_eq!(doc.group_of(green), None);
+        assert!(doc.group_layers(&[green, red], "Again").is_err());
+        assert!(doc.group_layers(&[], "Empty").is_err());
+        assert!(doc.group_layers(&[green], "  ").is_err());
+        assert!(doc.group_layers(&[green + 100], "Ghost").is_err());
+        assert_eq!(doc.view().groups.len(), 1);
+    }
+
+    #[test]
+    fn ungroup_and_layer_removal_dissolve_groups() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        doc.group_layers(&[red, blue], "Pair").unwrap();
+        doc.group_layers(&[green], "Solo").unwrap();
+        doc.ungroup(0).unwrap();
+        assert_eq!(doc.view().groups.len(), 1);
+        assert_eq!(doc.view().groups[0].name, "Solo");
+        assert!(doc.ungroup(5).is_err());
+        doc.remove_layer(green).unwrap();
+        assert!(doc.view().groups.is_empty());
+        doc.group_layers(&[red, blue], "Pair").unwrap();
+        doc.remove_layer(red).unwrap();
+        assert_eq!(doc.view().groups[0].members, vec![blue]);
+    }
+
+    #[test]
+    fn group_visibility_and_lock_apply_to_every_member() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        let g = doc.group_layers(&[red, blue], "Pair").unwrap();
+        doc.set_group_visible(g, false).unwrap();
+        let visible: Vec<bool> = doc.view().layers.iter().map(|l| l.visible).collect();
+        assert_eq!(visible, vec![false, true, false]);
+        doc.set_group_locked(g, true).unwrap();
+        let locked: Vec<bool> = doc.view().layers.iter().map(|l| l.locked).collect();
+        assert_eq!(locked, vec![true, false, true]);
+        assert!(doc.set_locked(green, false).is_ok());
+        assert!(doc.set_group_visible(3, true).is_err());
+    }
+
+    #[test]
+    fn move_group_moves_every_member_and_respects_locks() {
+        let (mut doc, [red, green, blue]) = three_dots();
+        let g = doc.group_layers(&[red, blue], "Pair").unwrap();
+        doc.move_group(g, 2, 1).unwrap();
+        assert_eq!(pixel(&doc, red, 2, 1), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 2, 1), [0, 0, 255, 255]);
+        assert_eq!(pixel(&doc, green, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(doc.move_group(g, 0, 0).unwrap(), None);
+        doc.set_locked(blue, true).unwrap();
+        assert!(doc.move_group(g, 1, 0).is_err());
+        assert_eq!(pixel(&doc, red, 2, 1), [255, 0, 0, 255]);
+        // With a selection, only the selected pixels travel, once.
+        doc.set_locked(blue, false).unwrap();
+        doc.select_rectangle(2.0, 1.0, 3.0, 2.0).unwrap();
+        doc.move_group(g, -2, -1).unwrap();
+        assert_eq!(pixel(&doc, red, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(pixel(&doc, blue, 0, 0), [0, 0, 255, 255]);
+        assert_eq!(selected_pixels(&doc), vec![(0, 0)]);
+    }
+
+    #[test]
+    fn group_at_finds_the_group_under_the_pointer() {
+        let (mut doc, [red, _green, blue]) = three_dots();
+        assert_eq!(doc.group_at(0, 0), None);
+        let g = doc.group_layers(&[red, blue], "Pair").unwrap();
+        assert_eq!(doc.group_at(0, 0), Some(g));
+        doc.set_visible(blue, false).unwrap();
+        // Green is on top now and ungrouped.
+        assert_eq!(doc.group_at(0, 0), None);
+        assert_eq!(doc.group_at(2, 2), None);
     }
 
     #[test]

@@ -362,6 +362,10 @@ export default function App() {
   // Smart Guides: snap a Move drop onto guides, other layers' edges, and
   // the canvas edge when it lands within this many pixels of one.
   const [smartGuides, setSmartGuides] = useState(true);
+  // Auto-Select in Group mode: a press picks up the whole group under the
+  // pointer, and the drag moves the group.
+  const [moveAutoSelectGroup, setMoveAutoSelectGroup] = useState(false);
+  const moveGroupIndex = useRef<number | null>(null);
   const [hoverBounds, setHoverBounds] = useState<{
     x0: number;
     y0: number;
@@ -3620,13 +3624,20 @@ export default function App() {
         if (!canPaint || (isPatch && !hasSelection)) return;
         event.currentTarget.setPointerCapture(event.pointerId);
         moveStart.current = toDocPoint(event, document);
+        moveGroupIndex.current = null;
         if (isMove && moveAutoSelect) {
           // Photoshop's Auto-Select: the press picks the topmost layer with
-          // an opaque pixel under the pointer, then the drag moves it.
+          // an opaque pixel under the pointer, then the drag moves it — or,
+          // in Group mode, the whole group that layer belongs to.
           const [px, py] = moveStart.current;
-          void invoke<number | null>("layer_at", { x: Math.floor(px), y: Math.floor(py) })
-            .then((id) => {
+          const x = Math.floor(px);
+          const y = Math.floor(py);
+          void invoke<number | null>("layer_at", { x, y })
+            .then(async (id) => {
               if (id !== null) setSelectedId(id);
+              if (moveAutoSelectGroup) {
+                moveGroupIndex.current = await invoke<number | null>("group_at", { x, y });
+              }
             })
             .catch((err) => setError(String(err)));
         }
@@ -3759,6 +3770,7 @@ export default function App() {
       checkpoint,
       applyStroke,
       moveAutoSelect,
+      moveAutoSelectGroup,
       levelsEyedropper,
       selectedId,
       runCommand,
@@ -4002,7 +4014,11 @@ export default function App() {
           if (dx !== 0 || dy !== 0) {
             const command =
               tool === "contentAwareMove" ? "content_aware_move" : isPatch ? "patch" : "move_pixels";
-            if (isMove && smartGuides) {
+            const groupIndex = moveGroupIndex.current;
+            moveGroupIndex.current = null;
+            if (isMove && groupIndex !== null) {
+              void runCommand("move_group", { index: groupIndex, dx, dy });
+            } else if (isMove && smartGuides) {
               const id = selectedId;
               void invoke<[number, number]>("snap_move", { id, dx, dy, threshold: 8 })
                 .then(([sx, sy]) => runCommand(command, { id, dx: sx, dy: sy }))
@@ -4878,6 +4894,23 @@ export default function App() {
             title="View > New Guide / New Guide Layout / Clear Guides"
           >
             Guides…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (!document || selectedId === null) return;
+              const ids = Array.from(
+                new Set([selectedId, ...document.layers.filter((l) => l.linked).map((l) => l.id)]),
+              );
+              void runCommand("group_layers", {
+                ids,
+                name: `Group ${document.groups.length + 1}`,
+              });
+            }}
+            disabled={busy || !canPaint}
+            title="Layer > Group Layers: group the selected layer together with every linked layer"
+          >
+            Group Layers
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -6403,6 +6436,17 @@ export default function App() {
                 onChange={(event) => setMoveAutoSelect(event.target.checked)}
               />
               Auto-Select
+            </label>
+          )}
+          {tool === "move" && moveAutoSelect && (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={moveAutoSelectGroup}
+                disabled={!canPaint}
+                onChange={(event) => setMoveAutoSelectGroup(event.target.checked)}
+              />
+              Group
             </label>
           )}
           {tool === "move" && (
@@ -16178,6 +16222,9 @@ export default function App() {
           }
           onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
           onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
+          groups={document?.groups ?? []}
+          onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
+          onUngroup={(index) => void runCommand("ungroup", { index })}
           onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
           onOpacityDragStart={checkpoint}
           onBlendMode={(id, blendMode: BlendMode) =>

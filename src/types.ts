@@ -77,7 +77,12 @@ export type DocumentView = {
   layerComps: string[];
   /** Ruler guides, in placement order. */
   guides: Guide[];
+  /** Layer groups, in creation order; members are layer ids, bottom to top. */
+  groups: LayerGroup[];
 };
+
+/** Mirrors `LayerGroup` in src-tauri/src/document.rs. */
+export type LayerGroup = { name: string; members: number[] };
 
 /** Mirrors `GuideOrientation` / `Guide` in src-tauri/src/document.rs: a
  * guide line on a pixel boundary, `position` pixels from the top or left. */

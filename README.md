@@ -13013,6 +13013,61 @@ run build`) is fully green.
 **1320 Rust tests total** (1315 → 1320, 1313 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 216 — Layer groups
+
+The document gains Layer > Group Layers as metadata over the flat
+stack: a `LayerGroup` is a name and a list of member ids kept in
+stack order, bottom to top, and a layer belongs to at most one group.
+`group_layers(ids, name)` validates the name, the ids, and that none
+is already grouped; `ungroup(index)` dissolves a group and leaves its
+layers where they are; `set_group_visible` and `set_group_locked`
+apply to every member at once; `move_group(index, dx, dy)` moves every
+member — whole layers, or their selected pixels with a selection
+active, the selection moving once — refusing if any member is locked,
+through the same `translate` and `move_layer_pixels` the Move tool and
+Link Layers use; and `group_at(x, y)` is Auto-Select in Group mode,
+the group of the layer under the pointer. Removing a layer takes it
+out of its group, and a group left empty dissolves. A group composites
+exactly as its members do (Photoshop's Pass Through); nesting and
+group-level opacity or blend modes are documented scope cuts. The
+layer panel draws a header row — folder icon, name, a visibility
+checkbox for the whole group, and Ungroup — above each group's top
+member; a **Group Layers** button groups the selected layer together
+with every linked layer as `Group N`; and the Move tool's Auto-Select
+gains a **Group** option that picks up the whole group under the
+pointer and moves it through `move_group`. The document view carries
+`groups`.
+
+**Verified two ways.** Five new `document.rs` tests on the three-dot
+fixture, every outcome reasoned out by hand. Grouping blue and red,
+listed top-first, stores them bottom-first as `[red, blue]` under the
+given name at index `0`; a second group that reuses red errors, as do
+an empty list, a blank name, and an unknown id. Ungrouping the first
+of two groups leaves the second; removing green dissolves its solo
+group; removing red leaves `[blue]` in the pair. Hiding the pair hides
+red and blue but not green (`[false, true, false]`), and locking it
+locks the same two. Moving the pair by `(2, 1)` moves red's and blue's
+dots and leaves green's, a zero move returns `None`, a locked member
+blocks the move with the dots in place, and with one pixel selected
+only that pixel of each member moves and the selection moves once.
+The origin belongs to no group until the pair exists, then to it, and
+to none again once blue is hidden and the ungrouped green is on top.
+All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-three: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The panel and Move-tool
+wiring was reviewed by hand instead. Every other layer of this
+project's quality bar (hand-verified Rust tests, `cargo fmt`, `cargo
+clippy --all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**1325 Rust tests total** (1320 → 1325, 1318 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

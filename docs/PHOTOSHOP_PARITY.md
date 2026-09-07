@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 322.**
+**618 distinct capabilities tracked. Currently shipped: 324.**
 
 ## PART I — EVERY TOOL
 
@@ -91,7 +91,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 ## PART III — EVERY MAJOR LAYER SYSTEM
 
 - [x] PIXEL LAYER (already true since Phase 1 — every `Layer` in this app *is* a document-sized RGBA8 pixel buffer; there is no other layer type yet to distinguish it from)
-- [ ] GROUP
+- [x] GROUP (`group_layers` / `ungroup`, named groups of layer ids over the flat stack — visibility, locking, and moving applied to every member at once, a removed layer leaving its group, an empty group dissolving — drawn as a header row in the layer panel; nesting and group-level opacity or blend modes are documented scope cuts — see README Phase 216)
 - [ ] TEXT LAYER
 - [ ] SHAPE LAYER
 - [ ] ADJUSTMENT LAYER
@@ -331,7 +331,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Move Tool — Hover Layer Bounds (`layer_bounds`, the bounding box of a layer's opaque pixels, outlined while the Move tool hovers over that layer — see README Phase 214)
 - [x] Layer Auto-Select (`layer_at`, the topmost visible layer with an opaque pixel under the pointer, picked on press when the Move tool's Auto-Select is on — see README Phase 214)
 - [x] Layer Auto-Select — Layer (the Layer mode of Auto-Select; Group mode is a documented scope cut in this groupless layer model — see README Phase 214)
-- [ ] Layer Auto-Select — Group
+- [x] Layer Auto-Select — Group (`group_at`, the group of the layer under the pointer, picked on press with the Move tool's Group option so the drag moves the whole group — see README Phase 216)
 - [ ] Show Transform Controls
 - [x] Select > Modify > Border (duplicate of MODIFY > BORDER in PART II, already shipped there — checked here for consistency)
 - [x] Select > Modify > Smooth (duplicate of MODIFY > SMOOTH in PART II, already shipped there — checked here for consistency)

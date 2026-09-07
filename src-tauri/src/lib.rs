@@ -2498,6 +2498,74 @@ fn snap_move(
     document.snap_move(id, dx, dy, threshold)
 }
 
+/// Layer > Group Layers: put `ids` into a new group called `name`.
+#[tauri::command]
+fn group_layers(
+    state: State<'_, AppState>,
+    ids: Vec<LayerId>,
+    name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.group_layers(&ids, &name)?;
+        Ok(None)
+    })
+}
+
+/// Layer > Ungroup Layers for group `index`.
+#[tauri::command]
+fn ungroup(state: State<'_, AppState>, index: usize) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.ungroup(index)?;
+        Ok(None)
+    })
+}
+
+/// Show or hide every member of group `index`.
+#[tauri::command]
+fn set_group_visible(
+    state: State<'_, AppState>,
+    index: usize,
+    visible: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_group_visible(index, visible)?;
+        Ok(None)
+    })
+}
+
+/// Lock or unlock every member of group `index`.
+#[tauri::command]
+fn set_group_locked(
+    state: State<'_, AppState>,
+    index: usize,
+    locked: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_group_locked(index, locked)?;
+        Ok(None)
+    })
+}
+
+/// Move every member of group `index` by `(dx, dy)`.
+#[tauri::command]
+fn move_group(
+    state: State<'_, AppState>,
+    index: usize,
+    dx: i32,
+    dy: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.move_group(index, dx, dy))
+}
+
+/// Move tool Auto-Select, Group mode: the group of the layer under `(x, y)`.
+/// Read-only.
+#[tauri::command]
+fn group_at(state: State<'_, AppState>, x: u32, y: u32) -> Result<Option<usize>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    Ok(document.group_at(x, y))
+}
+
 /// View > New Guide.
 #[tauri::command]
 fn add_guide(
@@ -4268,6 +4336,12 @@ pub fn run() {
             remove_background,
             mask_all_objects,
             layer_at,
+            group_layers,
+            ungroup,
+            set_group_visible,
+            set_group_locked,
+            move_group,
+            group_at,
             snap_move,
             layer_bounds,
             add_guide,
