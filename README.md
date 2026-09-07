@@ -13380,6 +13380,51 @@ by hand instead. Every other layer of this project's quality bar
 **1355 Rust tests total** (1350 → 1355, 1348 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 223 — Apply Image > Channel
+
+Apply Image gains its Channel list. An `ApplyChannel` is RGB, Red,
+Green, Blue, or Transparency, and its `view(pixel)` is how the source
+pixel is seen before anything else happens: unchanged for RGB; `[v, v,
+v, a]` for one colour channel `v`, the source's own alpha kept, so a
+transparent source pixel still applies nothing; and `[a, a, a, 255]`
+for Transparency — the alpha as an opaque grey covering the whole
+canvas, as Photoshop's Transparency channel is, so a transparent
+source pixel applies as opaque black. `apply_image_with` takes the
+channel before the blend and views every source pixel through it, after
+which Invert, the blend mode or arithmetic, opacity, and Preserve
+Transparency compose exactly as before; `apply_image` passes RGB. The
+`apply_image` command takes a `channel`, and the dialog gains a Channel
+select between Source and Blending. Alpha channels as sources and
+applying into a single target channel are documented scope cuts, this
+project having no channel model beyond the four bytes of a pixel.
+
+**Verified two ways.** Five new `document.rs` tests, the Multiply
+bytes first computed in Python emulating `f32`. On the 1×1 target
+`[100, 200, 30]` over the source `[50, 100, 240]`, the Red, Green, and
+Blue channels apply as the greys `50`, `100`, and `240`, the source
+untouched, and RGB is the source itself. A source at alpha `128`
+beside a fully transparent pixel applies through Transparency as `128`
+and `0` grey, both opaque, but through Red as the half mix `[75, 125,
+40]` and nothing at all. Red inverted applies as `205`. Red through
+Multiply gives `[20, 39, 6]` and through Add at scale `2` `[75, 125,
+40]`. The merged composite's Green channel is the opaque target's own
+`200`, its Transparency opaque white, and with the target hidden the
+source's `100`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and seventy:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1360 Rust tests total** (1355 → 1360, 1353 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

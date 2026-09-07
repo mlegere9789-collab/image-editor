@@ -219,6 +219,35 @@ impl Adjustment {
     }
 }
 
+/// Apply Image's Channel list for an RGB source: the composite, one
+/// colour channel applied as a grey, or the source's transparency — its
+/// alpha as an opaque grey covering the whole canvas, as Photoshop's
+/// Transparency channel does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ApplyChannel {
+    Rgb,
+    Red,
+    Green,
+    Blue,
+    Transparency,
+}
+
+impl ApplyChannel {
+    /// The source pixel as Apply Image sees it through this channel:
+    /// unchanged for RGB; `[v, v, v, a]` for one colour channel `v`, the
+    /// source's own alpha kept; `[a, a, a, 255]` for Transparency.
+    pub fn view(self, [r, g, b, a]: [u8; 4]) -> [u8; 4] {
+        match self {
+            ApplyChannel::Rgb => [r, g, b, a],
+            ApplyChannel::Red => [r, r, r, a],
+            ApplyChannel::Green => [g, g, g, a],
+            ApplyChannel::Blue => [b, b, b, a],
+            ApplyChannel::Transparency => [a, a, a, 255],
+        }
+    }
+}
+
 /// Apply Image's Blending list: any of the twelve layer blend modes, or
 /// the two channel-arithmetic modes only Apply Image and Calculations
 /// offer. Add and Subtract work in Photoshop's byte terms — `(target +
@@ -4027,6 +4056,7 @@ impl Document {
         self.apply_image_with(
             target,
             source,
+            ApplyChannel::Rgb,
             ApplyBlend::Mode { mode: blend },
             opacity,
             invert,
@@ -4034,17 +4064,24 @@ impl Document {
         )
     }
 
-    /// [`Self::apply_image`] with the full Blending list — a layer blend
-    /// mode, or Add / Subtract with their Scale and Offset. The arithmetic
-    /// replaces the blend-mode step only: alpha, opacity, Invert, and
-    /// Preserve Transparency compose around it exactly as before, so at
-    /// full opacity over an opaque target the channel is the arithmetic
-    /// result itself. Errors additionally for a scale outside `1..=2` or
-    /// an offset outside `-255..=255`.
+    /// [`Self::apply_image`] with the full Channel and Blending lists. The
+    /// source is first seen through `channel` ([`ApplyChannel::view`]):
+    /// one colour channel becomes a grey with the source's own alpha,
+    /// Transparency an opaque grey of its alpha — so a transparent source
+    /// pixel applies as opaque black through Transparency but as nothing
+    /// through a colour channel. `blend` is a layer blend mode, or Add /
+    /// Subtract with their Scale and Offset; the arithmetic replaces the
+    /// blend-mode step only. Alpha, opacity, Invert, and Preserve
+    /// Transparency compose around both exactly as before, so at full
+    /// opacity over an opaque target the channel is the blend result
+    /// itself. Errors additionally for a scale outside `1..=2` or an
+    /// offset outside `-255..=255`.
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_image_with(
         &mut self,
         target: LayerId,
         source: Option<LayerId>,
+        channel: ApplyChannel,
         blend: ApplyBlend,
         opacity: u8,
         invert: bool,
@@ -4062,7 +4099,12 @@ impl Document {
         let doc_width = self.width as usize;
         self.filter_pixels(target, |dest, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
-            let src = &source_pixels[base..base + CHANNELS];
+            let src = channel.view([
+                source_pixels[base],
+                source_pixels[base + 1],
+                source_pixels[base + 2],
+                source_pixels[base + 3],
+            ]);
             let dst = &dest[base..base + CHANNELS];
             let mut out = [dst[0], dst[1], dst[2], dst[3]];
             let source_alpha = to_unit(src[3]) * opacity;
@@ -35427,6 +35469,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Add {
                 scale: 1.0,
                 offset: 0,
@@ -35441,6 +35484,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Add {
                 scale: 2.0,
                 offset: 0,
@@ -35462,6 +35506,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Add {
                 scale: 1.5,
                 offset: -20,
@@ -35482,6 +35527,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Subtract {
                 scale: 1.0,
                 offset: 0,
@@ -35496,6 +35542,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Subtract {
                 scale: 1.0,
                 offset: 128,
@@ -35510,6 +35557,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Subtract {
                 scale: 2.0,
                 offset: 64,
@@ -35531,6 +35579,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Add {
                 scale: 1.0,
                 offset: 0,
@@ -35548,6 +35597,7 @@ mod tests {
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Add {
                 scale: 1.0,
                 offset: 0,
@@ -35586,13 +35636,22 @@ mod tests {
             },
         ] {
             assert!(doc
-                .apply_image_with(target, Some(source), blend, 100, false, false)
+                .apply_image_with(
+                    target,
+                    Some(source),
+                    ApplyChannel::Rgb,
+                    blend,
+                    100,
+                    false,
+                    false
+                )
                 .is_err());
             assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 255]);
         }
         doc.apply_image_with(
             target,
             Some(source),
+            ApplyChannel::Rgb,
             ApplyBlend::Mode {
                 mode: BlendMode::Multiply,
             },
@@ -35608,6 +35667,170 @@ mod tests {
         assert_eq!(pixel(&doc, target, 0, 0), pixel(&other, target, 0, 0));
         // Multiply: 100·50/255 → 20, 200·100/255 → 78, 30·240/255 → 28.
         assert_eq!(pixel(&doc, target, 0, 0), [20, 78, 28, 255]);
+    }
+
+    fn apply_channel(doc: &mut Document, source: LayerId, target: LayerId, channel: ApplyChannel) {
+        doc.apply_image_with(
+            target,
+            Some(source),
+            channel,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn apply_image_applies_one_colour_channel_as_a_grey() {
+        for (channel, value) in [
+            (ApplyChannel::Red, 50),
+            (ApplyChannel::Green, 100),
+            (ApplyChannel::Blue, 240),
+        ] {
+            let (mut doc, source, target) = arithmetic_pair();
+            apply_channel(&mut doc, source, target, channel);
+            assert_eq!(pixel(&doc, target, 0, 0), [value, value, value, 255]);
+            assert_eq!(pixel(&doc, source, 0, 0), [50, 100, 240, 255]);
+        }
+        let (mut doc, source, target) = arithmetic_pair();
+        apply_channel(&mut doc, source, target, ApplyChannel::Rgb);
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
+    }
+
+    #[test]
+    fn apply_image_transparency_channel_is_an_opaque_grey_of_the_alpha() {
+        // A 2×1 source: alpha 128 at x=0, fully transparent at x=1.
+        let mut doc = Document::new(2, 1).unwrap();
+        let source = doc
+            .add_layer("source", &[50, 100, 240, 128, 7, 7, 7, 0], 2, 1)
+            .unwrap();
+        let target = doc
+            .add_layer("target", &[100, 200, 30, 255, 100, 200, 30, 255], 2, 1)
+            .unwrap();
+        apply_channel(&mut doc, source, target, ApplyChannel::Transparency);
+        assert_eq!(pixel(&doc, target, 0, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, target, 1, 0), [0, 0, 0, 255]);
+        // Through a colour channel the transparent pixel applies nothing,
+        // and the half-transparent one mixes: (50 + 100) / 2 → 75.
+        let mut doc = Document::new(2, 1).unwrap();
+        let source = doc
+            .add_layer("source", &[50, 100, 240, 128, 7, 7, 7, 0], 2, 1)
+            .unwrap();
+        let target = doc
+            .add_layer("target", &[100, 200, 30, 255, 100, 200, 30, 255], 2, 1)
+            .unwrap();
+        apply_channel(&mut doc, source, target, ApplyChannel::Red);
+        assert_eq!(pixel(&doc, target, 0, 0), [75, 125, 40, 255]);
+        assert_eq!(pixel(&doc, target, 1, 0), [100, 200, 30, 255]);
+    }
+
+    #[test]
+    fn apply_image_channel_then_invert() {
+        // Red 50 as a grey, inverted: 205.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Red,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            100,
+            true,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [205, 205, 205, 255]);
+    }
+
+    #[test]
+    fn apply_image_channel_feeds_the_blend() {
+        // Red 50 as a grey through Multiply: 100·50/255 → 20, 200·50/255
+        // → 39, 30·50/255 → 6. Through Add at scale 2: 75, 125, 40.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Red,
+            ApplyBlend::Mode {
+                mode: BlendMode::Multiply,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [20, 39, 6, 255]);
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Red,
+            ApplyBlend::Add {
+                scale: 2.0,
+                offset: 0,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [75, 125, 40, 255]);
+    }
+
+    #[test]
+    fn apply_image_channel_of_the_merged_composite() {
+        // The merged image is the opaque target itself, so its Green
+        // channel, 200, applies as a grey; its Transparency is opaque
+        // white. Hiding the target leaves the source: Green 100.
+        let (mut doc, source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            None,
+            ApplyChannel::Green,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [200, 200, 200, 255]);
+        let (mut doc, _source, target) = arithmetic_pair();
+        doc.apply_image_with(
+            target,
+            None,
+            ApplyChannel::Transparency,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [255, 255, 255, 255]);
+        let (mut doc, _source, target) = arithmetic_pair();
+        doc.set_visible(target, false).unwrap();
+        doc.apply_image_with(
+            target,
+            None,
+            ApplyChannel::Green,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            100,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 100, 100, 255]);
+        let _ = source;
     }
 
     #[test]

@@ -7,6 +7,7 @@ import LayerPanel from "./LayerPanel";
 import type {
   Adjustment,
   ApplyBlend,
+  ApplyChannel,
   BlendMode,
   BlendModeInfo,
   DocumentView,
@@ -318,6 +319,7 @@ export default function App() {
   // Apply Image's two arithmetic blends beyond the layer modes, with their
   // Scale and Offset; "mode" means `applyImageBlend` applies.
   const [applyImageArithmetic, setApplyImageArithmetic] = useState<ApplyBlend["kind"]>("mode");
+  const [applyImageChannel, setApplyImageChannel] = useState<ApplyChannel>("rgb");
   const [applyImageScale, setApplyImageScale] = useState(1);
   const [applyImageOffset, setApplyImageOffset] = useState(0);
   const [applyImageInvert, setApplyImageInvert] = useState(false);
@@ -1324,6 +1326,7 @@ export default function App() {
     await runCommand("apply_image", {
       target: selectedId,
       source: applyImageSource === "merged" ? null : applyImageSource,
+      channel: applyImageChannel,
       blend,
       opacity: Math.round(applyImageOpacity),
       invert: applyImageInvert,
@@ -1334,6 +1337,7 @@ export default function App() {
     runCommand,
     selectedId,
     applyImageSource,
+    applyImageChannel,
     applyImageBlend,
     applyImageArithmetic,
     applyImageScale,
@@ -8424,6 +8428,19 @@ export default function App() {
                     {layer.name}
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Channel</span>
+              <select
+                value={applyImageChannel}
+                onChange={(event) => setApplyImageChannel(event.target.value as ApplyChannel)}
+              >
+                <option value="rgb">RGB</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+                <option value="transparency">Transparency</option>
               </select>
             </label>
             <label className="control control--row">

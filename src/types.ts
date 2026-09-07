@@ -40,6 +40,11 @@ export type LayerView = {
   fill: Fill | null;
 };
 
+/** Mirrors `ApplyChannel` in src-tauri/src/document.rs: Apply Image's
+ * Channel list — the composite, one colour channel as a grey, or the
+ * source's transparency as an opaque grey. */
+export type ApplyChannel = "rgb" | "red" | "green" | "blue" | "transparency";
+
 /** Mirrors `ApplyBlend` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`): Apply Image's Blending list — a layer blend mode, or
  * Add / Subtract with Scale (1–2) and Offset (−255..255). */

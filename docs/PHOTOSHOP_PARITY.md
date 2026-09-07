@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 330.**
+**618 distinct capabilities tracked. Currently shipped: 331.**
 
 ## PART I — EVERY TOOL
 
@@ -363,7 +363,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Apply Image — Source (a Source drop-down of every layer plus Merged — see README Phase 159)
 - [x] Apply Image — Source Layer (any layer, including the target itself, applied from a snapshot — see README Phase 159)
 - [x] Apply Image — Merged (the composite of every visible layer, via `composite::flatten` — see README Phase 159)
-- [ ] Apply Image — Source Channel
+- [x] Apply Image — Source Channel (`ApplyChannel::{Rgb, Red, Green, Blue, Transparency}` in `apply_image_with`: the source seen as its composite, one colour channel as a grey keeping the source's alpha, or its alpha as an opaque grey, before Invert, the blend, and opacity; alpha channels and single-channel targets are documented scope cuts — see README Phase 223)
 - [x] Apply Image — Invert (the source's colour inverted before blending, alpha untouched — see README Phase 159)
 - [x] Apply Image — Blending (all twelve layer blend modes — see README Phase 159)
 - [x] Apply Image — Opacity (0–100 percent scaling the source's alpha — see README Phase 159)
