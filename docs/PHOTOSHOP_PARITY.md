@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 250.**
+**618 distinct capabilities tracked. Currently shipped: 251.**
 
 ## PART I — EVERY TOOL
 
@@ -34,7 +34,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] PAINT BUCKET TOOL
 - [x] BRUSH TOOL
 - [x] PENCIL TOOL
-- [ ] COLOR REPLACEMENT TOOL
+- [x] COLOR REPLACEMENT TOOL (`Stroke::ColorReplace { color, tolerance }`, Color mode with Once sampling: each covered pixel within Tolerance of the colour under the stroke's start takes the brush colour's hue and saturation at its own lightness, mixed by coverage, alpha untouched; Continuous/Background Swatch sampling, the Hue/Saturation/Luminosity modes, Limits, and Anti-alias are documented scope cuts — see README Phase 179)
 - [ ] MIXER BRUSH TOOL
 - [x] HISTORY BRUSH TOOL (`Stroke::History { source }`, a brush that paints each covered pixel back from a remembered earlier state of the layer — the whole document cloned by Set Source, kept outside undo like the clipboard — composited by coverage times the sample's alpha; choosing any panel history state or snapshot is a documented scope cut — see README Phase 177)
 - [ ] ART HISTORY BRUSH TOOL

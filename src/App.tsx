@@ -3010,6 +3010,15 @@ export default function App() {
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
         });
+      } else if (tool === "colorReplace") {
+        const [r, g, b] = hexToRgb(brushColor);
+        void runCommand("color_replace_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          color: [r, g, b],
+          tolerance: magicWandTolerance,
+        });
       } else if (tool === "smudge") {
         void runCommand("smudge_stroke", {
           id: selectedId,
@@ -3053,7 +3062,17 @@ export default function App() {
         });
       }
     },
-    [runCommand, selectedId, tool, brushColor, brushOpacity, brushSize, spongeSaturate, symmetry],
+    [
+      runCommand,
+      selectedId,
+      tool,
+      brushColor,
+      brushOpacity,
+      brushSize,
+      spongeSaturate,
+      symmetry,
+      magicWandTolerance,
+    ],
   );
 
   const canPaint = document !== null && selectedId !== null;
@@ -4092,6 +4111,15 @@ export default function App() {
             title="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
           >
             Smudge
+          </button>
+          <button
+            className={`button button--quiet${tool === "colorReplace" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "colorReplace"}
+            onClick={() => setTool("colorReplace")}
+            title="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
+          >
+            Color Replacement
           </button>
           <button
             className={`button button--quiet${tool === "redEye" ? " button--active" : ""}`}
@@ -5444,6 +5472,19 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {tool === "colorReplace" && (
+            <label className="tools__slider">
+              Tolerance
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={magicWandTolerance}
+                disabled={!canPaint}
+                onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
+              />
+            </label>
           )}
           {tool === "historyBrush" && (
             <>

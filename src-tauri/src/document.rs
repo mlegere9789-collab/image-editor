@@ -7044,6 +7044,15 @@ impl Document {
                 | Stroke::Smudge { .. }
         )
         .then(|| layer.pixels.clone());
+        // Color Replacement samples the colour to replace under the stroke's
+        // first point (Photoshop's "Once" sampling), clamped to the canvas.
+        let replace_sample: [u8; 3] = {
+            let (px, py) = points[0];
+            let sx = (px.floor().max(0.0) as usize).min(width as usize - 1);
+            let sy = (py.floor().max(0.0) as usize).min(height as usize - 1);
+            let at = (sy * width as usize + sx) * CHANNELS;
+            [layer.pixels[at], layer.pixels[at + 1], layer.pixels[at + 2]]
+        };
         // Smudge pulls from one segment step behind the stroke's direction.
         let smudge_offset = match points {
             [.., a, b] => ((a.0 - b.0).round() as i32, (a.1 - b.1).round() as i32),
@@ -7140,6 +7149,26 @@ impl Document {
                         let mut color = [0u8; CHANNELS];
                         color.copy_from_slice(&source[base..base + CHANNELS]);
                         (color, to_unit(color[3]) * c)
+                    }
+                    Stroke::ColorReplace { color, tolerance } => {
+                        if layer.pixels[base + 3] == 0 {
+                            continue;
+                        }
+                        let px = &mut layer.pixels[base..base + 3];
+                        let within = px
+                            .iter()
+                            .zip(replace_sample.iter())
+                            .all(|(&a, &b)| a.abs_diff(b) <= tolerance);
+                        if !within {
+                            continue;
+                        }
+                        let (_, _, l) = rgb_to_hsl(px[0], px[1], px[2]);
+                        let (h, s, _) = rgb_to_hsl(color[0], color[1], color[2]);
+                        let target = hsl_to_rgb(h, s, l);
+                        for (slot, t) in px.iter_mut().zip([target.0, target.1, target.2]) {
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(t), c));
+                        }
+                        continue;
                     }
                     Stroke::Smudge { strength } => {
                         if smudge_offset == (0, 0) {
@@ -12526,6 +12555,16 @@ pub enum Stroke<'a> {
     /// a pixel whose source lies off the canvas is left alone. Photoshop's
     /// Finger Painting and Sample All Layers are documented scope cuts.
     Smudge { strength: u8 },
+    /// The Color Replacement tool in its default Color mode: each covered
+    /// pixel whose RGB is within `tolerance` (per channel) of the pixel
+    /// under the stroke's first point takes the brush `color`'s hue and
+    /// saturation at its own lightness — through the same `rgb_to_hsl` /
+    /// `hsl_to_rgb` pair the Sponge uses — mixed in by the brush's
+    /// coverage; alpha is untouched and fully transparent pixels are
+    /// skipped. Photoshop's Sampling: Once; its Continuous and Background
+    /// Swatch sampling, Hue/Saturation/Luminosity modes, Limits, and
+    /// Anti-alias are documented scope cuts.
+    ColorReplace { color: [u8; 3], tolerance: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -19502,6 +19541,101 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(0.5, 1.5), (1.5, 1.5)], 0.5, smudge(100))
+            .is_err());
+    }
+
+    fn replace(color: [u8; 3], tolerance: u8) -> Stroke<'static> {
+        Stroke::ColorReplace { color, tolerance }
+    }
+
+    #[test]
+    fn color_replacement_keeps_lightness_and_takes_the_brush_hue() {
+        // (100, 200, 100) is HSL (120, 0.476, 0.588); pure red's hue and
+        // saturation at that lightness is (255, 45, 45).
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 45, 45, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([0, 0, 255], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [45, 45, 255, 255]);
+    }
+
+    #[test]
+    fn color_replacement_only_touches_colours_near_the_first_point_sample() {
+        // A blue pixel at (2, 2) is far from the green sampled under the
+        // stroke's start, so tolerance 32 leaves it alone.
+        let mut pixels = solid(3, 3, [100, 200, 100, 255]);
+        pixels[32..36].copy_from_slice(&[50, 50, 200, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.stroke(id, &[(0.5, 0.5), (2.5, 2.5)], 3.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2), [50, 50, 200, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 45, 45, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 255]);
+        // Tolerance 255 replaces everything, the blue at its own lightness
+        // (a radius-3 dot at the centre covers the corner fully).
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 255))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2), [250, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_replacement_scales_with_coverage_and_colours_greys() {
+        // The 0.7929 edge coverage mixes (100, 200, 100) toward (255, 45,
+        // 45): (223, 77, 56). A grey takes the brush hue at its lightness.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 100, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [223, 77, 56, 255]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [150, 150, 150, 255]), 3, 3)
+            .unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 255]);
+    }
+
+    #[test]
+    fn color_replacement_leaves_alpha_and_transparent_pixels_alone() {
+        let mut pixels = solid(3, 3, [100, 200, 100, 255]);
+        pixels[3] = 0;
+        pixels[(3 + 1) * 4 + 3] = 128;
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 3).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 100, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1), [255, 45, 45, 128]);
+    }
+
+    #[test]
+    fn color_replacement_respects_the_selection_and_a_locked_layer() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [100, 200, 100, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 45, 45, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [100, 200, 100, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.5, 1.5)], 3.0, replace([255, 0, 0], 32))
             .is_err());
     }
 

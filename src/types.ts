@@ -133,6 +133,7 @@ export type Tool =
   | "blur"
   | "sharpen"
   | "smudge"
+  | "colorReplace"
   | "redEye"
   | "ruler"
   | "colorSampler"

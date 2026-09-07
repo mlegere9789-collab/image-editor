@@ -11136,6 +11136,58 @@ instead. Every other layer of this project's quality bar
 **1135 Rust tests total** (1130 → 1135, 1128 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 179 — Color Replacement tool
+
+`Stroke::ColorReplace { color, tolerance }` is the Color Replacement
+tool in its default Color mode with Sampling: Once. Before painting,
+the stroke samples the pixel under its first point (clamped to the
+canvas); then each pixel the brush covers whose RGB is within
+`tolerance` of that sample, per channel, takes the brush colour's hue
+and saturation at its own lightness — through the same `rgb_to_hsl` /
+`hsl_to_rgb` pair the Sponge uses — mixed in by the brush's coverage.
+Alpha is untouched and fully transparent pixels are skipped. Greys,
+having no hue, take the brush's hue at their lightness, as Photoshop's
+tool colours them. Continuous and Background Swatch sampling, the Hue,
+Saturation, and Luminosity modes, the Limits options, and Anti-alias
+are documented scope cuts. A new **Color Replacement** tool button
+sits beside Smudge; it uses the brush colour swatch and shows a
+Tolerance slider (shared with the Magic Wand's) in the tool options.
+
+**Verified two ways.** Five new `document.rs` tests, every byte
+cross-checked in Python emulating the `f32` HSL round trip and `lerp`.
+A solid `(100, 200, 100)` — HSL `(120°, 0.476, 0.588)` — painted with
+pure red becomes `(255, 45, 45)` everywhere covered (red's hue and
+saturation at that lightness), and with pure blue `(45, 45, 255)`. With
+a blue `(50, 50, 200)` pixel in the corner, a stroke starting on green
+at tolerance 32 recolours the greens and leaves the blue alone;
+tolerance 255 then recolours the blue too, to `(250, 0, 0)` at its own
+lightness. The `0.7929` edge coverage mixes `(100, 200, 100)` toward
+`(255, 45, 45)` to `(223, 77, 56)`, and a grey `150` takes the red hue
+at its lightness, `(255, 45, 45)`. A transparent pixel is untouched and
+an alpha-128 pixel keeps its alpha while recolouring. A one-pixel
+selection confines the stroke and a locked layer errors. Four of the
+five passed on the first run: the tolerance-255 case had placed its
+radius-3 dot at the corner, whose far corner it covers only at `0.67`,
+so the blue came back part-way mixed (`184, 16, 66`) — the dot was
+moved to the centre, where it covers every pixel fully; the code was
+right. (The compiler also caught a borrow of `self.width` while the
+layer was mutably borrowed in the first-point sampling, fixed by
+reading the already-captured locals.)
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-six:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new tool's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1140 Rust tests total** (1135 → 1140, 1133 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

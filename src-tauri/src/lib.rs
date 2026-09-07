@@ -2046,6 +2046,28 @@ fn smudge_stroke(
     })
 }
 
+/// Color Replacement tool: recolour pixels near the colour under the
+/// stroke's start along `points` on layer `id` with `color`'s hue and
+/// saturation. See [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn color_replace_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    color: [u8; 3],
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(
+            id,
+            &points,
+            radius,
+            Stroke::ColorReplace { color, tolerance },
+        )
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3525,6 +3547,7 @@ pub fn run() {
             blur_stroke,
             sharpen_stroke,
             smudge_stroke,
+            color_replace_stroke,
             clone_stroke,
             set_history_source,
             history_stroke,
