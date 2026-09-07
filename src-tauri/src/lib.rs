@@ -3292,6 +3292,118 @@ fn set_adjustment(
     })
 }
 
+/// The Pen Tool: appends an anchor at `(x, y)` to the current path.
+#[tauri::command]
+fn pen_add_anchor(
+    state: State<'_, AppState>,
+    x: f32,
+    y: f32,
+    handle: Option<(f32, f32)>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.pen_add_anchor((x, y), handle)?;
+        Ok(None)
+    })
+}
+
+/// Closes the current path.
+#[tauri::command]
+fn close_current_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.close_current_path()?;
+        Ok(None)
+    })
+}
+
+/// Discards the current path.
+#[tauri::command]
+fn clear_path(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.clear_path();
+        Ok(None)
+    })
+}
+
+/// The Freeform Pen Tool: replaces the current path with the traced points.
+#[tauri::command]
+fn freeform_pen(state: State<'_, AppState>, points: Vec<(f32, f32)>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.freeform_pen(&points)?;
+        Ok(None)
+    })
+}
+
+/// The Curvature Pen Tool: appends a smoothly-tangent anchor at `(x, y)`.
+#[tauri::command]
+fn curvature_pen_add_anchor(
+    state: State<'_, AppState>,
+    x: f32,
+    y: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.curvature_pen_add_anchor((x, y))?;
+        Ok(None)
+    })
+}
+
+/// The Add Anchor Point Tool.
+#[tauri::command]
+fn add_anchor_point(
+    state: State<'_, AppState>,
+    segment: usize,
+    t: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_anchor_point(segment, t)?;
+        Ok(None)
+    })
+}
+
+/// The Delete Anchor Point Tool.
+#[tauri::command]
+fn delete_anchor_point(state: State<'_, AppState>, index: usize) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_anchor_point(index)?;
+        Ok(None)
+    })
+}
+
+/// The Convert Point Tool.
+#[tauri::command]
+fn convert_anchor_point(
+    state: State<'_, AppState>,
+    index: usize,
+    handle: Option<(f32, f32)>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_anchor_point(index, handle)?;
+        Ok(None)
+    })
+}
+
+/// The Path Selection Tool.
+#[tauri::command]
+fn move_path(state: State<'_, AppState>, dx: f32, dy: f32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.move_path(dx, dy)?;
+        Ok(None)
+    })
+}
+
+/// The Direct Selection Tool.
+#[tauri::command]
+fn move_anchor(
+    state: State<'_, AppState>,
+    index: usize,
+    dx: f32,
+    dy: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.move_anchor(index, dx, dy)?;
+        Ok(None)
+    })
+}
+
 /// The Type tools: a new text layer set from `text`.
 #[tauri::command]
 fn add_text_layer(
@@ -5339,6 +5451,16 @@ pub fn run() {
             set_adjustment,
             add_fill_layer,
             add_text_layer,
+            pen_add_anchor,
+            close_current_path,
+            clear_path,
+            freeform_pen,
+            curvature_pen_add_anchor,
+            add_anchor_point,
+            delete_anchor_point,
+            convert_anchor_point,
+            move_path,
+            move_anchor,
             set_text,
             add_shape_layer,
             set_shape,

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 473.**
+**618 distinct capabilities tracked. Currently shipped: 481.**
 
 ## PART I — EVERY TOOL
 
@@ -44,16 +44,16 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] BLUR TOOL (`Stroke::Blur { strength }`, a brush that moves each covered pixel toward the radius-1 box blur of the pre-stroke layer by Strength × coverage, all four channels, never smearing its own output; Sample All Layers and the blend-mode option are documented scope cuts — see README Phase 163)
 - [x] SHARPEN TOOL (`Stroke::Sharpen { strength }`, Blur's opposite: a brush that moves each covered pixel's RGB away from the radius-1 box blur of the pre-stroke layer by Strength × coverage — the unsharp-mask formula Filter > Sharpen uses — alpha untouched — see README Phase 164)
 - [x] SMUDGE TOOL (`Stroke::Smudge { strength }`, a brush that pulls each covered pixel toward the pre-stroke pixel one segment step behind it along the drag by Strength × coverage, carrying the trailing colour forward; a directionless dot smudges nothing; Finger Painting and Sample All Layers are documented scope cuts — see README Phase 178)
-- [ ] PEN TOOL
-- [ ] FREEFORM PEN TOOL
-- [ ] CURVATURE PEN TOOL
-- [ ] ADD ANCHOR POINT TOOL
-- [ ] DELETE ANCHOR POINT TOOL
-- [ ] CONVERT POINT TOOL
+- [x] PEN TOOL (`pen_add_anchor` / `close_current_path`, the current work path's anchors: a plain click a straight corner, a click-drag a smooth one, its in-handle the mirror of the dragged out-handle through the point — see README Phase 259)
+- [x] FREEFORM PEN TOOL (`freeform_pen`, one corner anchor per sampled point of the drag, duplicates dropped as a Lasso trail's are; curve fitting from the freehand trace is a documented scope cut — see README Phase 259)
+- [x] CURVATURE PEN TOOL (`curvature_pen_add_anchor`, every interior anchor's handles recomputed as a Catmull-Rom-to-Bézier tangent through its neighbours on every click, so a curve stays smooth with no dragging; a documented approximation of Photoshop's unpublished algorithm — see README Phase 259)
+- [x] ADD ANCHOR POINT TOOL (`add_anchor_point`, a plain lerp on a straight segment or full De Casteljau subdivision of a curved one's cubic Bézier, so the curve's shape does not change — see README Phase 259)
+- [x] DELETE ANCHOR POINT TOOL (`delete_anchor_point`, removes one anchor, refusing to leave the path with fewer than two — see README Phase 259)
+- [x] CONVERT POINT TOOL (`convert_anchor_point`, a click clears an anchor's handles to a corner and a drag sets a mirrored smooth pair, the same construction the Pen Tool's drag makes — see README Phase 259)
 - [x] HORIZONTAL TYPE TOOL (`add_text_layer` / `set_text` with `vertical: false`: glyphs of the built-in 5×7 face advance `6 · size` across and lines drop `8 · size`, in the brush colour; a scalable outline font, kerning, and on-canvas typing are documented scope cuts — see README Phase 253)
 - [x] VERTICAL TYPE TOOL (the same with `vertical: true`: glyphs stack `8 · size` down and each new line starts a column `6 · size` to the right — see README Phase 253)
-- [ ] PATH SELECTION TOOL
-- [ ] DIRECT SELECTION TOOL
+- [x] PATH SELECTION TOOL (`move_path`, translates every anchor and handle of the current path together — see README Phase 259)
+- [x] DIRECT SELECTION TOOL (`move_anchor`, translates one anchor and its handles rigidly, leaving the rest of the path in place — see README Phase 259)
 - [x] RECTANGLE TOOL (`Document::draw_rectangle`, Pixels mode: an optionally rounded box painted by the pixel-centre rule with a flat fill and/or an inside stroke of a given width, clipped to the canvas and confined by the selection; Shape and Path modes, anti-aliasing, and Center/Outside stroke alignment are documented scope cuts — see README Phase 187)
 - [x] ELLIPSE TOOL (`Document::draw_ellipse`, Pixels mode: the ellipse inscribed in the dragged box painted by the pixel-centre rule with a flat fill and/or an inside stroke, through the same `draw_shape` painter as the Rectangle tool; Shape and Path modes, anti-aliasing, and Center/Outside stroke alignment are documented scope cuts — see README Phase 188)
 - [x] TRIANGLE TOOL (`Document::draw_triangle`, Pixels mode: the isosceles triangle fitted to the dragged box, apex at the top centre and base along the bottom, filled by the even-odd pixel-centre rule through the shared polygon painter; the rounded-corner option, stroke, anti-aliasing, and Shape/Path modes are documented scope cuts — see README Phase 192)

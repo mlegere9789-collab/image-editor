@@ -144,6 +144,8 @@ pub struct Document {
     pattern: Option<Pattern>,
     /// The brush tip Edit > Define Brush Preset captured, if any.
     brush_tip: Option<BrushTip>,
+    /// The Pen tool family's current work path — see [`Path`].
+    current_path: Option<Path>,
     /// Select > Save Selection's named selections, in the order first
     /// saved — Photoshop stores these as alpha channels; here they are the
     /// selections themselves (a mask's bitmap shared through its `Arc`),
@@ -1386,6 +1388,31 @@ pub struct BrushTip {
     pub width: u32,
     pub height: u32,
     pub values: Vec<f32>,
+}
+
+/// One anchor of a Bézier path — Photoshop's path point: its position
+/// and optional handles for the curve entering (`in_handle`) and leaving
+/// (`out_handle`) it, both absolute pixel coordinates; `None` on a side
+/// is a straight corner there.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathAnchor {
+    pub point: (f32, f32),
+    pub in_handle: Option<(f32, f32)>,
+    pub out_handle: Option<(f32, f32)>,
+}
+
+/// A Bézier path — Photoshop's current work path: an ordered list of
+/// anchors and whether the last one connects back to the first. The Pen,
+/// Freeform Pen, Curvature Pen, Add/Delete Anchor Point, Convert Point,
+/// Path Selection, and Direct Selection tools all read and write this one
+/// path; Photoshop's Paths panel of several named, saved paths is a
+/// documented scope cut.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Path {
+    pub anchors: Vec<PathAnchor>,
+    pub closed: bool,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -3220,6 +3247,8 @@ pub struct DocumentView {
     pub duotone: Vec<Ink>,
     /// Whether Edit > Define Brush Preset has captured a tip.
     pub has_brush_tip: bool,
+    /// The Pen tool family's current path, if any.
+    pub current_path: Option<Path>,
 }
 
 impl Document {
@@ -3238,6 +3267,7 @@ impl Document {
             last_transform: None,
             pattern: None,
             brush_tip: None,
+            current_path: None,
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
@@ -3298,6 +3328,7 @@ impl Document {
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
             has_brush_tip: self.brush_tip.is_some(),
+            current_path: self.current_path.clone(),
         }
     }
 
@@ -7407,6 +7438,305 @@ impl Document {
         Ok(touched)
     }
 
+    /// The current work path — see [`Path`]. `None` when no path has been
+    /// started.
+    pub fn current_path(&self) -> Option<&Path> {
+        self.current_path.as_ref()
+    }
+
+    /// The Pen tools' "start a new path": discards the current one.
+    pub fn clear_path(&mut self) {
+        self.current_path = None;
+    }
+
+    /// The Pen Tool: appends an anchor at `point` to the current path,
+    /// starting one if there isn't one. A plain click (`out_handle:
+    /// None`) is a straight corner; a click-drag (`out_handle: Some`)
+    /// makes the anchor smooth, mirroring the dragged handle through the
+    /// point to build the incoming handle — `in_handle = 2 · point −
+    /// out_handle` — the same symmetric drag Photoshop's Pen makes.
+    /// [`Self::close_current_path`] finishes it. Errors for a non-finite
+    /// point or handle.
+    pub fn pen_add_anchor(
+        &mut self,
+        point: (f32, f32),
+        out_handle: Option<(f32, f32)>,
+    ) -> Result<(), String> {
+        if !(point.0.is_finite() && point.1.is_finite()) {
+            return Err("Path coordinates must be finite numbers.".to_string());
+        }
+        if let Some(h) = out_handle {
+            if !(h.0.is_finite() && h.1.is_finite()) {
+                return Err("Path coordinates must be finite numbers.".to_string());
+            }
+        }
+        let in_handle = out_handle.map(|h| (2.0 * point.0 - h.0, 2.0 * point.1 - h.1));
+        let path = self.current_path.get_or_insert_with(|| Path {
+            anchors: Vec::new(),
+            closed: false,
+        });
+        path.anchors.push(PathAnchor {
+            point,
+            in_handle,
+            out_handle,
+        });
+        Ok(())
+    }
+
+    /// Closes the current path — the Pen Tool's click back on its first
+    /// anchor. Errors with fewer than three anchors, or no path.
+    pub fn close_current_path(&mut self) -> Result<(), String> {
+        let path = self
+            .current_path
+            .as_mut()
+            .ok_or_else(|| "No path to close.".to_string())?;
+        if path.anchors.len() < 3 {
+            return Err("A path needs at least three anchors to close.".to_string());
+        }
+        path.closed = true;
+        Ok(())
+    }
+
+    /// The Freeform Pen Tool: replaces the current path with one corner
+    /// anchor per point of `points` (a repeated point dropped, as a Lasso
+    /// trail's are), open. Photoshop's curve fitting from the freehand
+    /// drag is a documented scope cut: every sampled point becomes its
+    /// own straight-cornered anchor. Errors for fewer than two distinct
+    /// points or a non-finite one.
+    pub fn freeform_pen(&mut self, points: &[(f32, f32)]) -> Result<(), String> {
+        if points.iter().any(|p| !(p.0.is_finite() && p.1.is_finite())) {
+            return Err("Path coordinates must be finite numbers.".to_string());
+        }
+        let mut distinct: Vec<(f32, f32)> = Vec::with_capacity(points.len());
+        for &point in points {
+            if distinct.last() != Some(&point) {
+                distinct.push(point);
+            }
+        }
+        if distinct.len() < 2 {
+            return Err("The Freeform Pen needs at least two points.".to_string());
+        }
+        self.current_path = Some(Path {
+            anchors: distinct
+                .into_iter()
+                .map(|point| PathAnchor {
+                    point,
+                    in_handle: None,
+                    out_handle: None,
+                })
+                .collect(),
+            closed: false,
+        });
+        Ok(())
+    }
+
+    /// The Curvature Pen Tool: appends a plain anchor at `point` to the
+    /// current path (starting one if there isn't one), then recomputes
+    /// every interior anchor's handles as a smooth tangent through its
+    /// neighbours — the classic Catmull-Rom-to-Bézier conversion, `offset
+    /// = (next − previous) / 6`, `out_handle = point + offset`,
+    /// `in_handle = point − offset` — so the curve stays smooth as points
+    /// are added with no dragging; the two open ends stay plain corners.
+    /// A documented approximation, since Photoshop's own Curvature Pen
+    /// algorithm is unpublished. Errors for a non-finite point.
+    pub fn curvature_pen_add_anchor(&mut self, point: (f32, f32)) -> Result<(), String> {
+        if !(point.0.is_finite() && point.1.is_finite()) {
+            return Err("Path coordinates must be finite numbers.".to_string());
+        }
+        let path = self.current_path.get_or_insert_with(|| Path {
+            anchors: Vec::new(),
+            closed: false,
+        });
+        path.anchors.push(PathAnchor {
+            point,
+            in_handle: None,
+            out_handle: None,
+        });
+        self.recompute_curvature_handles();
+        Ok(())
+    }
+
+    fn recompute_curvature_handles(&mut self) {
+        let Some(path) = self.current_path.as_mut() else {
+            return;
+        };
+        let n = path.anchors.len();
+        let points: Vec<(f32, f32)> = path.anchors.iter().map(|a| a.point).collect();
+        for i in 0..n {
+            let (prev, next) = if path.closed && n > 2 {
+                (points[(i + n - 1) % n], points[(i + 1) % n])
+            } else if i == 0 || i == n - 1 {
+                path.anchors[i].in_handle = None;
+                path.anchors[i].out_handle = None;
+                continue;
+            } else {
+                (points[i - 1], points[i + 1])
+            };
+            let offset = ((next.0 - prev.0) / 6.0, (next.1 - prev.1) / 6.0);
+            let point = points[i];
+            path.anchors[i].out_handle = Some((point.0 + offset.0, point.1 + offset.1));
+            path.anchors[i].in_handle = Some((point.0 - offset.0, point.1 - offset.1));
+        }
+    }
+
+    /// The Add Anchor Point Tool: inserts a new anchor at parameter `t`
+    /// (`0` at its first end, `1` at its second, exclusive) of
+    /// `segment`'s curve — segment `i` runs from anchor `i` to anchor `i
+    /// + 1` (or back to `0` on a closed path's last segment). A segment
+    /// with no handle on either end is split by a plain straight-line
+    /// interpolation, leaving both new segments straight corners; a
+    /// segment with a handle is split by De Casteljau subdivision of its
+    /// cubic Bézier, the same construction giving both new halves their
+    /// handles, so the curve's shape does not change. Errors for a `t`
+    /// outside `0..1`, an unknown segment, or no path.
+    pub fn add_anchor_point(&mut self, segment: usize, t: f32) -> Result<(), String> {
+        let path = self
+            .current_path
+            .as_ref()
+            .ok_or_else(|| "No path to add an anchor to.".to_string())?;
+        if !(t.is_finite() && t > 0.0 && t < 1.0) {
+            return Err("Add Anchor Point's position must be between 0 and 1.".to_string());
+        }
+        let n = path.anchors.len();
+        let seg_count = if path.closed { n } else { n - 1 };
+        if segment >= seg_count {
+            return Err("No such segment index on this path.".to_string());
+        }
+        let a_idx = segment;
+        let b_idx = (segment + 1) % n;
+        let a = path.anchors[a_idx];
+        let b = path.anchors[b_idx];
+        let lerp = |p: (f32, f32), q: (f32, f32)| (p.0 + (q.0 - p.0) * t, p.1 + (q.1 - p.1) * t);
+        let (new_anchor, a_out, b_in) = if a.out_handle.is_none() && b.in_handle.is_none() {
+            let point = lerp(a.point, b.point);
+            (
+                PathAnchor {
+                    point,
+                    in_handle: None,
+                    out_handle: None,
+                },
+                None,
+                None,
+            )
+        } else {
+            let p1 = a.out_handle.unwrap_or(a.point);
+            let p2 = b.in_handle.unwrap_or(b.point);
+            let q1 = lerp(a.point, p1);
+            let q2 = lerp(p1, p2);
+            let q3 = lerp(p2, b.point);
+            let r1 = lerp(q1, q2);
+            let r2 = lerp(q2, q3);
+            let s = lerp(r1, r2);
+            let a_out = (q1 != a.point).then_some(q1);
+            let b_in = (q3 != b.point).then_some(q3);
+            let in_h = (r1 != s).then_some(r1);
+            let out_h = (r2 != s).then_some(r2);
+            (
+                PathAnchor {
+                    point: s,
+                    in_handle: in_h,
+                    out_handle: out_h,
+                },
+                a_out,
+                b_in,
+            )
+        };
+        let path = self.current_path.as_mut().expect("checked above");
+        path.anchors[a_idx].out_handle = a_out;
+        path.anchors[b_idx].in_handle = b_in;
+        path.anchors.insert(a_idx + 1, new_anchor);
+        Ok(())
+    }
+
+    /// The Delete Anchor Point Tool: removes anchor `index`. Errors when
+    /// removing it would leave fewer than two anchors, for an unknown
+    /// index, or no path.
+    pub fn delete_anchor_point(&mut self, index: usize) -> Result<(), String> {
+        let path = self
+            .current_path
+            .as_mut()
+            .ok_or_else(|| "No path to delete an anchor from.".to_string())?;
+        if index >= path.anchors.len() {
+            return Err("No anchor at that index.".to_string());
+        }
+        if path.anchors.len() <= 2 {
+            return Err("A path needs at least two anchors.".to_string());
+        }
+        path.anchors.remove(index);
+        Ok(())
+    }
+
+    /// The Convert Point Tool: with `handle: None`, clears anchor
+    /// `index`'s handles, making it a corner; with `handle: Some(h)`,
+    /// sets its out-handle to `h` and mirrors it through the anchor point
+    /// into the in-handle, making it smooth — the same drag
+    /// [`Self::pen_add_anchor`] makes. Errors for a non-finite handle, an
+    /// unknown index, or no path.
+    pub fn convert_anchor_point(
+        &mut self,
+        index: usize,
+        handle: Option<(f32, f32)>,
+    ) -> Result<(), String> {
+        if let Some(h) = handle {
+            if !(h.0.is_finite() && h.1.is_finite()) {
+                return Err("Path coordinates must be finite numbers.".to_string());
+            }
+        }
+        let path = self
+            .current_path
+            .as_mut()
+            .ok_or_else(|| "No path to convert.".to_string())?;
+        let anchor = path
+            .anchors
+            .get_mut(index)
+            .ok_or_else(|| "No anchor at that index.".to_string())?;
+        anchor.out_handle = handle;
+        anchor.in_handle = handle.map(|h| (2.0 * anchor.point.0 - h.0, 2.0 * anchor.point.1 - h.1));
+        Ok(())
+    }
+
+    /// The Path Selection Tool: moves the whole current path by `(dx,
+    /// dy)` — every anchor's point and any handles it has. Errors for a
+    /// non-finite offset or no path.
+    pub fn move_path(&mut self, dx: f32, dy: f32) -> Result<(), String> {
+        if !(dx.is_finite() && dy.is_finite()) {
+            return Err("The move must be a finite number of pixels.".to_string());
+        }
+        let path = self
+            .current_path
+            .as_mut()
+            .ok_or_else(|| "No path to move.".to_string())?;
+        for anchor in &mut path.anchors {
+            anchor.point = (anchor.point.0 + dx, anchor.point.1 + dy);
+            anchor.in_handle = anchor.in_handle.map(|h| (h.0 + dx, h.1 + dy));
+            anchor.out_handle = anchor.out_handle.map(|h| (h.0 + dx, h.1 + dy));
+        }
+        Ok(())
+    }
+
+    /// The Direct Selection Tool: moves one anchor of the current path —
+    /// point `index`, and its handles, rigidly — by `(dx, dy)`. Dragging
+    /// one handle alone, breaking a smooth point's symmetry, is a
+    /// documented scope cut. Errors for a non-finite offset, an unknown
+    /// index, or no path.
+    pub fn move_anchor(&mut self, index: usize, dx: f32, dy: f32) -> Result<(), String> {
+        if !(dx.is_finite() && dy.is_finite()) {
+            return Err("The move must be a finite number of pixels.".to_string());
+        }
+        let path = self
+            .current_path
+            .as_mut()
+            .ok_or_else(|| "No path to move.".to_string())?;
+        let anchor = path
+            .anchors
+            .get_mut(index)
+            .ok_or_else(|| "No anchor at that index.".to_string())?;
+        anchor.point = (anchor.point.0 + dx, anchor.point.1 + dy);
+        anchor.in_handle = anchor.in_handle.map(|h| (h.0 + dx, h.1 + dy));
+        anchor.out_handle = anchor.out_handle.map(|h| (h.0 + dx, h.1 + dy));
+        Ok(())
+    }
+
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
     /// Selection: gives layer `id` a mask built from `source`, replacing
     /// any mask it had. The selection variants need a selection.
@@ -7713,6 +8043,7 @@ impl Document {
         self.spots.clear();
         self.count_marks.clear();
         self.notes.clear();
+        self.current_path = None;
         // A guide is a boundary line, so it turns with the picture: a
         // vertical one at x = c becomes horizontal at y = c clockwise (or
         // at old_width − c counter-clockwise), and a horizontal one at
@@ -7782,6 +8113,7 @@ impl Document {
         self.spots.clear();
         self.count_marks.clear();
         self.notes.clear();
+        self.current_path = None;
         // Guides ride along with the pixels they sit between; those left
         // outside the crop are dropped.
         self.guides = self
@@ -48366,5 +48698,160 @@ mod tests {
             .tip_stroke(id, &[(2.5, 2.5)], [255, 0, 0, 255], 1)
             .unwrap_err()
             .contains("locked"));
+    }
+
+    fn close(a: (f32, f32), b: (f32, f32)) -> bool {
+        (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4
+    }
+
+    #[test]
+    fn pen_tool_builds_corners_and_smooth_anchors_and_closes_the_path() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 10.0), Some((15.0, 10.0)))
+            .unwrap();
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors.len(), 3);
+        assert_eq!(path.anchors[0].in_handle, None);
+        assert_eq!(path.anchors[0].out_handle, None);
+        assert_eq!(path.anchors[2].out_handle, Some((15.0, 10.0)));
+        // The in-handle mirrors the out-handle about the anchor point.
+        assert_eq!(path.anchors[2].in_handle, Some((5.0, 10.0)));
+        assert!(!path.closed);
+        // Closing needs at least three anchors and errors on a NaN point.
+        let mut two = Document::new(20, 20).unwrap();
+        two.pen_add_anchor((0.0, 0.0), None).unwrap();
+        two.pen_add_anchor((10.0, 0.0), None).unwrap();
+        assert!(two.close_current_path().unwrap_err().contains("three"));
+        assert!(doc
+            .pen_add_anchor((f32::NAN, 0.0), None)
+            .unwrap_err()
+            .contains("finite"));
+        doc.close_current_path().unwrap();
+        assert!(doc.current_path().unwrap().closed);
+    }
+
+    #[test]
+    fn freeform_pen_traces_a_polyline_of_corner_anchors() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.freeform_pen(&[(0.0, 0.0), (5.0, 5.0), (5.0, 5.0), (10.0, 0.0)])
+            .unwrap();
+        let path = doc.current_path().unwrap();
+        // A repeated point is dropped, as the Lasso trail does.
+        assert_eq!(path.anchors.len(), 3);
+        assert!(path
+            .anchors
+            .iter()
+            .all(|a| a.in_handle.is_none() && a.out_handle.is_none()));
+        assert_eq!(path.anchors[1].point, (5.0, 5.0));
+        assert!(!path.closed);
+        assert!(doc.freeform_pen(&[(0.0, 0.0)]).unwrap_err().contains("two"));
+        assert!(doc
+            .freeform_pen(&[(0.0, 0.0), (f32::NAN, 1.0)])
+            .unwrap_err()
+            .contains("finite"));
+    }
+
+    #[test]
+    fn curvature_pen_gives_interior_anchors_smooth_tangents_and_endpoints_corners() {
+        let mut doc = Document::new(20, 20).unwrap();
+        for point in [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)] {
+            doc.curvature_pen_add_anchor(point).unwrap();
+        }
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors[0].in_handle, None);
+        assert_eq!(path.anchors[0].out_handle, None);
+        assert_eq!(path.anchors[3].in_handle, None);
+        assert_eq!(path.anchors[3].out_handle, None);
+        // Anchor 1's tangent is (anchor2 - anchor0) / 6 = (1.667, 1.667).
+        assert!(close(
+            path.anchors[1].out_handle.unwrap(),
+            (11.6667, 1.6667)
+        ));
+        assert!(close(path.anchors[1].in_handle.unwrap(), (8.3333, -1.6667)));
+        assert!(close(
+            path.anchors[2].out_handle.unwrap(),
+            (8.3333, 11.6667)
+        ));
+        assert!(close(path.anchors[2].in_handle.unwrap(), (11.6667, 8.3333)));
+    }
+
+    #[test]
+    fn add_and_delete_anchor_point_subdivide_and_remove() {
+        // A straight segment splits by a plain lerp and stays straight.
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.add_anchor_point(0, 0.5).unwrap();
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors.len(), 3);
+        assert_eq!(path.anchors[1].point, (5.0, 0.0));
+        assert_eq!(path.anchors[1].in_handle, None);
+        assert_eq!(path.anchors[1].out_handle, None);
+        assert_eq!(path.anchors[0].out_handle, None);
+        assert_eq!(path.anchors[2].in_handle, None);
+        // A curved segment (a symmetric "U") splits by De Casteljau.
+        let mut curved = Document::new(30, 30).unwrap();
+        curved
+            .pen_add_anchor((0.0, 0.0), Some((0.0, 10.0)))
+            .unwrap();
+        curved.pen_add_anchor((20.0, 0.0), None).unwrap();
+        // Give anchor 1 (20, 0) an in-handle by converting it.
+        curved.convert_anchor_point(1, Some((20.0, -10.0))).unwrap();
+        curved.add_anchor_point(0, 0.5).unwrap();
+        let path = curved.current_path().unwrap();
+        assert_eq!(path.anchors[0].out_handle, Some((0.0, 5.0)));
+        assert_eq!(path.anchors[1].point, (10.0, 7.5));
+        assert_eq!(path.anchors[1].in_handle, Some((5.0, 7.5)));
+        assert_eq!(path.anchors[1].out_handle, Some((15.0, 7.5)));
+        assert_eq!(path.anchors[2].in_handle, Some((20.0, 5.0)));
+        assert!(doc
+            .add_anchor_point(5, 0.5)
+            .unwrap_err()
+            .contains("segment"));
+        assert!(doc
+            .add_anchor_point(0, 1.5)
+            .unwrap_err()
+            .contains("between"));
+        // Delete Anchor Point removes one and refuses to go below two.
+        doc.delete_anchor_point(1).unwrap();
+        assert_eq!(doc.current_path().unwrap().anchors.len(), 2);
+        assert!(doc.delete_anchor_point(0).unwrap_err().contains("two"));
+        assert!(doc.delete_anchor_point(9).unwrap_err().contains("anchor"));
+    }
+
+    #[test]
+    fn convert_path_and_direct_selection_edit_the_path_in_place() {
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.convert_anchor_point(0, Some((5.0, 5.0))).unwrap();
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors[0].out_handle, Some((5.0, 5.0)));
+        assert_eq!(path.anchors[0].in_handle, Some((-5.0, -5.0)));
+        doc.convert_anchor_point(0, None).unwrap();
+        assert_eq!(doc.current_path().unwrap().anchors[0].out_handle, None);
+        assert_eq!(doc.current_path().unwrap().anchors[0].in_handle, None);
+        // Path Selection moves every anchor and handle together.
+        doc.convert_anchor_point(0, Some((5.0, 5.0))).unwrap();
+        doc.move_path(2.0, 3.0).unwrap();
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors[0].point, (2.0, 3.0));
+        assert_eq!(path.anchors[0].out_handle, Some((7.0, 8.0)));
+        assert_eq!(path.anchors[1].point, (12.0, 3.0));
+        // Direct Selection moves only the one anchor, handles included.
+        doc.move_anchor(1, -1.0, 1.0).unwrap();
+        let path = doc.current_path().unwrap();
+        assert_eq!(path.anchors[1].point, (11.0, 4.0));
+        assert_eq!(path.anchors[0].point, (2.0, 3.0));
+        assert!(doc
+            .convert_anchor_point(9, None)
+            .unwrap_err()
+            .contains("anchor"));
+        assert!(doc.move_path(f32::NAN, 0.0).unwrap_err().contains("finite"));
+        assert!(doc.move_anchor(9, 0.0, 0.0).unwrap_err().contains("anchor"));
+        let mut none = Document::new(4, 4).unwrap();
+        assert!(none.move_path(1.0, 1.0).unwrap_err().contains("path"));
     }
 }

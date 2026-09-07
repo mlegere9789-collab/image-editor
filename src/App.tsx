@@ -36,6 +36,7 @@ import type {
   ShapeLayer,
   ShapeSpec,
   ArtStyle,
+  PathData,
   WarpMesh,
   WarpStyle,
   PuppetMesh,
@@ -162,6 +163,74 @@ function polygonPoints(
     const angle = start + (Math.PI * k) / (count / 2);
     return [centre[0] + r * Math.cos(angle), centre[1] + r * Math.sin(angle)];
   });
+}
+
+/** The index of the anchor of `path` nearest to `p` (straight-line
+ * distance, always some anchor when the path has any), or `null` for an
+ * empty path — Delete Anchor Point, Convert Point, and Direct Selection's
+ * hit test. */
+function nearestPathAnchor(path: PathData, p: [number, number]): number | null {
+  if (path.anchors.length === 0) return null;
+  let best = 0;
+  let bestDist = Infinity;
+  path.anchors.forEach((anchor, i) => {
+    const d = Math.hypot(anchor.point[0] - p[0], anchor.point[1] - p[1]);
+    if (d < bestDist) {
+      bestDist = d;
+      best = i;
+    }
+  });
+  return best;
+}
+
+/** The segment of `path` nearest to `p`, and how far along it (`0..1`) —
+ * Add Anchor Point's hit test. Hit-tested against the straight line
+ * between each segment's two anchor points rather than its true curve, a
+ * documented simplification. `null` when the path has no segment. */
+function nearestPathSegment(path: PathData, p: [number, number]): { segment: number; t: number } | null {
+  const n = path.anchors.length;
+  const segCount = path.closed ? n : n - 1;
+  if (segCount < 1) return null;
+  let best = { segment: 0, t: 0.5, dist: Infinity };
+  for (let i = 0; i < segCount; i += 1) {
+    const a = path.anchors[i].point;
+    const b = path.anchors[(i + 1) % n].point;
+    const abx = b[0] - a[0];
+    const aby = b[1] - a[1];
+    const lenSq = abx * abx + aby * aby;
+    let t = lenSq > 0 ? ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / lenSq : 0.5;
+    t = Math.min(0.95, Math.max(0.05, t));
+    const cx = a[0] + abx * t;
+    const cy = a[1] + aby * t;
+    const dist = Math.hypot(p[0] - cx, p[1] - cy);
+    if (dist < best.dist) best = { segment: i, t, dist };
+  }
+  return { segment: best.segment, t: best.t };
+}
+
+/** Whether `p` is close enough to `path`'s first anchor to close it, as
+ * the Pen and Curvature Pen tools' click-back-on-the-start does. */
+function nearPathStart(path: PathData | null, p: [number, number]): boolean {
+  if (!path || path.anchors.length < 3) return false;
+  const first = path.anchors[0].point;
+  return Math.hypot(first[0] - p[0], first[1] - p[1]) <= 4;
+}
+
+/** The SVG path `d` attribute drawing `path` as the true cubic Béziers
+ * its handles define (a missing handle standing in for the anchor
+ * itself, a straight corner). */
+function pathOutlineD(path: PathData): string {
+  if (path.anchors.length === 0) return "";
+  const segCount = path.closed ? path.anchors.length : path.anchors.length - 1;
+  let d = `M ${path.anchors[0].point[0]} ${path.anchors[0].point[1]}`;
+  for (let i = 0; i < segCount; i += 1) {
+    const a = path.anchors[i];
+    const b = path.anchors[(i + 1) % path.anchors.length];
+    const c1 = a.outHandle ?? a.point;
+    const c2 = b.inHandle ?? b.point;
+    d += ` C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${b.point[0]} ${b.point[1]}`;
+  }
+  return d;
 }
 
 function toDocPoint(
@@ -349,6 +418,10 @@ export default function App() {
   // append without re-rendering through stale state.
   const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
   const lassoTrail = useRef<[number, number][] | null>(null);
+  // The Pen tool family: a click-down point and, for Convert Point and
+  // Direct Selection, which anchor it landed on.
+  const penDragStart = useRef<[number, number] | null>(null);
+  const pendingAnchorIndex = useRef<number | null>(null);
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const moveStart = useRef<[number, number] | null>(null);
@@ -4618,6 +4691,14 @@ export default function App() {
   const isObjectSelectLasso = tool === "objectSelectLasso";
   // The Quick Selection tool shares the Selection Brush's stroke capture.
   const isSelectionBrush = tool === "selectionBrush" || tool === "quickSelection";
+  const isPen = tool === "pen";
+  const isFreeformPen = tool === "freeformPen";
+  const isCurvaturePen = tool === "curvaturePen";
+  const isAddAnchorPoint = tool === "addAnchorPoint";
+  const isDeleteAnchorPoint = tool === "deleteAnchorPoint";
+  const isConvertPoint = tool === "convertPoint";
+  const isPathSelection = tool === "pathSelection";
+  const isDirectSelection = tool === "directSelection";
 
   const closeLasso = useCallback(
     (mode: SelectionMode) => {
@@ -4867,11 +4948,65 @@ export default function App() {
         }
         return;
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush || isFreeformPen) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
         setLassoPoints([start]);
+        return;
+      }
+      if (isPen) {
+        const point = toDocPoint(event, document);
+        if (nearPathStart(document.currentPath, point)) {
+          void runCommand("close_current_path", {});
+        } else {
+          penDragStart.current = point;
+        }
+        return;
+      }
+      if (isCurvaturePen) {
+        const point = toDocPoint(event, document);
+        if (nearPathStart(document.currentPath, point)) {
+          void runCommand("close_current_path", {});
+        } else {
+          void runCommand("curvature_pen_add_anchor", { x: point[0], y: point[1] });
+        }
+        return;
+      }
+      if (isAddAnchorPoint) {
+        const path = document.currentPath;
+        const hit = path && nearestPathSegment(path, toDocPoint(event, document));
+        if (hit) void runCommand("add_anchor_point", { segment: hit.segment, t: hit.t });
+        return;
+      }
+      if (isDeleteAnchorPoint) {
+        const path = document.currentPath;
+        const index = path && nearestPathAnchor(path, toDocPoint(event, document));
+        if (index !== null && index !== undefined) void runCommand("delete_anchor_point", { index });
+        return;
+      }
+      if (isConvertPoint) {
+        const path = document.currentPath;
+        const point = toDocPoint(event, document);
+        const index = path && nearestPathAnchor(path, point);
+        if (index !== null && index !== undefined) {
+          pendingAnchorIndex.current = index;
+          penDragStart.current = point;
+        }
+        return;
+      }
+      if (isPathSelection) {
+        penDragStart.current = toDocPoint(event, document);
+        return;
+      }
+      if (isDirectSelection) {
+        const path = document.currentPath;
+        const point = toDocPoint(event, document);
+        const index = path && nearestPathAnchor(path, point);
+        if (index !== null && index !== undefined) {
+          pendingAnchorIndex.current = index;
+          penDragStart.current = point;
+        }
         return;
       }
       if (isPolygonLasso) {
@@ -5054,7 +5189,7 @@ export default function App() {
       } else if (hoverBounds !== null) {
         setHoverBounds(null);
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush || isFreeformPen) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
@@ -5146,6 +5281,52 @@ export default function App() {
         }
         return;
       }
+      if (isPen) {
+        const start = penDragStart.current;
+        penDragStart.current = null;
+        if (start && document) {
+          const end = toDocPoint(event, document);
+          const dragged = Math.hypot(end[0] - start[0], end[1] - start[1]) > 1;
+          void runCommand("pen_add_anchor", { x: start[0], y: start[1], handle: dragged ? end : null });
+        }
+        return;
+      }
+      if (isConvertPoint) {
+        const index = pendingAnchorIndex.current;
+        const start = penDragStart.current;
+        pendingAnchorIndex.current = null;
+        penDragStart.current = null;
+        if (index !== null && start && document) {
+          const end = toDocPoint(event, document);
+          const dragged = Math.hypot(end[0] - start[0], end[1] - start[1]) > 1;
+          void runCommand("convert_anchor_point", { index, handle: dragged ? end : null });
+        }
+        return;
+      }
+      if (isPathSelection) {
+        const start = penDragStart.current;
+        penDragStart.current = null;
+        if (start && document) {
+          const end = toDocPoint(event, document);
+          const dx = end[0] - start[0];
+          const dy = end[1] - start[1];
+          if (dx !== 0 || dy !== 0) void runCommand("move_path", { dx, dy });
+        }
+        return;
+      }
+      if (isDirectSelection) {
+        const index = pendingAnchorIndex.current;
+        const start = penDragStart.current;
+        pendingAnchorIndex.current = null;
+        penDragStart.current = null;
+        if (index !== null && start && document) {
+          const end = toDocPoint(event, document);
+          const dx = end[0] - start[0];
+          const dy = end[1] - start[1];
+          if (dx !== 0 || dy !== 0) void runCommand("move_anchor", { index, dx, dy });
+        }
+        return;
+      }
       if (isVectorMask) {
         const trail = lassoTrail.current;
         lassoTrail.current = null;
@@ -5154,6 +5335,13 @@ export default function App() {
           // Alt hides the path's inside instead of revealing it.
           void runCommand("add_vector_mask", { id: selectedId, points: trail, reveal: !event.altKey });
         }
+        return;
+      }
+      if (isFreeformPen) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 2) void runCommand("freeform_pen", { points: trail });
         return;
       }
       if (isObjectSelectLasso) {
@@ -6244,6 +6432,86 @@ export default function App() {
             title="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
           >
             Magnetic Lasso
+          </button>
+          <button
+            className={`button button--quiet${isPen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isPen}
+            onClick={() => setTool("pen")}
+            title="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
+          >
+            Pen
+          </button>
+          <button
+            className={`button button--quiet${isFreeformPen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isFreeformPen}
+            onClick={() => setTool("freeformPen")}
+            title="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
+          >
+            Freeform Pen
+          </button>
+          <button
+            className={`button button--quiet${isCurvaturePen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isCurvaturePen}
+            onClick={() => setTool("curvaturePen")}
+            title="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
+          >
+            Curvature Pen
+          </button>
+          <button
+            className={`button button--quiet${isAddAnchorPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isAddAnchorPoint}
+            onClick={() => setTool("addAnchorPoint")}
+            title="Add Anchor Point: click near the path to insert a new anchor there"
+          >
+            Add Anchor Point
+          </button>
+          <button
+            className={`button button--quiet${isDeleteAnchorPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isDeleteAnchorPoint}
+            onClick={() => setTool("deleteAnchorPoint")}
+            title="Delete Anchor Point: click an anchor to remove it"
+          >
+            Delete Anchor Point
+          </button>
+          <button
+            className={`button button--quiet${isConvertPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isConvertPoint}
+            onClick={() => setTool("convertPoint")}
+            title="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
+          >
+            Convert Point
+          </button>
+          <button
+            className={`button button--quiet${isPathSelection ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isPathSelection}
+            onClick={() => setTool("pathSelection")}
+            title="Path Selection: drag anywhere to move the whole current path"
+          >
+            Path Selection
+          </button>
+          <button
+            className={`button button--quiet${isDirectSelection ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isDirectSelection}
+            onClick={() => setTool("directSelection")}
+            title="Direct Selection: drag an anchor to move just that point"
+          >
+            Direct Selection
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void runCommand("clear_path", {})}
+            disabled={busy || !document?.currentPath}
+            title="Discard the current path and start a new one"
+          >
+            New Path
           </button>
           <button
             className={`button button--quiet${tool === "objectSelect" ? " button--active" : ""}`}
@@ -20280,6 +20548,58 @@ export default function App() {
                     strokeDasharray="4 4"
                     vectorEffect="non-scaling-stroke"
                   />
+                </svg>
+              )}
+              {document.currentPath && document.currentPath.anchors.length > 0 && (
+                <svg
+                  className="lasso-preview"
+                  viewBox={`0 0 ${document.width} ${document.height}`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d={pathOutlineD(document.currentPath)}
+                    fill="none"
+                    stroke="#4c8dff"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {document.currentPath.anchors.map((anchor, i) => (
+                    <g key={i}>
+                      {anchor.inHandle && (
+                        <line
+                          x1={anchor.point[0]}
+                          y1={anchor.point[1]}
+                          x2={anchor.inHandle[0]}
+                          y2={anchor.inHandle[1]}
+                          stroke="#4c8dff"
+                          strokeWidth={0.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      {anchor.outHandle && (
+                        <line
+                          x1={anchor.point[0]}
+                          y1={anchor.point[1]}
+                          x2={anchor.outHandle[0]}
+                          y2={anchor.outHandle[1]}
+                          stroke="#4c8dff"
+                          strokeWidth={0.5}
+                          vectorEffect="non-scaling-stroke"
+                        />
+                      )}
+                      <rect
+                        x={anchor.point[0] - 1.5}
+                        y={anchor.point[1] - 1.5}
+                        width={3}
+                        height={3}
+                        fill={i === 0 ? "#ffd34d" : "#ffffff"}
+                        stroke="#4c8dff"
+                        strokeWidth={0.5}
+                        vectorEffect="non-scaling-stroke"
+                      />
+                    </g>
+                  ))}
                 </svg>
               )}
               {document.notes.map((note, index) => (

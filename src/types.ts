@@ -203,7 +203,18 @@ export type DocumentView = {
   spots: SpotChannelView[];
   /** Whether Edit > Define Brush Preset has captured a tip. */
   hasBrushTip: boolean;
+  /** The Pen tool family's current path, if any. */
+  currentPath: PathData | null;
 };
+
+/** Mirrors `PathAnchor` / `Path` in src-tauri/src/document.rs: the Pen
+ * tool family's current work path. */
+export type PathAnchor = {
+  point: [number, number];
+  inHandle: [number, number] | null;
+  outHandle: [number, number] | null;
+};
+export type PathData = { anchors: PathAnchor[]; closed: boolean };
 
 /** Mirrors `SpotChannelView` in src-tauri/src/document.rs: a spot colour
  * channel's name, screen colour, and Solidity percent. */
@@ -476,6 +487,14 @@ export type Tool =
   | "historyBrush"
   | "mixerBrush"
   | "artHistoryBrush"
+  | "pen"
+  | "freeformPen"
+  | "curvaturePen"
+  | "addAnchorPoint"
+  | "deleteAnchorPoint"
+  | "convertPoint"
+  | "pathSelection"
+  | "directSelection"
   | "magicWand"
   | "lasso"
   | "magneticLasso"

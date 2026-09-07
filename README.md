@@ -15426,6 +15426,89 @@ build`) is fully green.
 **1535 Rust tests total** (1530 → 1535, 1528 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 259 — The Pen Tool family
+
+The Pen tools land as one Bézier path the document keeps — Photoshop's
+current work path, a scope cut short of its full Paths panel of named,
+saved paths. A `PathAnchor` is a point with optional `in_handle` and
+`out_handle` (absolute pixel coordinates; `None` on a side is a
+straight corner there), and a `Path` is an ordered list of them plus
+whether the last connects back to the first. `pen_add_anchor(point,
+out_handle)` is the Pen Tool: a plain click (`out_handle: None`)
+appends a straight corner, a click-drag appends a smooth anchor whose
+`in_handle` mirrors the dragged `out_handle` through the point —
+`in_handle = 2 · point − out_handle` — the same symmetric drag
+Photoshop's Pen makes; `close_current_path` needs at least three
+anchors. `freeform_pen(points)` is the Freeform Pen Tool: one corner
+anchor per sampled point of the drag, duplicates dropped as a Lasso
+trail's are — curve fitting from the freehand trace is a documented
+scope cut. `curvature_pen_add_anchor(point)` is the Curvature Pen
+Tool: appends a plain anchor, then recomputes every interior anchor's
+handles as a Catmull-Rom-to-Bézier tangent through its neighbours —
+`offset = (next − previous) / 6`, `out_handle = point + offset`,
+`in_handle = point − offset` — so the curve stays smooth as points are
+added with no dragging, the two open ends left as corners; a
+documented approximation, since Photoshop's own Curvature Pen
+algorithm is unpublished. `add_anchor_point(segment, t)` is the Add
+Anchor Point Tool: a segment with no handle on either end splits by a
+plain straight-line interpolation, leaving both new segments straight;
+one with a handle splits by De Casteljau subdivision of its cubic
+Bézier, so the curve's shape does not change. `delete_anchor_point`
+removes one anchor, refusing to leave fewer than two.
+`convert_anchor_point(index, handle)` is the Convert Point Tool: `None`
+clears an anchor's handles to a corner, `Some(h)` sets its out-handle
+and mirrors the in-handle, the same construction the Pen's drag makes.
+`move_path(dx, dy)` is the Path Selection Tool, translating every
+anchor and handle together; `move_anchor(index, dx, dy)` is the Direct
+Selection Tool, translating one anchor and its handles rigidly.
+Dragging a single handle to break a smooth point's symmetry is a
+documented scope cut. The toolbar gains all eight tools, a New Path
+button, and an SVG overlay drawing the path as the true cubic Béziers
+its handles define, with square anchor handles (the first anchor
+picked out) and control-handle lines; Add Anchor Point, Delete Anchor
+Point, Convert Point, Path Selection, and Direct Selection hit-test
+against the straight line between a segment's own two anchor points
+rather than its true curve, a documented simplification.
+
+**Verified two ways.** Five new `document.rs` tests, every anchor,
+handle, and subdivision traced by hand and the Curvature Pen's
+tangents cross-checked in `f32` by an independent Python script. Three
+Pen Tool clicks — two corners and a smooth anchor dragged to `(15,
+10)` — give that anchor an out-handle of `(15, 10)` and an in-handle
+mirrored to `(5, 10)`; closing needs three anchors and a NaN point is
+refused. A freeform trace of four points with one repeated collapses
+to three corner anchors. Four Curvature Pen clicks around a square
+leave the two ends corners and give the two interior anchors tangents
+of `(11.667, 1.667)`/`(8.333, −1.667)` and `(8.333, 11.667)`/`(11.667,
+8.333)` — `(next − previous) / 6` through their neighbours. Add Anchor
+Point at `t = 0.5` on a straight `(0,0)`–`(10,0)` segment gives an
+exact corner midpoint `(5, 0)`; on a curved "U" segment (control points
+`(0,10)` and `(20,10)`) De Casteljau subdivision gives the new
+anchor `(10, 7.5)` with handles `(5, 7.5)` and `(15, 7.5)`, and the
+neighbours' own handles become `(0, 5)` and `(20, 5)`; a bad segment
+index and an out-of-range `t` are refused, and Delete Anchor Point
+removes an anchor but refuses to go below two. Convert Point turns a
+corner into a smooth anchor with out-handle `(5, 5)` and mirrored
+in-handle `(−5, −5)` and back; Path Selection moves every anchor and
+handle by `(2, 3)` together; Direct Selection then moves only one
+anchor by `(−1, 1)`, leaving the other in place; bad indices, a
+non-finite move, and calling any of these with no path are refused.
+All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous two hundred and six: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The toolbar and overlay were reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1540 Rust tests total** (1535 → 1540, 1533 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
