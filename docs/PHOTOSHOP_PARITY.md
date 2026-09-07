@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 198.**
+**618 distinct capabilities tracked. Currently shipped: 199.**
 
 ## PART I — EVERY TOOL
 
@@ -217,7 +217,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Creative Cloud Libraries
 - [ ] Adobe Fonts integration
 - [ ] Free Transform
-- [ ] Scale
+- [x] Scale (`scale`, independent width/height percentages about the canvas centre — `rotate`'s own inverse-mapped nearest-neighbour scheme with division instead of rotation, transparent wherever the source falls outside the canvas, so shrinking leaves a transparent border and enlarging clips at the canvas edge. Negative percentages error rather than flip, since Flip is its own command; nearest-neighbour rather than bicubic is a documented scope cut — see README Phase 137)
 - [x] Rotate (`rotate`, any angle, positive clockwise, about the canvas centre — inverse-mapped nearest-neighbour resampling with the same rounding `sample_nearest` uses, transparent wherever the source falls outside the canvas. The canvas does not grow, so corners rotating past its edges are clipped — a documented scope cut alongside nearest-neighbour rather than bicubic resampling — see README Phase 136)
 - [ ] Skew
 - [ ] Distort

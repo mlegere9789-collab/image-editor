@@ -252,6 +252,9 @@ export default function App() {
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [rotateDegrees, setRotateDegrees] = useState(45);
+  const [showScaleDialog, setShowScaleDialog] = useState(false);
+  const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
+  const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
   const [cameraRaw, setCameraRaw] = useState({
     temperature: 0,
@@ -1069,6 +1072,16 @@ export default function App() {
     await runCommand("rotate", { id: selectedId, degrees: rotateDegrees });
     setShowRotateDialog(false);
   }, [runCommand, selectedId, rotateDegrees]);
+
+  const applyScale = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("scale", {
+      id: selectedId,
+      widthPercent: scaleWidthPercent,
+      heightPercent: scaleHeightPercent,
+    });
+    setShowScaleDialog(false);
+  }, [runCommand, selectedId, scaleWidthPercent, scaleHeightPercent]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3093,6 +3106,14 @@ export default function App() {
             title="Edit > Transform > Rotate (any angle, selected layer)"
           >
             Rotate…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowScaleDialog(true)}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Scale (selected layer)"
+          >
+            Scale…
           </button>
         </div>
 
@@ -5770,6 +5791,67 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyRotate} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showScaleDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowScaleDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Scale"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Scale</h2>
+            <p className="modal__hint">
+              Scales about the canvas centre. Shrinking leaves a transparent
+              border; enlarging pushes the edges off the canvas.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Width %</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={scaleWidthPercent}
+                onChange={(event) => setScaleWidthPercent(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Height %</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={scaleHeightPercent}
+                onChange={(event) => setScaleHeightPercent(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setScaleWidthPercent(100);
+                  setScaleHeightPercent(100);
+                }}
+              >
+                Reset
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowScaleDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyScale} disabled={busy}>
                 Apply
               </button>
             </div>

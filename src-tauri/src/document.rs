@@ -10125,6 +10125,48 @@ impl Document {
             out
         })
     }
+
+    /// Edit > Transform > Scale: resizes layer `id`'s pixels to
+    /// `width_percent` × `height_percent` of their current size about the
+    /// canvas centre, the same centre and inverse-mapping scheme
+    /// [`Self::rotate`] uses — each output pixel reads the nearest source
+    /// pixel at `centre + (pixel - centre) / factor`, rounding
+    /// half-away-from-zero, and is fully transparent wherever that source
+    /// position falls outside the canvas (shrinking leaves a transparent
+    /// border; enlarging pushes the edges off the canvas, which does not
+    /// grow — the same documented clipping and nearest-neighbour scope
+    /// cuts as [`Self::rotate`]). Both percentages must be finite and
+    /// positive: Photoshop's own dialog lets a negative percentage flip
+    /// the layer, but that is already Edit > Transform > Flip here, so a
+    /// zero or negative factor errors rather than silently mirroring.
+    pub fn scale(
+        &mut self,
+        id: LayerId,
+        width_percent: f32,
+        height_percent: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(width_percent.is_finite() && height_percent.is_finite())
+            || width_percent <= 0.0
+            || height_percent <= 0.0
+        {
+            return Err("Scale percentages must be finite and greater than zero.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (fx, fy) = (width_percent / 100.0, height_percent / 100.0);
+        self.filter_pixels(id, move |source, row, col| {
+            let sx = (cx + (col as f32 - cx) / fx).round() as i64;
+            let sy = (cy + (row as f32 - cy) / fy).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[base..base + CHANNELS]);
+            out
+        })
+    }
 }
 
 /// Every panel value Filter > Camera Raw Filter applies at once — see
@@ -23876,6 +23918,112 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.rotate(999, 90.0).is_err());
+    }
+
+    /// `ramped_3x3`'s idea at 4x4: R = 10, 20, ..., 160 in reading order,
+    /// so the canvas centre (1.5, 1.5) sits between pixels.
+    fn ramped_4x4() -> (Document, LayerId) {
+        let mut doc = Document::new(4, 4).unwrap();
+        let mut pixels = Vec::new();
+        for i in 0..16u8 {
+            pixels.extend([(i + 1) * 10, 0, 0, 255]);
+        }
+        let id = doc.add_layer("base", &pixels, 4, 4).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn scale_200_percent_on_an_even_canvas_doubles_each_centre_pixel() {
+        // About (1.5, 1.5), output x = 0 reads 1.5 + (0 - 1.5) / 2 = 0.75 ->
+        // 1, x = 1 reads 1.25 -> 1, x = 2 reads 1.75 -> 2, x = 3 reads
+        // 2.25 -> 2: the centre 2x2 (60, 70 / 100, 110) fills the canvas
+        // as 2x2 blocks.
+        let (mut doc, id) = ramped_4x4();
+        doc.scale(id, 200.0, 200.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![60, 60, 70, 70],
+                vec![60, 60, 70, 70],
+                vec![100, 100, 110, 110],
+                vec![100, 100, 110, 110]
+            ]
+        );
+    }
+
+    #[test]
+    fn scale_50_percent_shrinks_into_the_centre_with_a_transparent_border() {
+        // Output x = 1 reads 1.5 + (1 - 1.5) * 2 = 0.5 -> 1 and x = 2 reads
+        // 2.5 -> 3; x = 0 and x = 3 read -1.5 and 4.5, off the canvas.
+        let (mut doc, id) = ramped_4x4();
+        doc.scale(id, 50.0, 50.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![
+                vec![0, 0, 0, 0],
+                vec![0, 60, 80, 0],
+                vec![0, 140, 160, 0],
+                vec![0, 0, 0, 0]
+            ]
+        );
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 1)[3], 255);
+    }
+
+    #[test]
+    fn scale_axes_are_independent() {
+        // Width 50%, height 100% on ramped_3x3: only the middle column
+        // survives, each row keeping its own value.
+        let (mut doc, id) = ramped_3x3();
+        doc.scale(id, 50.0, 100.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 20, 0], vec![0, 50, 0], vec![0, 80, 0]]
+        );
+    }
+
+    #[test]
+    fn scale_on_an_odd_canvas_rounds_half_away_from_zero() {
+        // ramped_3x3 at 200%: output x = 0 reads 1 + (0 - 1) / 2 = 0.5,
+        // which rounds away from zero to 1, and x = 2 reads 1.5 -> 2, so
+        // the result leans toward the bottom-right rather than being
+        // symmetric -- a direct consequence of f32::round.
+        let (mut doc, id) = ramped_3x3();
+        doc.scale(id, 200.0, 200.0).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![50, 50, 60], vec![50, 50, 60], vec![80, 80, 90]]
+        );
+    }
+
+    #[test]
+    fn scale_100_percent_is_the_identity() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        doc.scale(id, 100.0, 100.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn scale_is_confined_to_the_selection_and_propagates_errors() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.scale(id, 200.0, 200.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(0, 0)], 50);
+        assert_eq!(after[idx(0, 0) + 4..], before[idx(0, 0) + 4..]);
+
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.scale(id, 0.0, 100.0).is_err());
+        assert!(doc.scale(id, 100.0, -50.0).is_err());
+        assert!(doc.scale(id, f32::NAN, 100.0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.scale(id, 200.0, 200.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.scale(999, 200.0, 200.0).is_err());
     }
 
     #[test]

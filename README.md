@@ -8945,6 +8945,63 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **919 Rust tests total** (913 → 919, 912 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 137 — Edit > Transform > Scale
+
+`scale(id, width_percent, height_percent)` is Rotate's sibling:
+Phase 136's inverse-mapping scheme with division in place of rotation.
+It resizes a layer's pixels to `width_percent` × `height_percent` of
+their current size about the same canvas centre `((width - 1) / 2,
+(height - 1) / 2)`; each output pixel reads the nearest source pixel at
+`centre + (pixel - centre) / factor`, rounding half-away-from-zero with
+`f32::round` exactly as `rotate` and `sample_nearest` do, and is fully
+transparent wherever that source position falls outside the canvas —
+so shrinking leaves a transparent border and enlarging pushes the edges
+off a canvas that does not grow, the same documented clipping and
+nearest-neighbour (rather than bicubic) scope cuts as `rotate`. The two
+axes are independent. Both percentages must be finite and positive:
+Photoshop's own dialog lets a negative percentage flip the layer, but
+that is already Edit > Transform > Flip here, so a zero or negative
+factor errors rather than silently mirroring. A new **Scale…** dialog
+takes the two percentages with a Reset button.
+
+**Verified two ways.** Six new `document.rs` tests, the first four
+asserting whole grids through `red_channel_grid`. A new `ramped_4x4`
+fixture (`10` to `160` in reading order) puts the canvas centre at
+`(1.5, 1.5)`, between pixels, which makes doubling exact: at `200%`,
+output `x = 0` reads `1.5 + (0 - 1.5) / 2 = 0.75 → 1`, `x = 1` reads
+`1.25 → 1`, `x = 2` reads `1.75 → 2`, `x = 3` reads `2.25 → 2`, so the
+centre `2x2` (`60, 70 / 100, 110`) fills the canvas as `2x2` blocks. At
+`50%`, `x = 1` reads `0.5 → 1` and `x = 2` reads `2.5 → 3` while `x = 0`
+and `x = 3` read `-1.5` and `4.5`, off the canvas: the centre `2x2`
+survives as `60, 80 / 140, 160` inside a fully transparent border
+(alpha checked, not just red). Width `50%` at height `100%` on
+`ramped_3x3` keeps only the middle column, each row its own value. And
+`ramped_3x3` at `200%` — an odd canvas whose centre is on a pixel —
+gives `[[50, 50, 60], [50, 50, 60], [80, 80, 90]]`, leaning toward the
+bottom-right rather than symmetric, because `x = 0` reads `1 + (0 - 1)
+/ 2 = 0.5`, which `f32::round` sends away from zero to `1`, while `x =
+2` reads `1.5 → 2`; the test pins that tie-breaking behaviour rather
+than hiding it. `100%` is a byte-for-byte identity. A one-pixel
+selection confines the rewrite, and `0%`, a negative percentage, `NaN`,
+a locked layer, and an unknown layer all error. All six passed on the
+first run, every grid cross-checked against an independent Python port
+of the inverse mapping emulating Rust's `f32` division and
+half-away-from-zero rounding.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-four: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**925 Rust tests total** (919 → 925, 918 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

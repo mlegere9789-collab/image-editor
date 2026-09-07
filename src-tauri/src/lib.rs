@@ -2676,6 +2676,19 @@ fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snaps
     edit_checkpointed(&state, |document| document.rotate(id, degrees))
 }
 
+/// Edit > Transform > Scale layer `id` to `width_percent` x `height_percent`.
+#[tauri::command]
+fn scale(
+    state: State<'_, AppState>,
+    id: LayerId,
+    width_percent: f32,
+    height_percent: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.scale(id, width_percent, height_percent)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2934,6 +2947,7 @@ pub fn run() {
             parametric_curve,
             camera_raw_filter,
             rotate,
+            scale,
             select_rectangle,
             select_ellipse,
             select_all,
