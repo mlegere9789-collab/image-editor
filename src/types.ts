@@ -129,7 +129,13 @@ export type DocumentView = {
   groups: LayerGroup[];
   /** Alpha channel names made by Image > Calculations, in creation order. */
   channels: string[];
+  /** Image > Mode. */
+  mode: ColorMode;
 };
+
+/** Mirrors `ColorMode` / `BitmapMethod` in src-tauri/src/document.rs. */
+export type ColorMode = "rgb" | "grayscale" | "bitmap";
+export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */

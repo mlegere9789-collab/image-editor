@@ -10,11 +10,13 @@ import type {
   ApplyBlend,
   ApplyChannel,
   ApplyMask,
+  BitmapMethod,
   BlendMode,
   BlendModeInfo,
   CalcResult,
   CalcSource,
   ChannelView,
+  ColorMode,
   ColorRange,
   ColorRangePreset,
   ColorSample,
@@ -321,6 +323,9 @@ export default function App() {
   } | null>(null);
   const [samplerReadouts, setSamplerReadouts] = useState<[number, number, number, number][]>([]);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
+  // Image > Mode > Bitmap: its Method dialog.
+  const [showBitmapDialog, setShowBitmapDialog] = useState(false);
+  const [bitmapMethod, setBitmapMethod] = useState<BitmapMethod>("threshold");
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
@@ -4627,6 +4632,28 @@ export default function App() {
           >
             Calculations…
           </button>
+          <label className="tools__slider" title="Image > Mode">
+            Mode
+            <select
+              value={document?.mode ?? "rgb"}
+              disabled={busy || !hasDocument}
+              onChange={(event) => {
+                const mode = event.target.value as ColorMode;
+                if (mode === "bitmap") {
+                  setShowBitmapDialog(true);
+                } else {
+                  void runCommand("convert_mode", { mode, method: null });
+                }
+              }}
+            >
+              <option value="rgb">RGB Color</option>
+              <option value="grayscale">Grayscale</option>
+              <option value="bitmap">Bitmap…</option>
+            </select>
+            <span className="control__value" title="The only depth this editor stores">
+              8 Bits/Channel
+            </span>
+          </label>
           <button
             className="button button--quiet"
             onClick={() => setShowLayerCompsDialog(true)}
@@ -9245,6 +9272,53 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyCalculations} disabled={busy}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBitmapDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBitmapDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Bitmap"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Mode &gt; Bitmap</h2>
+            <p className="modal__hint">
+              Every layer becomes black and white by luma. Brush strokes and fills then lay
+              down only black or white.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Method</span>
+              <select
+                value={bitmapMethod}
+                onChange={(event) => setBitmapMethod(event.target.value as BitmapMethod)}
+              >
+                <option value="threshold">50% Threshold</option>
+                <option value="patternDither">Pattern Dither</option>
+                <option value="diffusionDither">Diffusion Dither</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowBitmapDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  void runCommand("convert_mode", { mode: "bitmap", method: bitmapMethod });
+                  setShowBitmapDialog(false);
+                }}
+                disabled={busy}
+              >
                 OK
               </button>
             </div>

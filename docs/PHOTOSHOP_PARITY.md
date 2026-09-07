@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 368.**
+**618 distinct capabilities tracked. Currently shipped: 372.**
 
 ## PART I — EVERY TOOL
 
@@ -388,15 +388,15 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Channel Thumbnail Options (the Channels panel's Thumbnails select: None, Small, Medium, Large, each row's thumbnail served through the `composite://` protocol's new `channel=` query — see README Phase 227)
 - [x] Channel Selection for Editing (selecting an alpha channel in the panel shows it on the canvas and sends brush strokes to `paint_channel(name, points, radius, grey)`, the brush colour's luma laid down over the Selection Brush's hard coverage; New Channel adds a black one through `add_channel` — see README Phase 227)
 - [x] Composite Channel (`ChannelView::{Composite, Red, Green, Blue, Alpha}` and `channel_image(view)`: the RGB row shows the composite, the colour rows one channel of it as a grey — see README Phase 227)
-- [ ] RGB Color Mode
+- [x] RGB Color Mode (`ColorMode::Rgb`, the default; `convert_mode(Rgb)` from Grayscale or Bitmap keeps the pixels and lifts the paint constraint — see README Phase 228)
 - [ ] CMYK Color Mode
-- [ ] Grayscale Mode
-- [ ] Bitmap Mode
+- [x] Grayscale Mode (`convert_mode(Grayscale)` replaces every layer pixel's colour with its BT.601 luma, alpha kept, and from then on brush strokes, Fill, and the Paint Bucket lay down the colour's luma as a grey through `constrain_color`; the size ratio option is a documented scope cut — see README Phase 228)
+- [x] Bitmap Mode (`convert_mode(Bitmap, method)` with 50% Threshold, Pattern Dither on the 4×4 Bayer matrix, or Diffusion Dither by Floyd–Steinberg; paint and fills then lay down black or white; output resolution, halftone screen, and custom pattern are documented scope cuts — see README Phase 228)
 - [ ] Indexed Color Mode
 - [ ] Duotone Mode
 - [ ] Multichannel Mode
 - [ ] Lab Color Mode
-- [ ] 8 Bits/Channel
+- [x] 8 Bits/Channel (the one depth this editor stores, every layer RGBA8, shown beside the Mode menu; 16 and 32 bits remain unshipped — see README Phase 228)
 - [ ] 16 Bits/Channel
 - [ ] 32 Bits/Channel
 - [ ] HDR Support

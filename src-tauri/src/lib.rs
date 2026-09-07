@@ -1198,6 +1198,24 @@ fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, St
     })
 }
 
+/// Image > Mode: convert the document to `mode`, with Bitmap's `method`.
+#[tauri::command]
+fn convert_mode(
+    state: State<'_, AppState>,
+    mode: document::ColorMode,
+    method: Option<document::BitmapMethod>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_mode(mode, method)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Channels panel > New Channel: a black alpha channel, named `name` or
 /// the next free `Alpha N`.
 #[tauri::command]
@@ -4482,6 +4500,7 @@ pub fn run() {
             calculations,
             load_channel,
             add_channel,
+            convert_mode,
             rename_channel,
             move_channel,
             delete_channel,

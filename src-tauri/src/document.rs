@@ -129,6 +129,8 @@ pub struct Document {
     /// travelling through undo/redo with the document. Cleared, like the
     /// active selection, when the canvas changes size.
     saved_selections: Vec<(String, Selection)>,
+    /// Image > Mode — see [`ColorMode`].
+    mode: ColorMode,
     /// Alpha channels made by Image > Calculations, in creation order —
     /// a byte per pixel each, discarded like every other position-bound
     /// thing when the canvas changes size.
@@ -352,6 +354,32 @@ pub enum CalcOutcome {
     /// The selection was replaced.
     Selection,
 }
+
+/// Image > Mode: the document's colour mode. Pixels are always stored as
+/// RGBA8; the mode is what a conversion made of them and what colours new
+/// paint is constrained to — grey in Grayscale, black or white in Bitmap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ColorMode {
+    #[default]
+    Rgb,
+    Grayscale,
+    Bitmap,
+}
+
+/// Image > Mode > Bitmap's Method: 50% Threshold, Pattern Dither (a 4×4
+/// Bayer matrix), or Diffusion Dither (Floyd–Steinberg).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum BitmapMethod {
+    #[default]
+    Threshold,
+    PatternDither,
+    DiffusionDither,
+}
+
+/// The 4×4 Bayer ordered-dither matrix.
+const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
 /// What the canvas shows — Photoshop's Channels panel selection: the
 /// composite, one colour channel of it as a grey, or an alpha channel.
@@ -1545,6 +1573,8 @@ pub struct DocumentView {
     pub groups: Vec<LayerGroup>,
     /// Alpha channel names, in creation order.
     pub channels: Vec<String>,
+    /// Image > Mode.
+    pub mode: ColorMode,
 }
 
 impl Document {
@@ -1563,6 +1593,7 @@ impl Document {
             last_transform: None,
             pattern: None,
             saved_selections: Vec::new(),
+            mode: ColorMode::Rgb,
             channels: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
@@ -1605,7 +1636,128 @@ impl Document {
             guides: self.guides.clone(),
             groups: self.groups.clone(),
             channels: self.channels.iter().map(|c| c.name.clone()).collect(),
+            mode: self.mode,
         }
+    }
+
+    /// Image > Mode: the document's colour mode.
+    pub fn mode(&self) -> ColorMode {
+        self.mode
+    }
+
+    /// A colour as the mode allows it to be painted: unchanged in RGB, its
+    /// BT.601 luma as a grey in Grayscale, black or white (luma `128` and
+    /// up) in Bitmap; alpha is always kept.
+    pub fn constrain_color(&self, [r, g, b, a]: [u8; 4]) -> [u8; 4] {
+        match self.mode {
+            ColorMode::Rgb => [r, g, b, a],
+            ColorMode::Grayscale => {
+                let v = ApplyChannel::Rgb.value([r, g, b, a]);
+                [v, v, v, a]
+            }
+            ColorMode::Bitmap => {
+                let v = if ApplyChannel::Rgb.value([r, g, b, a]) >= 128 {
+                    255
+                } else {
+                    0
+                };
+                [v, v, v, a]
+            }
+        }
+    }
+
+    /// Image > Mode > RGB Color / Grayscale / Bitmap: converts every layer's
+    /// pixels and sets the mode. Grayscale replaces each pixel's colour
+    /// with its BT.601 luma, alpha kept (Photoshop's "discard color
+    /// information"); Bitmap does that and then binarises by `method`
+    /// (50% Threshold when `None`): Threshold is white at `128` and up;
+    /// Pattern Dither is white where the luma is at least the 4×4 Bayer
+    /// threshold `((2M + 1)·255 + 16) / 32` for the pixel's cell; Diffusion
+    /// Dither is Floyd–Steinberg in integers, each pixel's error `old −
+    /// new` spread `7/16` right, `3/16` down-left, `5/16` down, `1/16`
+    /// down-right, truncated toward zero, per layer. RGB Color only sets
+    /// the mode: a grey or bitmap stays as it is, ready for colour. Layer
+    /// masks and alpha channels are untouched. Photoshop's Bitmap dialog
+    /// also offers output resolution, a halftone screen, and a custom
+    /// pattern, and its Grayscale conversion offers a size ratio — all
+    /// documented scope cuts.
+    pub fn convert_mode(
+        &mut self,
+        mode: ColorMode,
+        method: Option<BitmapMethod>,
+    ) -> Result<(), String> {
+        let (width, height) = (self.width as usize, self.height as usize);
+        match mode {
+            ColorMode::Rgb => {}
+            ColorMode::Grayscale => {
+                for layer in &mut self.layers {
+                    for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                        let v = ApplyChannel::Rgb.value([px[0], px[1], px[2], px[3]]);
+                        px[0] = v;
+                        px[1] = v;
+                        px[2] = v;
+                    }
+                }
+            }
+            ColorMode::Bitmap => {
+                let method = method.unwrap_or_default();
+                for layer in &mut self.layers {
+                    let mut lumas: Vec<i32> = layer
+                        .pixels
+                        .chunks_exact(CHANNELS)
+                        .map(|px| i32::from(ApplyChannel::Rgb.value([px[0], px[1], px[2], px[3]])))
+                        .collect();
+                    let mut on = vec![false; width * height];
+                    match method {
+                        BitmapMethod::Threshold => {
+                            for (i, &v) in lumas.iter().enumerate() {
+                                on[i] = v >= 128;
+                            }
+                        }
+                        BitmapMethod::PatternDither => {
+                            for y in 0..height {
+                                for x in 0..width {
+                                    let m = i32::from(BAYER[y % 4][x % 4]);
+                                    let threshold = ((2 * m + 1) * 255 + 16) / 32;
+                                    on[y * width + x] = lumas[y * width + x] >= threshold;
+                                }
+                            }
+                        }
+                        BitmapMethod::DiffusionDither => {
+                            for y in 0..height {
+                                for x in 0..width {
+                                    let i = y * width + x;
+                                    let old = lumas[i];
+                                    let new = if old >= 128 { 255 } else { 0 };
+                                    on[i] = new == 255;
+                                    let error = old - new;
+                                    if x + 1 < width {
+                                        lumas[i + 1] += error * 7 / 16;
+                                    }
+                                    if y + 1 < height {
+                                        if x > 0 {
+                                            lumas[i + width - 1] += error * 3 / 16;
+                                        }
+                                        lumas[i + width] += error * 5 / 16;
+                                        if x + 1 < width {
+                                            lumas[i + width + 1] += error / 16;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    for (px, &lit) in layer.pixels.chunks_exact_mut(CHANNELS).zip(on.iter()) {
+                        let v = if lit { 255 } else { 0 };
+                        px[0] = v;
+                        px[1] = v;
+                        px[2] = v;
+                    }
+                }
+            }
+        }
+        self.mode = mode;
+        Ok(())
     }
 
     /// The alpha channels, in creation order.
@@ -4699,6 +4851,7 @@ impl Document {
     /// locked, the same as every other command that rewrites a layer's own
     /// pixels.
     fn paint_region(&mut self, id: LayerId, bounds: Rect, color: [u8; 4]) -> Result<(), String> {
+        let color = self.constrain_color(color);
         let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -9475,6 +9628,13 @@ impl Document {
         }
 
         let (width, height) = (self.width, self.height);
+        // The colour mode decides what a brush may lay down.
+        let stroke = match stroke {
+            Stroke::Brush { color } => Stroke::Brush {
+                color: self.constrain_color(color),
+            },
+            other => other,
+        };
         // Copied out before borrowing `self.layers` mutably below — `Selection`
         // is small (an enum plus four `u32`s), so this is cheap per call.
         let selection = self.selection.clone();
@@ -9964,6 +10124,7 @@ impl Document {
         color: [u8; 4],
         tolerance: u8,
     ) -> Result<Option<Rect>, String> {
+        let color = self.constrain_color(color);
         let (width, height) = (self.width, self.height);
         if x >= width || y >= height {
             return Err(format!(
@@ -37081,6 +37242,160 @@ mod tests {
             crate::composite::flatten(&doc).pixels,
             vec![7, 8, 9, 255, 7, 8, 9, 255, 7, 8, 9, 255]
         );
+    }
+
+    #[test]
+    fn grayscale_mode_turns_every_layer_to_its_luma() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let a = doc
+            .add_layer("a", &[255, 0, 0, 255, 0, 255, 0, 128], 2, 1)
+            .unwrap();
+        let b = doc
+            .add_layer("b", &[0, 0, 255, 64, 10, 20, 30, 0], 2, 1)
+            .unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Rgb);
+        doc.convert_mode(ColorMode::Grayscale, None).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Grayscale);
+        // Red 76.245 → 76, green 149.685 → 150, blue 29.07 → 29, and
+        // 0.299·10 + 0.587·20 + 0.114·30 = 18.15 → 18; alpha untouched.
+        assert_eq!(pixel(&doc, a, 0, 0), [76, 76, 76, 255]);
+        assert_eq!(pixel(&doc, a, 1, 0), [150, 150, 150, 128]);
+        assert_eq!(pixel(&doc, b, 0, 0), [29, 29, 29, 64]);
+        assert_eq!(pixel(&doc, b, 1, 0), [18, 18, 18, 0]);
+        // Back to RGB keeps the pixels; only the mode changes.
+        doc.convert_mode(ColorMode::Rgb, None).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Rgb);
+        assert_eq!(pixel(&doc, a, 1, 0), [150, 150, 150, 128]);
+    }
+
+    #[test]
+    fn bitmap_mode_fifty_percent_threshold() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[127, 127, 127, 255, 128, 128, 128, 200, 255, 0, 0, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::Threshold))
+            .unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Bitmap);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 200]);
+        // Pure red's luma is 76: black.
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        // Bitmap without a method is the threshold, and Bitmap → Grayscale
+        // keeps the two values.
+        doc.convert_mode(ColorMode::Grayscale, None).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 200]);
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[200, 200, 200, 255], 1, 1).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, None).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn bitmap_pattern_dither_follows_the_bayer_matrix() {
+        // A flat 128 grey: on wherever the 4×4 Bayer threshold, ((2M + 1)·255
+        // + 16) / 32, is at most 128 — M ≤ 7, a checkerboard.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("l", &[128; 64], 4, 4).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::PatternDither))
+            .unwrap();
+        let on = |x: u32, y: u32| pixel(&doc, id, x, y)[0] == 255;
+        #[rustfmt::skip]
+        let expected = [
+            [true, false, true, false],
+            [false, true, false, true],
+            [true, false, true, false],
+            [false, true, false, true],
+        ];
+        for (y, row) in expected.iter().enumerate() {
+            for (x, &want) in row.iter().enumerate() {
+                assert_eq!(on(x as u32, y as u32), want, "({x}, {y})");
+            }
+        }
+        // 120 clears M = 7's threshold 120 exactly but not M = 8's 135: the
+        // same checkerboard; 119 loses (3, 1), whose M is 7.
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("l", &[120; 64], 4, 4).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::PatternDither))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 3)[0], 255);
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc.add_layer("l", &[119; 64], 4, 4).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::PatternDither))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 3)[0], 0);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 255);
+    }
+
+    #[test]
+    fn bitmap_diffusion_dither_carries_the_error() {
+        // Floyd–Steinberg on a 3×1 row of 100: 0 (error 100, 43 right),
+        // 143 → 255 (error −112, −49 right), 51 → 0.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("l", &[100; 12], 3, 1).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::DiffusionDither))
+            .unwrap();
+        assert_eq!(
+            (0..3).map(|x| pixel(&doc, id, x, 0)[0]).collect::<Vec<_>>(),
+            [0, 255, 0]
+        );
+        // 2×2 of 100: (0,0) → 0 spreading 43 right, 31 below, 6 below-right;
+        // (1,0) = 143 → 255 spreading −21 below-left, −35 below; (0,1) =
+        // 110 → 0 spreading 48 right; (1,1) = 100 + 6 − 35 + 48 = 119 → 0.
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc.add_layer("l", &[100; 16], 2, 2).unwrap();
+        doc.convert_mode(ColorMode::Bitmap, Some(BitmapMethod::DiffusionDither))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 0);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 255);
+        assert_eq!(pixel(&doc, id, 0, 1)[0], 0);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 0);
+    }
+
+    #[test]
+    fn the_mode_constrains_paint_and_fills() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("l", &[0; 12], 3, 1).unwrap();
+        doc.convert_mode(ColorMode::Grayscale, None).unwrap();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            0.5,
+            Stroke::Brush {
+                color: [255, 0, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [76, 76, 76, 255]);
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        doc.fill_selection(id, [0, 255, 0, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [150, 150, 150, 255]);
+        doc.deselect();
+        doc.flood_fill(id, 2, 0, [0, 0, 255, 255], 0).unwrap();
+        assert_eq!(pixel(&doc, id, 2, 0), [29, 29, 29, 255]);
+        doc.convert_mode(ColorMode::Bitmap, None).unwrap();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            0.5,
+            Stroke::Brush {
+                color: [200, 200, 200, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        doc.fill_selection(id, [100, 100, 100, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        // In RGB the colour goes down as given.
+        doc.convert_mode(ColorMode::Rgb, None).unwrap();
+        doc.fill_selection(id, [9, 8, 7, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [9, 8, 7, 255]);
     }
 
     #[test]

@@ -13653,6 +13653,62 @@ hand instead. Every other layer of this project's quality bar
 **1380 Rust tests total** (1375 → 1380, 1373 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 228 — Image > Mode
+
+The document gains a colour mode. A `ColorMode` is RGB Color,
+Grayscale, or Bitmap, held on the document and reported in the view;
+pixels stay RGBA8 throughout, the mode being what a conversion made of
+them and what new paint is constrained to. `convert_mode(mode,
+method)` converts every layer: Grayscale replaces each pixel's colour
+with its BT.601 luma, alpha kept — Photoshop's "discard color
+information"; Bitmap does that and binarises by the `BitmapMethod`:
+50% Threshold (white at `128` and up, the default), Pattern Dither
+(white where the luma is at least the 4×4 Bayer cell's threshold
+`((2M + 1)·255 + 16) / 32`), or Diffusion Dither (Floyd–Steinberg in
+integers, each pixel's error spread `7/16` right, `3/16` down-left,
+`5/16` down, `1/16` down-right, truncated toward zero); RGB Color only
+sets the mode. `constrain_color(color)` is what the mode lets a brush
+lay down — unchanged, its luma as a grey, or black or white — and
+`stroke` (for the Brush), `paint_region` (Fill and Cut behind it), and
+`flood_fill` now pass their colour through it. A Mode select in the
+toolbar switches modes, Bitmap through a Method dialog, and "8
+Bits/Channel" sits beside it as the one depth this editor stores. The
+shape tools, gradients, and Apply Image are not yet constrained, and
+Photoshop's Bitmap output resolution, halftone screen, custom pattern,
+and Grayscale size ratio are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, the lumas, Bayer
+thresholds, and dithers first computed in Python (luma in `f32`,
+the rest in integers). Grayscale turns pure red, green, blue, and
+`[10, 20, 30]` into `76`, `150`, `29`, and `18` on two layers with
+alpha untouched, and RGB Color keeps them. 50% Threshold sends `127`
+to black, `128` to white with its alpha `200`, and red (luma `76`) to
+black; Bitmap with no method is the threshold, and Bitmap to Grayscale
+keeps the two values. Pattern Dither on a flat `128` lights exactly
+the Bayer cells with `M ≤ 7` — a checkerboard — since the thresholds
+run `8, 24, … 120, 135, … 247`; a flat `120` still lights the `M = 7`
+cell and `119` does not. Diffusion Dither on a `3×1` row of `100`
+gives `0, 255, 0` (errors `100` then `−112` carried right as `43` and
+`−49`), and on a `2×2` of `100` gives `0 255 / 0 0`, every carried
+term checked by hand. In Grayscale a red brush dab paints `76`, a
+green fill `150`, and a blue bucket `29`; in Bitmap a `200` dab paints
+white and a `100` fill black; back in RGB a fill goes down as given.
+All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The menu and dialog were
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1385 Rust tests total** (1380 → 1385, 1378 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
