@@ -544,6 +544,14 @@ export default function App() {
   const [innerShadowSize, setInnerShadowSize] = useState(5);
   const [innerShadowColor, setInnerShadowColor] = useState("#000000");
   const [innerShadowOpacity, setInnerShadowOpacity] = useState(75);
+  // Layer Style > Satin: distance, angle, size, colour, opacity, invert.
+  const [showSatinDialog, setShowSatinDialog] = useState(false);
+  const [satinDistance, setSatinDistance] = useState(11);
+  const [satinAngle, setSatinAngle] = useState(19);
+  const [satinSize, setSatinSize] = useState(14);
+  const [satinColor, setSatinColor] = useState("#000000");
+  const [satinOpacity, setSatinOpacity] = useState(50);
+  const [satinInvert, setSatinInvert] = useState(true);
   const [showPatternOverlayDialog, setShowPatternOverlayDialog] = useState(false);
   const [patternOverlayScale, setPatternOverlayScale] = useState(10);
   const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
@@ -1792,6 +1800,21 @@ export default function App() {
     dropShadowColor,
     dropShadowOpacity,
   ]);
+
+  const applySatin = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(satinColor);
+    await runCommand("satin", {
+      id: selectedId,
+      distance: satinDistance,
+      angle: satinAngle,
+      size: satinSize,
+      color: [r, g, b],
+      opacity: satinOpacity,
+      invert: satinInvert,
+    });
+    setShowSatinDialog(false);
+  }, [runCommand, selectedId, satinDistance, satinAngle, satinSize, satinColor, satinOpacity, satinInvert]);
 
   const applyInnerShadow = useCallback(async () => {
     if (selectedId === null) return;
@@ -5826,6 +5849,14 @@ export default function App() {
             title="Layer > Layer Style > Inner Shadow"
           >
             Inner Shadow…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSatinDialog(true)}
+            disabled={busy || !canPaint}
+            title="Layer > Layer Style > Satin"
+          >
+            Satin…
           </button>
           <button
             className="button button--quiet"
@@ -10766,6 +10797,103 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyDropShadow} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSatinDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSatinDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Satin"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Satin</h2>
+            <p className="modal__hint">
+              Shades the layer where its silhouette, shifted both ways along the angle,
+              disagrees with itself; Invert shades where it agrees instead.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Distance
+                <span className="control__value">{satinDistance}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={250}
+                value={satinDistance}
+                onChange={(event) => setSatinDistance(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{satinAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={satinAngle}
+                onChange={(event) => setSatinAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Size
+                <span className="control__value">{satinSize}px</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={250}
+                value={satinSize}
+                onChange={(event) => setSatinSize(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={satinColor}
+                onChange={(event) => setSatinColor(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Opacity
+                <span className="control__value">{satinOpacity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={satinOpacity}
+                onChange={(event) => setSatinOpacity(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={satinInvert}
+                onChange={(event) => setSatinInvert(event.target.checked)}
+              />
+              <span className="control__label">Invert</span>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowSatinDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={applySatin} disabled={busy}>
                 Apply
               </button>
             </div>

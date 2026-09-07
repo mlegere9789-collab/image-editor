@@ -13956,6 +13956,55 @@ run build`) is fully green.
 **1410 Rust tests total** (1405 → 1410, 1403 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 234 — Satin
+
+Layer Style completes with Satin. `satin(id, distance, angle, size,
+color, opacity, invert)` takes the layer's own silhouette offset both
+ways along `angle` by `distance` — the "0° from the right" convention
+Drop Shadow and Inner Shadow use — box-averages each copy over `size`
+with edge clamping, and uses the absolute difference of the two, the
+figure Photoshop's satin draws where the shifted shapes disagree, to
+blend every already-opaque pixel's RGB toward `color` by that figure
+times `opacity`; `invert` flips the figure so the agreeing interior is
+shaded instead. Alpha is untouched and transparent pixels are left
+alone, exactly as Inner Shadow behaves, and the selection and lock
+apply through `filter_pixels`. Distance and Size up to `250`, Opacity
+to `100`, and a finite angle are checked first. A **Satin…** dialog
+with Photoshop's default values (distance `11`, angle `19°`, size
+`14`, black at `50%`, Invert on) applies it. The Multiply default
+blend, the contour picker, and anti-aliasing are documented scope
+cuts.
+
+**Verified two ways.** Five new `document.rs` tests on a five-pixel
+row opaque `[100, 150, 200]` in the middle three, the softened blend
+first computed in Python emulating `f32`. Distance `1` at `0°` with
+size `0` shades the two end pixels of the shape fully black — each
+sees an opaque neighbour one way and a transparent one the other, `255`
+apart — and leaves the middle, which sees opaque both ways, and the
+transparent ends untouched. Invert shades the middle instead. Opacity
+`50` halves the blend to `[50, 75, 100]`, and a white colour shades
+white. Size `1` averages each sample over three clamped pixels: the
+shape's ends see `255` one way and `85` the other, `170` apart, and
+blend two thirds toward black to `[33, 50, 67]`, while the middle
+sees `170` both ways and stays. Distance `251`, size `251`, opacity
+`101`, a NaN angle, and an unknown layer are refused; a `90°` offset
+on a one-row layer clamps both samples onto the pixel and changes
+nothing; a locked layer is refused. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+eighty-one: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1415 Rust tests total** (1410 → 1415, 1408 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

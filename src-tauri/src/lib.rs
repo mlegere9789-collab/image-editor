@@ -3793,6 +3793,24 @@ fn inner_shadow(
     })
 }
 
+/// Layer > Layer Style > Satin on layer `id`, baked in destructively.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn satin(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distance: u32,
+    angle: f32,
+    size: u32,
+    color: [u8; 3],
+    opacity: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.satin(id, distance, angle, size, color, opacity, invert)
+    })
+}
+
 /// Layer > Layer Style > Pattern Overlay on layer `id`, baked in
 /// destructively.
 #[tauri::command]
@@ -4752,6 +4770,7 @@ pub fn run() {
             inner_glow,
             drop_shadow,
             inner_shadow,
+            satin,
             pattern_overlay,
             bevel_emboss,
             contour,

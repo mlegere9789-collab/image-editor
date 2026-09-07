@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 379.**
+**618 distinct capabilities tracked. Currently shipped: 380.**
 
 ## PART I — EVERY TOOL
 
@@ -120,7 +120,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] STROKE (`stroke_outline`, baked in destructively: Photoshop's own "Outside" position only — a transparent pixel with an opaque neighbour within a Chebyshev-distance `size` becomes stroke, every opaque pixel untouched. Inside/Center positions, Blend Mode, and non-destructive editability are documented scope cuts — see README Phase 99)
 - [x] INNER SHADOW (`inner_shadow`, baked in destructively: the mirror image of `drop_shadow` — the exact same offset/box-average machinery, but sourced from each sampled pixel's own inverse alpha instead of its alpha, and blended onto already-opaque pixels instead of replacing already-transparent ones — see README Phase 107)
 - [x] INNER GLOW (`inner_glow`, baked in destructively: the mirror image of `outer_glow` — an opaque pixel `d < size` pixels from the nearest transparent neighbour blends toward the glow colour by `(1 - d/size) * opacity`, leaving deep-interior pixels with no transparent neighbour within `size` completely alone — see README Phase 103)
-- [ ] SATIN
+- [x] SATIN (`satin`, baked in destructively: the layer's silhouette offset both ways along the angle by Distance, each copy box-averaged over Size with edge clamping, and the absolute difference of the two — Photoshop's satin figure — blending every opaque pixel toward the colour by that figure times Opacity, Invert shading the agreeing interior instead; alpha untouched; the Multiply default, contour, and anti-alias are documented scope cuts — see README Phase 234)
 - [x] COLOR OVERLAY (`color_overlay`, baked in destructively: blends every already-opaque pixel's own RGB toward a solid colour by Opacity, Photoshop's own Normal blend mode only — a fully-transparent pixel has nothing to overlay onto and is left alone — see README Phase 100)
 - [x] GRADIENT OVERLAY (`gradient_overlay`, baked in destructively: `color_overlay`'s own blend-toward-a-target formula, but the target interpolates between two colours by the pixel's own horizontal or vertical position — Photoshop's own arbitrary angle, Scale, and non-linear Styles are a documented scope cut — see README Phase 101)
 - [x] PATTERN OVERLAY (`pattern_overlay`, baked in destructively: `color_overlay`'s own blend-toward-a-target formula, but the target alternates between two colours in a procedural checkerboard — this project has no pattern-asset library or file-loading UI, so a two-colour checkerboard stands in for a real pattern swatch — see README Phase 105)

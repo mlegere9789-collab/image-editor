@@ -13525,6 +13525,88 @@ impl Document {
         })
     }
 
+    /// Layer > Layer Style > Satin, baked in destructively: the layer's
+    /// own silhouette offset both ways along `angle` by `distance`
+    /// (drop_shadow's "0° from the right" convention), each copy
+    /// box-averaged over `size` with edge clamping, and the absolute
+    /// difference of the two — bright where the shifted shapes disagree,
+    /// which is Photoshop's satin figure — used, times `opacity`, to blend
+    /// every already-opaque pixel's RGB toward `color`; `invert` flips the
+    /// figure so the agreeing interior is shaded instead. Alpha is
+    /// untouched and transparent pixels are left alone, as in
+    /// [`Self::inner_shadow`]. Photoshop's Multiply default and its
+    /// contour and anti-alias options are documented scope cuts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn satin(
+        &mut self,
+        id: LayerId,
+        distance: u32,
+        angle: f32,
+        size: u32,
+        color: [u8; 3],
+        opacity: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if distance > 250 {
+            return Err("Satin distance must be between 0 and 250.".to_string());
+        }
+        if !angle.is_finite() {
+            return Err(format!("Satin angle must be a number, got {angle}."));
+        }
+        if size > 250 {
+            return Err("Satin size must be between 0 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Satin opacity must be between 0 and 100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = (distance as f32 * cos).round() as i64;
+        let dy = -(distance as f32 * sin).round() as i64;
+        let radius = size as i64;
+        let opacity_frac = opacity as f32 / 100.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let own = [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            if own[3] == 0 {
+                return own;
+            }
+            let average_at = |cy: i64, cx: i64| -> u32 {
+                let mut sum: u32 = 0;
+                let mut count: u32 = 0;
+                for wy in -radius..=radius {
+                    let y = (cy + wy).clamp(0, height - 1) as usize;
+                    for wx in -radius..=radius {
+                        let x = (cx + wx).clamp(0, width - 1) as usize;
+                        sum += src[(y * doc_width + x) * CHANNELS + 3] as u32;
+                        count += 1;
+                    }
+                }
+                sum / count
+            };
+            let forward = average_at(row as i64 + dy, col as i64 + dx);
+            let backward = average_at(row as i64 - dy, col as i64 - dx);
+            let mut figure = forward.abs_diff(backward);
+            if invert {
+                figure = 255 - figure;
+            }
+            let satin_alpha = (figure as f32 * opacity_frac).round().clamp(0.0, 255.0) as u8;
+            if satin_alpha == 0 {
+                return own;
+            }
+            let frac = satin_alpha as f32 / 255.0;
+            let mut out = own;
+            for c in 0..3 {
+                let v = own[c] as f32;
+                out[c] = (v * (1.0 - frac) + color[c] as f32 * frac)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
     /// Layer > Layer Style > Pattern Overlay, baked in destructively:
     /// [`Self::color_overlay`]'s own blend-toward-a-target formula, but
     /// the target alternates between `color1` and `color2` in a
@@ -38444,6 +38526,85 @@ mod tests {
         assert_eq!(doc.proof_image(Proof::Deuteranopia), vec![103, 108, 0, 255]);
         // The layers are untouched: a proof is a view.
         assert_eq!(doc.layers()[1].pixels, vec![255, 0, 0, 128]);
+    }
+
+    /// A 5×1 layer opaque `[100, 150, 200]` at x = 1..=3, transparent at
+    /// both ends.
+    fn satin_row() -> (Document, LayerId) {
+        let mut doc = Document::new(5, 1).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            0, 0, 0, 0,  100, 150, 200, 255,  100, 150, 200, 255,  100, 150, 200, 255,  0, 0, 0, 0,
+        ];
+        let id = doc.add_layer("l", &pixels, 5, 1).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn satin_shades_where_the_two_offset_silhouettes_differ() {
+        // Distance 1 at 0° offsets one pixel left and right: x = 1 sees an
+        // opaque neighbour one way and a transparent one the other (255
+        // apart), x = 2 sees opaque both ways (0 apart), x = 3 mirrors x = 1.
+        let (mut doc, id) = satin_row();
+        doc.satin(id, 1, 0.0, 0, [0, 0, 0], 100, false).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 4, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn satin_invert_swaps_the_shading() {
+        let (mut doc, id) = satin_row();
+        doc.satin(id, 1, 0.0, 0, [0, 0, 0], 100, true).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn satin_opacity_scales_the_blend() {
+        let (mut doc, id) = satin_row();
+        doc.satin(id, 1, 0.0, 0, [0, 0, 0], 50, false).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 75, 100, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 150, 200, 255]);
+        let (mut doc, id) = satin_row();
+        doc.satin(id, 1, 0.0, 0, [255, 255, 255], 100, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn satin_size_softens_the_silhouettes() {
+        // Size 1 box-averages each offset sample over three pixels, edge
+        // clamped: x = 1 sees 255 one way and (0 + 0 + 255) / 3 = 85 the
+        // other, 170 apart, so it blends two thirds toward black —
+        // [33, 50, 67]; x = 2 sees 170 both ways and stays.
+        let (mut doc, id) = satin_row();
+        doc.satin(id, 1, 0.0, 1, [0, 0, 0], 100, false).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [33, 50, 67, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 150, 200, 255]);
+        assert_eq!(pixel(&doc, id, 3, 0), [33, 50, 67, 255]);
+    }
+
+    #[test]
+    fn satin_validates_and_a_vertical_offset_on_one_row_does_nothing() {
+        let (mut doc, id) = satin_row();
+        assert!(doc.satin(id, 251, 0.0, 0, [0, 0, 0], 100, false).is_err());
+        assert!(doc.satin(id, 1, 0.0, 251, [0, 0, 0], 100, false).is_err());
+        assert!(doc.satin(id, 1, 0.0, 0, [0, 0, 0], 101, false).is_err());
+        assert!(doc
+            .satin(id, 1, f32::NAN, 0, [0, 0, 0], 100, false)
+            .is_err());
+        assert!(doc.satin(999, 1, 0.0, 0, [0, 0, 0], 100, false).is_err());
+        // Straight up on a one-row layer: both samples clamp onto the pixel
+        // itself, so nothing differs and nothing changes.
+        doc.satin(id, 1, 90.0, 0, [0, 0, 0], 100, false).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.satin(id, 1, 0.0, 0, [0, 0, 0], 100, false).is_err());
     }
 
     #[test]
