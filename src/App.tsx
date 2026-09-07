@@ -250,6 +250,11 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showColorMixerDialog, setShowColorMixerDialog] = useState(false);
+  const [colorMixerRange, setColorMixerRange] = useState(0);
+  const [colorMixerHue, setColorMixerHue] = useState(0);
+  const [colorMixerSaturation, setColorMixerSaturation] = useState(0);
+  const [colorMixerLuminance, setColorMixerLuminance] = useState(0);
   const [showColorGradingDialog, setShowColorGradingDialog] = useState(false);
   const [colorGrading, setColorGrading] = useState<[number, number][]>([
     [220, 0],
@@ -958,6 +963,25 @@ export default function App() {
     });
     setShowColorGradingDialog(false);
   }, [runCommand, selectedId, colorGrading]);
+
+  const applyColorMixer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("color_mixer", {
+      id: selectedId,
+      range: colorMixerRange,
+      hue: colorMixerHue,
+      saturation: colorMixerSaturation,
+      luminance: colorMixerLuminance,
+    });
+    setShowColorMixerDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    colorMixerRange,
+    colorMixerHue,
+    colorMixerSaturation,
+    colorMixerLuminance,
+  ]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3260,6 +3284,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowColorMixerDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Color Mixer"
+          >
+            Color Mixer…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5219,6 +5251,88 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyColorGrading} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showColorMixerDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowColorMixerDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Color Mixer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Color Mixer</h2>
+            <label className="control">
+              <span className="control__label">Range</span>
+              <select
+                value={colorMixerRange}
+                onChange={(event) => setColorMixerRange(Number(event.target.value))}
+              >
+                {["Reds", "Oranges", "Yellows", "Greens", "Aquas", "Blues", "Purples", "Magentas"].map(
+                  (name, index) => (
+                    <option key={name} value={index}>
+                      {name}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Hue
+                <span className="control__value">{colorMixerHue}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={colorMixerHue}
+                onChange={(event) => setColorMixerHue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{colorMixerSaturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={colorMixerSaturation}
+                onChange={(event) => setColorMixerSaturation(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Luminance
+                <span className="control__value">{colorMixerLuminance}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={colorMixerLuminance}
+                onChange={(event) => setColorMixerLuminance(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowColorMixerDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyColorMixer} disabled={busy}>
                 Apply
               </button>
             </div>

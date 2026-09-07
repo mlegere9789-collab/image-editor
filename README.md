@@ -8649,6 +8649,67 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **894 Rust tests total** (889 → 894, 887 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 132 — Camera Raw Filter > Color Mixer
+
+`color_mixer(id, range, hue, saturation, luminance)` brings Camera
+Raw's HSL panel to this project: `hue_saturation`'s own hue shift,
+saturation scale, and lightness offset — the same three formulas (`h +
+shift` modulo `360`, `s × (1 + saturation/100)`, `l + luminance/100`,
+each clamped) and the same `-180..=180` / `-100..=100` clamped ranges —
+applied to only one of Camera Raw's eight named hue ranges at a time.
+`range` is `0` Reds, `1` Oranges, `2` Yellows, `3` Greens, `4` Aquas,
+`5` Blues, `6` Purples, `7` Magentas, each defined by the HSL hue of its
+own named colour (`0`, `30`, `60`, `120`, `180`, `240`, `270`, `300`
+degrees); a pixel belongs to whichever centre is nearest its own hue
+measured around the colour wheel (so hue `350` is a Red, not a
+Magenta; a hue exactly midway between two centres goes to the
+lower-indexed one), and achromatic pixels — saturation `0`, which
+`rgb_to_hsl` reports with a placeholder hue of `0` — belong to no range
+and are never touched, so a neutral grey can't be dragged into the Reds
+and brightened by a Luminance slider meant for red pixels. Camera Raw's
+own eight ranges overlap with feathered edges, so that a hue between two
+centres is partly affected by both sliders; this project's own hard
+nearest-centre partition is a documented simplification, chosen over
+guessing Camera Raw's own exact falloff widths. Any other `range`
+errors. A new **Color Mixer…** dialog exposes a Range dropdown and
+Hue/Saturation/Luminance sliders, matching Camera Raw's own per-range
+three-slider layout one range at a time.
+
+**Verified two ways.** Six new `document.rs` tests. The partition
+itself is pinned directly: hues `0`, `14`, `15` (the Red/Orange
+midpoint, going to the lower index), `331`, and `359` are Reds; `16`
+and `45` Oranges; `46` Yellows; `150` Greens; `210` Aquas; `255` Blues;
+`256` and `285` Purples. On a three-pixel row — `(200, 100, 100)` at
+hue `0`, `(200, 150, 100)` at hue `30`, `(100, 100, 200)` at hue `240`,
+all saturation `0.476190` and lightness `0.588235` — shifting the Reds
+by `+120` turns only the first into its hue-`120` counterpart `(100,
+200, 100)`; then shifting the Oranges by `+120` turns only the second
+into `(100, 200, 150)`, leaving the Blue pixel untouched throughout.
+Saturation `-50` on the red pixel halves `s` to `0.238095` and gives
+`(175, 125, 125)` — the same bytes `camera_raw_saturation` produced for
+that pixel in Phase 126, as it must, since the formula is shared — and
+luminance `+20` lifts `l` to `0.788235`, giving `(227, 175, 175)`. A
+grey `(128, 128, 128)` survives a Reds shift of `+120` hue, `+100`
+saturation, `+20` luminance byte-for-byte. A one-pixel selection
+confines the shift, and range `8`, a locked layer, and an unknown layer
+all error. All six passed on the first run, the partition table and all
+four colour results cross-checked against an independent Python script
+reusing the existing `rgb_to_hsl`/`hsl_to_rgb` port.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-nine: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**900 Rust tests total** (894 → 900, 893 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

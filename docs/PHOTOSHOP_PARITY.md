@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 193.**
+**618 distinct capabilities tracked. Currently shipped: 194.**
 
 ## PART I — EVERY TOOL
 
@@ -630,7 +630,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Parametric Curve
 - [x] Point Curve (`camera_raw_point_curve`, an exact preset over `curves` — Camera Raw's own Point Curve is the same point-driven RGB tone curve Image > Adjustments > Curves applies, so the five fixed-input, straight-segment curve is the same already-verified code under its Camera Raw name, with the same no-per-channel/no-spline scope cuts — see README Phase 130)
 - [ ] Targeted Adjustment Tool
-- [ ] Color Mixer
+- [x] Color Mixer (`color_mixer`, `hue_saturation`'s own HSL hue-shift/saturation-scale/lightness-offset applied to one of Camera Raw's eight named hue ranges at a time — Reds, Oranges, Yellows, Greens, Aquas, Blues, Purples, Magentas — a pixel belonging to whichever range's centre hue (0/30/60/120/180/240/270/300°) is nearest its own hue, achromatic pixels never. Camera Raw's own feathered, overlapping range boundaries are a documented simplification to hard nearest-centre edges — see README Phase 132)
 - [ ] Point Color
 - [x] Color Grading (`color_grading`, three `[hue, saturation]` wheels for shadows/midtones/highlights, each converted into `color_balance`'s own three per-channel sliders for that range via `tint = hsl_to_rgb(hue, 1, 0.5)`, `slider = round((tint/255 − 0.5) × 2 × saturation)`, then applied by Color Balance's own luma-weighted blend — an exact composition. Camera Raw's own per-wheel Luminance, Global wheel, and Blending/Balance are a documented scope cut — see README Phase 131)
 - [ ] Optics

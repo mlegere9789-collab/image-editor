@@ -2612,6 +2612,22 @@ fn color_grading(
     })
 }
 
+/// Camera Raw Filter > Color Mixer on layer `id`: shift one hue range
+/// (`0` Reds through `7` Magentas) by hue/saturation/luminance.
+#[tauri::command]
+fn color_mixer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    range: u8,
+    hue: i32,
+    saturation: i32,
+    luminance: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.color_mixer(id, range, hue, saturation, luminance)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2865,6 +2881,7 @@ pub fn run() {
             shadow_clipping,
             camera_raw_point_curve,
             color_grading,
+            color_mixer,
             select_rectangle,
             select_ellipse,
             select_all,

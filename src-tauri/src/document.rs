@@ -9918,6 +9918,69 @@ impl Document {
         };
         self.color_balance(id, sliders(shadows), sliders(midtones), sliders(highlights))
     }
+
+    /// Camera Raw Filter > Color Mixer: [`Self::hue_saturation`]'s own
+    /// HSL hue shift, saturation scale, and lightness offset — the same
+    /// three formulas, the same `-180..=180` / `-100..=100` clamped
+    /// ranges — applied to only one of Camera Raw's eight named hue
+    /// ranges at a time. `range` is `0` Reds, `1` Oranges, `2` Yellows,
+    /// `3` Greens, `4` Aquas, `5` Blues, `6` Purples, `7` Magentas, each
+    /// defined by the HSL hue of its own named colour (`0`, `30`, `60`,
+    /// `120`, `180`, `240`, `270`, `300` degrees); a pixel belongs to
+    /// whichever centre is nearest its own hue around the colour wheel
+    /// ([`color_mixer_range`]), and achromatic pixels — saturation `0`,
+    /// which [`rgb_to_hsl`] reports with hue `0` — belong to no range and
+    /// are never touched, so a neutral grey can't be dragged into the
+    /// Reds by its placeholder hue. Camera Raw's own ranges overlap with
+    /// feathered edges so that a hue between two centres is partly
+    /// affected by both; this project's own hard nearest-centre
+    /// partition is a documented simplification, chosen over guessing
+    /// Camera Raw's own exact falloff widths. Any other `range` errors.
+    pub fn color_mixer(
+        &mut self,
+        id: LayerId,
+        range: u8,
+        hue: i32,
+        saturation: i32,
+        luminance: i32,
+    ) -> Result<Option<Rect>, String> {
+        if range as usize >= COLOR_MIXER_CENTRES.len() {
+            return Err("Color Mixer range must be 0 (Reds) through 7 (Magentas).".to_string());
+        }
+        let hue_shift = hue.clamp(-180, 180) as f32;
+        let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
+        let light_offset = luminance.clamp(-100, 100) as f32 / 100.0;
+        self.adjust_layer_pixels(id, move |[r, g, b, a]| {
+            let (h, s, l) = rgb_to_hsl(r, g, b);
+            if s <= 0.0 || color_mixer_range(h) != range as usize {
+                return [r, g, b, a];
+            }
+            let h = (h + hue_shift).rem_euclid(360.0);
+            let s = (s * (1.0 + sat_factor)).clamp(0.0, 1.0);
+            let l = (l + light_offset).clamp(0.0, 1.0);
+            let (r, g, b) = hsl_to_rgb(h, s, l);
+            [r, g, b, a]
+        })
+    }
+}
+
+/// The centre hue, in degrees, of each of Camera Raw's eight Color Mixer
+/// ranges: Reds, Oranges, Yellows, Greens, Aquas, Blues, Purples, Magentas.
+const COLOR_MIXER_CENTRES: [f32; 8] = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0, 270.0, 300.0];
+
+/// Which [`COLOR_MIXER_CENTRES`] entry `hue` (degrees, `0.0..360.0`) is
+/// nearest to around the colour wheel, so `350` is a Red, not a Magenta.
+/// A hue exactly midway between two centres goes to the lower-indexed one.
+fn color_mixer_range(hue: f32) -> usize {
+    let mut best = (f32::INFINITY, 0);
+    for (index, centre) in COLOR_MIXER_CENTRES.iter().enumerate() {
+        let direct = (hue - centre).abs();
+        let distance = direct.min(360.0 - direct);
+        if distance < best.0 {
+            best = (distance, index);
+        }
+    }
+    best.1
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -23163,6 +23226,97 @@ mod tests {
         assert!(doc.color_grading(id, [0, 50], [0, 0], [0, 0]).is_err());
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.color_grading(999, [0, 50], [0, 0], [0, 0]).is_err());
+    }
+
+    #[test]
+    fn color_mixer_range_picks_the_nearest_centre_around_the_wheel() {
+        assert_eq!(color_mixer_range(0.0), 0);
+        assert_eq!(color_mixer_range(14.0), 0);
+        assert_eq!(color_mixer_range(15.0), 0); // midway: lower index wins
+        assert_eq!(color_mixer_range(16.0), 1);
+        assert_eq!(color_mixer_range(45.0), 1);
+        assert_eq!(color_mixer_range(46.0), 2);
+        assert_eq!(color_mixer_range(150.0), 3);
+        assert_eq!(color_mixer_range(210.0), 4);
+        assert_eq!(color_mixer_range(255.0), 5);
+        assert_eq!(color_mixer_range(256.0), 6);
+        assert_eq!(color_mixer_range(285.0), 6);
+        assert_eq!(color_mixer_range(331.0), 0); // wraps: nearer 360 than 300
+        assert_eq!(color_mixer_range(359.0), 0);
+    }
+
+    #[test]
+    fn color_mixer_shifts_only_pixels_in_the_chosen_range() {
+        // (200, 100, 100) is hue 0 (Reds); (200, 150, 100) is hue 30
+        // (Oranges); (100, 100, 200) is hue 240 (Blues). Shifting the Reds
+        // by +120 turns only the first into its hue-120 counterpart
+        // (100, 200, 100) at the same saturation and lightness.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[200, 100, 100, 255, 200, 150, 100, 255, 100, 100, 200, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.color_mixer(id, 0, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 100, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 150, 100, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 100, 200, 255]);
+        // The Oranges range catches the second pixel instead: (100, 200, 150).
+        doc.color_mixer(id, 1, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 100, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 200, 150, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [100, 100, 200, 255]);
+    }
+
+    #[test]
+    fn color_mixer_saturation_and_luminance_use_hue_saturations_own_formulas() {
+        // Same (200, 100, 100) pixel: saturation -50 halves s to 0.238095,
+        // giving (175, 125, 125) exactly as camera_raw_saturation does;
+        // luminance +20 lifts l from 0.588235 to 0.788235, giving
+        // (227, 175, 175).
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[200, 100, 100, 255], 1, 1).unwrap();
+        doc.color_mixer(id, 0, 0, -50, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [175, 125, 125, 255]);
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[200, 100, 100, 255], 1, 1).unwrap();
+        doc.color_mixer(id, 0, 0, 0, 20).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [227, 175, 175, 255]);
+    }
+
+    #[test]
+    fn color_mixer_never_touches_achromatic_pixels() {
+        // Grey reports hue 0, which would otherwise make it a "Red".
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.color_mixer(id, 0, 120, 100, 20).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn color_mixer_is_confined_to_the_selection() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[200, 100, 100, 255, 200, 100, 100, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.color_mixer(id, 0, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 200, 100, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn color_mixer_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.color_mixer(id, 8, 0, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.color_mixer(id, 0, 120, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.color_mixer(999, 0, 120, 0, 0).is_err());
     }
 
     #[test]
