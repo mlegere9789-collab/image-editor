@@ -129,6 +129,10 @@ pub struct Document {
     /// travelling through undo/redo with the document. Cleared, like the
     /// active selection, when the canvas changes size.
     saved_selections: Vec<(String, Selection)>,
+    /// Alpha channels made by Image > Calculations, in creation order —
+    /// a byte per pixel each, discarded like every other position-bound
+    /// thing when the canvas changes size.
+    channels: Vec<AlphaChannel>,
     /// The Count tool's numbered marks, in placement order — document
     /// data in Photoshop too (they save with the file and undo), and
     /// discarded, like every position-bound thing here, when the canvas
@@ -234,6 +238,21 @@ pub enum ApplyChannel {
 }
 
 impl ApplyChannel {
+    /// One byte of the pixel through this channel: a colour channel's own
+    /// byte, Transparency the alpha, and RGB the BT.601 luma rounded —
+    /// Photoshop's Gray, what a mask or a Calculations source reads.
+    pub fn value(self, [r, g, b, a]: [u8; 4]) -> u8 {
+        match self {
+            ApplyChannel::Rgb => {
+                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as u8
+            }
+            ApplyChannel::Red => r,
+            ApplyChannel::Green => g,
+            ApplyChannel::Blue => b,
+            ApplyChannel::Transparency => a,
+        }
+    }
+
     /// The source pixel as Apply Image sees it through this channel:
     /// unchanged for RGB; `[v, v, v, a]` for one colour channel `v`, the
     /// source's own alpha kept; `[a, a, a, 255]` for Transparency.
@@ -263,19 +282,50 @@ pub struct ApplyMask {
 
 impl ApplyMask {
     /// The mask's weight at one pixel, `0..=1`: the channel's byte
-    /// (luma rounded, for RGB), inverted if asked, over 255.
-    pub fn weight(self, [r, g, b, a]: [u8; 4]) -> f32 {
-        let value = match self.channel {
-            ApplyChannel::Rgb => {
-                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as u8
-            }
-            ApplyChannel::Red => r,
-            ApplyChannel::Green => g,
-            ApplyChannel::Blue => b,
-            ApplyChannel::Transparency => a,
-        };
+    /// ([`ApplyChannel::value`]), inverted if asked, over 255.
+    pub fn weight(self, pixel: [u8; 4]) -> f32 {
+        let value = self.channel.value(pixel);
         to_unit(if self.invert { 255 - value } else { value })
     }
+}
+
+/// Image > Calculations: one of its two sources — a layer (`None` for the
+/// merged composite) read through one channel, optionally inverted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalcSource {
+    pub layer: Option<LayerId>,
+    pub channel: ApplyChannel,
+    pub invert: bool,
+}
+
+/// Where Image > Calculations sends its grey result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CalcResult {
+    NewDocument,
+    NewChannel,
+    Selection,
+}
+
+/// What [`Document::calculations`] produced for its [`CalcResult`].
+#[derive(Debug, Clone)]
+pub enum CalcOutcome {
+    /// A new grey document the size of this one.
+    Document(Box<Document>),
+    /// The name of the alpha channel added to this document.
+    Channel(String),
+    /// The selection was replaced.
+    Selection,
+}
+
+/// An alpha channel: one byte per document pixel, row-major, as
+/// Photoshop's Channels panel stores a saved grey — here made by
+/// Calculations and loadable as a selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AlphaChannel {
+    pub name: String,
+    pub pixels: Vec<u8>,
 }
 
 /// Apply Image's Blending list: any of the twelve layer blend modes, or
@@ -1447,6 +1497,8 @@ pub struct DocumentView {
     pub guides: Vec<Guide>,
     /// Layer groups, in creation order; members are ids, bottom to top.
     pub groups: Vec<LayerGroup>,
+    /// Alpha channel names, in creation order.
+    pub channels: Vec<String>,
 }
 
 impl Document {
@@ -1465,6 +1517,7 @@ impl Document {
             last_transform: None,
             pattern: None,
             saved_selections: Vec::new(),
+            channels: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
             layer_comps: Vec::new(),
@@ -1505,6 +1558,114 @@ impl Document {
             layer_comps: self.layer_comp_names(),
             guides: self.guides.clone(),
             groups: self.groups.clone(),
+            channels: self.channels.iter().map(|c| c.name.clone()).collect(),
+        }
+    }
+
+    /// The alpha channels, in creation order.
+    pub fn channels(&self) -> &[AlphaChannel] {
+        &self.channels
+    }
+
+    /// Loads alpha channel `name` as the selection: every pixel whose grey
+    /// is `128` or more — the one-bit reading of Photoshop's partial
+    /// selection. Errors for an unknown name.
+    pub fn load_channel(&mut self, name: &str) -> Result<(), String> {
+        let channel = self
+            .channels
+            .iter()
+            .find(|c| c.name == name)
+            .ok_or_else(|| format!("No channel named \"{name}\"."))?;
+        let bits = channel.pixels.iter().map(|&v| v >= 128).collect();
+        self.set_mask_selection(bits)
+    }
+
+    /// Image > Calculations: blends Source 1 onto Source 2 — each a layer
+    /// or the merged composite read through one channel
+    /// ([`ApplyChannel::value`]), inverted if asked — as greys, with
+    /// `blend` (a layer mode or Add / Subtract, Source 2 the base so
+    /// Subtract is `Source 2 − Source 1`), then mixes the result back
+    /// toward Source 2 by `opacity` percent and, when given, the `mask`'s
+    /// weight ([`ApplyMask::weight`]) — Photoshop's own order. The grey
+    /// goes to `result`: a new one-layer document this one's size
+    /// ([`CalcOutcome::Document`], this document untouched), a new alpha
+    /// channel named `Alpha N`, or the selection (`128` and up selected).
+    /// Everything is validated before anything changes: unknown layers,
+    /// an opacity over 100, or an out-of-range Scale or Offset error.
+    pub fn calculations(
+        &mut self,
+        source1: CalcSource,
+        source2: CalcSource,
+        blend: ApplyBlend,
+        opacity: u8,
+        mask: Option<ApplyMask>,
+        result: CalcResult,
+    ) -> Result<CalcOutcome, String> {
+        if opacity > 100 {
+            return Err(format!("Opacity must be 0..=100 percent, not {opacity}."));
+        }
+        blend.validate()?;
+        let pixels_of = |doc: &Self, layer: Option<LayerId>| -> Result<Vec<u8>, String> {
+            Ok(match layer {
+                Some(id) => doc.layer(id)?.pixels.clone(),
+                None => crate::composite::flatten(doc).pixels,
+            })
+        };
+        let pixels1 = pixels_of(self, source1.layer)?;
+        let pixels2 = pixels_of(self, source2.layer)?;
+        let mask_pixels = match mask {
+            Some(m) => Some(pixels_of(self, m.source)?),
+            None => None,
+        };
+        let opacity = f32::from(opacity) / 100.0;
+        let count = self.width as usize * self.height as usize;
+        let mut greys = Vec::with_capacity(count);
+        for i in 0..count {
+            let at = |pixels: &[u8]| {
+                let base = i * CHANNELS;
+                [
+                    pixels[base],
+                    pixels[base + 1],
+                    pixels[base + 2],
+                    pixels[base + 3],
+                ]
+            };
+            let read = |source: CalcSource, pixels: &[u8]| {
+                let value = source.channel.value(at(pixels));
+                to_unit(if source.invert { 255 - value } else { value })
+            };
+            let cs = read(source1, &pixels1);
+            let cb = read(source2, &pixels2);
+            let blended = blend.blend(cb, cs);
+            let mut weight = opacity;
+            if let (Some(mask), Some(mask_pixels)) = (mask, &mask_pixels) {
+                weight *= mask.weight(at(mask_pixels));
+            }
+            greys.push(to_byte(weight * blended + (1.0 - weight) * cb));
+        }
+        match result {
+            CalcResult::NewDocument => {
+                let mut document = Document::new(self.width, self.height)?;
+                let mut rgba = Vec::with_capacity(count * CHANNELS);
+                for &grey in &greys {
+                    rgba.extend_from_slice(&[grey, grey, grey, 255]);
+                }
+                document.add_layer("Calculation", &rgba, self.width, self.height)?;
+                Ok(CalcOutcome::Document(Box::new(document)))
+            }
+            CalcResult::NewChannel => {
+                let name = format!("Alpha {}", self.channels.len() + 1);
+                self.channels.push(AlphaChannel {
+                    name: name.clone(),
+                    pixels: greys,
+                });
+                Ok(CalcOutcome::Channel(name))
+            }
+            CalcResult::Selection => {
+                let bits = greys.iter().map(|&v| v >= 128).collect();
+                self.set_mask_selection(bits)?;
+                Ok(CalcOutcome::Selection)
+            }
         }
     }
 
@@ -3846,6 +4007,7 @@ impl Document {
         self.selection = None;
         self.last_selection = None;
         self.saved_selections.clear();
+        self.channels.clear();
         self.count_marks.clear();
         self.notes.clear();
         // A guide is a boundary line, so it turns with the picture: a
@@ -3913,6 +4075,7 @@ impl Document {
         self.selection = None;
         self.last_selection = None;
         self.saved_selections.clear();
+        self.channels.clear();
         self.count_marks.clear();
         self.notes.clear();
         // Guides ride along with the pixels they sit between; those left
@@ -36056,6 +36219,235 @@ mod tests {
         doc.apply_image(target, Some(source), BlendMode::Normal, 100, false, false)
             .unwrap();
         assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
+    }
+
+    /// A 2×1 document: layer `a` `[200, 50, 100, 255] [10, 20, 30, 128]`
+    /// under layer `b` `[100, 150, 200, 255] [255, 255, 255, 0]`.
+    fn calc_pair() -> (Document, LayerId, LayerId) {
+        let mut doc = Document::new(2, 1).unwrap();
+        let a = doc
+            .add_layer("a", &[200, 50, 100, 255, 10, 20, 30, 128], 2, 1)
+            .unwrap();
+        let b = doc
+            .add_layer("b", &[100, 150, 200, 255, 255, 255, 255, 0], 2, 1)
+            .unwrap();
+        (doc, a, b)
+    }
+
+    fn calc_source(layer: Option<LayerId>, channel: ApplyChannel, invert: bool) -> CalcSource {
+        CalcSource {
+            layer,
+            channel,
+            invert,
+        }
+    }
+
+    const NORMAL: ApplyBlend = ApplyBlend::Mode {
+        mode: BlendMode::Normal,
+    };
+
+    /// The two result bytes of a Calculations run sent to a new document.
+    fn calc_greys(
+        doc: &mut Document,
+        source1: CalcSource,
+        source2: CalcSource,
+        blend: ApplyBlend,
+        opacity: u8,
+        mask: Option<ApplyMask>,
+    ) -> [u8; 2] {
+        match doc
+            .calculations(
+                source1,
+                source2,
+                blend,
+                opacity,
+                mask,
+                CalcResult::NewDocument,
+            )
+            .unwrap()
+        {
+            CalcOutcome::Document(result) => {
+                let pixels = &result.layers()[0].pixels;
+                assert_eq!(result.view().layers.len(), 1);
+                assert_eq!(&pixels[0..3], &[pixels[0]; 3]);
+                assert_eq!(&pixels[4..7], &[pixels[4]; 3]);
+                assert_eq!((pixels[3], pixels[7]), (255, 255));
+                [pixels[0], pixels[4]]
+            }
+            other => panic!("expected a document, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn calculations_blends_source_1_onto_source_2_as_greys() {
+        // Normal: the result is Source 1's channel — a's Red, [200, 10].
+        // Multiply with b's Green [150, 255]: 200·150/255 → 118, 10.
+        // Gray reads a's luma, 100.55 → 101 and 17.6 → 18. Merged as
+        // Source 1 is b over a: Blue 200, and at x=1 a's 30 through b's
+        // transparent pixel.
+        let (mut doc, a, b) = calc_pair();
+        let a_red = calc_source(Some(a), ApplyChannel::Red, false);
+        let b_green = calc_source(Some(b), ApplyChannel::Green, false);
+        assert_eq!(
+            calc_greys(&mut doc, a_red, b_green, NORMAL, 100, None),
+            [200, 10]
+        );
+        let multiply = ApplyBlend::Mode {
+            mode: BlendMode::Multiply,
+        };
+        assert_eq!(
+            calc_greys(&mut doc, a_red, b_green, multiply, 100, None),
+            [118, 10]
+        );
+        let a_gray = calc_source(Some(a), ApplyChannel::Rgb, false);
+        assert_eq!(
+            calc_greys(&mut doc, a_gray, b_green, NORMAL, 100, None),
+            [101, 18]
+        );
+        let merged_blue = calc_source(None, ApplyChannel::Blue, false);
+        assert_eq!(
+            calc_greys(&mut doc, merged_blue, b_green, NORMAL, 100, None),
+            [200, 30]
+        );
+        // The document itself is untouched.
+        assert_eq!(pixel(&doc, a, 0, 0), [200, 50, 100, 255]);
+        assert_eq!(doc.view().layers.len(), 2);
+    }
+
+    #[test]
+    fn calculations_subtract_and_add_take_source_2_as_the_base() {
+        // Subtract: Source 2 − Source 1 — (150 − 200) → 0, 255 − 10 = 245.
+        // Add at scale 2, offset 10: (200 + 150)/2 + 10 = 185, and
+        // (10 + 255)/2 + 10 = 142.5 → 143.
+        let (mut doc, a, b) = calc_pair();
+        let a_red = calc_source(Some(a), ApplyChannel::Red, false);
+        let b_green = calc_source(Some(b), ApplyChannel::Green, false);
+        let subtract = ApplyBlend::Subtract {
+            scale: 1.0,
+            offset: 0,
+        };
+        assert_eq!(
+            calc_greys(&mut doc, a_red, b_green, subtract, 100, None),
+            [0, 245]
+        );
+        let add = ApplyBlend::Add {
+            scale: 2.0,
+            offset: 10,
+        };
+        assert_eq!(
+            calc_greys(&mut doc, a_red, b_green, add, 100, None),
+            [185, 143]
+        );
+    }
+
+    #[test]
+    fn calculations_invert_opacity_and_mask() {
+        // a's Red inverted is [55, 245]; at 50% over b's Green [150, 255]
+        // the halfway greys are 102.5 → 103 and 250. A Transparency mask
+        // from a, [255, 128], leaves x=0 alone and quarters x=1:
+        // 0.251·245 + 0.749·255 → 252.
+        let (mut doc, a, b) = calc_pair();
+        let a_red_inv = calc_source(Some(a), ApplyChannel::Red, true);
+        let b_green = calc_source(Some(b), ApplyChannel::Green, false);
+        assert_eq!(
+            calc_greys(&mut doc, a_red_inv, b_green, NORMAL, 100, None),
+            [55, 245]
+        );
+        assert_eq!(
+            calc_greys(&mut doc, a_red_inv, b_green, NORMAL, 50, None),
+            [103, 250]
+        );
+        let mask = ApplyMask {
+            source: Some(a),
+            channel: ApplyChannel::Transparency,
+            invert: false,
+        };
+        assert_eq!(
+            calc_greys(&mut doc, a_red_inv, b_green, NORMAL, 50, Some(mask)),
+            [103, 252]
+        );
+        let inverted = ApplyMask {
+            source: Some(a),
+            channel: ApplyChannel::Transparency,
+            invert: true,
+        };
+        // Inverted, [0, 127]: x=0 stays b's 150, x=1 weighs 0.498·0.5.
+        assert_eq!(
+            calc_greys(&mut doc, a_red_inv, b_green, NORMAL, 50, Some(inverted)),
+            [150, 253]
+        );
+    }
+
+    #[test]
+    fn calculations_can_make_a_channel_or_a_selection() {
+        let (mut doc, a, b) = calc_pair();
+        let a_red = calc_source(Some(a), ApplyChannel::Red, false);
+        let b_green = calc_source(Some(b), ApplyChannel::Green, false);
+        assert!(doc.view().channels.is_empty());
+        let outcome = doc
+            .calculations(a_red, b_green, NORMAL, 100, None, CalcResult::NewChannel)
+            .unwrap();
+        assert!(matches!(outcome, CalcOutcome::Channel(ref name) if name == "Alpha 1"));
+        assert_eq!(doc.view().channels, vec!["Alpha 1".to_string()]);
+        assert_eq!(doc.channels()[0].pixels, vec![200, 10]);
+        doc.calculations(a_red, b_green, NORMAL, 100, None, CalcResult::NewChannel)
+            .unwrap();
+        assert_eq!(doc.view().channels.len(), 2);
+        assert_eq!(doc.channels()[1].name, "Alpha 2");
+        // Selection: greys of 128 and up are selected.
+        assert!(doc.view().selection.is_none());
+        let outcome = doc
+            .calculations(a_red, b_green, NORMAL, 100, None, CalcResult::Selection)
+            .unwrap();
+        assert!(matches!(outcome, CalcOutcome::Selection));
+        assert_eq!(doc.selected_bits().unwrap(), vec![true, false]);
+        doc.deselect();
+        doc.load_channel("Alpha 1").unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), vec![true, false]);
+        assert!(doc.load_channel("Alpha 9").is_err());
+        // The document's pixels are untouched throughout.
+        assert_eq!(pixel(&doc, a, 0, 0), [200, 50, 100, 255]);
+        assert_eq!(doc.view().layers.len(), 2);
+    }
+
+    #[test]
+    fn calculations_validates_before_changing_anything() {
+        let (mut doc, a, b) = calc_pair();
+        let a_red = calc_source(Some(a), ApplyChannel::Red, false);
+        let b_green = calc_source(Some(b), ApplyChannel::Green, false);
+        let unknown = calc_source(Some(999), ApplyChannel::Red, false);
+        for (s1, s2) in [(unknown, b_green), (a_red, unknown)] {
+            assert!(doc
+                .calculations(s1, s2, NORMAL, 100, None, CalcResult::NewChannel)
+                .is_err());
+        }
+        let bad_mask = ApplyMask {
+            source: Some(999),
+            channel: ApplyChannel::Red,
+            invert: false,
+        };
+        assert!(doc
+            .calculations(
+                a_red,
+                b_green,
+                NORMAL,
+                100,
+                Some(bad_mask),
+                CalcResult::NewChannel
+            )
+            .is_err());
+        assert!(doc
+            .calculations(a_red, b_green, NORMAL, 101, None, CalcResult::NewChannel)
+            .is_err());
+        let bad_scale = ApplyBlend::Add {
+            scale: 3.0,
+            offset: 0,
+        };
+        assert!(doc
+            .calculations(a_red, b_green, bad_scale, 100, None, CalcResult::Selection)
+            .is_err());
+        assert!(doc.view().channels.is_empty());
+        assert!(doc.view().selection.is_none());
     }
 
     #[test]

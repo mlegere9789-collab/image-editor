@@ -127,7 +127,16 @@ export type DocumentView = {
   guides: Guide[];
   /** Layer groups, in creation order; members are layer ids, bottom to top. */
   groups: LayerGroup[];
+  /** Alpha channel names made by Image > Calculations, in creation order. */
+  channels: string[];
 };
+
+/** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >
+ * Calculations' two sources. */
+export type CalcSource = { layer: number | null; channel: ApplyChannel; invert: boolean };
+
+/** Mirrors `CalcResult` in src-tauri/src/document.rs. */
+export type CalcResult = "newDocument" | "newChannel" | "selection";
 
 /** Mirrors `LayerGroup` in src-tauri/src/document.rs. */
 export type LayerGroup = { name: string; members: number[] };

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 337.**
+**618 distinct capabilities tracked. Currently shipped: 356.**
 
 ## PART I — EVERY TOOL
 
@@ -338,27 +338,27 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Select > Grow (duplicate of GROW in PART II, already shipped there — checked here for consistency)
 - [x] Select > Similar (duplicate of SIMILAR in PART II, already shipped there — checked here for consistency)
 - [x] Save Selection (`save_selection` / `load_selection`, named selections stored on the document — shape, bounds, inversion, border, and a mask's bitmap — replacing a same-named one on save, loaded back as a new selection, listed in the view, and cleared with the active selection when the canvas changes size; Photoshop's alpha-channel storage and Load's Add/Subtract/Intersect operations are documented scope cuts — see README Phase 157)
-- [ ] Calculations
-- [ ] Calculations — Source 1
-- [ ] Calculations — Source 1 Layer
-- [ ] Calculations — Source 1 Channel
-- [ ] Calculations — Source 1 Invert
-- [ ] Calculations — Source 2
-- [ ] Calculations — Source 2 Layer
-- [ ] Calculations — Source 2 Channel
-- [ ] Calculations — Source 2 Invert
-- [ ] Calculations — Blending
+- [x] Calculations (`calculations(source1, source2, blend, opacity, mask, result)`: two single-channel greys blended, Source 2 the base, mixed back toward Source 2 by opacity and mask weight, sent to a new document, a new alpha channel, or the selection — see README Phase 225)
+- [x] Calculations — Source 1 (`CalcSource { layer, channel, invert }` — see README Phase 225)
+- [x] Calculations — Source 1 Layer (any layer, hidden or not, or `None` for the merged composite — see README Phase 225)
+- [x] Calculations — Source 1 Channel (`ApplyChannel::value`: Red, Green, Blue, Transparency, or Gray as the BT.601 luma — see README Phase 225)
+- [x] Calculations — Source 1 Invert (`255 − value` before blending — see README Phase 225)
+- [x] Calculations — Source 2 (the second `CalcSource`, the base of the blend — see README Phase 225)
+- [x] Calculations — Source 2 Layer (as Source 1 Layer — see README Phase 225)
+- [x] Calculations — Source 2 Channel (as Source 1 Channel — see README Phase 225)
+- [x] Calculations — Source 2 Invert (as Source 1 Invert — see README Phase 225)
+- [x] Calculations — Blending (the full `ApplyBlend` list: the twelve layer modes plus Add and Subtract with Scale and Offset — see README Phase 225)
 - [x] Add Blending Mode (`ApplyBlend::Add { scale, offset }` in `apply_image_with`: per channel `(target + source) / scale + offset`, clamped, with scale `1..=2` and offset `-255..=255`, composing with opacity, Invert, and Preserve Transparency exactly as the layer blend modes do — see README Phase 222)
 - [x] Subtract Blending Mode (`ApplyBlend::Subtract { scale, offset }`: per channel `(target − source) / scale + offset`, clamped — see README Phase 222)
-- [ ] Calculations — Opacity
-- [ ] Calculations — Mask
-- [ ] Calculations — Mask Image
-- [ ] Calculations — Mask Layer
-- [ ] Calculations — Mask Channel
-- [ ] Calculations — Mask Invert
-- [ ] Calculations — Result: New Document
-- [ ] Calculations — Result: New Channel
-- [ ] Calculations — Result: Selection
+- [x] Calculations — Opacity (0–100 percent mixing the blend result back toward Source 2 — see README Phase 225)
+- [x] Calculations — Mask (the same `ApplyMask` as Apply Image, its weight multiplied into the opacity per pixel — see README Phase 225)
+- [x] Calculations — Mask Image (`source: None` reads the merged composite — see README Phase 225)
+- [x] Calculations — Mask Layer (`source: Some(id)` reads that layer — see README Phase 225)
+- [x] Calculations — Mask Channel (Gray, Red, Green, Blue, or Transparency — see README Phase 225)
+- [x] Calculations — Mask Invert (`255 − value` — see README Phase 225)
+- [x] Calculations — Result: New Document (a new one-layer grey document this one's size, which the app opens in place of the current one with a fresh history, as Open does — see README Phase 225)
+- [x] Calculations — Result: New Channel (an `AlphaChannel` named `Alpha N` on the document, listed in the view and loadable as a selection through `load_channel` — see README Phase 225)
+- [x] Calculations — Result: Selection (a mask selection of every pixel whose grey is 128 or more, the one-bit reading of Photoshop's partial selection — see README Phase 225)
 - [x] Apply Image (`apply_image`, blending a source layer or the merged image onto the selected layer with a blend mode and opacity, as if stacked on top and merged down — the canvas composite's own source-over math; confined to the selection; single-channel sources, the mask options, and the live preview are documented scope cuts — see README Phase 159)
 - [x] Apply Image — Source (a Source drop-down of every layer plus Merged — see README Phase 159)
 - [x] Apply Image — Source Layer (any layer, including the target itself, applied from a snapshot — see README Phase 159)

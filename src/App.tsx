@@ -11,6 +11,8 @@ import type {
   ApplyMask,
   BlendMode,
   BlendModeInfo,
+  CalcResult,
+  CalcSource,
   DocumentView,
   Fill,
   GuideOrientation,
@@ -343,6 +345,22 @@ export default function App() {
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
   const [loadSelectionName, setLoadSelectionName] = useState("");
+  // Image > Calculations: two single-channel sources, a blend, opacity, an
+  // optional mask, and where the grey result goes.
+  const [showCalculationsDialog, setShowCalculationsDialog] = useState(false);
+  const [calcSource1, setCalcSource1] = useState<CalcSource>({ layer: null, channel: "rgb", invert: false });
+  const [calcSource2, setCalcSource2] = useState<CalcSource>({ layer: null, channel: "rgb", invert: false });
+  const [calcArithmetic, setCalcArithmetic] = useState<ApplyBlend["kind"]>("mode");
+  const [calcBlend, setCalcBlend] = useState<BlendMode>("multiply");
+  const [calcScale, setCalcScale] = useState(1);
+  const [calcOffset, setCalcOffset] = useState(0);
+  const [calcOpacity, setCalcOpacity] = useState(100);
+  const [calcMasked, setCalcMasked] = useState(false);
+  const [calcMask, setCalcMask] = useState<ApplyMask>({ source: null, channel: "rgb", invert: false });
+  const [calcResult, setCalcResult] = useState<CalcResult>("newChannel");
+  // Load Channel: which alpha channel to load as the selection.
+  const [showLoadChannelDialog, setShowLoadChannelDialog] = useState(false);
+  const [loadChannelName, setLoadChannelName] = useState("");
   const [showScaleDialog, setShowScaleDialog] = useState(false);
   const [scaleWidthPercent, setScaleWidthPercent] = useState(100);
   const [scaleHeightPercent, setScaleHeightPercent] = useState(100);
@@ -1386,6 +1404,57 @@ export default function App() {
     await runCommand("load_selection", { name: loadSelectionName });
     setShowLoadSelectionDialog(false);
   }, [runCommand, loadSelectionName]);
+
+  const openLoadChannelDialog = useCallback(() => {
+    const names = document?.channels ?? [];
+    setLoadChannelName((current) => (names.includes(current) ? current : (names[0] ?? "")));
+    setShowLoadChannelDialog(true);
+  }, [document]);
+
+  const applyLoadChannel = useCallback(async () => {
+    await runCommand("load_channel", { name: loadChannelName });
+    setShowLoadChannelDialog(false);
+  }, [runCommand, loadChannelName]);
+
+  const openCalculationsDialog = useCallback(() => {
+    const ids = (document?.layers ?? []).map((layer) => layer.id);
+    const keep = (source: CalcSource): CalcSource =>
+      source.layer !== null && !ids.includes(source.layer) ? { ...source, layer: null } : source;
+    setCalcSource1(keep);
+    setCalcSource2(keep);
+    setCalcMask((mask) =>
+      mask.source !== null && !ids.includes(mask.source) ? { ...mask, source: null } : mask,
+    );
+    setShowCalculationsDialog(true);
+  }, [document]);
+
+  const applyCalculations = useCallback(async () => {
+    const blend: ApplyBlend =
+      calcArithmetic === "mode"
+        ? { kind: "mode", mode: calcBlend }
+        : { kind: calcArithmetic, scale: calcScale, offset: calcOffset };
+    await runCommand("calculations", {
+      source1: calcSource1,
+      source2: calcSource2,
+      blend,
+      opacity: Math.round(calcOpacity),
+      mask: calcMasked ? calcMask : null,
+      result: calcResult,
+    });
+    setShowCalculationsDialog(false);
+  }, [
+    runCommand,
+    calcSource1,
+    calcSource2,
+    calcArithmetic,
+    calcBlend,
+    calcScale,
+    calcOffset,
+    calcOpacity,
+    calcMasked,
+    calcMask,
+    calcResult,
+  ]);
 
   const setGeometryField = useCallback((key: keyof typeof geometry, value: number) => {
     setGeometry((settings) => ({ ...settings, [key]: value }));
@@ -4443,6 +4512,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={openCalculationsDialog}
+            disabled={busy || !hasDocument}
+            title="Image > Calculations: blend two single channels into a new document, alpha channel, or selection"
+          >
+            Calculations…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowLayerCompsDialog(true)}
             disabled={busy || !hasDocument}
             title="Window > Layer Comps (save and restore every layer's visibility, opacity, and blend mode)"
@@ -4689,6 +4766,14 @@ export default function App() {
             title="Select > Load Selection (replace the selection with a saved one)"
           >
             Load Selection…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openLoadChannelDialog}
+            disabled={busy || (document?.channels.length ?? 0) === 0}
+            title="Load an alpha channel made by Image > Calculations as the selection (grey 128 and up)"
+          >
+            Load Channel…
           </button>
           <button
             className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
@@ -8649,6 +8734,307 @@ export default function App() {
                 disabled={busy || saveSelectionName.trim() === ""}
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCalculationsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCalculationsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Calculations"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Calculations</h2>
+            <p className="modal__hint">
+              Blends Source 1 onto Source 2 as greys (Source 2 is the base, so Subtract is
+              Source 2 − Source 1) and sends the result to a new document, a new alpha
+              channel, or the selection.
+            </p>
+            <fieldset className="control">
+              <legend className="control__label">Source 1</legend>
+              <label className="control control--row">
+                <span className="control__label">Layer</span>
+                <select
+                  value={calcSource1.layer === null ? "merged" : String(calcSource1.layer)}
+                  onChange={(event) =>
+                    setCalcSource1((s) => ({
+                      ...s,
+                      layer: event.target.value === "merged" ? null : Number(event.target.value),
+                    }))
+                  }
+                >
+                  <option value="merged">Merged</option>
+                  {[...layers].reverse().map((layer) => (
+                    <option key={layer.id} value={String(layer.id)}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="control control--row">
+                <span className="control__label">Channel</span>
+                <select
+                  value={calcSource1.channel}
+                  onChange={(event) =>
+                    setCalcSource1((s) => ({ ...s, channel: event.target.value as ApplyChannel }))
+                  }
+                >
+                  <option value="rgb">Gray (luma)</option>
+                  <option value="red">Red</option>
+                  <option value="green">Green</option>
+                  <option value="blue">Blue</option>
+                  <option value="transparency">Transparency</option>
+                </select>
+              </label>
+              <label className="control control--row">
+                <input
+                  type="checkbox"
+                  checked={calcSource1.invert}
+                  onChange={(event) => setCalcSource1((s) => ({ ...s, invert: event.target.checked }))}
+                />
+                <span className="control__label">Invert</span>
+              </label>
+            </fieldset>
+            <fieldset className="control">
+              <legend className="control__label">Source 2</legend>
+              <label className="control control--row">
+                <span className="control__label">Layer</span>
+                <select
+                  value={calcSource2.layer === null ? "merged" : String(calcSource2.layer)}
+                  onChange={(event) =>
+                    setCalcSource2((s) => ({
+                      ...s,
+                      layer: event.target.value === "merged" ? null : Number(event.target.value),
+                    }))
+                  }
+                >
+                  <option value="merged">Merged</option>
+                  {[...layers].reverse().map((layer) => (
+                    <option key={layer.id} value={String(layer.id)}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="control control--row">
+                <span className="control__label">Channel</span>
+                <select
+                  value={calcSource2.channel}
+                  onChange={(event) =>
+                    setCalcSource2((s) => ({ ...s, channel: event.target.value as ApplyChannel }))
+                  }
+                >
+                  <option value="rgb">Gray (luma)</option>
+                  <option value="red">Red</option>
+                  <option value="green">Green</option>
+                  <option value="blue">Blue</option>
+                  <option value="transparency">Transparency</option>
+                </select>
+              </label>
+              <label className="control control--row">
+                <input
+                  type="checkbox"
+                  checked={calcSource2.invert}
+                  onChange={(event) => setCalcSource2((s) => ({ ...s, invert: event.target.checked }))}
+                />
+                <span className="control__label">Invert</span>
+              </label>
+            </fieldset>
+            <label className="control control--row">
+              <span className="control__label">Blending</span>
+              <select
+                value={calcArithmetic === "mode" ? calcBlend : calcArithmetic}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  if (value === "add" || value === "subtract") {
+                    setCalcArithmetic(value);
+                  } else {
+                    setCalcArithmetic("mode");
+                    setCalcBlend(value as BlendMode);
+                  }
+                }}
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+                <option value="add">Add</option>
+                <option value="subtract">Subtract</option>
+              </select>
+            </label>
+            {calcArithmetic !== "mode" && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Scale</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={2}
+                    step={0.001}
+                    value={calcScale}
+                    onChange={(event) =>
+                      setCalcScale(Math.max(1, Math.min(2, Number(event.target.value))))
+                    }
+                  />
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Offset</span>
+                  <input
+                    type="number"
+                    min={-255}
+                    max={255}
+                    step={1}
+                    value={calcOffset}
+                    onChange={(event) =>
+                      setCalcOffset(
+                        Math.max(-255, Math.min(255, Math.round(Number(event.target.value)))),
+                      )
+                    }
+                  />
+                </label>
+              </>
+            )}
+            <label className="control control--row">
+              <span className="control__label">Opacity (%)</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={calcOpacity}
+                onChange={(event) =>
+                  setCalcOpacity(Math.max(0, Math.min(100, Number(event.target.value))))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={calcMasked}
+                onChange={(event) => setCalcMasked(event.target.checked)}
+              />
+              <span className="control__label">Mask</span>
+            </label>
+            {calcMasked && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Mask Image</span>
+                  <select
+                    value={calcMask.source === null ? "merged" : String(calcMask.source)}
+                    onChange={(event) =>
+                      setCalcMask((m) => ({
+                        ...m,
+                        source: event.target.value === "merged" ? null : Number(event.target.value),
+                      }))
+                    }
+                  >
+                    <option value="merged">Merged</option>
+                    {[...layers].reverse().map((layer) => (
+                      <option key={layer.id} value={String(layer.id)}>
+                        {layer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Mask Channel</span>
+                  <select
+                    value={calcMask.channel}
+                    onChange={(event) =>
+                      setCalcMask((m) => ({ ...m, channel: event.target.value as ApplyChannel }))
+                    }
+                  >
+                    <option value="rgb">Gray (luma)</option>
+                    <option value="red">Red</option>
+                    <option value="green">Green</option>
+                    <option value="blue">Blue</option>
+                    <option value="transparency">Transparency</option>
+                  </select>
+                </label>
+                <label className="control control--row">
+                  <input
+                    type="checkbox"
+                    checked={calcMask.invert}
+                    onChange={(event) => setCalcMask((m) => ({ ...m, invert: event.target.checked }))}
+                  />
+                  <span className="control__label">Invert Mask</span>
+                </label>
+              </>
+            )}
+            <label className="control control--row">
+              <span className="control__label">Result</span>
+              <select
+                value={calcResult}
+                onChange={(event) => setCalcResult(event.target.value as CalcResult)}
+              >
+                <option value="newChannel">New Channel</option>
+                <option value="selection">Selection</option>
+                <option value="newDocument">New Document (replaces the open one)</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCalculationsDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCalculations} disabled={busy}>
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLoadChannelDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLoadChannelDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Load Channel"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Load Channel</h2>
+            <label className="control control--row">
+              <span className="control__label">Alpha channel</span>
+              <select
+                value={loadChannelName}
+                onChange={(event) => setLoadChannelName(event.target.value)}
+              >
+                {(document?.channels ?? []).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLoadChannelDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={applyLoadChannel}
+                disabled={busy || loadChannelName === ""}
+              >
+                Load
               </button>
             </div>
           </div>

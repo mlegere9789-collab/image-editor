@@ -1059,6 +1059,47 @@ fn apply_image(
     })
 }
 
+/// Image > Calculations: blend two single-channel sources into a grey sent
+/// to a new document (which replaces the open one, with a fresh history,
+/// as opening a file does), a new alpha channel, or the selection.
+#[tauri::command]
+fn calculations(
+    state: State<'_, AppState>,
+    source1: document::CalcSource,
+    source2: document::CalcSource,
+    blend: document::ApplyBlend,
+    opacity: u8,
+    mask: Option<document::ApplyMask>,
+    result: document::CalcResult,
+) -> Result<Snapshot, String> {
+    if result == document::CalcResult::NewDocument {
+        let produced = {
+            let mut guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+            let document = guard.as_mut().ok_or_else(|| NO_DOCUMENT.to_string())?;
+            document.calculations(source1, source2, blend, opacity, mask, result)?
+        };
+        return match produced {
+            document::CalcOutcome::Document(new_document) => {
+                replace_open_document(&state, *new_document)
+            }
+            _ => Err("Calculations did not produce a document.".to_string()),
+        };
+    }
+    edit_checkpointed(&state, |document| {
+        document.calculations(source1, source2, blend, opacity, mask, result)?;
+        Ok(None)
+    })
+}
+
+/// Load alpha channel `name` as the selection.
+#[tauri::command]
+fn load_channel(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.load_channel(&name)?;
+        Ok(None)
+    })
+}
+
 /// Edit > Copy Merged: capture the visible composite within the active
 /// selection into the clipboard. Read-only, like [`copy`].
 #[tauri::command]
@@ -4272,6 +4313,8 @@ pub fn run() {
             copy,
             copy_merged,
             apply_image,
+            calculations,
+            load_channel,
             cut,
             paste,
             paste_into,

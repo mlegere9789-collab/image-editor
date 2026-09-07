@@ -13471,6 +13471,65 @@ by hand instead. Every other layer of this project's quality bar
 **1365 Rust tests total** (1360 → 1365, 1358 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 225 — Image > Calculations
+
+Calculations arrives whole, built on Apply Image's types. A `CalcSource`
+is a layer (or `None`, the merged composite), a channel, and an invert
+flag, and `ApplyChannel::value(pixel)` — new, and now what
+`ApplyMask::weight` reads too — is the byte a single channel yields:
+Red, Green, or Blue itself, Transparency the alpha, Gray the BT.601
+luma rounded. `calculations(source1, source2, blend, opacity, mask,
+result)` reads both sources as greys, inverted where asked, blends
+Source 1 onto Source 2 with the full `ApplyBlend` list (Source 2 the
+base, so Subtract is `Source 2 − Source 1`), then mixes the result
+back toward Source 2 by the opacity times the mask's weight — the
+order Photoshop's dialog describes. The grey goes where `result` says:
+`NewDocument` returns a new one-layer opaque grey document this one's
+size, leaving this one untouched (the app opens it in place of the
+current document with a fresh history, as Open does — Photoshop opens
+a second window, which this single-document app cannot); `NewChannel`
+appends an `AlphaChannel` named `Alpha N` to a new `channels` list on
+the document, one byte per pixel, listed by name in the view, cleared
+with the saved selections when the canvas changes size, and loadable
+as a selection through a new `load_channel(name)` (grey `128` and up,
+the one-bit reading of Photoshop's partial selection); `Selection`
+replaces the selection the same way directly. Every input is validated
+before anything changes. A **Calculations…** dialog carries both
+sources, the blend with Scale and Offset, Opacity, the Mask group, and
+Result; a **Load Channel…** dialog mirrors Load Selection.
+
+**Verified two ways.** Five new `document.rs` tests on a 2×1 document
+— layer `a` `[200, 50, 100, 255] [10, 20, 30, 128]` under `b` `[100,
+150, 200, 255] [255, 255, 255, 0]` — every grey first computed in
+Python emulating `f32`. Normal gives Source 1 itself, `a`'s Red `[200,
+10]`; Multiply against `b`'s Green `[150, 255]` gives `[118, 10]`;
+Gray reads `a`'s luma, `100.55 → 101` and `18`; the merged image's
+Blue is `[200, 30]`, `a` showing through `b`'s transparent pixel; and
+the document is untouched. Subtract gives `[0, 245]`, Add at scale `2`
+offset `10` `[185, 143]` (the exact `142.5` rounded half away). `a`'s
+Red inverted is `[55, 245]`, at `50%` opacity `[103, 250]`, under a
+Transparency mask from `a` `[103, 252]`, and with that mask inverted
+`[150, 253]`. A New Channel result names `Alpha 1` holding `[200,
+10]`, a second `Alpha 2`, the Selection result selects `[true,
+false]`, loading `Alpha 1` selects the same, and an unknown channel
+errors. Unknown source or mask layers, opacity `101`, and scale `3`
+are each refused with no channel added and no selection made. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-two: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialogs were reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1370 Rust tests total** (1365 → 1370, 1363 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
