@@ -481,6 +481,9 @@ export default function App() {
   const [levelsOutputBlack, setLevelsOutputBlack] = useState(0);
   const [levelsOutputWhite, setLevelsOutputWhite] = useState(255);
   const [levelsChannel, setLevelsChannel] = useState<LevelsChannel>("rgb");
+  // Levels > Auto Options: the Clip percentages in hundredths (0.10% = 10).
+  const [levelsClipShadows, setLevelsClipShadows] = useState(10);
+  const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
@@ -1610,6 +1613,18 @@ export default function App() {
     texturizerLightDirection,
     texturizerInvert,
   ]);
+
+  /** The Levels dialog's Auto button: Auto Tone with the dialog's Clip
+   * percentages, in place of the sliders. */
+  const applyLevelsAuto = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("auto_tone", {
+      id: selectedId,
+      shadowClip: levelsClipShadows,
+      highlightClip: levelsClipHighlights,
+    });
+    setShowLevelsDialog(false);
+  }, [runCommand, selectedId, levelsClipShadows, levelsClipHighlights]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -9425,12 +9440,52 @@ export default function App() {
                 onChange={(event) => setLevelsOutputWhite(Number(event.target.value))}
               />
             </label>
+            <div className="control control--row">
+              <label className="control">
+                <span className="control__label">Clip shadows %</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={9.99}
+                  step={0.01}
+                  value={(levelsClipShadows / 100).toFixed(2)}
+                  onChange={(event) =>
+                    setLevelsClipShadows(
+                      Math.max(0, Math.min(999, Math.round(Number(event.target.value) * 100))),
+                    )
+                  }
+                />
+              </label>
+              <label className="control">
+                <span className="control__label">Clip highlights %</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={9.99}
+                  step={0.01}
+                  value={(levelsClipHighlights / 100).toFixed(2)}
+                  onChange={(event) =>
+                    setLevelsClipHighlights(
+                      Math.max(0, Math.min(999, Math.round(Number(event.target.value) * 100))),
+                    )
+                  }
+                />
+              </label>
+            </div>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
                 onClick={() => setShowLevelsDialog(false)}
               >
                 Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={applyLevelsAuto}
+                disabled={busy}
+                title="Auto: stretch each channel to full range, ignoring the clipped percentages at each end"
+              >
+                Auto
               </button>
               <button className="button" onClick={applyLevels} disabled={busy}>
                 Apply

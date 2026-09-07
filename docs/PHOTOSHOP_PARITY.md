@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 274.**
+**618 distinct capabilities tracked. Currently shipped: 276.**
 
 ## PART I — EVERY TOOL
 
@@ -451,8 +451,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Levels Black Point Eyedropper
 - [ ] Levels Gray Point Eyedropper
 - [ ] Levels White Point Eyedropper
-- [ ] Levels Auto
-- [ ] Levels Auto Options
+- [x] Levels Auto (the Levels dialog's Auto button: `auto_tone_clipped` with the dialog's Clip percentages, each channel stretched to full range from its clipped low to its clipped high — see README Phase 194)
+- [x] Levels Auto Options (`auto_tone_clipped` / `auto_contrast_clipped`'s shadow and highlight Clip in hundredths of a percent, 0–9.99%, read off per-channel histograms as ranks; the algorithm choices beyond Enhance Per Channel Contrast, Snap Neutral Midtones, and the target colours are documented scope cuts — see README Phase 194)
 - [ ] Curves Point Mode
 - [ ] Curves Pencil/Draw Mode
 - [ ] Curves On-Image Adjustment Tool

@@ -3971,11 +3971,41 @@ impl Document {
     /// already a single flat value (`low == high`) is left untouched
     /// rather than dividing by zero, and sampling nothing (an empty
     /// selection) leaves the layer untouched entirely. Alpha untouched.
-    /// Photoshop's own 0.5%-per-end histogram clipping and its per-channel
-    /// Auto Options dialog are a documented scope cut — this project
-    /// always stretches from the true sampled minimum and maximum.
+    /// This stretches from the true sampled minimum and maximum; the Levels
+    /// dialog's Auto Options clipping lives in [`Self::auto_tone_clipped`].
     pub fn auto_tone(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
-        self.auto_stretch(id, false)
+        self.auto_stretch(id, false, 0, 0)
+    }
+
+    /// [`Self::auto_tone`] with the Levels dialog's Auto Options: before
+    /// each channel's range is measured, the darkest `shadow_clip` and
+    /// lightest `highlight_clip` hundredths of a percent of the sampled
+    /// pixels are ignored — Photoshop's Clip fields, `0.10%` by default,
+    /// each allowed up to `9.99%` — so a handful of stray extreme pixels
+    /// no longer pins the stretch. Concretely, with `n` sampled pixels a
+    /// channel's low is the value of its `⌊n × clip / 10000⌋`-th darkest
+    /// pixel and its high the value of the same-ranked lightest one; a
+    /// clip of `0` is exactly the true minimum and maximum. Errors for a
+    /// clip above `999`.
+    pub fn auto_tone_clipped(
+        &mut self,
+        id: LayerId,
+        shadow_clip: u32,
+        highlight_clip: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.auto_stretch(id, false, shadow_clip, highlight_clip)
+    }
+
+    /// [`Self::auto_contrast`] with the same clipping as
+    /// [`Self::auto_tone_clipped`]: the shared range is the darkest of
+    /// the three clipped lows to the lightest of the three clipped highs.
+    pub fn auto_contrast_clipped(
+        &mut self,
+        id: LayerId,
+        shadow_clip: u32,
+        highlight_clip: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.auto_stretch(id, true, shadow_clip, highlight_clip)
     }
 
     /// Image > Adjustments > Auto Contrast: the same linear stretch
@@ -3984,10 +4014,10 @@ impl Document {
     /// and lightest sampled values, whichever channel each falls in)
     /// rather than each channel's own — the property that keeps Auto
     /// Contrast from shifting colour balance the way [`Self::auto_tone`]
-    /// can. Photoshop's own 0.5%-per-end histogram clipping is a
-    /// documented scope cut, the same as [`Self::auto_tone`]'s own.
+    /// can. Unclipped; see [`Self::auto_contrast_clipped`] for the Levels
+    /// dialog's Auto Options clipping.
     pub fn auto_contrast(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
-        self.auto_stretch(id, true)
+        self.auto_stretch(id, true, 0, 0)
     }
 
     /// Shared implementation behind [`Self::auto_tone`] (`shared = false`,
@@ -3998,7 +4028,16 @@ impl Document {
     /// layer) to find each channel's own low/high; a second pass applies
     /// the resulting per-channel stretch, the same two-pass
     /// sample-then-remap shape [`Self::equalize`] already uses.
-    fn auto_stretch(&mut self, id: LayerId, shared: bool) -> Result<Option<Rect>, String> {
+    fn auto_stretch(
+        &mut self,
+        id: LayerId,
+        shared: bool,
+        shadow_clip: u32,
+        highlight_clip: u32,
+    ) -> Result<Option<Rect>, String> {
+        if shadow_clip > 999 || highlight_clip > 999 {
+            return Err("Auto clip must be between 0.00% and 9.99%.".to_string());
+        }
         let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let bounds = self.copy_bounds();
@@ -4007,9 +4046,10 @@ impl Document {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
 
-        let mut lo = [255u8; 3];
-        let mut hi = [0u8; 3];
-        let mut sampled = false;
+        // Per-channel histograms of the sampled pixels, so the clipped
+        // low/high can be read off as ranks rather than raw extremes.
+        let mut histograms = [[0u64; 256]; 3];
+        let mut sampled = 0u64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
                 let keep = selection
@@ -4018,17 +4058,37 @@ impl Document {
                 if !keep {
                     continue;
                 }
-                sampled = true;
+                sampled += 1;
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
                 for c in 0..3 {
-                    let v = layer.pixels[base + c];
-                    lo[c] = lo[c].min(v);
-                    hi[c] = hi[c].max(v);
+                    histograms[c][layer.pixels[base + c] as usize] += 1;
                 }
             }
         }
-        if !sampled {
+        if sampled == 0 {
             return Ok(None);
+        }
+        let skip_low = sampled * shadow_clip as u64 / 10_000;
+        let skip_high = sampled * highlight_clip as u64 / 10_000;
+        let mut lo = [255u8; 3];
+        let mut hi = [0u8; 3];
+        for c in 0..3 {
+            let mut seen = 0u64;
+            for (v, &count) in histograms[c].iter().enumerate() {
+                seen += count;
+                if seen > skip_low {
+                    lo[c] = v as u8;
+                    break;
+                }
+            }
+            let mut seen = 0u64;
+            for (v, &count) in histograms[c].iter().enumerate().rev() {
+                seen += count;
+                if seen > skip_high {
+                    hi[c] = v as u8;
+                    break;
+                }
+            }
         }
         if shared {
             let glo = lo.iter().copied().min().unwrap();
@@ -4047,7 +4107,7 @@ impl Document {
                 }
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
                 for c in 0..3 {
-                    if hi[c] == lo[c] {
+                    if hi[c] <= lo[c] {
                         continue;
                     }
                     let v = layer.pixels[base + c] as f32;
@@ -21575,6 +21635,93 @@ mod tests {
             .levels_on(id, LevelsChannel::Red, 50, 200, 100, 0, 255)
             .is_err());
         assert_eq!(pixel(&doc, id, 0, 0), [100, 150, 200, 255]);
+    }
+
+    /// A forty-pixel grey ramp 0, 5, …, 195 (all three channels equal),
+    /// long enough for a sub-10% clip to drop whole pixels: 5% of forty is
+    /// two pixels per end, 9.99% three.
+    fn grey_ramp_40() -> (Document, LayerId) {
+        let pixels: Vec<u8> = (0..40u8).flat_map(|i| [i * 5, i * 5, i * 5, 255]).collect();
+        let mut doc = Document::new(40, 1).unwrap();
+        let id = doc.add_layer("ramp", &pixels, 40, 1).unwrap();
+        (doc, id)
+    }
+
+    fn red_row(doc: &Document, id: LayerId) -> Vec<u8> {
+        (0..doc.width()).map(|x| pixel(doc, id, x, 0)[0]).collect()
+    }
+
+    #[test]
+    fn levels_auto_clips_the_darkest_and_lightest_pixels() {
+        // 5% per end skips two pixels: the range becomes 10..185, so the
+        // first three land on 0 and the last three on 255.
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_tone_clipped(id, 500, 500).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 0, 0, 7, 15]);
+        assert_eq!(row[20], 131);
+        assert_eq!(&row[35..], [240, 248, 255, 255, 255]);
+        // 9.99% skips three: 15..180.
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_tone_clipped(id, 999, 999).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 0, 0, 0, 8]);
+        assert_eq!(&row[35..], [247, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn levels_auto_with_zero_clip_is_auto_tone() {
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_tone_clipped(id, 0, 0).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 7, 13, 20, 26]);
+        assert_eq!(&row[35..], [229, 235, 242, 248, 255]);
+        let (mut plain, plain_id) = grey_ramp_40();
+        plain.auto_tone(plain_id).unwrap();
+        assert_eq!(row, red_row(&plain, plain_id));
+    }
+
+    #[test]
+    fn levels_auto_clips_shadows_and_highlights_separately() {
+        // Shadows only: 10..195, so 100 maps to 90/185 → 124.
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_tone_clipped(id, 500, 0).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 0, 0, 7, 14]);
+        assert_eq!((row[20], row[39]), (124, 255));
+        // Highlights only: 0..180, so 100 maps to 100/180 → 142.
+        let (mut doc, id) = grey_ramp_40();
+        doc.auto_tone_clipped(id, 0, 999).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 7, 14, 21, 28]);
+        assert_eq!(row[20], 142);
+        assert_eq!(&row[35..], [248, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn levels_auto_contrast_shares_the_clipped_range() {
+        // Red ramps 0..195 while green is a flat 100: green's own range
+        // is empty, but the shared 10..185 range still moves it to 131.
+        let pixels: Vec<u8> = (0..40u8).flat_map(|i| [i * 5, 100, i * 5, 255]).collect();
+        let mut doc = Document::new(40, 1).unwrap();
+        let id = doc.add_layer("ramp", &pixels, 40, 1).unwrap();
+        doc.auto_contrast_clipped(id, 500, 500).unwrap();
+        let row = red_row(&doc, id);
+        assert_eq!(&row[..5], [0, 0, 0, 7, 15]);
+        assert_eq!(&row[35..], [240, 248, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0)[1], 131);
+        assert_eq!(pixel(&doc, id, 39, 0)[1], 131);
+    }
+
+    #[test]
+    fn levels_auto_rejects_bad_clips_and_propagates_errors() {
+        let (mut doc, id) = grey_ramp_40();
+        assert!(doc.auto_tone_clipped(id, 999, 1000).is_err());
+        assert!(doc.auto_contrast_clipped(id, 1000, 0).is_err());
+        assert!(doc.auto_tone_clipped(id + 1, 10, 10).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.auto_tone_clipped(id, 10, 10).is_err());
+        assert_eq!(red_row(&doc, id)[..3], [0, 5, 10]);
     }
 
     #[test]

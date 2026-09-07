@@ -11906,6 +11906,66 @@ hand instead. Every other layer of this project's quality bar
 **1210 Rust tests total** (1205 → 1210, 1203 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 194 — Levels Auto and Auto Options
+
+`Document::auto_tone_clipped(id, shadow_clip, highlight_clip)` and
+`auto_contrast_clipped` lift the clipping scope cut Auto Tone and Auto
+Contrast shipped with, and put the Levels dialog's **Auto** button on
+top of them. Photoshop's Auto Options Clip fields ignore the darkest
+and lightest fractions of the histogram before measuring a channel's
+range — `0.10%` each by default, each allowed up to `9.99%` — so a
+handful of stray extreme pixels no longer pins the stretch. The shared
+`auto_stretch` now builds a 256-bin histogram per channel over the
+sampled pixels and reads each channel's low as the value of its
+`⌊n × clip / 10000⌋`-th darkest pixel and its high as the same-ranked
+lightest one, so a clip of `0` is exactly the old true minimum and
+maximum and `auto_tone`/`auto_contrast` are unchanged (they delegate
+with zero clips); a channel whose clipped high is not above its
+clipped low is left alone. Clips are hundredths of a percent, `0..=999`,
+and anything above errors. The `auto_tone` and `auto_contrast`
+commands take optional clips; the Levels dialog gains **Clip shadows
+%** and **Clip highlights %** fields (default `0.10`) and an **Auto**
+button that runs Auto Tone with them, closing the dialog. Photoshop's
+other Auto Options algorithms (Enhance Monochromatic Contrast is Auto
+Contrast, Find Dark & Light Colors and Snap Neutral Midtones are Auto
+Color, deferred) and its target-colour swatches are documented scope
+cuts.
+
+**Verified two ways.** Five new `document.rs` tests on a forty-pixel
+ramp `0, 5, …, 195`, every byte first computed in Python emulating
+`f32`. At `5%` per end two pixels are skipped, so the range is
+`10..185`: the row starts `0, 0, 0, 7, 15`, has `131` at value `100`,
+and ends `240, 248, 255, 255, 255`; at `9.99%` three are skipped
+(`15..180`), starting `0, 0, 0, 0, 8` and ending `247, 255, 255, 255,
+255`. Zero clips give `0, 7, 13, 20, 26 … 229, 235, 242, 248, 255`,
+byte-identical to `auto_tone`. Shadows alone (`10..195`) map `100` to
+`124`; highlights alone (`0..180`) map it to `142`. Auto Contrast with
+a flat-`100` green channel beside the red ramp still moves green to
+`131`, since the shared range is the clipped `10..185`. A clip of
+`1000` errors, as do an unknown and a locked layer, with the pixels
+intact. One of the five passed on the first run: the other four were
+first written on a ten-pixel ramp with `10%` and `25%` clips — values
+the method itself rejects, since Photoshop's Clip fields stop at
+`9.99%` — and every one failed on that error before any expected byte
+was compared. They were rewritten on the forty-pixel ramp with `5%`
+and `9.99%` clips, whose ranks the Python model had been run on, and
+passed; the ceiling test was tightened to `999`/`1000` at the same
+time.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and forty-one:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new button and fields were reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1215 Rust tests total** (1210 → 1215, 1208 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
