@@ -2955,6 +2955,13 @@ export default function App() {
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
         });
+      } else if (tool === "blur") {
+        void runCommand("blur_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          strength: Math.round(brushOpacity * 100),
+        });
       } else if (tool === "patternStamp") {
         void runCommand("pattern_stamp_stroke", {
           id: selectedId,
@@ -3722,6 +3729,15 @@ export default function App() {
             title="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
           >
             Sponge
+          </button>
+          <button
+            className={`button button--quiet${tool === "blur" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "blur"}
+            onClick={() => setTool("blur")}
+            title="Blur: paint to soften (Flow sets the Strength)"
+          >
+            Blur
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4964,6 +4980,7 @@ export default function App() {
               tool === "dodge" ||
               tool === "burn" ||
               tool === "sponge" ||
+              tool === "blur" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"

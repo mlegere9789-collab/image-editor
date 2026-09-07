@@ -10369,6 +10369,52 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1055 Rust tests total** (1050 → 1055, 1048 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 163 — Blur tool
+
+`Stroke::Blur { strength }` is the first neighbourhood brush: every
+pixel the brush covers moves — all four channels — toward the radius-1
+box blur of the layer (`box_blur_at`, the same edge-clamped average
+Filter > Blur > Box Blur uses) by `strength` percent scaled by the
+brush's coverage. The blur is read from a snapshot of the layer taken
+before the stroke, so a stroke never smears its own output along its
+path: dragging across a region gives exactly the result of dotting it,
+and at full strength a stroke covering the whole layer is byte for byte
+Box Blur at radius 1. `Document::stroke` now takes that snapshot for
+neighbourhood tools only (a clone of the layer per stroke call, which
+the Sharpen tool will share next); the pixel-local tools pay nothing.
+Photoshop's Sample All Layers and its per-stroke blend mode are
+documented scope cuts. A **Blur** tool button sits beside Sponge; the
+Flow slider is its Strength.
+
+**Verified two ways.** Five new `document.rs` tests, the blur grid and
+the two scaled bytes cross-checked in Python (integer-truncating
+average, then `f32` `lerp`, `to_unit`, `to_byte`). A radius-3 dot at
+full strength on `ramped_3x3` yields exactly Box Blur's radius-1 grid,
+`[[23, 30, 36], [43, 50, 56], [63, 70, 76]]` — the corner being `((10 +
+10 + 20) × 2 + 40 + 40 + 50) / 9 = 23` — and the layer's bytes equal
+`box_blur(id, 1)`'s. Strength 50 moves the corner half way, `16.5 →
+17`, and strength 0 is an identity. The radius-1 edge coverage of
+`0.7929` moves the corner `10.3` of the way to `20`. On
+`depth_ramped_3x3` the alpha columns `0 / 128 / 255` average to `127`
+at the centre while its red stays `50`, and a one-pixel selection
+confines the stroke. A stroke dragged from corner to corner gives the
+same grid as the single dot, proving the snapshot read, and a locked
+layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and ten: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1060 Rust tests total** (1055 → 1060, 1053 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

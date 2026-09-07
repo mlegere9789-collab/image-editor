@@ -101,6 +101,7 @@ export type Tool =
   | "dodge"
   | "burn"
   | "sponge"
+  | "blur"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

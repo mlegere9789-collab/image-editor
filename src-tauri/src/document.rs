@@ -6530,6 +6530,8 @@ impl Document {
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
+        // Neighbourhood tools read the layer as it stood before the stroke.
+        let snapshot = matches!(stroke, Stroke::Blur { .. }).then(|| layer.pixels.clone());
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -6640,6 +6642,26 @@ impl Document {
                         };
                         let (r, g, b) = hsl_to_rgb(h, s, l);
                         px.copy_from_slice(&[r, g, b]);
+                        continue;
+                    }
+                    Stroke::Blur { strength } => {
+                        let source = snapshot.as_ref().expect("taken above");
+                        let blurred = box_blur_at(
+                            source,
+                            width as usize,
+                            width as i64,
+                            height as i64,
+                            y0 + row as u32,
+                            x0 + col as u32,
+                            1,
+                        );
+                        let amount = f32::from(strength) / 100.0 * c;
+                        for (slot, &target) in layer.pixels[base..base + CHANNELS]
+                            .iter_mut()
+                            .zip(blurred.iter())
+                        {
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), amount));
+                        }
                         continue;
                     }
                 };
@@ -11736,6 +11758,13 @@ pub enum Stroke {
     /// and alpha, and skipping fully transparent pixels. Photoshop's
     /// Vibrance option is a documented scope cut.
     Sponge { flow: u8, saturate: bool },
+    /// The Blur tool: moves each covered pixel — all four channels — toward
+    /// the radius-1 box blur ([`box_blur_at`]) of the layer as it stood
+    /// before the stroke, by `strength` percent scaled by the brush's
+    /// coverage. Reading the pre-stroke snapshot means a stroke never
+    /// smears its own output along its path. Photoshop's Sample All Layers
+    /// and its blend-mode option are documented scope cuts.
+    Blur { strength: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -18016,6 +18045,86 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, sponge(100, false))
+            .is_err());
+    }
+
+    #[test]
+    fn blur_tool_at_full_strength_matches_the_box_blur_filter() {
+        // A radius-3 dot covers every pixel of the 3x3 fully, so the stroke
+        // is exactly Filter > Blur > Box Blur at radius 1 -- including the
+        // edge-clamped corners ((10+10+20)*2 + 40+40+50) / 9 = 23.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![23, 30, 36], vec![43, 50, 56], vec![63, 70, 76]]
+        );
+        let (mut filtered, id2) = ramped_3x3();
+        filtered.box_blur(id2, 1).unwrap();
+        assert_eq!(doc.layers()[0].pixels, filtered.layers()[0].pixels);
+    }
+
+    #[test]
+    fn blur_tool_strength_scales_the_move() {
+        // Half way from 10 to 23 is 16.5 -> 17; strength 0 changes nothing.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 17);
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 0 })
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn blur_tool_scales_with_the_brushs_soft_edge_coverage() {
+        // The 0.7929 edge coverage moves 10 toward 23 by 10.3 -> 20.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Blur { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 20);
+    }
+
+    #[test]
+    fn blur_tool_blurs_alpha_too_and_respects_the_selection() {
+        // depth_ramped_3x3's alpha columns 0 / 128 / 255 average to 127 at
+        // the centre; its red stays the symmetric 50.
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 127]);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 23);
+        assert_eq!(pixel(&doc, id, 1, 1)[0], 50);
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 20);
+    }
+
+    #[test]
+    fn blur_tool_reads_the_pre_stroke_layer_and_rejects_a_locked_layer() {
+        // A stroke dragged across the whole layer equals the one-dot stroke:
+        // every pixel is blurred from the untouched snapshot, never from
+        // pixels the stroke already softened.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(
+            id,
+            &[(0.0, 0.0), (3.0, 3.0)],
+            3.0,
+            Stroke::Blur { strength: 100 },
+        )
+        .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![23, 30, 36], vec![43, 50, 56], vec![63, 70, 76]]
+        );
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
             .is_err());
     }
 
