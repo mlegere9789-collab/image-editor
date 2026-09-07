@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 223.**
+**618 distinct capabilities tracked. Currently shipped: 231.**
 
 ## PART I — EVERY TOOL
 
@@ -359,15 +359,15 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Calculations — Result: New Document
 - [ ] Calculations — Result: New Channel
 - [ ] Calculations — Result: Selection
-- [ ] Apply Image
-- [ ] Apply Image — Source
-- [ ] Apply Image — Source Layer
-- [ ] Apply Image — Merged
+- [x] Apply Image (`apply_image`, blending a source layer or the merged image onto the selected layer with a blend mode and opacity, as if stacked on top and merged down — the canvas composite's own source-over math; confined to the selection; single-channel sources, the mask options, and the live preview are documented scope cuts — see README Phase 159)
+- [x] Apply Image — Source (a Source drop-down of every layer plus Merged — see README Phase 159)
+- [x] Apply Image — Source Layer (any layer, including the target itself, applied from a snapshot — see README Phase 159)
+- [x] Apply Image — Merged (the composite of every visible layer, via `composite::flatten` — see README Phase 159)
 - [ ] Apply Image — Source Channel
-- [ ] Apply Image — Invert
-- [ ] Apply Image — Blending
-- [ ] Apply Image — Opacity
-- [ ] Apply Image — Preserve Transparency
+- [x] Apply Image — Invert (the source's colour inverted before blending, alpha untouched — see README Phase 159)
+- [x] Apply Image — Blending (all twelve layer blend modes — see README Phase 159)
+- [x] Apply Image — Opacity (0–100 percent scaling the source's alpha — see README Phase 159)
+- [x] Apply Image — Preserve Transparency (the target's alpha kept exactly; colour mixes toward the blend by the source's effective alpha and transparent pixels stay untouched — see README Phase 159)
 - [ ] Apply Image — Mask
 - [ ] Apply Image — Mask Image
 - [ ] Apply Image — Mask Layer

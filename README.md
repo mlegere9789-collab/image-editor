@@ -10162,6 +10162,71 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1035 Rust tests total** (1030 → 1035, 1028 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 159 — Image > Apply Image
+
+`apply_image(target, source, blend, opacity, invert,
+preserve_transparency)` blends a source — any layer, or with `None` the
+merged composite of every visible layer — onto the target layer with a
+blend mode and an opacity in percent, as if the source were a layer
+stacked on top of the target and merged down. Per channel it is the
+same W3C source-over math the canvas composite uses (`Cs′ = (1 − αb)·Cs
++ αb·B(Cb, Cs)`, `αo = αs + αb(1 − αs)`, `Co = (αs·Cs′ + αb·Cb(1 −
+αs)) / αo`, with `αs` the source alpha scaled by the opacity), so the
+result is exactly what stacking and merging would show. *Invert*
+inverts the source's colour (not its alpha) before blending. *Preserve
+Transparency* keeps the target's coverage exactly: colour mixes toward
+the blended value by the source's effective alpha, with the backdrop
+treated as opaque for the blend, but alpha never changes, so fully
+transparent target pixels stay untouched — Lock Transparent Pixels, in
+effect, and this project's explicit definition of an option Photoshop
+documents only by outcome. It runs through `filter_pixels`, so it is
+confined to the selection and reads the source from a snapshot (a
+layer may be applied to itself). It errors on a locked or unknown
+target, an unknown source, or an opacity over 100. Photoshop's
+single-channel sources, its mask options (Mask, Mask Layer, Mask
+Channel, Transparency Mask, Mask Invert), and its live preview are
+documented scope cuts. A new **Apply Image…** dialog beside Copy
+Merged offers a Source drop-down (Merged plus every layer, top to
+bottom), all twelve blend modes, an Opacity field, and the two
+checkboxes.
+
+**Verified two ways.** Five new `document.rs` tests on a new
+`apply_image_fixture` — `ramped_3x3` under a "target" layer of opaque
+`100` red with a fully transparent `(0, 0)` and a half-transparent `(2,
+2)` — with the three blended values cross-checked in Python emulating
+the composite's `f32` arithmetic. Normal at 100%: opaque over opaque
+replaces (`(1, 1)` → `50`), the source shows through the transparent
+pixel (`(0, 0)` → `10, α 255`), the half-transparent pixel becomes the
+source at full alpha (`(2, 2)` → `90, α 255`), the dirty box is the
+canvas, and the source layer is untouched. Multiply gives `100/255 ×
+50/255 → 19.6 → 20`; Normal at 50% gives `(100 + 50) / 2 = 75`;
+inverted Normal applies the source `(50, 0, 0)` as `(205, 255, 255)`,
+every channel flipped. With Preserve Transparency the
+transparent `(0, 0)` stays `[0, 0, 0, 0]`, `(2, 2)` becomes `90` at its
+own α `128`, and `(1, 1)` is `50`. With no source and the target hidden,
+the merged image is the base ramp alone, so `(1, 1)` → `50` and `(0,
+0)` → `10`. A one-pixel selection at `(0, 0)` confines the apply to that
+pixel (`(1, 1)` stays `100`); opacity `101` errors mentioning "Opacity",
+and an unknown source, an unknown target, and a locked target all
+error. Four of the five passed on the first run; the Invert expectation
+had been written as if only the red channel flipped (`205, 0, 0`), and
+the test, not the code, was corrected to the full inversion the
+Python model and Photoshop both give.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and six: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1040 Rust tests total** (1035 → 1040, 1033 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

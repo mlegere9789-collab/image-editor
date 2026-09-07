@@ -2149,6 +2149,78 @@ impl Document {
         Ok(self.extract(&layer.pixels, bounds))
     }
 
+    /// Image > Apply Image: blends `source` — a layer, or with `None` the
+    /// merged composite of every visible layer — onto layer `target` with
+    /// `blend` and `opacity` (percent, `0..=100`), as if the source were a
+    /// layer stacked on top of the target and merged down: per channel the
+    /// same W3C source-over math the canvas composite uses, so the result
+    /// is what stacking and merging would show. `invert` inverts the
+    /// source's colour (not its alpha) first. `preserve_transparency`
+    /// keeps the target's coverage exactly: colour mixes toward the blended
+    /// value by the source's effective alpha, with the backdrop treated as
+    /// opaque for the blend, but alpha never changes, so fully transparent
+    /// target pixels stay untouched — Lock Transparent Pixels, in effect.
+    /// Confined to the selection and snapshot-based, so a layer may be
+    /// applied to itself. Errors on a locked or unknown target, an unknown
+    /// source, or an opacity over 100. Photoshop's single-channel sources,
+    /// its mask options, and its live preview are documented scope cuts.
+    pub fn apply_image(
+        &mut self,
+        target: LayerId,
+        source: Option<LayerId>,
+        blend: BlendMode,
+        opacity: u8,
+        invert: bool,
+        preserve_transparency: bool,
+    ) -> Result<Option<Rect>, String> {
+        if opacity > 100 {
+            return Err(format!("Opacity must be 0..=100 percent, not {opacity}."));
+        }
+        let source_pixels = match source {
+            Some(id) => self.layer(id)?.pixels.clone(),
+            None => crate::composite::flatten(self).pixels,
+        };
+        let opacity = f32::from(opacity) / 100.0;
+        let doc_width = self.width as usize;
+        self.filter_pixels(target, |dest, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let src = &source_pixels[base..base + CHANNELS];
+            let dst = &dest[base..base + CHANNELS];
+            let mut out = [dst[0], dst[1], dst[2], dst[3]];
+            let source_alpha = to_unit(src[3]) * opacity;
+            let backdrop_alpha = to_unit(dst[3]);
+            if source_alpha <= 0.0 || (preserve_transparency && backdrop_alpha <= 0.0) {
+                return out;
+            }
+            let source_channel = |channel: usize| {
+                let cs = to_unit(src[channel]);
+                if invert {
+                    1.0 - cs
+                } else {
+                    cs
+                }
+            };
+            if preserve_transparency {
+                for (channel, slot) in out.iter_mut().enumerate().take(3) {
+                    let (cb, cs) = (to_unit(dst[channel]), source_channel(channel));
+                    let mixed = source_alpha * blend.blend(cb, cs) + (1.0 - source_alpha) * cb;
+                    *slot = to_byte(mixed);
+                }
+                return out;
+            }
+            let out_alpha = source_alpha + backdrop_alpha * (1.0 - source_alpha);
+            for (channel, slot) in out.iter_mut().enumerate().take(3) {
+                let (cb, cs) = (to_unit(dst[channel]), source_channel(channel));
+                let blended = (1.0 - backdrop_alpha) * cs + backdrop_alpha * blend.blend(cb, cs);
+                let co = (source_alpha * blended + backdrop_alpha * cb * (1.0 - source_alpha))
+                    / out_alpha;
+                *slot = to_byte(co);
+            }
+            out[3] = to_byte(out_alpha);
+            out
+        })
+    }
+
     /// Edit > Copy Merged: like [`Self::copy`], but captures what is
     /// actually on screen — every visible layer composited together with
     /// its opacity and blend mode, exactly as the canvas shows them — within
@@ -26634,6 +26706,111 @@ mod tests {
                 y1: 2
             }
         );
+    }
+
+    /// ramped_3x3 plus a "target" layer of opaque 100 red, except a fully
+    /// transparent (0, 0) and a half-transparent (2, 2).
+    fn apply_image_fixture() -> (Document, LayerId, LayerId) {
+        let (mut doc, base) = ramped_3x3();
+        let mut pixels = vec![0u8; 36];
+        for px in pixels.chunks_exact_mut(4) {
+            px.copy_from_slice(&[100, 0, 0, 255]);
+        }
+        pixels[..4].copy_from_slice(&[0, 0, 0, 0]);
+        pixels[32..].copy_from_slice(&[100, 0, 0, 128]);
+        let target = doc.add_layer("target", &pixels, 3, 3).unwrap();
+        (doc, base, target)
+    }
+
+    #[test]
+    fn apply_image_normal_at_full_opacity_composites_the_source_over_the_target() {
+        let (mut doc, base, target) = apply_image_fixture();
+        let rect = doc
+            .apply_image(target, Some(base), BlendMode::Normal, 100, false, false)
+            .unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            })
+        );
+        // Opaque over opaque replaces; over transparent the source shows
+        // through; over alpha 128 the result is the source at full alpha.
+        assert_eq!(pixel(&doc, target, 1, 1), [50, 0, 0, 255]);
+        assert_eq!(pixel(&doc, target, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, target, 2, 2), [90, 0, 0, 255]);
+        // The source itself is untouched.
+        assert_eq!(pixel(&doc, base, 1, 1), [50, 0, 0, 255]);
+    }
+
+    #[test]
+    fn apply_image_honours_blend_mode_opacity_and_invert() {
+        // Multiply: 100/255 * 50/255 -> 19.6 -> 20. Normal at 50%: (100 +
+        // 50) / 2 = 75. Inverted Normal: every source channel flips, so
+        // (50, 0, 0) is applied as (205, 255, 255).
+        let (mut doc, base, target) = apply_image_fixture();
+        doc.apply_image(target, Some(base), BlendMode::Multiply, 100, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 1, 1), [20, 0, 0, 255]);
+
+        let (mut doc, base, target) = apply_image_fixture();
+        doc.apply_image(target, Some(base), BlendMode::Normal, 50, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 1, 1), [75, 0, 0, 255]);
+
+        let (mut doc, base, target) = apply_image_fixture();
+        doc.apply_image(target, Some(base), BlendMode::Normal, 100, true, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 1, 1), [205, 255, 255, 255]);
+    }
+
+    #[test]
+    fn apply_image_can_preserve_the_targets_transparency() {
+        let (mut doc, base, target) = apply_image_fixture();
+        doc.apply_image(target, Some(base), BlendMode::Normal, 100, false, true)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, target, 2, 2), [90, 0, 0, 128]);
+        assert_eq!(pixel(&doc, target, 1, 1), [50, 0, 0, 255]);
+    }
+
+    #[test]
+    fn apply_image_with_no_source_uses_the_merged_composite() {
+        // With the target hidden the merged image is the base ramp alone.
+        let (mut doc, _, target) = apply_image_fixture();
+        doc.set_visible(target, false).unwrap();
+        doc.apply_image(target, None, BlendMode::Normal, 100, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 1, 1), [50, 0, 0, 255]);
+        assert_eq!(pixel(&doc, target, 0, 0), [10, 0, 0, 255]);
+    }
+
+    #[test]
+    fn apply_image_respects_the_selection_and_rejects_bad_input() {
+        let (mut doc, base, target) = apply_image_fixture();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.apply_image(target, Some(base), BlendMode::Normal, 100, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, target, 1, 1), [100, 0, 0, 255]);
+
+        let err = doc
+            .apply_image(target, Some(base), BlendMode::Normal, 101, false, false)
+            .unwrap_err();
+        assert!(err.contains("Opacity"), "{err}");
+        assert!(doc
+            .apply_image(target, Some(999), BlendMode::Normal, 100, false, false)
+            .is_err());
+        assert!(doc
+            .apply_image(999, Some(base), BlendMode::Normal, 100, false, false)
+            .is_err());
+        doc.set_locked(target, true).unwrap();
+        assert!(doc
+            .apply_image(target, Some(base), BlendMode::Normal, 100, false, false)
+            .is_err());
     }
 
     #[test]

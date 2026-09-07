@@ -681,6 +681,30 @@ fn copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     snapshot(&state, document, None)
 }
 
+/// Image > Apply Image: blend layer `source` (or the merged composite, with
+/// `None`) onto layer `target` with `blend` at `opacity` percent.
+#[tauri::command]
+fn apply_image(
+    state: State<'_, AppState>,
+    target: LayerId,
+    source: Option<LayerId>,
+    blend: BlendMode,
+    opacity: u8,
+    invert: bool,
+    preserve_transparency: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.apply_image(
+            target,
+            source,
+            blend,
+            opacity,
+            invert,
+            preserve_transparency,
+        )
+    })
+}
+
 /// Edit > Copy Merged: capture the visible composite within the active
 /// selection into the clipboard. Read-only, like [`copy`].
 #[tauri::command]
@@ -3047,6 +3071,7 @@ pub fn run() {
             constrain_crop,
             copy,
             copy_merged,
+            apply_image,
             cut,
             paste,
             paste_into,

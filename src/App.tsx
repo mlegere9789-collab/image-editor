@@ -257,6 +257,12 @@ export default function App() {
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
+  const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
+  const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
+  const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
+  const [applyImageOpacity, setApplyImageOpacity] = useState(100);
+  const [applyImageInvert, setApplyImageInvert] = useState(false);
+  const [applyImagePreserve, setApplyImagePreserve] = useState(false);
   const [showSaveSelectionDialog, setShowSaveSelectionDialog] = useState(false);
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
@@ -1127,6 +1133,37 @@ export default function App() {
     });
     setShowMoveSelectionDialog(false);
   }, [runCommand, moveSelectionX, moveSelectionY]);
+
+  const openApplyImageDialog = useCallback(() => {
+    if (selectedId === null) return;
+    setApplyImageSource((current) =>
+      current === "merged" || (document?.layers ?? []).some((layer) => layer.id === current)
+        ? current
+        : "merged",
+    );
+    setShowApplyImageDialog(true);
+  }, [document, selectedId]);
+
+  const applyApplyImage = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("apply_image", {
+      target: selectedId,
+      source: applyImageSource === "merged" ? null : applyImageSource,
+      blend: applyImageBlend,
+      opacity: Math.round(applyImageOpacity),
+      invert: applyImageInvert,
+      preserveTransparency: applyImagePreserve,
+    });
+    setShowApplyImageDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    applyImageSource,
+    applyImageBlend,
+    applyImageOpacity,
+    applyImageInvert,
+    applyImagePreserve,
+  ]);
 
   const applySaveSelection = useCallback(async () => {
     await runCommand("save_selection", { name: saveSelectionName });
@@ -3301,6 +3338,14 @@ export default function App() {
             title="Edit > Copy Merged (Shift+Ctrl+C: copies every visible layer composited, as shown on the canvas)"
           >
             Copy Merged
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openApplyImageDialog}
+            disabled={busy || !canPaint}
+            title="Image > Apply Image (blend another layer, or the merged image, onto the selected layer)"
+          >
+            Apply Image…
           </button>
           <button
             className="button button--quiet"
@@ -6333,6 +6378,98 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyGeometry} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showApplyImageDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowApplyImageDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Apply Image"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Apply Image</h2>
+            <p className="modal__hint">
+              Blends the source onto the selected layer as if it were stacked on top and
+              merged down. Preserve Transparency keeps the target&apos;s coverage as it is.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Source</span>
+              <select
+                value={applyImageSource === "merged" ? "merged" : String(applyImageSource)}
+                onChange={(event) =>
+                  setApplyImageSource(
+                    event.target.value === "merged" ? "merged" : Number(event.target.value),
+                  )
+                }
+              >
+                <option value="merged">Merged</option>
+                {[...layers].reverse().map((layer) => (
+                  <option key={layer.id} value={String(layer.id)}>
+                    {layer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blending</span>
+              <select
+                value={applyImageBlend}
+                onChange={(event) => setApplyImageBlend(event.target.value as BlendMode)}
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Opacity (%)</span>
+              <input
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={applyImageOpacity}
+                onChange={(event) =>
+                  setApplyImageOpacity(Math.max(0, Math.min(100, Number(event.target.value))))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={applyImageInvert}
+                onChange={(event) => setApplyImageInvert(event.target.checked)}
+              />
+              <span className="control__label">Invert</span>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={applyImagePreserve}
+                onChange={(event) => setApplyImagePreserve(event.target.checked)}
+              />
+              <span className="control__label">Preserve Transparency</span>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowApplyImageDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyApplyImage} disabled={busy}>
                 Apply
               </button>
             </div>
