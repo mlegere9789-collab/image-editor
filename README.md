@@ -11966,6 +11966,53 @@ hand instead. Every other layer of this project's quality bar
 **1215 Rust tests total** (1210 → 1215, 1208 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 195 — Curves Point mode
+
+`Document::curves_points(id, points)` lifts the "five fixed input
+positions" scope cut Curves shipped with: Photoshop's Point mode. The
+curve is any number (at least two) of `(input, output)` control points
+at arbitrary inputs, sorted by input so a caller may list them in any
+order, joined by straight segments — the same linear-interpolation
+scope cut as before; the smooth spline remains cut — and flat beyond
+the outer points, so a curve whose points stop short of `0` or `255`
+clamps the tones outside them. The old `curves` is now this with its
+five fixed inputs zipped to the slider values, so it is unchanged.
+Fewer than two points, or two points sharing an input, errors.
+
+The Curves dialog gains a **Point mode** checkbox: on, the five sliders
+give way to an editable list of Input/Output pairs with **Add Point**
+and per-row remove buttons (a list can't shrink below two), applied
+through a new `curves_points` command; Reset restores both the sliders
+and the two-point identity list.
+
+**Verified two ways.** Five new `document.rs` tests on a four-pixel
+fixture, every byte hand-computed with the segment formula and its
+round-half-up. Two endpoints `(0, 0)`–`(255, 255)` are the identity.
+`(0, 0)`→`(128, 255)`→`(255, 255)` maps `10` to `19.9 → 20`, `64` to
+`127.5 → 128`, `60` to `119.5 → 120`, `100` to `199.2 → 199`, and `128`
+and `200` to `255`. `(192, 255)` and `(64, 0)` listed backwards sort
+themselves: `10` and `30` clamp to `0`, `200` and `255` to `255`, `128`
+is the segment's midpoint at `128`, and `100` is `36/128` of the way at
+`71.7 → 72`. The five fixed inputs with outputs `0, 100, 128, 192, 255`
+are byte-identical to the old `curves` on every pixel, with `10 →
+15.6 → 16`. One point, two points at the same input, an unknown layer,
+and a locked layer error with the pixels intact. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and forty-two:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new point list was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1220 Rust tests total** (1215 → 1220, 1213 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

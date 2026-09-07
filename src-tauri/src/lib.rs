@@ -3236,6 +3236,17 @@ fn curves(state: State<'_, AppState>, id: LayerId, points: [u8; 5]) -> Result<Sn
     edit_checkpointed(&state, |document| document.curves(id, points))
 }
 
+/// Image > Adjustments > Curves in Point mode: arbitrary `(input, output)`
+/// control points on layer `id`.
+#[tauri::command]
+fn curves_points(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(u8, u8)>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.curves_points(id, &points))
+}
+
 /// Image > Adjustments > Color Balance on layer `id`.
 #[tauri::command]
 fn color_balance(
@@ -3840,6 +3851,7 @@ pub fn run() {
             channel_mixer,
             levels,
             curves,
+            curves_points,
             color_balance,
             highlights_shadows,
             clarity,

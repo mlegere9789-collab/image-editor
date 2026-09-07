@@ -486,6 +486,13 @@ export default function App() {
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
+  // Curves > Point mode: free (input, output) control points instead of
+  // the five fixed-input sliders.
+  const [curvesPointMode, setCurvesPointMode] = useState(false);
+  const [curveNodes, setCurveNodes] = useState<[number, number][]>([
+    [0, 0],
+    [255, 255],
+  ]);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
@@ -1655,9 +1662,22 @@ export default function App() {
 
   const applyCurves = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("curves", { id: selectedId, points: curvePoints });
+    if (curvesPointMode) {
+      await runCommand("curves_points", { id: selectedId, points: curveNodes });
+    } else {
+      await runCommand("curves", { id: selectedId, points: curvePoints });
+    }
     setShowCurvesDialog(false);
-  }, [runCommand, selectedId, curvePoints]);
+  }, [runCommand, selectedId, curvePoints, curvesPointMode, curveNodes]);
+
+  const setCurveNode = useCallback((index: number, axis: 0 | 1, value: number) => {
+    const clamped = Math.max(0, Math.min(255, Math.round(value)));
+    setCurveNodes((nodes) =>
+      nodes.map((node, i) =>
+        i === index ? (axis === 0 ? [clamped, node[1]] : [node[0], clamped]) : node,
+      ),
+    );
+  }, []);
 
   const setColorBalanceValue = useCallback(
     (setter: (updater: (values: number[]) => number[]) => void, index: number, value: number) => {
@@ -9508,7 +9528,57 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Curves</h2>
-            {curvePoints.map((value, index) => (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={curvesPointMode}
+                onChange={(event) => setCurvesPointMode(event.target.checked)}
+              />
+              Point mode
+            </label>
+            {curvesPointMode &&
+              curveNodes.map(([input, output], index) => (
+                <div className="control control--row" key={index}>
+                  <label className="control">
+                    <span className="control__label">Input</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={input}
+                      onChange={(event) => setCurveNode(index, 0, Number(event.target.value))}
+                    />
+                  </label>
+                  <label className="control">
+                    <span className="control__label">Output</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={255}
+                      value={output}
+                      onChange={(event) => setCurveNode(index, 1, Number(event.target.value))}
+                    />
+                  </label>
+                  <button
+                    className="button button--quiet"
+                    disabled={curveNodes.length <= 2}
+                    onClick={() => setCurveNodes((nodes) => nodes.filter((_, i) => i !== index))}
+                    title="Remove this point"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            {curvesPointMode && (
+              <button
+                className="button button--quiet"
+                onClick={() => setCurveNodes((nodes) => [...nodes, [128, 128]])}
+              >
+                Add Point
+              </button>
+            )}
+            {!curvesPointMode &&
+              curvePoints.map((value, index) => (
               <label className="control" key={index}>
                 <span className="control__label">
                   Input {IDENTITY_CURVE[index]}
@@ -9522,11 +9592,17 @@ export default function App() {
                   onChange={(event) => setCurvePoint(index, Number(event.target.value))}
                 />
               </label>
-            ))}
+              ))}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
-                onClick={() => setCurvePoints(IDENTITY_CURVE)}
+                onClick={() => {
+                  setCurvePoints(IDENTITY_CURVE);
+                  setCurveNodes([
+                    [0, 0],
+                    [255, 255],
+                  ]);
+                }}
               >
                 Reset
               </button>

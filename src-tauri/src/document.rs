@@ -11611,13 +11611,43 @@ impl Document {
     /// value reproduces exactly, since each segment's output span exactly
     /// matches its input span. Alpha untouched.
     pub fn curves(&mut self, id: LayerId, points: [u8; 5]) -> Result<Option<Rect>, String> {
-        const XS: [f32; 5] = [0.0, 64.0, 128.0, 192.0, 255.0];
+        const XS: [u8; 5] = [0, 64, 128, 192, 255];
+        let nodes: Vec<(u8, u8)> = XS.iter().copied().zip(points).collect();
+        self.curves_points(id, &nodes)
+    }
+
+    /// [`Self::curves`] in Photoshop's Point mode: the curve is defined by
+    /// any number (at least two) of `(input, output)` control points at
+    /// arbitrary input positions, sorted by input here so a caller can
+    /// list them in any order, and connected by straight segments — the
+    /// same linear-interpolation scope cut as `curves`, which is now this
+    /// with its five fixed inputs. Below the first point and above the
+    /// last the curve is flat at that point's output, so a curve whose
+    /// points do not reach `0` or `255` clamps the tones outside them.
+    /// Errors for fewer than two points or two points sharing an input.
+    pub fn curves_points(
+        &mut self,
+        id: LayerId,
+        points: &[(u8, u8)],
+    ) -> Result<Option<Rect>, String> {
+        if points.len() < 2 {
+            return Err("A curve needs at least two points.".to_string());
+        }
+        let mut nodes: Vec<(u8, u8)> = points.to_vec();
+        nodes.sort_by_key(|&(x, _)| x);
+        if nodes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+            return Err("Curve points must have distinct input values.".to_string());
+        }
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
             let apply = |c: u8| {
                 let x = c as f32;
-                let seg = ((x / 64.0) as usize).min(3);
-                let (x0, x1) = (XS[seg], XS[seg + 1]);
-                let (y0, y1) = (points[seg] as f32, points[seg + 1] as f32);
+                let seg = match nodes.iter().position(|&(nx, _)| nx > c) {
+                    Some(0) => return nodes[0].1,
+                    Some(i) => i - 1,
+                    None => return nodes[nodes.len() - 1].1,
+                };
+                let (x0, y0) = (nodes[seg].0 as f32, nodes[seg].1 as f32);
+                let (x1, y1) = (nodes[seg + 1].0 as f32, nodes[seg + 1].1 as f32);
                 let t = (x - x0) / (x1 - x0);
                 (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8
             };
@@ -21722,6 +21752,76 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.auto_tone_clipped(id, 10, 10).is_err());
         assert_eq!(red_row(&doc, id)[..3], [0, 5, 10]);
+    }
+
+    fn curves_points_fixture() -> (Document, LayerId) {
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[
+                    10, 64, 128, 255, 60, 200, 100, 128, 0, 192, 255, 255, 30, 30, 30, 255,
+                ],
+                4,
+                1,
+            )
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn curves_points_two_endpoints_are_the_identity() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_points(id, &[(0, 0), (255, 255)]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [60, 200, 100, 128]);
+    }
+
+    #[test]
+    fn curves_points_interpolates_between_arbitrary_points() {
+        // (0, 0) → (128, 255) → (255, 255): 64 sits half-way up the first
+        // segment (127.5 → 128), 128 and everything above hit the ceiling.
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_points(id, &[(0, 0), (128, 255), (255, 255)])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [20, 128, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [120, 255, 199, 128]);
+    }
+
+    #[test]
+    fn curves_points_are_flat_outside_the_outer_points_and_sort_themselves() {
+        // (64, 0) → (192, 255), listed backwards: 10 and 30 clamp to 0, 200
+        // and 255 to 255, 128 is the segment's midpoint → 128, and 100 is
+        // 36/128 of the way → 71.7 → 72.
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_points(id, &[(192, 255), (64, 0)]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 72, 128]);
+        assert_eq!(pixel(&doc, id, 3, 0), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn curves_points_at_the_five_fixed_inputs_is_plain_curves() {
+        let (mut doc, id) = curves_points_fixture();
+        doc.curves_points(id, &[(0, 0), (64, 100), (128, 128), (192, 192), (255, 255)])
+            .unwrap();
+        let (mut plain, plain_id) = curves_points_fixture();
+        plain.curves(plain_id, [0, 100, 128, 192, 255]).unwrap();
+        for x in 0..4 {
+            assert_eq!(pixel(&doc, id, x, 0), pixel(&plain, plain_id, x, 0));
+        }
+        assert_eq!(pixel(&doc, id, 0, 0), [16, 100, 128, 255]);
+    }
+
+    #[test]
+    fn curves_points_rejects_bad_input_and_propagates_errors() {
+        let (mut doc, id) = curves_points_fixture();
+        assert!(doc.curves_points(id, &[(0, 0)]).is_err());
+        assert!(doc.curves_points(id, &[(0, 0), (0, 255)]).is_err());
+        assert!(doc.curves_points(id + 1, &[(0, 0), (255, 255)]).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.curves_points(id, &[(0, 0), (255, 255)]).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 64, 128, 255]);
     }
 
     #[test]
