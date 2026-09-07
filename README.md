@@ -10842,6 +10842,57 @@ instead. Every other layer of this project's quality bar
 **1105 Rust tests total** (1100 → 1105, 1098 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 173 — Move tool
+
+`move_pixels(id, dx, dy)` is the Move tool. With no selection the whole
+layer shifts, the vacated edge left transparent — a public front for
+the private `translate` that Free Transform and Camera Raw Geometry
+already used. With a selection only the selected pixels move: they are
+lifted from a snapshot, their source cleared to transparent, and set
+down at the offset overwriting whatever was there — Photoshop's cut-
+and-drop — with the selection outline carried along through Phase
+156's `move_selection` and dropped when it leaves the canvas entirely,
+as Photoshop drops it. Reading from the snapshot is what makes a
+one-pixel move of a run of pixels land each on its neighbour's old spot
+rather than smearing. Pixels pushed off the canvas are lost. A zero
+move is a no-op returning `None`; otherwise the whole canvas is reported
+dirty. A locked or unknown layer errors before anything is touched. In
+the frontend a **Move** tool button captures a drag on the canvas and
+applies the rounded offset at pointer-up, and the arrow keys nudge the
+layer by 1 px (10 px with Shift) while the tool is active — the same
+branch of the keyboard handler that nudges the selection outline for
+the marquees. Photoshop's Auto-Select, Show Transform Controls, and
+alignment buttons are documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests reading pixels and
+the selection back by hand-derived position. `ramped_3x3` moved right
+by one reads `[[0, 10, 20], [0, 40, 50], [0, 70, 80]]` with the vacated
+column transparent, byte-equal to `translate`, and reports the whole
+canvas dirty. With `(0, 0)` selected and moved by `(1, 1)`, the `10`
+lands on `(1, 1)` (overwriting `50`), `(0, 0)` is transparent, `(1, 0)`
+and `(2, 2)` are untouched, and the outline now sits at `(1, 1)–(2,
+2)`. The pair `10 20` selected and moved right by one reads `0 10 20`
+— each moved pixel read from the snapshot, not from a neighbour already
+overwritten. The right-hand column selected and moved right by one is
+cleared, nothing is written, the centre is untouched, and the selection
+is dropped. A zero move returns `None` and changes nothing; an unknown
+layer errors; a locked layer errors with its pixels and its `Rectangle`
+selection intact. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The tool's drag and nudge wiring was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1110 Rust tests total** (1105 → 1110, 1103 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

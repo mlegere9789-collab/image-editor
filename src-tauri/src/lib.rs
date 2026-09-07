@@ -484,6 +484,19 @@ fn move_selection(state: State<'_, AppState>, dx: i64, dy: i64) -> Result<Snapsh
     })
 }
 
+/// Move tool: shift layer `id`'s selected pixels (or the whole layer) by
+/// `(dx, dy)`, carrying the selection outline along. A whole, discrete
+/// action, so it checkpoints itself.
+#[tauri::command]
+fn move_pixels(
+    state: State<'_, AppState>,
+    id: LayerId,
+    dx: i32,
+    dy: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.move_pixels(id, dx, dy))
+}
+
 /// Select > Transform Selection: scale, rotate, and move the selection
 /// outline about its own centre without touching pixels.
 #[tauri::command]
@@ -3491,6 +3504,7 @@ pub fn run() {
             invert_selection,
             expand_selection,
             move_selection,
+            move_pixels,
             transform_selection,
             save_selection,
             load_selection,

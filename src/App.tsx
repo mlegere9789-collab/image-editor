@@ -263,6 +263,7 @@ export default function App() {
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
+  const moveStart = useRef<[number, number] | null>(null);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
   const [showLayerCompsDialog, setShowLayerCompsDialog] = useState(false);
   const [layerCompName, setLayerCompName] = useState("Comp 1");
@@ -2786,9 +2787,12 @@ export default function App() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey)) {
         // Arrow keys nudge the selection outline while a marquee tool is
-        // active, as in Photoshop: 1 px, or 10 px with Shift.
+        // active, or the layer's pixels with the Move tool, as in
+        // Photoshop: 1 px, or 10 px with Shift.
         const marquee = tool === "selectRect" || tool === "selectEllipse";
-        if (!marquee || !hasSelection || busy || isTypingTarget(event.target)) return;
+        const move = tool === "move" && selectedId !== null;
+        if ((!marquee || !hasSelection) && !move) return;
+        if (busy || isTypingTarget(event.target)) return;
         const step = event.shiftKey ? 10 : 1;
         const nudges: Record<string, [number, number]> = {
           ArrowLeft: [-step, 0],
@@ -2799,7 +2803,11 @@ export default function App() {
         const delta = nudges[event.key];
         if (delta) {
           event.preventDefault();
-          void runCommand("move_selection", { dx: delta[0], dy: delta[1] });
+          if (move) {
+            void runCommand("move_pixels", { id: selectedId, dx: delta[0], dy: delta[1] });
+          } else {
+            void runCommand("move_selection", { dx: delta[0], dy: delta[1] });
+          }
         }
         return;
       }
@@ -3063,6 +3071,7 @@ export default function App() {
 
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
+  const isMove = tool === "move";
   const isColorSampler = tool === "colorSampler";
   const isCount = tool === "count";
   const isNote = tool === "note";
@@ -3230,6 +3239,12 @@ export default function App() {
         rulerStart.current = toDocPoint(event, document);
         return;
       }
+      if (isMove) {
+        if (!canPaint) return;
+        event.currentTarget.setPointerCapture(event.pointerId);
+        moveStart.current = toDocPoint(event, document);
+        return;
+      }
       if (isColorSampler) {
         placeColorSampler(event);
         return;
@@ -3282,6 +3297,7 @@ export default function App() {
       isRedEye,
       redEyeAt,
       isRuler,
+      isMove,
       isColorSampler,
       placeColorSampler,
       isCount,
@@ -3345,6 +3361,17 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      if (isMove) {
+        const start = moveStart.current;
+        moveStart.current = null;
+        if (start && document && selectedId !== null) {
+          const [x1, y1] = toDocPoint(event, document);
+          const dx = Math.round(x1 - start[0]);
+          const dy = Math.round(y1 - start[1]);
+          if (dx !== 0 || dy !== 0) void runCommand("move_pixels", { id: selectedId, dx, dy });
+        }
+        return;
       }
       if (isRuler) {
         const start = rulerStart.current;
@@ -3411,6 +3438,7 @@ export default function App() {
       lastPoint.current = null;
     },
     [
+      isMove,
       isRuler,
       isMarqueeTool,
       isGradient,
@@ -3979,6 +4007,15 @@ export default function App() {
             title="Note: click to pin a text note; click a note's badge to edit or delete it"
           >
             Note
+          </button>
+          <button
+            className={`button button--quiet${tool === "move" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "move"}
+            onClick={() => setTool("move")}
+            title="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
+          >
+            Move
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}

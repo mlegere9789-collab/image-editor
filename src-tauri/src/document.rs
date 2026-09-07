@@ -11777,6 +11777,60 @@ impl Document {
         })
     }
 
+    /// The Move tool: shifts layer `id`'s pixels by `(dx, dy)`. With no
+    /// selection the whole layer moves, the vacated edge left transparent
+    /// ([`Self::translate`]). With a selection only the selected pixels
+    /// move: they are lifted, their source cleared to transparent, and set
+    /// down at the offset overwriting whatever was there — Photoshop's
+    /// "cut and drop" — with the selection outline carried along
+    /// ([`Self::move_selection`]) and dropped if it leaves the canvas
+    /// entirely. Pixels pushed off the canvas are lost. A zero move does
+    /// nothing and returns `None`; otherwise the whole canvas is reported
+    /// dirty. Errors on a locked or unknown layer before touching anything.
+    /// Photoshop's Auto-Select, Show Transform Controls, and alignment
+    /// buttons are documented scope cuts.
+    pub fn move_pixels(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        if dx == 0 && dy == 0 {
+            self.layer(id)?;
+            return Ok(None);
+        }
+        let everything = Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        };
+        if self.selection.is_none() {
+            self.translate(id, dx, dy)?;
+            return Ok(Some(everything));
+        }
+        let bits = self.selected_bits()?;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let snapshot = layer.pixels.clone();
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS].fill(0);
+        }
+        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+            let (x, y) = (
+                idx as i64 % width + dx as i64,
+                idx as i64 / width + dy as i64,
+            );
+            if (0..width).contains(&x) && (0..height).contains(&y) {
+                let dst = (y * width + x) as usize * CHANNELS;
+                layer.pixels[dst..dst + CHANNELS]
+                    .copy_from_slice(&snapshot[idx * CHANNELS..(idx + 1) * CHANNELS]);
+            }
+        }
+        if self.move_selection(dx as i64, dy as i64).is_err() {
+            self.selection = None;
+        }
+        Ok(Some(everything))
+    }
+
     /// Edit > Free Transform: [`Self::scale`], then [`Self::rotate`], then
     /// [`Self::skew`], then a transparent-fill move, applied in that fixed
     /// order to layer `id` as one edit — so the result is byte-for-byte
@@ -18764,6 +18818,87 @@ mod tests {
             .flat_map(|y| (0..4).map(move |x| (x, y)))
             .filter(|&(x, y)| pixel(doc, id, x, y)[3] > 0)
             .collect()
+    }
+
+    #[test]
+    fn move_tool_shifts_the_whole_layer_with_transparent_fill() {
+        let (mut doc, id) = ramped_3x3();
+        let rect = doc.move_pixels(id, 1, 0).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 20], vec![0, 40, 50], vec![0, 70, 80]]
+        );
+        assert_eq!(pixel(&doc, id, 0, 1), [0, 0, 0, 0]);
+        let (mut translated, id2) = ramped_3x3();
+        translated.translate(id2, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, translated.layers()[0].pixels);
+    }
+
+    #[test]
+    fn move_tool_moves_only_the_selected_pixels_and_their_outline() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.move_pixels(id, 1, 1).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 2, 2), [90, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [20, 0, 0, 255]);
+        let s = doc.selection().unwrap();
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            }
+        );
+    }
+
+    #[test]
+    fn move_tool_reads_the_pre_move_pixels_when_source_and_target_overlap() {
+        // Moving the pair 10 20 right by one lands 10 on 20's old spot and
+        // 20 on 30's: each moved pixel is read from the snapshot, not from
+        // a neighbour already overwritten.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 1.0).unwrap();
+        doc.move_pixels(id, 1, 0).unwrap();
+        assert_eq!(red_channel_grid(&doc)[0], vec![0, 10, 20]);
+        assert_eq!(pixel(&doc, id, 0, 0)[3], 0);
+    }
+
+    #[test]
+    fn move_tool_drops_pixels_and_the_outline_that_leave_the_canvas() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 0.0, 3.0, 3.0).unwrap();
+        doc.move_pixels(id, 1, 0).unwrap();
+        for y in 0..3 {
+            assert_eq!(pixel(&doc, id, 2, y)[3], 0, "row {y}");
+        }
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 255]);
+        assert!(doc.selection().is_none());
+    }
+
+    #[test]
+    fn move_tool_ignores_a_zero_move_and_rejects_locked_or_unknown_layers() {
+        let (mut doc, id) = ramped_3x3();
+        assert_eq!(doc.move_pixels(id, 0, 0).unwrap(), None);
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+        assert!(doc.move_pixels(999, 1, 0).is_err());
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.move_pixels(id, 1, 0).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [10, 0, 0, 255]);
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
     #[test]

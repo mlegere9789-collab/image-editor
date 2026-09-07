@@ -121,6 +121,7 @@ export type Symmetry = "vertical" | "horizontal" | "both";
 export type SelectionMode = "new" | "add" | "subtract" | "intersect";
 
 export type Tool =
+  | "move"
   | "brush"
   | "eraser"
   | "magicEraser"
