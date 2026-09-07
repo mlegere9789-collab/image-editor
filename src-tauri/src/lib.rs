@@ -278,6 +278,13 @@ fn channel_view_of(query: Option<&str>) -> Option<document::ChannelView> {
         "red" => document::ChannelView::Red,
         "green" => document::ChannelView::Green,
         "blue" => document::ChannelView::Blue,
+        "cyan" => document::ChannelView::Cyan,
+        "magenta" => document::ChannelView::Magenta,
+        "yellow" => document::ChannelView::Yellow,
+        "black" => document::ChannelView::Black,
+        "lightness" => document::ChannelView::Lightness,
+        "aStar" => document::ChannelView::AStar,
+        "bStar" => document::ChannelView::BStar,
         other => document::ChannelView::Alpha {
             name: percent_decode(other.strip_prefix("alpha:")?),
         },

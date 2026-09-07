@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChannelView, MoveDirection } from "./types";
+import type { ChannelView, ColorMode, MoveDirection } from "./types";
 
 /** Channel Thumbnail Options: the size of the thumbnail beside each row. */
 export type ChannelThumbs = "none" | "small" | "medium" | "large";
@@ -11,6 +11,8 @@ type Props = {
   channels: string[];
   /** What the canvas is showing. */
   view: ChannelView;
+  /** Image > Mode, which decides the fixed rows. */
+  mode: ColorMode;
   thumbs: ChannelThumbs;
   disabled: boolean;
   onSelect: (view: ChannelView) => void;
@@ -31,12 +33,41 @@ function sameView(a: ChannelView, b: ChannelView): boolean {
   return a.kind === b.kind && (a.kind !== "alpha" || b.kind !== "alpha" || a.name === b.name);
 }
 
-const FIXED: { view: ChannelView; label: string }[] = [
-  { view: { kind: "composite" }, label: "RGB" },
-  { view: { kind: "red" }, label: "Red" },
-  { view: { kind: "green" }, label: "Green" },
-  { view: { kind: "blue" }, label: "Blue" },
-];
+/** The fixed rows for each mode — Photoshop's own Channels panel layout. */
+function fixedRows(mode: ColorMode): { view: ChannelView; label: string }[] {
+  switch (mode) {
+    case "cmyk":
+      return [
+        { view: { kind: "composite" }, label: "CMYK" },
+        { view: { kind: "cyan" }, label: "Cyan" },
+        { view: { kind: "magenta" }, label: "Magenta" },
+        { view: { kind: "yellow" }, label: "Yellow" },
+        { view: { kind: "black" }, label: "Black" },
+      ];
+    case "lab":
+      return [
+        { view: { kind: "composite" }, label: "Lab" },
+        { view: { kind: "lightness" }, label: "Lightness" },
+        { view: { kind: "aStar" }, label: "a" },
+        { view: { kind: "bStar" }, label: "b" },
+      ];
+    case "multichannel":
+      return [];
+    case "grayscale":
+    case "bitmap":
+    case "duotone":
+      return [{ view: { kind: "composite" }, label: mode === "duotone" ? "Duotone" : "Gray" }];
+    case "indexed":
+      return [{ view: { kind: "composite" }, label: "Index" }];
+    default:
+      return [
+        { view: { kind: "composite" }, label: "RGB" },
+        { view: { kind: "red" }, label: "Red" },
+        { view: { kind: "green" }, label: "Green" },
+        { view: { kind: "blue" }, label: "Blue" },
+      ];
+  }
+}
 
 /** Photoshop's Channels panel: the composite, its three colour channels,
  * and every alpha channel, each selectable as the canvas view, with
@@ -46,6 +77,7 @@ export default function ChannelPanel({
   generation,
   channels,
   view,
+  mode,
   thumbs,
   disabled,
   onSelect,
@@ -59,7 +91,7 @@ export default function ChannelPanel({
   const [renaming, setRenaming] = useState<{ name: string; draft: string } | null>(null);
 
   const rows: { view: ChannelView; label: string }[] = [
-    ...FIXED,
+    ...fixedRows(mode),
     ...channels.map((name) => ({ view: { kind: "alpha", name } as ChannelView, label: name })),
   ];
 

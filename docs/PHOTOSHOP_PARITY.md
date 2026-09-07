@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 374.**
+**618 distinct capabilities tracked. Currently shipped: 377.**
 
 ## PART I — EVERY TOOL
 
@@ -389,13 +389,13 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Channel Selection for Editing (selecting an alpha channel in the panel shows it on the canvas and sends brush strokes to `paint_channel(name, points, radius, grey)`, the brush colour's luma laid down over the Selection Brush's hard coverage; New Channel adds a black one through `add_channel` — see README Phase 227)
 - [x] Composite Channel (`ChannelView::{Composite, Red, Green, Blue, Alpha}` and `channel_image(view)`: the RGB row shows the composite, the colour rows one channel of it as a grey — see README Phase 227)
 - [x] RGB Color Mode (`ColorMode::Rgb`, the default; `convert_mode(Rgb)` from Grayscale or Bitmap keeps the pixels and lifts the paint constraint — see README Phase 228)
-- [ ] CMYK Color Mode
+- [x] CMYK Color Mode (`ColorMode::Cmyk`: pixels stay RGB while the Channels panel shows CMYK, Cyan, Magenta, Yellow, and Black rows through `cmyk_of`, the naive profile-free split `K = 1 − max`, ink `(1 − channel − K)/(1 − K)`, drawn light where there is little ink; ICC press profiles are a documented scope cut — see README Phase 231)
 - [x] Grayscale Mode (`convert_mode(Grayscale)` replaces every layer pixel's colour with its BT.601 luma, alpha kept, and from then on brush strokes, Fill, and the Paint Bucket lay down the colour's luma as a grey through `constrain_color`; the size ratio option is a documented scope cut — see README Phase 228)
 - [x] Bitmap Mode (`convert_mode(Bitmap, method)` with 50% Threshold, Pattern Dither on the 4×4 Bayer matrix, or Diffusion Dither by Floyd–Steinberg; paint and fills then lay down black or white; output resolution, halftone screen, and custom pattern are documented scope cuts — see README Phase 228)
 - [x] Indexed Color Mode (`convert_to_indexed(palette)` with Exact — the image's own colours, at most 256 — Uniform, the 6×6×6 web cube, or Adaptive, the N most frequent colours (2–256) by popularity; every pixel snaps to its nearest table entry and paint and fills are constrained to the table; dithering, Local/Master palettes, Forced, Transparency, and Matte are documented scope cuts — see README Phase 229)
 - [x] Duotone Mode (`convert_to_duotone(inks)`, one to four `Ink`s each with a colour and Curves-style darkness→coverage points: every layer's luma printed as the subtractive overprint of the inks, `1 − c·(1 − ink)` per channel from white, and new paint printed the same way; Overprint Colors and the dialog's curve editor are documented scope cuts — see README Phase 230)
-- [ ] Multichannel Mode
-- [ ] Lab Color Mode
+- [x] Multichannel Mode (`convert_mode(Multichannel)` splits the composite into Cyan, Magenta, and Yellow alpha channels — `255 −` its red, green, blue — as Photoshop does from RGB, and the panel shows only the alpha channels; layers stay as they are, a documented deviation — see README Phase 231)
+- [x] Lab Color Mode (`ColorMode::Lab`: pixels stay RGB while the Channels panel shows Lab, Lightness, a, and b rows through `lab_of`, the standard sRGB → XYZ (D65) → CIE L*a*b* conversion scaled to bytes — see README Phase 231)
 - [x] 8 Bits/Channel (the one depth this editor stores, every layer RGBA8, shown beside the Mode menu; 16 and 32 bits remain unshipped — see README Phase 228)
 - [ ] 16 Bits/Channel
 - [ ] 32 Bits/Channel

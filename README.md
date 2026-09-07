@@ -13815,6 +13815,60 @@ by hand instead. Every other layer of this project's quality bar
 **1395 Rust tests total** (1390 → 1395, 1388 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 231 — CMYK, Lab, and Multichannel
+
+The mode family completes with the three modes that are ways of
+seeing the pixels rather than of changing them. `cmyk_of(rgb)` is the
+naive, profile-free ink split — `K = 1 − max(r, g, b)` and each ink
+`(1 − channel − K) / (1 − K)`, zero for black — and `lab_of(rgb)` the
+standard sRGB linearisation, D65 XYZ matrix, and CIE L*a*b* with its
+cube-root function and linear toe, scaled to bytes (`L × 2.55`, `a`
+and `b` rounded and offset by `128`). `ChannelView` gains Cyan,
+Magenta, Yellow, Black (drawn light where there is little ink, as
+Photoshop draws ink channels), Lightness, a, and b, all computed from
+the composite by `channel_image` and served through the protocol's
+`channel=` query. CMYK Color and Lab Color set the mode without
+touching the pixels or constraining paint; Multichannel splits the
+composite into Cyan, Magenta, and Yellow alpha channels — `255 −` its
+red, green, blue, as Photoshop does from RGB — refusing if those names
+are taken, and leaves the layers as they are, a documented deviation
+from Photoshop's discarding them. The Channels panel now lays out its
+fixed rows by mode: RGB and its three channels; CMYK and its four; Lab
+and its three; a single Gray, Duotone, or Index row; and only the
+alpha channels in Multichannel. ICC press profiles behind Photoshop's
+real CMYK, and 16 and 32 bits per channel, remain unshipped.
+
+**Verified two ways.** Five new `document.rs` tests, every byte first
+computed in Python emulating `f32` step by step. `cmyk_of` gives white
+`[0, 0, 0, 0]`, black `[0, 0, 0, 255]`, red `[0, 255, 255, 0]`, `[0,
+128, 255]` → `[255, 127, 0, 0]`, and `[200, 100, 50]` → `[0, 128,
+191, 55]` (the magenta an exact `0.5`, `128` in `f32`). `lab_of` gives
+white `[255, 128, 128]`, black `[0, 128, 128]`, red `[136, 208, 195]`
+(`L 53.23, a 80.11, b 67.22`), green `[224, 42, 211]`, blue `[82,
+207, 20]`, mid grey `[137, 128, 128]`, and `[200, 100, 50]` → `[137,
+164, 173]`. That last pixel's channel views are `255`, `127`, `64`,
+`200` for the inks and `137`, `164`, `173` for Lab. CMYK and Lab set
+the mode, keep the pixel, and leave paint and `constrain_color`
+unconstrained. Multichannel on a black layer under a `[200, 100, 50]`
+pixel beside a transparent one makes Cyan `[55, 255]`, Magenta `[155,
+255]`, Yellow `[205, 255]`, keeps the layers, and refuses a second
+conversion while the names are taken. All five passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-eight: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The panel was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1400 Rust tests total** (1395 → 1400, 1393 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

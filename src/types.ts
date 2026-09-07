@@ -143,7 +143,15 @@ export type Ink = { color: [number, number, number]; curve: [number, number][] }
 
 /** Mirrors `ColorMode` / `BitmapMethod` / `Palette` in
  * src-tauri/src/document.rs. */
-export type ColorMode = "rgb" | "grayscale" | "bitmap" | "indexed" | "duotone";
+export type ColorMode =
+  | "rgb"
+  | "grayscale"
+  | "bitmap"
+  | "indexed"
+  | "duotone"
+  | "cmyk"
+  | "lab"
+  | "multichannel";
 export type Palette = { kind: "exact" } | { kind: "uniform" } | { kind: "adaptive"; colors: number };
 export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
@@ -173,6 +181,13 @@ export type ChannelView =
   | { kind: "red" }
   | { kind: "green" }
   | { kind: "blue" }
+  | { kind: "cyan" }
+  | { kind: "magenta" }
+  | { kind: "yellow" }
+  | { kind: "black" }
+  | { kind: "lightness" }
+  | { kind: "aStar" }
+  | { kind: "bStar" }
   | { kind: "alpha"; name: string };
 
 /** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >

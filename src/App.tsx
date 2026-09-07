@@ -4664,6 +4664,9 @@ export default function App() {
               <option value="bitmap">Bitmap…</option>
               <option value="indexed">Indexed Color…</option>
               <option value="duotone">Duotone…</option>
+              <option value="cmyk">CMYK Color</option>
+              <option value="lab">Lab Color</option>
+              <option value="multichannel">Multichannel</option>
             </select>
             {document?.mode === "indexed" && (
               <span className="control__value" title="Colour table">
@@ -17592,6 +17595,7 @@ export default function App() {
               generation={generation}
               channels={document?.channels ?? []}
               view={shownChannel}
+              mode={document?.mode ?? "rgb"}
               thumbs={channelThumbs}
               disabled={busy}
               onSelect={setChannelView}

@@ -374,6 +374,65 @@ pub enum ColorMode {
     Indexed,
     /// A grey image printed with one to four inks — see [`Ink`].
     Duotone,
+    /// Pixels kept as RGB; the Channels panel shows the naive CMYK split
+    /// of each pixel ([`cmyk_of`]).
+    Cmyk,
+    /// Pixels kept as RGB; the Channels panel shows L*, a*, b* of each
+    /// pixel ([`lab_of`]).
+    Lab,
+    /// The composite split into Cyan, Magenta, and Yellow alpha channels.
+    Multichannel,
+}
+
+/// The naive, profile-free CMYK split of an RGB pixel as ink coverages
+/// `0..=255`: `K = 1 − max(r, g, b)` and each ink `(1 − channel − K) /
+/// (1 − K)`, zero for black. Photoshop's own conversion goes through an
+/// ICC press profile — a documented scope cut.
+pub fn cmyk_of([r, g, b]: [u8; 3]) -> [u8; 4] {
+    let (r, g, b) = (to_unit(r), to_unit(g), to_unit(b));
+    let k = 1.0 - r.max(g).max(b);
+    if k >= 1.0 {
+        return [0, 0, 0, 255];
+    }
+    let d = 1.0 - k;
+    let ink = |channel: f32| to_byte(((1.0 - channel) - k) / d);
+    [ink(r), ink(g), ink(b), to_byte(k)]
+}
+
+/// An sRGB pixel as CIE L*a*b* bytes under D65 — `L` scaled `0..=100 →
+/// 0..=255`, `a` and `b` rounded and offset by `128` — through the
+/// standard sRGB linearisation, the D65 XYZ matrix, and the Lab cube-root
+/// function with its linear toe.
+pub fn lab_of([r, g, b]: [u8; 3]) -> [u8; 3] {
+    let linear = |v: u8| {
+        let c = to_unit(v);
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (linear(r), linear(g), linear(b));
+    let x = 0.4124 * r + 0.3576 * g + 0.1805 * b;
+    let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    let z = 0.0193 * r + 0.1192 * g + 0.9505 * b;
+    let f = |t: f32| {
+        if t > 0.008856 {
+            t.cbrt()
+        } else {
+            7.787 * t + 16.0 / 116.0
+        }
+    };
+    let (fx, fy, fz) = (f(x / 0.95047), f(y), f(z / 1.08883));
+    let l = 116.0 * fy - 16.0;
+    let a = 500.0 * (fx - fy);
+    let bb = 200.0 * (fy - fz);
+    let offset = |v: f32| (v.round().clamp(-128.0, 127.0) + 128.0) as u8;
+    [
+        (l * 2.55).round().clamp(0.0, 255.0) as u8,
+        offset(a),
+        offset(bb),
+    ]
 }
 
 /// One of Image > Mode > Duotone's inks: its colour and its curve, the
@@ -422,7 +481,18 @@ pub enum ChannelView {
     Red,
     Green,
     Blue,
-    Alpha { name: String },
+    /// CMYK mode's ink channels, shown light where there is little ink.
+    Cyan,
+    Magenta,
+    Yellow,
+    Black,
+    /// Lab mode's channels.
+    Lightness,
+    AStar,
+    BStar,
+    Alpha {
+        name: String,
+    },
 }
 
 /// An alpha channel: one byte per document pixel, row-major, as
@@ -1870,6 +1940,7 @@ impl Document {
                 let [pr, pg, pb] = Self::print_duotone(&self.duotone, &tables, grey);
                 [pr, pg, pb, a]
             }
+            ColorMode::Cmyk | ColorMode::Lab | ColorMode::Multichannel => [r, g, b, a],
             ColorMode::Grayscale => {
                 let v = ApplyChannel::Rgb.value([r, g, b, a]);
                 [v, v, v, a]
@@ -1911,7 +1982,22 @@ impl Document {
         self.color_table.clear();
         self.duotone.clear();
         match mode {
-            ColorMode::Rgb => {}
+            ColorMode::Rgb | ColorMode::Cmyk | ColorMode::Lab => {}
+            ColorMode::Multichannel => {
+                let composite = crate::composite::flatten(self).pixels;
+                for (name, offset) in [("Cyan", 0), ("Magenta", 1), ("Yellow", 2)] {
+                    if self.channels.iter().any(|c| c.name == name) {
+                        return Err(format!(
+                            "Multichannel needs the channel name \"{name}\" free."
+                        ));
+                    }
+                    let ink: Vec<u8> = composite
+                        .chunks_exact(CHANNELS)
+                        .map(|px| 255 - px[offset])
+                        .collect();
+                    self.add_channel(name, ink)?;
+                }
+            }
             ColorMode::Duotone => {
                 return self.convert_to_duotone(&[Ink {
                     color: [0, 0, 0],
@@ -2115,6 +2201,35 @@ impl Document {
         };
         Ok(match view {
             ChannelView::Composite => crate::composite::flatten(self).pixels,
+            ChannelView::Cyan | ChannelView::Magenta | ChannelView::Yellow | ChannelView::Black => {
+                let index = match view {
+                    ChannelView::Cyan => 0,
+                    ChannelView::Magenta => 1,
+                    ChannelView::Yellow => 2,
+                    _ => 3,
+                };
+                let composite = crate::composite::flatten(self).pixels;
+                grey_of(
+                    composite
+                        .chunks_exact(CHANNELS)
+                        .map(|px| 255 - cmyk_of([px[0], px[1], px[2]])[index])
+                        .collect(),
+                )
+            }
+            ChannelView::Lightness | ChannelView::AStar | ChannelView::BStar => {
+                let index = match view {
+                    ChannelView::Lightness => 0,
+                    ChannelView::AStar => 1,
+                    _ => 2,
+                };
+                let composite = crate::composite::flatten(self).pixels;
+                grey_of(
+                    composite
+                        .chunks_exact(CHANNELS)
+                        .map(|px| lab_of([px[0], px[1], px[2]])[index])
+                        .collect(),
+                )
+            }
             ChannelView::Red | ChannelView::Green | ChannelView::Blue => {
                 let offset = match view {
                     ChannelView::Red => 0,
@@ -37875,6 +37990,107 @@ mod tests {
         doc.convert_mode(ColorMode::Rgb, None).unwrap();
         assert!(doc.view().duotone.is_empty());
         assert_eq!(pixel(&doc, id, 0, 0), [124, 124, 124, 255]);
+    }
+
+    #[test]
+    fn cmyk_of_is_the_naive_ink_split() {
+        assert_eq!(cmyk_of([255, 255, 255]), [0, 0, 0, 0]);
+        assert_eq!(cmyk_of([0, 0, 0]), [0, 0, 0, 255]);
+        assert_eq!(cmyk_of([255, 0, 0]), [0, 255, 255, 0]);
+        assert_eq!(cmyk_of([0, 128, 255]), [255, 127, 0, 0]);
+        // k = 1 − 200/255 → 55; m = (1 − 100/255 − k)/(1 − k) = 0.5 → 128
+        // in f32; y = 0.75 → 191.
+        assert_eq!(cmyk_of([200, 100, 50]), [0, 128, 191, 55]);
+    }
+
+    #[test]
+    fn lab_of_follows_srgb_d65() {
+        assert_eq!(lab_of([255, 255, 255]), [255, 128, 128]);
+        assert_eq!(lab_of([0, 0, 0]), [0, 128, 128]);
+        // L 53.23, a 80.11, b 67.22.
+        assert_eq!(lab_of([255, 0, 0]), [136, 208, 195]);
+        // L 87.74, a −86.18, b 83.18.
+        assert_eq!(lab_of([0, 255, 0]), [224, 42, 211]);
+        // L 32.30, a 79.20, b −107.86.
+        assert_eq!(lab_of([0, 0, 255]), [82, 207, 20]);
+        // Mid grey: L 53.59, neutral.
+        assert_eq!(lab_of([128, 128, 128]), [137, 128, 128]);
+        assert_eq!(lab_of([200, 100, 50]), [137, 164, 173]);
+    }
+
+    #[test]
+    fn cmyk_and_lab_channel_views_of_one_pixel() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[200, 100, 50, 255], 1, 1).unwrap();
+        // Ink channels show light where there is little ink: 255 − ink.
+        assert_eq!(
+            doc.channel_image(&ChannelView::Cyan).unwrap(),
+            [255, 255, 255, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Magenta).unwrap(),
+            [127, 127, 127, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Yellow).unwrap(),
+            [64, 64, 64, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Black).unwrap(),
+            [200, 200, 200, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::Lightness).unwrap(),
+            [137, 137, 137, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::AStar).unwrap(),
+            [164, 164, 164, 255]
+        );
+        assert_eq!(
+            doc.channel_image(&ChannelView::BStar).unwrap(),
+            [173, 173, 173, 255]
+        );
+    }
+
+    #[test]
+    fn cmyk_and_lab_modes_keep_the_pixels_and_the_paint() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[200, 100, 50, 255], 1, 1).unwrap();
+        doc.convert_mode(ColorMode::Cmyk, None).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Cmyk);
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 100, 50, 255]);
+        doc.fill_selection(id, [1, 2, 3, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [1, 2, 3, 255]);
+        doc.convert_mode(ColorMode::Lab, None).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Lab);
+        assert_eq!(pixel(&doc, id, 0, 0), [1, 2, 3, 255]);
+        assert_eq!(doc.constrain_color([9, 8, 7, 6]), [9, 8, 7, 6]);
+        doc.convert_mode(ColorMode::Rgb, None).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [1, 2, 3, 255]);
+    }
+
+    #[test]
+    fn multichannel_splits_the_composite_into_ink_channels() {
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("under", &[0, 0, 0, 255, 0, 0, 0, 255], 2, 1)
+            .unwrap();
+        let top = doc
+            .add_layer("top", &[200, 100, 50, 255, 255, 255, 255, 0], 2, 1)
+            .unwrap();
+        doc.convert_mode(ColorMode::Multichannel, None).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Multichannel);
+        assert_eq!(doc.view().channels, ["Cyan", "Magenta", "Yellow"]);
+        // 255 − the composite's red, green, blue; the second pixel shows
+        // the black layer through the transparent top.
+        assert_eq!(doc.channels()[0].pixels, [55, 255]);
+        assert_eq!(doc.channels()[1].pixels, [155, 255]);
+        assert_eq!(doc.channels()[2].pixels, [205, 255]);
+        // The layers themselves stay.
+        assert_eq!(pixel(&doc, top, 0, 0), [200, 100, 50, 255]);
+        // Converting again would need the names free.
+        assert!(doc.convert_mode(ColorMode::Multichannel, None).is_err());
+        assert_eq!(doc.view().channels.len(), 3);
     }
 
     #[test]
