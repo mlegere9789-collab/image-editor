@@ -261,6 +261,8 @@ export default function App() {
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
   const [spongeSaturate, setSpongeSaturate] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
+  // The Polygonal Lasso's vertices so far, in document coordinates.
+  const [lassoPoints, setLassoPoints] = useState<[number, number][]>([]);
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const moveStart = useRef<[number, number] | null>(null);
@@ -3072,6 +3074,20 @@ export default function App() {
   const isRedEye = tool === "redEye";
   const isRuler = tool === "ruler";
   const isMove = tool === "move";
+  const isPolygonLasso = tool === "polygonLasso";
+
+  const closeLasso = useCallback(
+    (mode: SelectionMode) => {
+      if (lassoPoints.length < 3) return;
+      void runCommand("select_polygon", { points: lassoPoints, mode });
+      setLassoPoints([]);
+    },
+    [runCommand, lassoPoints],
+  );
+
+  useEffect(() => {
+    if (!isPolygonLasso) setLassoPoints([]);
+  }, [isPolygonLasso]);
   const isColorSampler = tool === "colorSampler";
   const isCount = tool === "count";
   const isNote = tool === "note";
@@ -3245,6 +3261,30 @@ export default function App() {
         moveStart.current = toDocPoint(event, document);
         return;
       }
+      if (isPolygonLasso) {
+        const point = toDocPoint(event, document);
+        // A click back on the first vertex closes the polygon, as in
+        // Photoshop; Shift/Alt at that click pick the combine mode.
+        const first = lassoPoints[0];
+        const closing =
+          lassoPoints.length >= 3 &&
+          first !== undefined &&
+          Math.hypot(point[0] - first[0], point[1] - first[1]) <= 3;
+        if (closing) {
+          closeLasso(
+            event.shiftKey && event.altKey
+              ? "intersect"
+              : event.shiftKey
+                ? "add"
+                : event.altKey
+                  ? "subtract"
+                  : selectionMode,
+          );
+        } else {
+          setLassoPoints((current) => [...current, point]);
+        }
+        return;
+      }
       if (isColorSampler) {
         placeColorSampler(event);
         return;
@@ -3298,6 +3338,10 @@ export default function App() {
       redEyeAt,
       isRuler,
       isMove,
+      isPolygonLasso,
+      lassoPoints,
+      closeLasso,
+      selectionMode,
       isColorSampler,
       placeColorSampler,
       isCount,
@@ -4016,6 +4060,15 @@ export default function App() {
             title="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
           >
             Move
+          </button>
+          <button
+            className={`button button--quiet${tool === "polygonLasso" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "polygonLasso"}
+            onClick={() => setTool("polygonLasso")}
+            title="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
+          >
+            Polygonal Lasso
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -5337,7 +5390,27 @@ export default function App() {
               </select>
             </label>
           )}
-          {isMarqueeTool && (
+          {isPolygonLasso && (
+            <>
+              <span className="tools__slider">{lassoPoints.length} vertices</span>
+              <button
+                className="button button--quiet"
+                onClick={() => closeLasso(selectionMode)}
+                disabled={busy || lassoPoints.length < 3}
+                title="Close the polygon and select it"
+              >
+                Close
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => setLassoPoints([])}
+                disabled={lassoPoints.length === 0}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+          {(isMarqueeTool || isPolygonLasso) && (
             <label className="tools__slider">
               Mode
               <select
@@ -14214,6 +14287,30 @@ export default function App() {
                   {index + 1}
                 </span>
               ))}
+              {lassoPoints.length > 0 && (
+                <svg
+                  className="lasso-preview"
+                  viewBox={`0 0 ${document.width} ${document.height}`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polyline
+                    points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
+                    fill="none"
+                    stroke="#fff"
+                    strokeWidth={1}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <polyline
+                    points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
+                    fill="none"
+                    stroke="#000"
+                    strokeWidth={1}
+                    strokeDasharray="4 4"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              )}
               {document.notes.map((note, index) => (
                 <button
                   key={index}

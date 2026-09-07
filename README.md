@@ -10893,6 +10893,61 @@ by hand instead. Every other layer of this project's quality bar
 **1110 Rust tests total** (1105 → 1110, 1103 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 174 — Polygonal Lasso tool
+
+`select_polygon_with(mode, points)` takes the polygon through three or
+more points (closed back to the first) and rasterises it to every
+pixel whose centre it contains, using the even-odd rule through a new
+`point_in_polygon` (a +x ray cast, each edge half-open in `y` so a ray
+through a vertex counts once), into a pixel-mask selection combined
+with the current selection per the same New/Add/Subtract/Intersect
+mode the marquees take — Phase 158's `combine_selection` now builds
+its rectangle or ellipse and hands it to a shared `combine_with` that
+takes any prebuilt selection, mask included. The even-odd rule means a
+self-crossing outline selects its odd-wound lobes, as Photoshop's lasso
+does. Fewer than three points, a non-finite coordinate, or a polygon
+covering no pixel centre errors, leaving the selection intact.
+Anti-alias and Feather are documented scope cuts, as for every
+selection here. A new **Polygonal Lasso** tool button places a vertex
+per click, draws the outline so far as an SVG polyline over the
+canvas, closes the polygon when the first vertex is clicked again
+(within 3 px) or the **Close** button is pressed — Shift/Alt at that
+click choose the mode, as for the marquees — and offers **Cancel**;
+the Mode drop-down appears for it as it does for the marquees.
+
+**Verified two ways.** Five new `document.rs` tests reading the
+selection back pixel by pixel, every expected set derived by hand and
+confirmed by a Python `f32` model of the same ray cast before the Rust
+tests ran. The right triangle `(0, 0)–(4, 0)–(0, 4)` on `4×4` contains
+a pixel centre exactly when `x + y < 3`: six pixels, `Mask`, bounds
+`(0, 0)–(3, 3)`. The square `(1, 1)–(3, 3)` selects the same four
+pixels as the rectangle marquee. Adding the small triangle `(0, 0)–(2,
+0)–(0, 2)` to a one-pixel selection at `(3, 3)` gives `(0, 0)` and `(3,
+3)`, and subtracting the unit square at the origin leaves `(3, 3)`. The
+bow-tie `(0, 0)–(4, 3)–(4, 0)–(0, 3)` on `4×3`, whose diagonals pass
+through no pixel centre, selects exactly its left and right lobes —
+eight pixels. Two points, a NaN coordinate, and a polygon entirely off
+the canvas all error, the last with "nothing selected", keeping the
+`Rectangle`. Four of the five passed on the first run: the bow-tie test
+had first been written on a `4×4` canvas, whose diagonals run straight
+through pixel centres, and the Python model showed the half-open edge
+rule admitting those boundary centres before the Rust test ran — the
+fixture, not the code, was changed to the `4×3` bow-tie.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and twenty-one:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The tool's click, close, and overlay wiring
+was reviewed by hand instead. Every other layer of this project's
+quality bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build`) is fully green.
+
+**1115 Rust tests total** (1110 → 1115, 1108 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

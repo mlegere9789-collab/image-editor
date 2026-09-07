@@ -388,6 +388,21 @@ fn select_ellipse(
     })
 }
 
+/// Polygonal Lasso / Lasso: select the pixels inside the polygon through
+/// `points`, combined with the current selection per `mode`.
+#[tauri::command]
+fn select_polygon(
+    state: State<'_, AppState>,
+    points: Vec<(f32, f32)>,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_polygon_with(mode, &points)?;
+        Ok(None)
+    })
+}
+
 /// Magic Wand: replace the selection with every pixel of layer `id` within
 /// `tolerance` of the pixel at `(x, y)`, contiguous or not.
 #[tauri::command]
@@ -3492,6 +3507,7 @@ pub fn run() {
             pattern_stamp_stroke,
             select_rectangle,
             select_ellipse,
+            select_polygon,
             select_magic_wand,
             select_color_range,
             grow_selection,

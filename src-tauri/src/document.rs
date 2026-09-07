@@ -865,6 +865,23 @@ fn wand_bits(
     bits
 }
 
+/// Even-odd point-in-polygon: casts a ray from `(px, py)` toward +x and
+/// counts the polygon edges it crosses, each edge treated as half-open in
+/// `y` so a ray through a vertex is counted once, not twice.
+fn point_in_polygon(px: f32, py: f32, points: &[(f32, f32)]) -> bool {
+    let mut inside = false;
+    let mut j = points.len() - 1;
+    for i in 0..points.len() {
+        let (xi, yi) = points[i];
+        let (xj, yj) = points[j];
+        if (yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
 /// The per-channel `(min, max)` of every pixel of `pixels` flagged in
 /// `bits`, each widened by `tolerance` and saturated to `0..=255`.
 fn colour_range_of(pixels: &[u8], bits: &[bool], tolerance: u8) -> [(u8, u8); CHANNELS] {
@@ -1194,13 +1211,69 @@ impl Document {
         shape: SelectionShape,
         bounds: Rect,
     ) -> Result<(), String> {
-        let new = Selection {
-            shape,
-            bounds,
-            inverted: false,
-            border: None,
-            mask: None,
+        self.combine_with(
+            mode,
+            Selection {
+                shape,
+                bounds,
+                inverted: false,
+                border: None,
+                mask: None,
+            },
+        )
+    }
+
+    /// The Polygonal Lasso (and, fed a drag's trail, the Lasso): the
+    /// polygon through `points` — at least three, in document coordinates,
+    /// closed back to the first — rasterised to every pixel whose centre it
+    /// contains (even-odd rule, so a self-crossing outline selects its
+    /// odd-wound parts as Photoshop's does) into a
+    /// [`SelectionShape::Mask`], then combined with the current selection
+    /// per `mode` like the marquees. Errors on fewer than three points, a
+    /// non-finite coordinate, or a polygon covering no pixel centre, leaving
+    /// the selection intact. Anti-aliasing and Feather are documented
+    /// scope cuts, as for every selection here.
+    pub fn select_polygon_with(
+        &mut self,
+        mode: SelectionMode,
+        points: &[(f32, f32)],
+    ) -> Result<(), String> {
+        if points.len() < 3 {
+            return Err("A polygon needs at least three points.".to_string());
+        }
+        if !points.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+            return Err("Polygon points must be finite numbers.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        let mut bits = Vec::with_capacity(width as usize * height as usize);
+        for y in 0..height {
+            for x in 0..width {
+                bits.push(point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, points));
+            }
+        }
+        let mask = SelectionMask {
+            width,
+            height,
+            bits,
         };
+        let bounds = mask
+            .bounds()
+            .ok_or_else(|| "That would leave nothing selected.".to_string())?;
+        self.combine_with(
+            mode,
+            Selection {
+                shape: SelectionShape::Mask,
+                bounds,
+                inverted: false,
+                border: None,
+                mask: Some(Arc::new(mask)),
+            },
+        )
+    }
+
+    /// [`Self::combine_selection`]'s engine over an already-built `new`
+    /// selection of any shape.
+    fn combine_with(&mut self, mode: SelectionMode, new: Selection) -> Result<(), String> {
         let current = match (mode, self.selection.is_some()) {
             (SelectionMode::New, _)
             | (SelectionMode::Add, false)
@@ -18818,6 +18891,110 @@ mod tests {
             .flat_map(|y| (0..4).map(move |x| (x, y)))
             .filter(|&(x, y)| pixel(doc, id, x, y)[3] > 0)
             .collect()
+    }
+
+    #[test]
+    fn polygonal_lasso_selects_the_pixel_centres_inside_a_triangle() {
+        // The right triangle (0,0)-(4,0)-(0,4) on 4x4 contains a pixel
+        // centre when (x + 0.5) + (y + 0.5) < 4, i.e. x + y < 3: six pixels.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_polygon_with(SelectionMode::New, &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)])
+            .unwrap();
+        assert_eq!(
+            selected_pixels(&doc),
+            vec![(0, 0), (1, 0), (2, 0), (0, 1), (1, 1), (0, 2)]
+        );
+        let s = doc.selection().unwrap();
+        assert_eq!(s.shape, SelectionShape::Mask);
+        assert_eq!(
+            s.bounds,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+    }
+
+    #[test]
+    fn polygonal_lasso_square_matches_the_rectangle_marquee() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_polygon_with(
+            SelectionMode::New,
+            &[(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)],
+        )
+        .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(1, 1), (2, 1), (1, 2), (2, 2)]);
+        let mut marquee = Document::new(4, 4).unwrap();
+        marquee.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        assert_eq!(selected_pixels(&marquee), selected_pixels(&doc));
+    }
+
+    #[test]
+    fn polygonal_lasso_combines_with_the_current_selection() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_rectangle(3.0, 3.0, 4.0, 4.0).unwrap();
+        doc.select_polygon_with(SelectionMode::Add, &[(0.0, 0.0), (2.0, 0.0), (0.0, 2.0)])
+            .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(0, 0), (3, 3)]);
+        doc.select_polygon_with(
+            SelectionMode::Subtract,
+            &[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        )
+        .unwrap();
+        assert_eq!(selected_pixels(&doc), vec![(3, 3)]);
+    }
+
+    #[test]
+    fn polygonal_lasso_uses_the_even_odd_rule_for_a_self_crossing_outline() {
+        // The bow-tie (0,0)-(4,3)-(4,0)-(0,3) on 4x3 crosses itself at the
+        // centre; its two lobes are the left and right triangles, whose
+        // diagonals (y = 3x/4 and y = 3 - 3x/4) pass through no pixel
+        // centre. Left lobe: x = 0.5 admits y 0.5..2.5, x = 1.5 only 1.5;
+        // mirrored on the right.
+        let mut doc = Document::new(4, 3).unwrap();
+        doc.select_polygon_with(
+            SelectionMode::New,
+            &[(0.0, 0.0), (4.0, 3.0), (4.0, 0.0), (0.0, 3.0)],
+        )
+        .unwrap();
+        assert_eq!(
+            selected_pixels(&doc),
+            vec![
+                (0, 0),
+                (3, 0),
+                (0, 1),
+                (1, 1),
+                (2, 1),
+                (3, 1),
+                (0, 2),
+                (3, 2)
+            ]
+        );
+    }
+
+    #[test]
+    fn polygonal_lasso_rejects_bad_polygons() {
+        let (mut doc, _) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        assert!(doc
+            .select_polygon_with(SelectionMode::New, &[(0.0, 0.0), (2.0, 0.0)])
+            .is_err());
+        assert!(doc
+            .select_polygon_with(
+                SelectionMode::New,
+                &[(0.0, 0.0), (f32::NAN, 0.0), (0.0, 2.0)]
+            )
+            .is_err());
+        let err = doc
+            .select_polygon_with(
+                SelectionMode::New,
+                &[(-3.0, -3.0), (-1.0, -3.0), (-1.0, -1.0)],
+            )
+            .unwrap_err();
+        assert!(err.contains("nothing selected"), "{err}");
+        assert_eq!(doc.selection().unwrap().shape, SelectionShape::Rectangle);
     }
 
     #[test]

@@ -137,6 +137,7 @@ export type Tool =
   | "note"
   | "patternStamp"
   | "magicWand"
+  | "polygonLasso"
   | "selectRect"
   | "selectEllipse"
   | "selectRow"

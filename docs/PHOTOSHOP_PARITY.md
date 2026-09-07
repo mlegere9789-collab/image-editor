@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 245.**
+**618 distinct capabilities tracked. Currently shipped: 246.**
 
 ## PART I — EVERY TOOL
 
@@ -13,7 +13,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] SINGLE ROW MARQUEE TOOL
 - [x] SINGLE COLUMN MARQUEE TOOL
 - [ ] LASSO TOOL
-- [ ] POLYGONAL LASSO TOOL
+- [x] POLYGONAL LASSO TOOL (`select_polygon_with`, click-placed vertices closed back on the first and rasterised by the even-odd rule to every pixel whose centre the polygon contains, a pixel-mask selection combined with the current one per the New/Add/Subtract/Intersect mode; Anti-alias and Feather are documented scope cuts — see README Phase 174)
 - [ ] MAGNETIC LASSO TOOL
 - [ ] OBJECT SELECTION TOOL
 - [ ] QUICK SELECTION TOOL
