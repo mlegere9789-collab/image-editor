@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 301.**
+**618 distinct capabilities tracked. Currently shipped: 302.**
 
 ## PART I — EVERY TOOL
 
@@ -14,7 +14,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] SINGLE COLUMN MARQUEE TOOL
 - [x] LASSO TOOL (`select_lasso_with`, a freehand drag's trail with consecutive duplicates dropped, closed back to its start and rasterised by the Polygonal Lasso's even-odd polygon fill into a pixel-mask selection combined per the New/Add/Subtract/Intersect mode; Anti-alias and Feather are documented scope cuts — see README Phase 175)
 - [x] POLYGONAL LASSO TOOL (`select_polygon_with`, click-placed vertices closed back on the first and rasterised by the even-odd rule to every pixel whose centre the polygon contains, a pixel-mask selection combined with the current one per the New/Add/Subtract/Intersect mode; Anti-alias and Feather are documented scope cuts — see README Phase 174)
-- [ ] MAGNETIC LASSO TOOL
+- [x] MAGNETIC LASSO TOOL (`select_magnetic_lasso_with`, each trail point snapped to the strongest Sobel edge within the Width that clears the Contrast — onto that pixel's nearer boundary per axis — then selected as a lasso; frequency, pen-pressure width, and live anchoring are documented scope cuts — see README Phase 208)
 - [ ] OBJECT SELECTION TOOL
 - [x] QUICK SELECTION TOOL (`quick_select_with`, a Selection Brush stroke grown like Select > Grow — every pixel 4-connected to the stroked pixels through colour within the stroked pixels' own range widened by the Tolerance — combined with the current selection, adding by default; brush hardness, Auto-Enhance, and edge detection are documented scope cuts — see README Phase 207)
 - [x] MAGIC WAND TOOL (`select_magic_wand`, a click selects every pixel within a per-channel Tolerance of the clicked pixel's own colour — 4-connected from the click in Contiguous mode, anywhere on the layer otherwise — as the first pixel-mask selection: a new `SelectionShape::Mask` backed by a shared document-sized bitmap that every selection-respecting command already honours through `Selection::contains`. Anti-alias and Sample All Layers are documented scope cuts, and Modify > Expand/Contract/Smooth/Border reject mask selections for now — see README Phase 149)

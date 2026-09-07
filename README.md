@@ -12603,6 +12603,58 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1280 Rust tests total** (1275 → 1280, 1273 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 208 — Magnetic Lasso tool
+
+`Document::select_magnetic_lasso_with(mode, id, trail, width,
+contrast)` is Photoshop's Magnetic Lasso: a freehand trail whose
+points snap to the strongest nearby edge before the enclosed area is
+selected. For each trail point the square window of half-size `width`
+pixels around it is searched for the pixel with the greatest edge
+strength — the largest of `sobel_at`'s three channel magnitudes — that
+is at least `contrast`; the strongest wins, the nearest of equals,
+then the first in row order. The point is then moved onto that pixel's
+nearer edge on each axis along which it lies outside the pixel, keeping
+its own coordinate on an axis where it already lies within the pixel's
+span, so a snapped outline runs along pixel boundaries rather than
+through pixel centres (which the even-odd rule would exclude). A point
+with no qualifying edge in reach stays put, and the snapped trail goes
+through the Lasso's own `select_lasso_with`. Photoshop's frequency,
+pen-pressure width, and live anchoring are documented scope cuts. A
+**Magnetic Lasso** tool button sits after Lasso with **Width** and
+**Contrast** sliders, sharing the lasso's trail capture and preview
+and sending the trail through a `select_magnetic_lasso` command at
+pointer-up with the marquee modifier keys.
+
+**Verified two ways.** Five new `document.rs` tests on a `6×4` whose
+left three columns are black and right three white, every snap and
+mask first produced by a Python model of the Sobel strengths (columns
+2 and 3 read `255`, the rest `0`), the search, the per-axis snap, and
+the even-odd fill. A loose outline `(0.2, 0.2)`→`(0.2, 3.8)`→`(5.8,
+3.8)`→`(5.8, 0.2)` with width `2` snaps to `x = 2` and `x = 4` while
+keeping its own `y`, selecting exactly columns 2–3; with width `1` the
+edge is out of reach and all 24 pixels are selected. A black-to-`30`
+step has strength `120`, so it is ignored at contrast `128` and taken
+at `100`, and the full-strength edge clears even `255`. A point at
+`x = 2.3` inside the edge column keeps its `x` while `4.6` snaps to
+`4`, still selecting columns 2–3, and Add mode unions that with a
+selected first column. Width `0`, an unknown layer, a `NaN` point, and
+a two-point trail all error with nothing selected. All five passed on
+the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and fifty-five:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The tool's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1285 Rust tests total** (1280 → 1285, 1278 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

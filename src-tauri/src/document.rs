@@ -1429,6 +1429,94 @@ impl Document {
         self.select_polygon_with(mode, &distinct)
     }
 
+    /// The Magnetic Lasso tool: a freehand `trail` whose points snap to
+    /// the strongest nearby edge before the enclosed area is selected.
+    /// For each trail point the square window of half-size `width`
+    /// pixels around it is searched for the pixel with the greatest edge
+    /// strength — the largest of [`sobel_at`]'s three channel magnitudes —
+    /// that is at least `contrast`; the strongest wins, the nearest of
+    /// equals, then the first in row order. The point is then moved onto
+    /// that pixel's nearer edge on each axis along which it lies outside
+    /// the pixel, keeping its own coordinate on an axis where it already
+    /// lies within the pixel's span, so a snapped outline runs along
+    /// pixel boundaries rather than through centres. A point with no
+    /// qualifying edge in reach stays where it is. The snapped trail then
+    /// goes through [`Self::select_lasso_with`] (duplicate points dropped,
+    /// three needed) per `mode`. Photoshop's frequency, its pen-pressure
+    /// width, and its live anchoring are documented scope cuts. Errors
+    /// for a zero `width`, non-finite points, an unknown layer, or a
+    /// trail that encloses nothing.
+    pub fn select_magnetic_lasso_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        trail: &[(f32, f32)],
+        width: u32,
+        contrast: u8,
+    ) -> Result<(), String> {
+        if width == 0 {
+            return Err("Magnetic Lasso width must be at least 1 pixel.".to_string());
+        }
+        if trail.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return Err("Selection coordinates must be finite numbers.".to_string());
+        }
+        let (doc_width, doc_height) = (self.width as i64, self.height as i64);
+        let layer = self.layer(id)?;
+        let strength = |x: i64, y: i64| -> u8 {
+            let edge = sobel_at(
+                &layer.pixels,
+                doc_width as usize,
+                (doc_width, doc_height),
+                (y as u32, x as u32),
+            );
+            edge[0].max(edge[1]).max(edge[2])
+        };
+        let reach = width as i64;
+        let snapped: Vec<(f32, f32)> = trail
+            .iter()
+            .map(|&(px, py)| {
+                let (cx, cy) = (px.floor() as i64, py.floor() as i64);
+                let mut best: Option<(u8, f32, i64, i64)> = None;
+                for y in (cy - reach).max(0)..=(cy + reach).min(doc_height - 1) {
+                    for x in (cx - reach).max(0)..=(cx + reach).min(doc_width - 1) {
+                        let s = strength(x, y);
+                        if s < contrast {
+                            continue;
+                        }
+                        let d = (x as f32 + 0.5 - px).powi(2) + (y as f32 + 0.5 - py).powi(2);
+                        let better = match best {
+                            None => true,
+                            Some((bs, bd, _, _)) => s > bs || (s == bs && d < bd),
+                        };
+                        if better {
+                            best = Some((s, d, x, y));
+                        }
+                    }
+                }
+                let Some((_, _, x, y)) = best else {
+                    return (px, py);
+                };
+                let (x, y) = (x as f32, y as f32);
+                let sx = if (x..x + 1.0).contains(&px) {
+                    px
+                } else if px < x {
+                    x
+                } else {
+                    x + 1.0
+                };
+                let sy = if (y..y + 1.0).contains(&py) {
+                    py
+                } else if py < y {
+                    y
+                } else {
+                    y + 1.0
+                };
+                (sx, sy)
+            })
+            .collect();
+        self.select_lasso_with(mode, &snapped)
+    }
+
     /// The Selection Brush tool: paints a selection with a round brush of
     /// `radius` along `points`, combined with the current selection per
     /// `mode` (the tool adds by default and subtracts with Alt held). A
@@ -23500,6 +23588,109 @@ mod tests {
             .is_err());
         assert!(doc
             .quick_select_with(SelectionMode::Subtract, id, &[(0.5, 0.5)], 0.5, 0)
+            .is_err());
+        assert!(doc.selection().is_none());
+    }
+
+    /// A 6×4 whose left three columns are black and right three `right`.
+    fn split_6x4(right: u8) -> (Document, LayerId) {
+        let pixels: Vec<u8> = (0..24)
+            .flat_map(|i| {
+                let v = if i % 6 < 3 { 0 } else { right };
+                [v, v, v, 255]
+            })
+            .collect();
+        let mut doc = Document::new(6, 4).unwrap();
+        let id = doc.add_layer("l", &pixels, 6, 4).unwrap();
+        (doc, id)
+    }
+
+    const LOOSE_TRAIL: [(f32, f32); 4] = [(0.2, 0.2), (0.2, 3.8), (5.8, 3.8), (5.8, 0.2)];
+
+    #[test]
+    fn magnetic_lasso_snaps_the_trail_onto_the_edge() {
+        // Columns 2 and 3 carry the Sobel edge (strength 255); a loose
+        // outline around everything snaps to x = 2 and x = 4, keeping its
+        // own y, so exactly those two columns are selected.
+        let (mut doc, id) = split_6x4(255);
+        doc.select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 2, 128)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["..##..", "..##..", "..##..", "..##.."]
+        );
+    }
+
+    #[test]
+    fn magnetic_lasso_out_of_reach_leaves_the_trail_alone() {
+        let (mut doc, id) = split_6x4(255);
+        doc.select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 1, 128)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), ["######"; 4]);
+    }
+
+    #[test]
+    fn magnetic_lasso_contrast_gates_the_edge() {
+        // A black-to-30 step has strength 120: ignored at 128, taken at 100.
+        let (mut doc, id) = split_6x4(30);
+        doc.select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 2, 128)
+            .unwrap();
+        assert_eq!(selection_grid(&doc), ["######"; 4]);
+        doc.select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 2, 100)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["..##..", "..##..", "..##..", "..##.."]
+        );
+        // The full-strength edge clears even a contrast of 255.
+        let (mut doc, id) = split_6x4(255);
+        doc.select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 2, 255)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["..##..", "..##..", "..##..", "..##.."]
+        );
+    }
+
+    #[test]
+    fn magnetic_lasso_keeps_a_coordinate_already_within_the_edge_pixel() {
+        // A point inside column 2 keeps its x; one at 4.6 snaps to the
+        // right edge pixel's far side, x = 4. The polygon (2.3, 0.2) →
+        // (2.3, 3.8) → (4.6, 3.8) → (4.6, 0.2) becomes x ∈ (2.3, 4):
+        // still columns 2 and 3.
+        let (mut doc, id) = split_6x4(255);
+        let trail = [(2.3, 0.2), (2.3, 3.8), (4.6, 3.8), (4.6, 0.2)];
+        doc.select_magnetic_lasso_with(SelectionMode::Add, id, &trail, 1, 128)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["..##..", "..##..", "..##..", "..##.."]
+        );
+        // Add mode unions with an existing selection.
+        doc.select_rectangle(0.0, 0.0, 1.0, 4.0).unwrap();
+        doc.select_magnetic_lasso_with(SelectionMode::Add, id, &trail, 1, 128)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#.##..", "#.##..", "#.##..", "#.##.."]
+        );
+    }
+
+    #[test]
+    fn magnetic_lasso_rejects_bad_input() {
+        let (mut doc, id) = split_6x4(255);
+        assert!(doc
+            .select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL, 0, 128)
+            .is_err());
+        assert!(doc
+            .select_magnetic_lasso_with(SelectionMode::New, id + 1, &LOOSE_TRAIL, 2, 128)
+            .is_err());
+        assert!(doc
+            .select_magnetic_lasso_with(SelectionMode::New, id, &[(f32::NAN, 0.2)], 2, 128)
+            .is_err());
+        // Two points, or a snapped trail that collapses to a line.
+        assert!(doc
+            .select_magnetic_lasso_with(SelectionMode::New, id, &LOOSE_TRAIL[..2], 2, 128)
             .is_err());
         assert!(doc.selection().is_none());
     }

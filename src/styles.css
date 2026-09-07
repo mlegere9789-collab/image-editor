@@ -188,7 +188,8 @@ body {
 }
 
 .canvas--selectionBrush,
-.canvas--quickSelection {
+.canvas--quickSelection,
+.canvas--magneticLasso {
   cursor: crosshair;
 }
 

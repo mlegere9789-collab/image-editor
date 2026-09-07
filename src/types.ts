@@ -164,6 +164,7 @@ export type Tool =
   | "historyBrush"
   | "magicWand"
   | "lasso"
+  | "magneticLasso"
   | "polygonLasso"
   | "selectionBrush"
   | "quickSelection"

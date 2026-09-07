@@ -454,6 +454,25 @@ fn quick_select(
     })
 }
 
+/// Magnetic Lasso tool: a freehand trail snapped to the strongest edge of
+/// layer `id` within `width` pixels that is at least `contrast` strong,
+/// then selected as a lasso, combined per `mode`.
+#[tauri::command]
+fn select_magnetic_lasso(
+    state: State<'_, AppState>,
+    id: LayerId,
+    trail: Vec<(f32, f32)>,
+    width: u32,
+    contrast: u8,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_magnetic_lasso_with(mode, id, &trail, width, contrast)?;
+        Ok(None)
+    })
+}
+
 /// Selection Brush tool: select within `radius` of a painted stroke,
 /// combined with the current selection per `mode` (Add by default).
 #[tauri::command]
@@ -4074,6 +4093,7 @@ pub fn run() {
             select_polygon,
             select_lasso,
             select_brush,
+            select_magnetic_lasso,
             quick_select,
             select_magic_wand,
             select_color_range,

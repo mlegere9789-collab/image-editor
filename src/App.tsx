@@ -353,6 +353,10 @@ export default function App() {
   const [skewVertical, setSkewVertical] = useState(0);
   const [magicWandTolerance, setMagicWandTolerance] = useState(32);
   // Sharpen tool options: Protect Detail and Sample All Layers.
+  // Magnetic Lasso options: the edge search reach in pixels and the
+  // minimum edge strength (0-255) that counts as an edge.
+  const [magneticWidth, setMagneticWidth] = useState(10);
+  const [magneticContrast, setMagneticContrast] = useState(32);
   const [sharpenProtectDetail, setSharpenProtectDetail] = useState(false);
   const [sharpenSampleAll, setSharpenSampleAll] = useState(false);
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
@@ -3377,6 +3381,7 @@ export default function App() {
   const isCloneStamp = tool === "cloneStamp" || tool === "healingBrush";
   const isPolygonLasso = tool === "polygonLasso";
   const isLasso = tool === "lasso";
+  const isMagneticLasso = tool === "magneticLasso";
   // The Quick Selection tool shares the Selection Brush's stroke capture.
   const isSelectionBrush = tool === "selectionBrush" || tool === "quickSelection";
 
@@ -3595,7 +3600,7 @@ export default function App() {
         moveStart.current = toDocPoint(event, document);
         return;
       }
-      if (isLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isSelectionBrush) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
@@ -3699,6 +3704,7 @@ export default function App() {
       isCloneStamp,
       cloneSource,
       isLasso,
+      isMagneticLasso,
       isSelectionBrush,
       isPolygonLasso,
       lassoPoints,
@@ -3754,7 +3760,7 @@ export default function App() {
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
       readLevelsAt(event);
-      if (isLasso || isSelectionBrush) {
+      if (isLasso || isMagneticLasso || isSelectionBrush) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
@@ -3771,7 +3777,16 @@ export default function App() {
       lastPoint.current = point;
       applyStroke([previous, point]);
     },
-    [document, isLasso, isSelectionBrush, isMarqueeTool, isRectangle, applyStroke, readLevelsAt],
+    [
+      document,
+      isLasso,
+      isMagneticLasso,
+      isSelectionBrush,
+      isMarqueeTool,
+      isRectangle,
+      applyStroke,
+      readLevelsAt,
+    ],
   );
 
   const endStroke = useCallback(
@@ -3800,6 +3815,29 @@ export default function App() {
               setShowCurvesDialog(true);
             })
             .catch((err) => setError(String(err)));
+        }
+        return;
+      }
+      if (isMagneticLasso) {
+        const trail = lassoTrail.current;
+        lassoTrail.current = null;
+        setLassoPoints([]);
+        if (trail && trail.length >= 3 && selectedId !== null) {
+          const mode: SelectionMode =
+            event.shiftKey && event.altKey
+              ? "intersect"
+              : event.shiftKey
+                ? "add"
+                : event.altKey
+                  ? "subtract"
+                  : selectionMode;
+          void runCommand("select_magnetic_lasso", {
+            id: selectedId,
+            trail,
+            width: magneticWidth,
+            contrast: magneticContrast,
+            mode,
+          });
         }
         return;
       }
@@ -3995,6 +4033,9 @@ export default function App() {
     },
     [
       isLasso,
+      isMagneticLasso,
+      magneticWidth,
+      magneticContrast,
       isSelectionBrush,
       brushSize,
       magicWandTolerance,
@@ -4644,6 +4685,15 @@ export default function App() {
             title="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
           >
             Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "magneticLasso" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magneticLasso"}
+            onClick={() => setTool("magneticLasso")}
+            title="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
+          >
+            Magnetic Lasso
           </button>
           <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
@@ -6158,6 +6208,34 @@ export default function App() {
                   {shapeRadius}px
                 </label>
               )}
+            </>
+          )}
+          {tool === "magneticLasso" && (
+            <>
+              <label className="tools__slider">
+                Width
+                <input
+                  type="range"
+                  min={1}
+                  max={64}
+                  value={magneticWidth}
+                  disabled={!canPaint}
+                  onChange={(event) => setMagneticWidth(Number(event.target.value))}
+                />
+                {magneticWidth}px
+              </label>
+              <label className="tools__slider">
+                Contrast
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={magneticContrast}
+                  disabled={!canPaint}
+                  onChange={(event) => setMagneticContrast(Number(event.target.value))}
+                />
+                {magneticContrast}
+              </label>
             </>
           )}
           {tool === "sharpen" && (
