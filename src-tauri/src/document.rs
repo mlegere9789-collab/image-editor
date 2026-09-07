@@ -9780,6 +9780,29 @@ impl Document {
             out
         })
     }
+
+    /// Camera Raw Filter > Basic > Saturation: Camera Raw's own Basic
+    /// panel pairs a Vibrance slider with a Saturation slider exactly as
+    /// Image > Adjustments > Vibrance does, and this project's own
+    /// [`Self::vibrance`] already implements both — so Camera Raw's
+    /// Saturation is that same function with its vibrance term held at
+    /// `0`, which is an exact no-op on the saturation
+    /// (`s + 0 * (1 - s) = s`), leaving only the uniform
+    /// `s * (1 + saturation / 100)` scale, clamped to `0..=1`. Every
+    /// hue is scaled equally, which is precisely what distinguishes
+    /// Photoshop's own Saturation slider from its Vibrance slider.
+    /// `saturation` is Photoshop's own `-100..=100` range, clamped
+    /// (saturating rather than erroring) like [`Self::vibrance`]'s own
+    /// sliders. A preset over an already-verified adjustment, the same
+    /// kind of composition the one-click Sharpen presets already make
+    /// over [`Self::unsharp_mask`].
+    pub fn camera_raw_saturation(
+        &mut self,
+        id: LayerId,
+        saturation: i32,
+    ) -> Result<Option<Rect>, String> {
+        self.vibrance(id, 0, saturation)
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22703,6 +22726,79 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.lens_blur(999, 4, false).is_err());
+    }
+
+    #[test]
+    fn camera_raw_saturation_scales_every_hue_uniformly() {
+        // (200, 100, 100) is hue 0, saturation 0.476190, lightness
+        // 0.588235. At +50 the saturation scales to 0.714286; back through
+        // hsl_to_rgb, chroma = (1 - |2l - 1|) * s = 0.588235 and
+        // m = l - chroma/2 = 0.294118, so r = 0.882353 -> 225 and
+        // g = b = 0.294118 -> 75.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[200, 100, 100, 255], 1, 1).unwrap();
+        doc.camera_raw_saturation(id, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [225, 75, 75, 255]);
+    }
+
+    #[test]
+    fn camera_raw_saturation_negative_values_desaturate() {
+        // Same pixel at -50: saturation halves to 0.238095, chroma
+        // 0.196078, m = 0.490196, so r = 0.686275 -> 175 and
+        // g = b = 0.490196 -> 125 -- a hand-computed pull toward grey.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[200, 100, 100, 255], 1, 1).unwrap();
+        doc.camera_raw_saturation(id, -50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [175, 125, 125, 255]);
+    }
+
+    #[test]
+    fn camera_raw_saturation_leaves_grey_unchanged() {
+        // Zero saturation scaled by anything is still zero.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("layer", &[128, 128, 128, 255], 1, 1).unwrap();
+        doc.camera_raw_saturation(id, 100).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn camera_raw_saturation_matches_vibrance_at_zero_vibrance_and_clamps() {
+        let (mut via_preset, id_a) = ramped_3x3();
+        let (mut via_vibrance, id_b) = ramped_3x3();
+        via_preset.camera_raw_saturation(id_a, 50).unwrap();
+        via_vibrance.vibrance(id_b, 0, 50).unwrap();
+        assert_eq!(
+            via_preset.layers()[0].pixels,
+            via_vibrance.layers()[0].pixels
+        );
+
+        let (mut clamped, id_c) = ramped_3x3();
+        let (mut at_max, id_d) = ramped_3x3();
+        clamped.camera_raw_saturation(id_c, 9999).unwrap();
+        at_max.camera_raw_saturation(id_d, 100).unwrap();
+        assert_eq!(clamped.layers()[0].pixels, at_max.layers()[0].pixels);
+    }
+
+    #[test]
+    fn camera_raw_saturation_is_confined_to_the_selection() {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("row", &[200, 100, 100, 255, 200, 100, 100, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.camera_raw_saturation(id, 50).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [225, 75, 75, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn camera_raw_saturation_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.camera_raw_saturation(id, 50).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.camera_raw_saturation(999, 50).is_err());
     }
 
     #[test]

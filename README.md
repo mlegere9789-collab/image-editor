@@ -8341,6 +8341,59 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **867 Rust tests total** (861 → 867, 860 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 126 — Camera Raw Filter > Saturation
+
+`camera_raw_saturation(id, saturation)` fills in the Camera Raw Basic
+panel's own Saturation slider. Camera Raw pairs a Vibrance slider with
+a Saturation slider exactly as Image > Adjustments > Vibrance does, and
+this project's own `vibrance(id, vibrance, saturation)` already
+implements both — so Camera Raw's Saturation is that same function
+with its vibrance term held at `0`, which is an exact no-op on the
+saturation (`s + 0 * (1 - s) = s`), leaving only the uniform `s * (1 +
+saturation / 100)` HSL scale, clamped to `0..=1`, that `vibrance`'s
+own second slider already applies. Every hue is scaled equally, which
+is precisely what distinguishes Photoshop's own Saturation slider from
+its Vibrance slider (which boosts the least-saturated colours most).
+`saturation` is Photoshop's own `-100..=100` range, clamped rather
+than erroring like `vibrance`'s own sliders. This is a preset over an
+already-verified adjustment — the same kind of composition the
+one-click Sharpen presets already make over `unsharp_mask` — and is
+framed as such rather than as new colour math. A new **Saturation…**
+button sits with the other Camera Raw Filter entries, opening a
+single-slider dialog.
+
+**Verified two ways.** Six new `document.rs` tests. `(200, 100, 100)`
+is hue `0`, saturation `0.476190`, lightness `0.588235`; at `+50` the
+saturation scales to `0.714286`, and back through `hsl_to_rgb` the
+chroma is `(1 - |2l - 1|) * s = 0.588235` with `m = l - chroma/2 =
+0.294118`, so `r = 0.882353` → `225` and `g = b = 0.294118` → `75`:
+`(225, 75, 75)`. At `-50` the saturation halves to `0.238095`, chroma
+`0.196078`, `m = 0.490196`, so `r = 0.686275` → `175` and `g = b` →
+`125`: `(175, 125, 125)`, a hand-computed pull toward grey. A third
+test confirms a neutral grey is unchanged at `+100` (zero saturation
+scaled by anything is still zero). A fourth confirms, byte-for-byte on
+the `ramped_3x3` fixture, that the preset equals `vibrance(id, 0, 50)`
+exactly and that `9999` clamps to the same result as `100`. A fifth
+confines the shift to a one-pixel selection. A sixth confirms a
+locked/unknown layer errors. All six passed on the first run, the two
+colour values cross-checked against the independent Python
+`rgb_to_hsl`/`hsl_to_rgb` port (emulating Rust's own `f32` arithmetic)
+already used to verify Replace Color and Defringe.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-three: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**873 Rust tests total** (867 → 873, 866 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

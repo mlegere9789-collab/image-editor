@@ -240,6 +240,8 @@ export default function App() {
   const [shadowsValue, setShadowsValue] = useState(0);
   const [showClarityDialog, setShowClarityDialog] = useState(false);
   const [clarityAmount, setClarityAmount] = useState(20);
+  const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] = useState(false);
+  const [cameraRawSaturation, setCameraRawSaturation] = useState(25);
   const [showDefringeDialog, setShowDefringeDialog] = useState(false);
   const [defringeAmount, setDefringeAmount] = useState(50);
 
@@ -894,6 +896,15 @@ export default function App() {
     await runCommand("clarity", { id: selectedId, amount: clarityAmount });
     setShowClarityDialog(false);
   }, [runCommand, selectedId, clarityAmount]);
+
+  const applyCameraRawSaturation = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("camera_raw_saturation", {
+      id: selectedId,
+      saturation: cameraRawSaturation,
+    });
+    setShowCameraRawSaturationDialog(false);
+  }, [runCommand, selectedId, cameraRawSaturation]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -3138,6 +3149,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowCameraRawSaturationDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Saturation"
+          >
+            Saturation…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -4873,6 +4892,47 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyClarity} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCameraRawSaturationDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCameraRawSaturationDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Camera Raw Saturation"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Saturation</h2>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{cameraRawSaturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={cameraRawSaturation}
+                onChange={(event) => setCameraRawSaturation(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCameraRawSaturationDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCameraRawSaturation} disabled={busy}>
                 Apply
               </button>
             </div>

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 187.**
+**618 distinct capabilities tracked. Currently shipped: 188.**
 
 ## PART I — EVERY TOOL
 
@@ -626,7 +626,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Highlights (`highlights_shadows`, reusing `color_balance`'s own luma-based tonal-range weighting with a single uniform per-range shift instead of three per-channel sliders, preserving colour balance exactly — see README Phase 118)
 - [x] Shadows (`highlights_shadows`'s own second slider — see README Phase 118)
 - [x] Clarity (`clarity`, `unsharp_mask`'s own diff-and-amplify shape reusing `box_blur_at`, fixed at a large radius (40) matching Photoshop's own internal fixed-radius Clarity implementation, with a signed `-100..=100` amount so negative values soften local contrast instead of only ever sharpening — see README Phase 119)
-- [ ] Saturation — Camera Raw
+- [x] Saturation — Camera Raw (`camera_raw_saturation`, an exact preset over `vibrance` with its vibrance term held at 0 — Camera Raw's own Basic panel pairs Vibrance and Saturation exactly as Image > Adjustments > Vibrance does, so the uniform `s * (1 + saturation / 100)` HSL scale is the same already-verified code — see README Phase 126)
 - [ ] Parametric Curve
 - [ ] Point Curve
 - [ ] Targeted Adjustment Tool
