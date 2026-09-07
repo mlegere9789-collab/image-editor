@@ -265,6 +265,18 @@ pub struct Selection {
 
 /// How a new marquee combines with the selection already there — the four
 /// mode buttons in Photoshop's selection-tool options bar (Shift, Alt, and
+/// Which channel Image > Adjustments > Levels remaps: the RGB composite
+/// (all three together, the dialog's default) or one of Red, Green, or
+/// Blue on its own — Photoshop's own Channel dropdown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LevelsChannel {
+    Rgb,
+    Red,
+    Green,
+    Blue,
+}
+
 /// Shift+Alt while dragging).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11449,11 +11461,10 @@ impl Document {
     }
 
     /// Image > Adjustments > Levels: the classic histogram remap, applied
-    /// identically to all three RGB channels (Photoshop's own dialog also
-    /// lets you pick one channel at a time via a dropdown; this always
-    /// applies to the RGB composite channel — a deliberate scope cut, the
-    /// same kind Black & White's single fixed luma weighting already made
-    /// in this project). Each channel value goes through three steps:
+    /// identically to all three RGB channels (the dialog's RGB composite
+    /// choice; [`Self::levels_on`] takes the Channel dropdown's single
+    /// Red, Green, or Blue as well). Each channel value goes through
+    /// three steps:
     /// normalize against the input black/white points (`(value -
     /// input_black) / (input_white - input_black)`, clamped to
     /// `0.0..=1.0`), apply a gamma curve (`normalized.powf(1.0 / gamma)`),
@@ -11475,6 +11486,33 @@ impl Document {
         output_black: u8,
         output_white: u8,
     ) -> Result<Option<Rect>, String> {
+        self.levels_on(
+            id,
+            LevelsChannel::Rgb,
+            input_black,
+            input_white,
+            gamma,
+            output_black,
+            output_white,
+        )
+    }
+
+    /// [`Self::levels`] with Photoshop's Channel dropdown: `Rgb` remaps
+    /// all three channels exactly as `levels` does, while `Red`, `Green`,
+    /// or `Blue` puts only that one channel through the remap and leaves
+    /// the other two (and alpha) untouched — the way a per-channel Levels
+    /// move tints an image rather than re-toning it.
+    #[allow(clippy::too_many_arguments)]
+    pub fn levels_on(
+        &mut self,
+        id: LayerId,
+        channel: LevelsChannel,
+        input_black: u8,
+        input_white: u8,
+        gamma: i32,
+        output_black: u8,
+        output_white: u8,
+    ) -> Result<Option<Rect>, String> {
         let input_black = input_black as f32;
         let input_white = (input_white as f32).max(input_black + 1.0);
         let exponent = 100.0 / gamma.clamp(1, 999) as f32;
@@ -11487,7 +11525,12 @@ impl Document {
                 let corrected = normalized.powf(exponent);
                 to_byte(output_black + corrected * (output_white - output_black))
             };
-            [apply(r), apply(g), apply(b), a]
+            match channel {
+                LevelsChannel::Rgb => [apply(r), apply(g), apply(b), a],
+                LevelsChannel::Red => [apply(r), g, b, a],
+                LevelsChannel::Green => [r, apply(g), b, a],
+                LevelsChannel::Blue => [r, g, apply(b), a],
+            }
         })
     }
 
@@ -21454,6 +21497,84 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_triangle(id, 0.0, 0.0, 5.0, 5.0, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    /// The Levels formula, cross-checked in Python with f32 emulation:
+    /// input 50–200 at gamma 1 maps 100 → 85, 150 → 170, 200 → 255.
+    fn levels_channel_fixture() -> (Document, LayerId) {
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[100, 150, 200, 255, 100, 150, 200, 128], 2, 1)
+            .unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn levels_on_a_single_channel_leaves_the_others_alone() {
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Red, 50, 200, 100, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [85, 150, 200, 255]);
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Green, 50, 200, 100, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 170, 200, 255]);
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Blue, 50, 200, 100, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 150, 255, 255]);
+    }
+
+    #[test]
+    fn levels_on_rgb_is_plain_levels() {
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Rgb, 50, 200, 100, 0, 255)
+            .unwrap();
+        let (mut plain, plain_id) = levels_channel_fixture();
+        plain.levels(plain_id, 50, 200, 100, 0, 255).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [85, 170, 255, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), pixel(&plain, plain_id, 0, 0));
+    }
+
+    #[test]
+    fn levels_on_a_channel_applies_gamma_and_output_range_to_it() {
+        // Gamma 2.00 on red: 0.3333^0.5 = 0.5774 → 147; output black 64
+        // on red: 64 + 0.3333 × 191 = 127.67 → 128.
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Red, 50, 200, 200, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [147, 150, 200, 255]);
+        let (mut doc, id) = levels_channel_fixture();
+        doc.levels_on(id, LevelsChannel::Red, 50, 200, 100, 64, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 150, 200, 255]);
+    }
+
+    #[test]
+    fn levels_on_a_channel_keeps_alpha_and_the_selection() {
+        let (mut doc, id) = levels_channel_fixture();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.levels_on(id, LevelsChannel::Blue, 50, 200, 100, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 150, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 200, 128]);
+        doc.deselect();
+        doc.levels_on(id, LevelsChannel::Blue, 50, 200, 100, 0, 255)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [100, 150, 255, 128]);
+    }
+
+    #[test]
+    fn levels_on_a_channel_propagates_errors() {
+        let (mut doc, id) = levels_channel_fixture();
+        assert!(doc
+            .levels_on(id + 1, LevelsChannel::Red, 50, 200, 100, 0, 255)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .levels_on(id, LevelsChannel::Red, 50, 200, 100, 0, 255)
+            .is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [100, 150, 200, 255]);
     }
 
     #[test]

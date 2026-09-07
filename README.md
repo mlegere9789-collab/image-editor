@@ -11857,6 +11857,55 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1205 Rust tests total** (1200 → 1205, 1198 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 193 — Levels channel selection
+
+`Document::levels_on(id, channel, input_black, input_white, gamma,
+output_black, output_white)` lifts the scope cut Levels shipped with:
+Photoshop's Channel dropdown. `LevelsChannel::Rgb` remaps all three
+channels exactly as `levels` always has (which now simply delegates),
+while `Red`, `Green`, or `Blue` puts only that one channel through the
+same normalise-gamma-remap chain and leaves the other two, and alpha,
+untouched — the way a per-channel Levels move tints an image rather
+than re-toning it. The `levels` command takes an optional `channel`
+(defaulting to RGB) and the Levels dialog gains a **Channel** select
+above its sliders.
+
+This phase also reconciles eight checklist entries. Five detail rows
+under Levels — Input Black Point, Midtone/Gamma, White Point, Output
+Black, Output White — are the very parameters `levels` has taken since
+it shipped, and the two `Select > Grow` / `Select > Similar` rows
+duplicate the GROW and SIMILAR entries shipped in Phases 151 and 152;
+all are now checked "for consistency" in the same wording the earlier
+Border and Smooth duplicates use, so the shipped count moves by eight
+rather than one.
+
+**Verified two ways.** Five new `document.rs` tests on a `[100, 150,
+200]` pixel with input `50–200`, every expected byte first computed in
+Python emulating `f32` arithmetic: the three channels normalise to
+`0.3333`, `0.6667`, and `1.0`, so Red alone gives `[85, 150, 200]`,
+Green alone `[100, 170, 200]`, Blue alone `[100, 150, 255]`, and RGB
+`[85, 170, 255]` — byte-identical to the old `levels`. Gamma `2.00` on
+Red gives `0.3333^0.5 = 0.5774 → 147`, and an output black of `64`
+gives `64 + 0.3333 × 191 = 127.67 → 128`. With only the first of two
+pixels selected a Blue move leaves the second at `[100, 150, 200, 128]`
+until the selection is dropped, and alpha `128` survives; an unknown or
+locked layer errors with the pixel intact. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and forty:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The new dropdown's wiring was reviewed by
+hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1210 Rust tests total** (1205 → 1210, 1203 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

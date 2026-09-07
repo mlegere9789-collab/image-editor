@@ -9,6 +9,7 @@ import type {
   BlendModeInfo,
   DocumentView,
   HistoryState,
+  LevelsChannel,
   Measurement,
   MoveDirection,
   SelectionMode,
@@ -479,6 +480,7 @@ export default function App() {
   const [levelsGamma, setLevelsGamma] = useState(100);
   const [levelsOutputBlack, setLevelsOutputBlack] = useState(0);
   const [levelsOutputWhite, setLevelsOutputWhite] = useState(255);
+  const [levelsChannel, setLevelsChannel] = useState<LevelsChannel>("rgb");
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
@@ -1618,9 +1620,11 @@ export default function App() {
       gamma: levelsGamma,
       outputBlack: levelsOutputBlack,
       outputWhite: levelsOutputWhite,
+      channel: levelsChannel,
     });
     setShowLevelsDialog(false);
   }, [
+    levelsChannel,
     runCommand,
     selectedId,
     levelsInputBlack,
@@ -9344,6 +9348,18 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Levels</h2>
+            <label className="control">
+              <span className="control__label">Channel</span>
+              <select
+                value={levelsChannel}
+                onChange={(event) => setLevelsChannel(event.target.value as LevelsChannel)}
+              >
+                <option value="rgb">RGB</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Input Black

@@ -3201,10 +3201,12 @@ fn levels(
     gamma: i32,
     output_black: u8,
     output_white: u8,
+    channel: Option<document::LevelsChannel>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.levels(
+        document.levels_on(
             id,
+            channel.unwrap_or(document::LevelsChannel::Rgb),
             input_black,
             input_white,
             gamma,

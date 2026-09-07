@@ -122,6 +122,10 @@ export type Symmetry = "vertical" | "horizontal" | "both";
  * buttons in Photoshop's selection-tool options bar. */
 export type SelectionMode = "new" | "add" | "subtract" | "intersect";
 
+/** Mirrors `LevelsChannel` in src-tauri/src/document.rs: the Levels
+ * dialog's Channel dropdown. */
+export type LevelsChannel = "rgb" | "red" | "green" | "blue";
+
 export type Tool =
   | "move"
   | "brush"
