@@ -24,6 +24,7 @@ import type {
   Fill,
   GuideOrientation,
   HistoryState,
+  Ink,
   LevelsChannel,
   Measurement,
   MoveDirection,
@@ -331,6 +332,9 @@ export default function App() {
   const [showIndexedDialog, setShowIndexedDialog] = useState(false);
   const [indexedPalette, setIndexedPalette] = useState<Palette["kind"]>("adaptive");
   const [indexedColors, setIndexedColors] = useState(256);
+  // Image > Mode > Duotone: one to four ink colours (straight curves).
+  const [showDuotoneDialog, setShowDuotoneDialog] = useState(false);
+  const [duotoneInks, setDuotoneInks] = useState<string[]>(["#000000", "#0080ff"]);
   const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
@@ -4648,6 +4652,8 @@ export default function App() {
                   setShowBitmapDialog(true);
                 } else if (mode === "indexed") {
                   setShowIndexedDialog(true);
+                } else if (mode === "duotone") {
+                  setShowDuotoneDialog(true);
                 } else {
                   void runCommand("convert_mode", { mode, method: null });
                 }
@@ -4657,6 +4663,7 @@ export default function App() {
               <option value="grayscale">Grayscale</option>
               <option value="bitmap">Bitmap…</option>
               <option value="indexed">Indexed Color…</option>
+              <option value="duotone">Duotone…</option>
             </select>
             {document?.mode === "indexed" && (
               <span className="control__value" title="Colour table">
@@ -9395,6 +9402,74 @@ export default function App() {
                       : { kind: indexedPalette };
                   void runCommand("convert_to_indexed", { palette });
                   setShowIndexedDialog(false);
+                }}
+                disabled={busy}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDuotoneDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDuotoneDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Duotone"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Mode &gt; Duotone</h2>
+            <p className="modal__hint">
+              Every layer becomes its grey printed through the inks, darkest where every ink
+              is full; one ink is a monotone, four a quadtone. Curves are straight here.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Type</span>
+              <select
+                value={duotoneInks.length}
+                onChange={(event) => {
+                  const count = Number(event.target.value);
+                  setDuotoneInks((inks) =>
+                    inks.length >= count
+                      ? inks.slice(0, count)
+                      : [...inks, ...["#ff8000", "#8000ff"].slice(0, count - inks.length)],
+                  );
+                }}
+              >
+                <option value={1}>Monotone</option>
+                <option value={2}>Duotone</option>
+                <option value={3}>Tritone</option>
+                <option value={4}>Quadtone</option>
+              </select>
+            </label>
+            {duotoneInks.map((ink, index) => (
+              <label className="control control--row" key={index}>
+                <span className="control__label">Ink {index + 1}</span>
+                <input
+                  type="color"
+                  value={ink}
+                  onChange={(event) =>
+                    setDuotoneInks((inks) => inks.map((c, i) => (i === index ? event.target.value : c)))
+                  }
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowDuotoneDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  const inks: Ink[] = duotoneInks.map((hex) => ({ color: hexToRgb(hex), curve: [] }));
+                  void runCommand("convert_to_duotone", { inks });
+                  setShowDuotoneDialog(false);
                 }}
                 disabled={busy}
               >

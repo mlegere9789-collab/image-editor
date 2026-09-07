@@ -133,6 +133,8 @@ pub struct Document {
     mode: ColorMode,
     /// Indexed Color's colour table, empty in every other mode.
     color_table: Vec<[u8; 3]>,
+    /// Duotone's inks, empty in every other mode.
+    duotone: Vec<Ink>,
     /// Alpha channels made by Image > Calculations, in creation order —
     /// a byte per pixel each, discarded like every other position-bound
     /// thing when the canvas changes size.
@@ -370,6 +372,19 @@ pub enum ColorMode {
     /// Every pixel one of at most 256 colours in the document's colour
     /// table — see [`Palette`].
     Indexed,
+    /// A grey image printed with one to four inks — see [`Ink`].
+    Duotone,
+}
+
+/// One of Image > Mode > Duotone's inks: its colour and its curve, the
+/// Curves-style points (input darkness `0..=255` → coverage `0..=255`)
+/// through which a pixel's darkness becomes this ink's coverage; an
+/// empty curve is the straight line, full ink at black and none at white.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ink {
+    pub color: [u8; 3],
+    pub curve: Vec<(u8, u8)>,
 }
 
 /// Image > Mode > Indexed Color's Palette: Exact keeps the image's own
@@ -1594,6 +1609,8 @@ pub struct DocumentView {
     pub mode: ColorMode,
     /// How many colours Indexed Color's table holds; `0` in other modes.
     pub color_table_size: usize,
+    /// Duotone's inks; empty in other modes.
+    pub duotone: Vec<Ink>,
 }
 
 impl Document {
@@ -1614,6 +1631,7 @@ impl Document {
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
+            duotone: Vec::new(),
             channels: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
@@ -1658,7 +1676,68 @@ impl Document {
             channels: self.channels.iter().map(|c| c.name.clone()).collect(),
             mode: self.mode,
             color_table_size: self.color_table.len(),
+            duotone: self.duotone.clone(),
         }
+    }
+
+    /// The coverage tables of `inks`, one `[u8; 256]` each, indexed by
+    /// darkness (`255 − grey`); an empty curve is the straight line.
+    fn ink_tables(inks: &[Ink]) -> Result<Vec<[u8; 256]>, String> {
+        if inks.is_empty() || inks.len() > 4 {
+            return Err(format!(
+                "Duotone takes one to four inks, not {}.",
+                inks.len()
+            ));
+        }
+        inks.iter()
+            .map(|ink| {
+                if ink.curve.is_empty() {
+                    curve_lookup(&[(0, 0), (255, 255)])
+                } else {
+                    curve_lookup(&ink.curve)
+                }
+            })
+            .collect()
+    }
+
+    /// A grey printed through `inks` with their `tables`: starting from
+    /// white, each ink multiplies every channel by `1 − c · (1 − ink /
+    /// 255)`, `c` being its coverage at the grey's darkness — the
+    /// subtractive overprint of the inks, so monotone black with a
+    /// straight curve is the grey itself.
+    fn print_duotone(inks: &[Ink], tables: &[[u8; 256]], grey: u8) -> [u8; 3] {
+        let darkness = 255 - grey;
+        let mut out = [0u8; 3];
+        for (channel, slot) in out.iter_mut().enumerate() {
+            let mut factor = 1.0f32;
+            for (ink, table) in inks.iter().zip(tables) {
+                let coverage = to_unit(table[darkness as usize]);
+                factor *= 1.0 - coverage * (1.0 - to_unit(ink.color[channel]));
+            }
+            *slot = to_byte(factor);
+        }
+        out
+    }
+
+    /// Image > Mode > Duotone (Monotone through Quadtone): reduces every
+    /// layer to its BT.601 luma, prints that grey through `inks`
+    /// ([`Self::print_duotone`]), stores the inks, and sets the mode; new
+    /// paint is printed the same way. Errors for no inks, more than four,
+    /// or a bad curve, changing nothing. Converting away keeps the printed
+    /// colours as they are. Photoshop's Overprint Colors and its curve
+    /// editor are documented scope cuts.
+    pub fn convert_to_duotone(&mut self, inks: &[Ink]) -> Result<(), String> {
+        let tables = Self::ink_tables(inks)?;
+        for layer in &mut self.layers {
+            for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                let grey = ApplyChannel::Rgb.value([px[0], px[1], px[2], px[3]]);
+                px[..3].copy_from_slice(&Self::print_duotone(inks, &tables, grey));
+            }
+        }
+        self.color_table.clear();
+        self.duotone = inks.to_vec();
+        self.mode = ColorMode::Duotone;
+        Ok(())
     }
 
     /// Indexed Color's colour table — empty in every other mode.
@@ -1785,6 +1864,12 @@ impl Document {
                 let [nr, ng, nb] = self.nearest_table_color([r, g, b]);
                 [nr, ng, nb, a]
             }
+            ColorMode::Duotone => {
+                let tables = Self::ink_tables(&self.duotone).unwrap_or_default();
+                let grey = ApplyChannel::Rgb.value([r, g, b, a]);
+                let [pr, pg, pb] = Self::print_duotone(&self.duotone, &tables, grey);
+                [pr, pg, pb, a]
+            }
             ColorMode::Grayscale => {
                 let v = ApplyChannel::Rgb.value([r, g, b, a]);
                 [v, v, v, a]
@@ -1824,8 +1909,15 @@ impl Document {
     ) -> Result<(), String> {
         let (width, height) = (self.width as usize, self.height as usize);
         self.color_table.clear();
+        self.duotone.clear();
         match mode {
             ColorMode::Rgb => {}
+            ColorMode::Duotone => {
+                return self.convert_to_duotone(&[Ink {
+                    color: [0, 0, 0],
+                    curve: Vec::new(),
+                }]);
+            }
             ColorMode::Indexed => {
                 return match self.convert_to_indexed(Palette::Exact) {
                     Ok(()) => Ok(()),
@@ -37662,6 +37754,127 @@ mod tests {
         assert!(doc.color_table().is_empty());
         assert_eq!(doc.view().color_table_size, 0);
         assert_eq!(pixel(&doc, id, 0, 0), [7, 7, 7, 255]);
+    }
+
+    fn ink(color: [u8; 3]) -> Ink {
+        Ink {
+            color,
+            curve: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn monotone_black_with_a_straight_curve_is_the_grey_itself() {
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[0, 0, 0, 255, 128, 128, 128, 200, 255, 0, 0, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.convert_to_duotone(&[ink([0, 0, 0])]).unwrap();
+        assert_eq!(doc.view().mode, ColorMode::Duotone);
+        assert_eq!(doc.view().duotone, vec![ink([0, 0, 0])]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 200]);
+        // Pure red is its luma, 76.
+        assert_eq!(pixel(&doc, id, 2, 0), [76, 76, 76, 255]);
+    }
+
+    #[test]
+    fn a_duotone_multiplies_its_inks() {
+        // Black and [0, 128, 255] at grey 128: coverage 127/255 for both,
+        // so red 255·0.502·0.502 → 64, green 255·0.502·0.752 → 96, blue
+        // 255·0.502 → 128. Black stays black, white stays white.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[128, 128, 128, 255, 0, 0, 0, 255, 255, 255, 255, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.convert_to_duotone(&[ink([0, 0, 0]), ink([0, 128, 255])])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [64, 96, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [255, 255, 255, 255]);
+        // A third ink, yellow, at grey 200 (coverage 55/255): red and blue
+        // 255·0.784² → 157, green 255·0.784·0.893 → 179.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[200, 200, 200, 255], 1, 1).unwrap();
+        doc.convert_to_duotone(&[ink([0, 0, 0]), ink([0, 128, 255]), ink([255, 255, 0])])
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [157, 179, 157, 255]);
+    }
+
+    #[test]
+    fn an_ink_curve_scales_its_coverage() {
+        // Monotone red at grey 100 lays red only where the ink is absent:
+        // [255, 100, 100]. A curve to 127 halves black's coverage: grey 0
+        // prints 128, grey 128 prints 192.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[100, 100, 100, 255], 1, 1).unwrap();
+        doc.convert_to_duotone(&[ink([255, 0, 0])]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 100, 100, 255]);
+        let half = Ink {
+            color: [0, 0, 0],
+            curve: vec![(0, 0), (255, 127)],
+        };
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 0, 0, 255, 128, 128, 128, 255], 2, 1)
+            .unwrap();
+        doc.convert_to_duotone(&[half]).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [192, 192, 192, 255]);
+    }
+
+    #[test]
+    fn duotone_mode_prints_new_paint_through_the_inks() {
+        // Green's luma 150 through black + [0, 128, 255]: [88, 119, 150].
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("l", &[0; 8], 2, 1).unwrap();
+        doc.convert_to_duotone(&[ink([0, 0, 0]), ink([0, 128, 255])])
+            .unwrap();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            0.5,
+            Stroke::Brush {
+                color: [0, 255, 0, 255],
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [88, 119, 150, 255]);
+        doc.select_rectangle(1.0, 0.0, 2.0, 1.0).unwrap();
+        doc.fill_selection(id, [128, 128, 128, 255]).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [64, 96, 128, 255]);
+    }
+
+    #[test]
+    fn duotone_validates_and_leaving_it_drops_the_inks() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[200, 100, 50, 255], 1, 1).unwrap();
+        assert!(doc.convert_to_duotone(&[]).is_err());
+        assert!(doc.convert_to_duotone(&vec![ink([0, 0, 0]); 5]).is_err());
+        let bad_curve = Ink {
+            color: [0, 0, 0],
+            curve: vec![(0, 0)],
+        };
+        assert!(doc.convert_to_duotone(&[bad_curve]).is_err());
+        assert_eq!(doc.view().mode, ColorMode::Rgb);
+        assert_eq!(pixel(&doc, id, 0, 0), [200, 100, 50, 255]);
+        // The plain mode switch is monotone black: the luma, 124.
+        doc.convert_mode(ColorMode::Duotone, None).unwrap();
+        assert_eq!(doc.view().duotone, vec![ink([0, 0, 0])]);
+        assert_eq!(pixel(&doc, id, 0, 0), [124, 124, 124, 255]);
+        doc.convert_mode(ColorMode::Rgb, None).unwrap();
+        assert!(doc.view().duotone.is_empty());
+        assert_eq!(pixel(&doc, id, 0, 0), [124, 124, 124, 255]);
     }
 
     #[test]

@@ -1233,6 +1233,23 @@ fn convert_to_indexed(
     })
 }
 
+/// Image > Mode > Duotone with the dialog's `inks`.
+#[tauri::command]
+fn convert_to_duotone(
+    state: State<'_, AppState>,
+    inks: Vec<document::Ink>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.convert_to_duotone(&inks)?;
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: document.width(),
+            y1: document.height(),
+        }))
+    })
+}
+
 /// Channels panel > New Channel: a black alpha channel, named `name` or
 /// the next free `Alpha N`.
 #[tauri::command]
@@ -4519,6 +4536,7 @@ pub fn run() {
             add_channel,
             convert_mode,
             convert_to_indexed,
+            convert_to_duotone,
             rename_channel,
             move_channel,
             delete_channel,

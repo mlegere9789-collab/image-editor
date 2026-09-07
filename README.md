@@ -13762,6 +13762,59 @@ by hand instead. Every other layer of this project's quality bar
 **1390 Rust tests total** (1385 → 1390, 1383 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 230 — Duotone
+
+The mode family gains Duotone, Monotone through Quadtone. An `Ink` is
+a colour and a curve — Curves-style points from a pixel's darkness
+(`255 − grey`) to that ink's coverage, an empty curve being the
+straight line through `curve_lookup` — and `convert_to_duotone(inks)`
+reduces every layer to its BT.601 luma and prints the grey through
+the inks: starting from white, each ink multiplies every channel by
+`1 − c · (1 − ink / 255)` with `c` its coverage, the subtractive
+overprint, so monotone black with a straight curve is the grey itself
+and every ink darkens only where its colour lacks that channel. The
+inks are stored on the document and in the view, cleared on leaving
+the mode, and `constrain_color` prints new paint the same way, so a
+brush in Duotone lays down the duotone of its colour's luma;
+`convert_mode(Duotone)` is monotone black. One to four inks and valid
+curves are checked before anything changes; converting away keeps
+the printed colours. The Mode select gains Duotone… with a Type
+select (Monotone to Quadtone) and an ink colour per row. Overprint
+Colors and Photoshop's curve editor are documented scope cuts, the
+command accepting curve points the dialog does not yet draw.
+
+**Verified two ways.** Five new `document.rs` tests, every printed
+byte first computed in Python emulating `f32`, and monotone black's
+identity checked there for all 256 greys. Monotone black keeps `0`
+and `128` (alpha `200` kept) and turns pure red into its luma `76`.
+Black over `[0, 128, 255]` prints grey `128` as `[64, 96, 128]`
+(coverage `127/255` for both inks), black as black and white as
+white, and a third yellow ink prints grey `200` as `[157, 179, 157]`.
+Monotone red prints grey `100` as `[255, 100, 100]`, and a black ink
+with a curve to `127` halves its coverage, printing grey `0` as `128`
+and `128` as `192`. In Duotone mode a green brush dab (luma `150`)
+prints `[88, 119, 150]` and a `128` fill `[64, 96, 128]`. No inks,
+five inks, and a one-point curve are refused with nothing changed,
+the plain mode switch is monotone black (luma `124` of `[200, 100,
+50]`), and leaving the mode drops the inks. All five passed on the first
+Rust run; the tritone expectation had first been guessed as `[178,
+178, 152]`, and the Python check gave `[157, 179, 157]` — the yellow
+ink darkens blue, not green — so it was corrected before that run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1395 Rust tests total** (1390 → 1395, 1388 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

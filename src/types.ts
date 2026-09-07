@@ -133,11 +133,17 @@ export type DocumentView = {
   mode: ColorMode;
   /** How many colours Indexed Color's table holds; 0 in other modes. */
   colorTableSize: number;
+  /** Duotone's inks; empty in other modes. */
+  duotone: Ink[];
 };
+
+/** Mirrors `Ink` in src-tauri/src/document.rs: a Duotone ink's colour and
+ * curve points (darkness → coverage); an empty curve is the straight line. */
+export type Ink = { color: [number, number, number]; curve: [number, number][] };
 
 /** Mirrors `ColorMode` / `BitmapMethod` / `Palette` in
  * src-tauri/src/document.rs. */
-export type ColorMode = "rgb" | "grayscale" | "bitmap" | "indexed";
+export type ColorMode = "rgb" | "grayscale" | "bitmap" | "indexed" | "duotone";
 export type Palette = { kind: "exact" } | { kind: "uniform" } | { kind: "adaptive"; colors: number };
 export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
