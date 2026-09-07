@@ -699,6 +699,25 @@ fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Edit > Paste Special > Paste Outside: paste the clipboard centred on the
+/// active selection, keeping only the pixels outside it. Errors if nothing
+/// has been copied yet or nothing is selected.
+#[tauri::command]
+fn paste_outside(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let clipboard = {
+        let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "Nothing has been copied or cut yet.".to_string())?
+            .clone()
+    };
+    edit_checkpointed(&state, |document| {
+        document
+            .paste_outside(&clipboard, "Pasted Layer")
+            .map(|_| None)
+    })
+}
+
 /// Camera Raw Filter > Geometry (Manual) on layer `id`, as one undo step.
 #[tauri::command]
 fn camera_raw_geometry(
@@ -2987,6 +3006,7 @@ pub fn run() {
             cut,
             paste,
             paste_into,
+            paste_outside,
             camera_raw_geometry,
             new_layer_via_copy,
             new_layer_via_cut,

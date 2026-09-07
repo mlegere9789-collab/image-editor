@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 215.**
+**618 distinct capabilities tracked. Currently shipped: 216.**
 
 ## PART I — EVERY TOOL
 
@@ -323,7 +323,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Paste
 - [x] Paste Special > Paste in Place (identical to plain Paste in this app — see README Phase 18)
 - [x] Paste Special > Paste Into (`paste_into`, the clipboard pasted as a new top layer centred in the active selection's bounds, with every pixel outside the selection's shape left transparent; errors with nothing copied or nothing selected. Photoshop's live layer mask is baked in as transparency — a documented scope cut — see README Phase 146)
-- [ ] Paste Special > Paste Outside
+- [x] Paste Special > Paste Outside (`paste_outside`, the clipboard as a new top layer centred on the selection's bounding box exactly as Paste Into centres it, keeping only the pixels outside the selection's shape — pixel for pixel the complement of Paste Into; the mask is baked in as transparency, a documented scope cut — see README Phase 154)
 - [x] Delete (also covers Edit > Clear — same command in this app, see README Phase 19)
 - [x] Fill (flat colour only, no pattern/history/content-aware source — see README Phase 19)
 - [ ] Content-Aware Fill from Selection

@@ -2087,10 +2087,37 @@ impl Document {
         clipboard: &Clipboard,
         name: impl Into<String>,
     ) -> Result<LayerId, String> {
+        self.paste_against_selection(clipboard, name, "Paste Into", true)
+    }
+
+    /// Edit > Paste Special > Paste Outside: the mirror image of
+    /// [`Self::paste_into`] — the clipboard is centred on the active
+    /// selection's bounding box exactly as Paste Into centres it, but only
+    /// the pixels that fall *outside* the selection's shape are kept, so the
+    /// pasted layer surrounds the selection rather than filling it. The two
+    /// commands' results are exact complements: pixel for pixel, one holds
+    /// the clipboard and the other is transparent. As with Paste Into,
+    /// Photoshop's live layer mask is baked in as transparency here, and
+    /// nothing selected is an error.
+    pub fn paste_outside(
+        &mut self,
+        clipboard: &Clipboard,
+        name: impl Into<String>,
+    ) -> Result<LayerId, String> {
+        self.paste_against_selection(clipboard, name, "Paste Outside", false)
+    }
+
+    fn paste_against_selection(
+        &mut self,
+        clipboard: &Clipboard,
+        name: impl Into<String>,
+        command: &str,
+        inside: bool,
+    ) -> Result<LayerId, String> {
         let selection = self
             .selection
             .clone()
-            .ok_or_else(|| "Paste Into needs an active selection.".to_string())?;
+            .ok_or_else(|| format!("{command} needs an active selection."))?;
         let bounds = selection.bounds;
         let origin_x =
             bounds.x0 as i64 + ((bounds.x1 - bounds.x0) as i64 - clipboard.width as i64) / 2;
@@ -2109,7 +2136,7 @@ impl Document {
                 if px < 0 || px >= width {
                     continue;
                 }
-                if !selection.contains(px as f32 + 0.5, py as f32 + 0.5) {
+                if selection.contains(px as f32 + 0.5, py as f32 + 0.5) != inside {
                     continue;
                 }
                 let src = (row as usize * clipboard.width as usize + col as usize) * CHANNELS;
@@ -25889,6 +25916,85 @@ mod tests {
         let clipboard = doc.copy(id).unwrap();
         let err = doc.paste_into(&clipboard, "into").unwrap_err();
         assert!(err.contains("selection"), "{err}");
+        assert_eq!(doc.layers().len(), 1);
+    }
+
+    #[test]
+    fn paste_outside_keeps_the_pixels_outside_the_selection() {
+        // The whole 3x3 centred on the single selected centre pixel: the
+        // origin is 1 + (1 - 3) / 2 = 0, so the clipboard lands on the
+        // canvas exactly and everything but the centre is kept.
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let pasted = doc.paste_outside(&clipboard, "outside").unwrap();
+        assert_eq!(doc.layers()[1].id, pasted);
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![10, 20, 30], vec![40, 0, 60], vec![70, 80, 90]]
+        );
+        assert_eq!(pixel(&doc, pasted, 1, 1), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, pasted, 0, 0), [10, 0, 0, 255]);
+    }
+
+    #[test]
+    fn paste_outside_is_the_exact_complement_of_paste_into() {
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.paste_into(&clipboard, "into").unwrap();
+        doc.paste_outside(&clipboard, "outside").unwrap();
+        let original = &doc.layers()[0].pixels;
+        let inside = &doc.layers()[1].pixels;
+        let outside = &doc.layers()[2].pixels;
+        for (i, byte) in original.iter().enumerate() {
+            assert_eq!(inside[i] + outside[i], *byte, "byte {i}");
+            assert!(inside[i] == 0 || outside[i] == 0, "byte {i}");
+        }
+    }
+
+    #[test]
+    fn paste_outside_clips_to_the_selection_shape_not_its_box() {
+        // The canvas-spanning ellipse on 4x4 excludes exactly the corners,
+        // so Paste Outside keeps exactly the corners.
+        let (mut doc, id) = ramped_4x4();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_ellipse(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.paste_outside(&clipboard, "outside").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![
+                vec![10, 0, 0, 40],
+                vec![0, 0, 0, 0],
+                vec![0, 0, 0, 0],
+                vec![130, 0, 0, 160]
+            ]
+        );
+        assert_eq!(pixel(&doc, doc.layers()[1].id, 0, 0)[3], 255);
+        assert_eq!(pixel(&doc, doc.layers()[1].id, 1, 0)[3], 0);
+    }
+
+    #[test]
+    fn paste_outside_an_inverted_selection_pastes_inside_it() {
+        // Inverting flips what "outside" means but not the bounding box the
+        // clipboard is centred on, so this equals Paste Into un-inverted.
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.invert_selection().unwrap();
+        doc.paste_outside(&clipboard, "outside").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 50, 0], vec![0, 0, 0]]
+        );
+    }
+
+    #[test]
+    fn paste_outside_without_a_selection_is_an_error() {
+        let (mut doc, id) = ramped_3x3();
+        let clipboard = doc.copy(id).unwrap();
+        let err = doc.paste_outside(&clipboard, "outside").unwrap_err();
+        assert!(err.contains("Paste Outside"), "{err}");
         assert_eq!(doc.layers().len(), 1);
     }
 

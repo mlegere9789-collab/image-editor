@@ -9893,6 +9893,54 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1010 Rust tests total** (1005 → 1010, 1003 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 154 — Edit > Paste Special > Paste Outside
+
+`paste_outside(clipboard, name)` is the mirror image of Phase 146's
+Paste Into: the clipboard becomes a new top layer centred on the active
+selection's bounding box exactly as Paste Into centres it (the box's
+top-left plus half the size difference, truncated toward zero), but
+only the pixels that fall *outside* the selection's shape are kept, so
+the pasted content surrounds the selection instead of filling it. The
+two commands now share one private `paste_against_selection` routine
+that differs in a single comparison, which makes their relationship
+exact: pixel for pixel, one layer holds the clipboard byte and the
+other is zero. An inverted selection flips what "outside" means but not
+the bounding box the clipboard is centred on. As with Paste Into,
+Photoshop's live layer mask is baked in as transparency (a documented
+scope cut), and nothing selected is an error. A new **Paste Outside**
+button sits beside Paste Into, enabled under the same conditions.
+
+**Verified two ways.** Five new `document.rs` tests, every expected
+pixel read off its fixture. The whole `ramped_3x3` pasted outside its
+single selected centre pixel lands at origin `1 + (1 − 3) / 2 = 0` and
+keeps everything but the centre — `[[10, 20, 30], [40, 0, 60], [70, 80,
+90]]` with `(1, 1)` fully transparent and `(0, 0)` opaque `10`. Paste
+Into and Paste Outside from the same clipboard and selection are exact
+complements: for every byte of the three layers, `into + outside ==
+original` and at least one of the two is `0`. The canvas-spanning
+ellipse on `ramped_4x4`, which Paste Into's own test showed excludes
+exactly the four corners, keeps exactly those corners here — `10`,
+`40`, `130`, `160`, opaque, with everything else transparent. Inverting
+the centre-pixel selection before pasting outside yields Paste Into's
+un-inverted result, only the `50` at `(1, 1)`. Nothing selected errors
+with a message naming "Paste Outside" and adds no layer. Paste Into's
+own five Phase 146 tests run unchanged through the shared routine. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and one: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1015 Rust tests total** (1010 → 1015, 1008 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -3249,6 +3249,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => void runCommand("paste_outside", {}, "top")}
+            disabled={busy || !hasDocument || !canPaste || !document?.selection}
+            title="Edit > Paste Special > Paste Outside (centred on the selection, keeping only what falls outside it)"
+          >
+            Paste Outside
+          </button>
+          <button
+            className="button button--quiet"
             onClick={deleteSelection}
             disabled={busy || selectedId === null}
             title="Edit > Delete"
