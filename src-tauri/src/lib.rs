@@ -492,6 +492,32 @@ fn select_object_lasso(
     })
 }
 
+/// Select > Subject: the largest non-background thing on layer `id`,
+/// combined per `mode`.
+#[tauri::command]
+fn select_subject(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        let mode = mode.unwrap_or(document::SelectionMode::New);
+        document.select_subject_with(mode, id, tolerance)?;
+        Ok(None)
+    })
+}
+
+/// Remove Background: keep the subject of layer `id`, clear the rest.
+#[tauri::command]
+fn remove_background(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tolerance: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.remove_background(id, tolerance))
+}
+
 /// Magnetic Lasso tool: a freehand trail snapped to the strongest edge of
 /// layer `id` within `width` pixels that is at least `contrast` strong,
 /// then selected as a lasso, combined per `mode`.
@@ -4134,6 +4160,8 @@ pub fn run() {
             select_magnetic_lasso,
             select_object_rect,
             select_object_lasso,
+            select_subject,
+            remove_background,
             quick_select,
             select_magic_wand,
             select_color_range,

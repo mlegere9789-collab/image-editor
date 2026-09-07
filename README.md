@@ -12715,6 +12715,53 @@ instead. Every other layer of this project's quality bar
 **1290 Rust tests total** (1285 → 1290, 1283 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 210 — Select Subject and Remove Background
+
+`Document::select_subject_with(mode, id, tolerance)` is Select >
+Subject: the Object Selection finder run over the whole canvas, so the
+most common colour of the canvas's outer ring is the background and
+the largest 4-connected thing that is not it, within the Tolerance, is
+the subject, combined with the current selection per `mode`.
+`remove_background(id, tolerance)` keeps that subject and makes every
+other pixel of the layer fully transparent, leaving the selection as
+it was. The finder was split so its bitmap can be had without touching
+the selection (`find_object_in_bits`), which the Object Selection tool
+now also goes through. Photoshop's neural subject detection, on device
+or in the cloud, is replaced by this explicit stand-in, and Select
+People, Sky Selection, and Focus Area stay deferred as neural. Two
+buttons follow the Object Selection tools — **Select Subject** (using
+the selection Mode picker) and **Remove Background** — through
+`select_subject` and `remove_background` commands.
+
+**Verified two ways.** Five new `document.rs` tests on the Object
+Selection scene, whose subject the Phase 209 Python model had already
+produced. Select Subject picks the nine-pixel object; adding it to a
+selected top row and subtracting it from Select All give `#######`
+over the object and a `3×3` hole respectively. Remove Background keeps
+the object's `200`s opaque and makes the corner, the speck, and the
+mark transparent, so row 3's alphas read `0 0 255 255 255 0 0`, and a
+prior one-pixel selection survives it. A flat layer has no subject, so
+both operations error with the pixels intact, as do an unknown layer
+and, for Remove Background, a locked one. Four of the five passed on
+the first run: the Remove Background test reached for the test
+module's `alpha_grid`, which reads a fixed `3×3`, on a `7×7` and
+panicked on the index; it now reads the row through `pixel`, and
+passed.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+fifty-seven: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The buttons were reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1295 Rust tests total** (1290 → 1295, 1288 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

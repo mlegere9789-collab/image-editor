@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 308.**
+**618 distinct capabilities tracked. Currently shipped: 311.**
 
 ## PART I — EVERY TOOL
 
@@ -77,7 +77,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] COLOR RANGE (`select_color_range`, a pixel-mask selection of every pixel of the selected layer whose R, G, and B are each within Fuzziness of a chosen colour, wherever it sits — the same mask machinery the Magic Wand introduced, with an explicit colour instead of a click and no contiguity. Photoshop's soft partial selection, sampled-colours eyedroppers, Localized Color Clusters, and the Skin Tones/Highlights/etc. presets are documented scope cuts — see README Phase 150)
 - [ ] FOCUS AREA
 - [ ] SKY SELECTION
-- [ ] SUBJECT SELECTION
+- [x] SUBJECT SELECTION (`select_subject_with`, the Object Selection finder over the whole canvas: the canvas edge's most common colour is the background and the largest connected thing that is not it is the subject — an explicit stand-in for Photoshop's neural detection — see README Phase 210)
 - [ ] SELECT PEOPLE
 - [x] MODIFY > BORDER
 - [x] MODIFY > SMOOTH
@@ -292,10 +292,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Color Range — Selection Preview
 - [ ] Color Range — Invert
 - [ ] Color Range — Skin Tones
-- [ ] Select Subject
+- [x] Select Subject (duplicate of SUBJECT SELECTION in PART II, shipped there — checked here for consistency)
 - [ ] Select Subject — Device Processing
 - [ ] Select Subject — Cloud Processing
-- [ ] Remove Background
+- [x] Remove Background (`remove_background`, the subject kept and every other pixel of the layer made fully transparent, the selection left as it was — see README Phase 210)
 - [ ] Select People — Individual Person Selection
 - [ ] Select People — Person Components
 - [ ] Select People — Hair Selection

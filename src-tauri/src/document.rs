@@ -1487,6 +1487,50 @@ impl Document {
         self.select_object_in_bits(mode, id, region, tolerance)
     }
 
+    /// Select > Subject: the Object Selection finder run over the whole
+    /// canvas — the most common colour of the canvas's outer ring is the
+    /// background and the largest connected thing that is not it, within
+    /// `tolerance`, is the subject — combined per `mode`. Photoshop's
+    /// neural subject detection, on device or in the cloud, is replaced by
+    /// this explicit stand-in.
+    pub fn select_subject_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        tolerance: u8,
+    ) -> Result<(), String> {
+        let region = vec![true; self.width as usize * self.height as usize];
+        self.select_object_in_bits(mode, id, region, tolerance)
+    }
+
+    /// Remove Background: keeps [`Self::select_subject_with`]'s subject and
+    /// makes every other pixel of layer `id` fully transparent, leaving the
+    /// selection as it was. Errors when no subject is found, or on a
+    /// locked or unknown layer, with the pixels intact.
+    pub fn remove_background(
+        &mut self,
+        id: LayerId,
+        tolerance: u8,
+    ) -> Result<Option<Rect>, String> {
+        let region = vec![true; self.width as usize * self.height as usize];
+        let subject = self.find_object_in_bits(id, region, tolerance)?;
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        for (idx, keep) in subject.iter().enumerate() {
+            if !keep {
+                layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        }))
+    }
+
     /// The Object Selection tool's finder, this project's explicit stand-in
     /// for Photoshop's neural object detection: within `region`, the
     /// background is taken to be the most common colour of the region's
@@ -1504,6 +1548,19 @@ impl Document {
         region: Vec<bool>,
         tolerance: u8,
     ) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        let bits = self.find_object_in_bits(id, region, tolerance)?;
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// [`Self::select_object_in_bits`]'s finder on its own: the object's
+    /// bitmap, without touching the selection.
+    fn find_object_in_bits(
+        &self,
+        id: LayerId,
+        region: Vec<bool>,
+        tolerance: u8,
+    ) -> Result<Vec<bool>, String> {
         let (width, height) = (self.width, self.height);
         let layer = self.layer(id)?;
         let at = |x: u32, y: u32| -> usize { (y * width + x) as usize };
@@ -1585,7 +1642,7 @@ impl Document {
         for idx in best {
             bits[idx] = true;
         }
-        self.combine_with(mode, mask_selection(width, height, bits)?)
+        Ok(bits)
     }
 
     /// The Magnetic Lasso tool: a freehand `trail` whose points snap to
@@ -23963,6 +24020,75 @@ mod tests {
             .select_object_in_lasso_with(SelectionMode::New, id, &[(0.0, 0.0), (7.0, 7.0)], 0)
             .is_err());
         assert!(doc.selection().is_none());
+    }
+
+    #[test]
+    fn select_subject_finds_the_largest_thing_on_the_canvas() {
+        let (mut doc, id) = object_scene();
+        doc.select_subject_with(SelectionMode::New, id, 0).unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+    }
+
+    #[test]
+    fn select_subject_combines_with_the_selection() {
+        let (mut doc, id) = object_scene();
+        doc.select_rectangle(0.0, 0.0, 7.0, 1.0).unwrap();
+        doc.select_subject_with(SelectionMode::Add, id, 0).unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#######", ".......", "..###..", "..###..", "..###..", ".......", "......."]
+        );
+        doc.select_all().unwrap();
+        doc.select_subject_with(SelectionMode::Subtract, id, 0)
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#######", "#######", "##...##", "##...##", "##...##", "#######", "#######"]
+        );
+    }
+
+    #[test]
+    fn remove_background_keeps_only_the_subject() {
+        let (mut doc, id) = object_scene();
+        doc.remove_background(id, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 3, 3), [200, 200, 200, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [200, 200, 200, 255]);
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 0]);
+        // The speck and the mark are not the subject and go too.
+        assert_eq!(pixel(&doc, id, 0, 6), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 5, 1), [0, 0, 0, 0]);
+        let row3: Vec<u8> = (0..7).map(|x| pixel(&doc, id, x, 3)[3]).collect();
+        assert_eq!(row3, vec![0, 0, 255, 255, 255, 0, 0]);
+    }
+
+    #[test]
+    fn remove_background_leaves_the_selection_alone() {
+        let (mut doc, id) = object_scene();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.remove_background(id, 0).unwrap();
+        assert_eq!(selection_grid(&doc)[0], "#......");
+        assert_eq!(pixel(&doc, id, 6, 6), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn subject_tools_propagate_errors() {
+        // A flat layer has no subject.
+        let mut doc = Document::new(3, 3).unwrap();
+        let flat = doc
+            .add_layer("flat", &solid(3, 3, [90, 90, 90, 255]), 3, 3)
+            .unwrap();
+        assert!(doc
+            .select_subject_with(SelectionMode::New, flat, 0)
+            .is_err());
+        assert!(doc.remove_background(flat, 0).is_err());
+        assert_eq!(pixel(&doc, flat, 1, 1), [90, 90, 90, 255]);
+        let (mut doc, id) = object_scene();
+        assert!(doc
+            .select_subject_with(SelectionMode::New, id + 1, 0)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.remove_background(id, 0).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
     }
 
     #[test]

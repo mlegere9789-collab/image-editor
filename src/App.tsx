@@ -4773,6 +4773,32 @@ export default function App() {
             Object Lasso
           </button>
           <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("select_subject", {
+                id: selectedId,
+                tolerance: magicWandTolerance,
+                mode: selectionMode,
+              })
+            }
+            disabled={busy || !canPaint}
+            title="Select > Subject: select the largest thing on the layer that is not its edge colour, at the Tolerance"
+          >
+            Select Subject
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
+            }
+            disabled={busy || !canPaint}
+            title="Remove Background: keep the subject and make everything else transparent"
+          >
+            Remove Background
+          </button>
+          <button
             className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
             disabled={!hasDocument}
             aria-pressed={tool === "selectionBrush"}
