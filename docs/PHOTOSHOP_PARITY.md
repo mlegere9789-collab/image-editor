@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 490.**
+**618 distinct capabilities tracked. Currently shipped: 493.**
 
 ## PART I — EVERY TOOL
 
@@ -432,13 +432,13 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Ask When Pasting
 - [ ] Missing Profile Warning
 - [ ] Embed Color Profile
-- [ ] Proof Setup
-- [ ] Proof Colors
+- [x] Proof Setup (the toolbar's Proof select, choosing which of the proofs below to view — Off, Protanopia-type, Deuteranopia-type, or Custom Paper/Ink; Proof Setup's other device-profile-driven presets (Working CMYK, Legacy Macintosh RGB, an ICC profile picked from disk, …) are a documented scope cut of this app's colour management)
+- [x] Proof Colors (the same Proof select at any setting other than Off — a live, non-destructive view through the `composite://` protocol's `proof=` query, exactly matching Photoshop's toggle)
 - [ ] Gamut Warning
 - [x] Color Blindness Proofing (`Proof::{Protanopia, Deuteranopia}`, `simulate_color_blindness`, and `proof_image`: the composite linearised, put through the Viénot–Brettel–Mollon 1999 reduction matrix, and re-encoded, served as a view through the composite protocol's `proof=` query without touching the pixels; a Proof select in the toolbar — see README Phase 233)
 - [x] Simulate Paper Color (`Proof::PaperInk { paper, ink }` / `simulate_paper_ink`, a Custom proof rescaling every channel from `0..=255` onto `ink..=paper` — the same white/black point compensation Photoshop's own soft proof applies for a device whose paper is not perfectly white, standing in for the full ICC-profile-driven version this app's colour management does not model; a Paper/Ink option in the toolbar's Proof select, with colour pickers — see README Phase 264)
 - [x] Simulate Black Ink (the same `Proof::PaperInk` rescale's `ink` end — see README Phase 264)
-- [ ] Color & Vibrance
+- [x] Color & Vibrance (Adobe's current adjustment-layer-panel name for the Vibrance adjustment; duplicate of VIBRANCE in PART III, already shipped there — checked here for consistency)
 - [x] Solid Color Fill (duplicate of SOLID COLOR in PART VI, already shipped there — checked here for consistency)
 - [x] Gradient Fill (duplicate of GRADIENT in PART VI, already shipped there — checked here for consistency)
 - [x] Pattern Fill (duplicate of PATTERN in PART VI, already shipped there — checked here for consistency)
