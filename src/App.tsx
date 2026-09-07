@@ -379,6 +379,10 @@ export default function App() {
   const [fieldBlurX2, setFieldBlurX2] = useState(0);
   const [fieldBlurY2, setFieldBlurY2] = useState(0);
   const [fieldBlurRadius2, setFieldBlurRadius2] = useState(15);
+  const [showSpinBlurDialog, setShowSpinBlurDialog] = useState(false);
+  const [spinBlurCenterX, setSpinBlurCenterX] = useState(0);
+  const [spinBlurCenterY, setSpinBlurCenterY] = useState(0);
+  const [spinBlurAngle, setSpinBlurAngle] = useState(15);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -2153,6 +2157,23 @@ export default function App() {
     fieldBlurRadius2,
   ]);
 
+  const openSpinBlurDialog = useCallback(() => {
+    setSpinBlurCenterX(Math.round((document?.width ?? 2) / 2));
+    setSpinBlurCenterY(Math.round((document?.height ?? 2) / 2));
+    setShowSpinBlurDialog(true);
+  }, [document]);
+
+  const applySpinBlur = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("spin_blur", {
+      id: selectedId,
+      centerX: spinBlurCenterX,
+      centerY: spinBlurCenterY,
+      angle: spinBlurAngle,
+    });
+    setShowSpinBlurDialog(false);
+  }, [runCommand, selectedId, spinBlurCenterX, spinBlurCenterY, spinBlurAngle]);
+
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("lens_flare", {
@@ -3925,6 +3946,14 @@ export default function App() {
             title="Filter Gallery > Blur Gallery > Field Blur"
           >
             Field Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openSpinBlurDialog}
+            disabled={busy || !canPaint}
+            title="Filter Gallery > Blur Gallery > Spin Blur"
+          >
+            Spin Blur…
           </button>
           <button
             className="button button--quiet"
@@ -11194,6 +11223,66 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyFieldBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSpinBlurDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSpinBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Spin Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Blur Gallery &gt; Spin Blur
+            </h2>
+            <label className="control control--row">
+              <span className="control__label">Center X / Y</span>
+              <input
+                type="number"
+                min={0}
+                max={document?.width ?? 1}
+                value={spinBlurCenterX}
+                onChange={(event) => setSpinBlurCenterX(Number(event.target.value))}
+              />
+              <input
+                type="number"
+                min={0}
+                max={document?.height ?? 1}
+                value={spinBlurCenterY}
+                onChange={(event) => setSpinBlurCenterY(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{spinBlurAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={spinBlurAngle}
+                onChange={(event) => setSpinBlurAngle(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSpinBlurDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySpinBlur} disabled={busy}>
                 Apply
               </button>
             </div>

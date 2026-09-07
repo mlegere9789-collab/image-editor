@@ -9669,6 +9669,70 @@ impl Document {
         }
         Ok(Some(bounds))
     }
+
+    /// Filter Gallery > Blur Gallery > Spin Blur: [`Self::radial_blur`]'s
+    /// own three-sample averaging shape, but rotating each sample around
+    /// `(center_x, center_y)` instead of scaling it — the classic
+    /// spinning-wheel motion blur. A pixel's own offset from the centre
+    /// is rotated by three angles symmetric around `0°` — `-angle/2`,
+    /// `0°`, and `+angle/2`, where `angle` is the total rotation span in
+    /// degrees — each rotated offset resampled via [`sample_nearest`]
+    /// (the same edge-clamped nearest-neighbour primitive
+    /// [`Self::ripple`]/[`Self::twirl`]/[`Self::radial_blur`] already
+    /// share) and the three samples averaged across all four channels,
+    /// alpha included, exactly as [`Self::radial_blur`] already averages
+    /// its own three zoom samples. A pixel sitting exactly at the centre
+    /// has a zero-length offset, which rotation leaves at zero
+    /// regardless of `angle`, so it stays completely unchanged; `angle =
+    /// 0°` collapses all three samples onto the pixel's own position,
+    /// the identity. `angle` is Photoshop's own `0..=360` Blur Angle
+    /// range. Photoshop's own Spin Blur also lets the ellipse be
+    /// stretched and offers a Strobe Effect option; this project's own
+    /// circular, three-sample version is a documented scope cut, the
+    /// same kind of narrowing [`Self::radial_blur`]'s own fixed
+    /// three-sample count already makes.
+    pub fn spin_blur(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        angle: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !center_x.is_finite() || !center_y.is_finite() {
+            return Err("Spin Blur center must be finite numbers.".to_string());
+        }
+        if !(0.0..=360.0).contains(&angle) {
+            return Err("Spin Blur angle must be between 0 and 360 degrees.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let half = angle / 2.0;
+        let thetas = [(-half).to_radians(), 0.0, half.to_radians()];
+        self.filter_pixels(id, move |source, row, col| {
+            let (x, y) = (col as f32, row as f32);
+            let (dx, dy) = (x - center_x, y - center_y);
+            let mut sums = [0u32; CHANNELS];
+            for &theta in &thetas {
+                let (sin, cos) = theta.sin_cos();
+                let rdx = dx * cos - dy * sin;
+                let rdy = dx * sin + dy * cos;
+                let sample = sample_nearest(
+                    source,
+                    doc_width,
+                    (width, height),
+                    (center_x + rdx, center_y + rdy),
+                );
+                for (sum, &v) in sums.iter_mut().zip(sample.iter()) {
+                    *sum += v as u32;
+                }
+            }
+            let mut out = [0u8; CHANNELS];
+            for (slot, &sum) in out.iter_mut().zip(sums.iter()) {
+                *slot = (sum as f32 / 3.0).round().clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
 }
 
 /// `(r, g, b)` (each `0..=255`) to `(hue, saturation, lightness)`
@@ -22403,6 +22467,89 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.field_blur(999, 0.0, 0.0, 0, 2.0, 2.0, 4).is_err());
+    }
+
+    #[test]
+    fn spin_blur_rotates_each_sample_around_the_centre() {
+        // ramped_3x3's own R-only ramp. Centre (1.0, 1.0), angle 90
+        // (half-angle 45 either way). Pixel (row 0, col 2): its own
+        // offset from centre is (1, -1). Rotating by -45 degrees lands
+        // the sample at (1, 0) (value 20); by 0 degrees at the pixel's
+        // own position, (2, 0) (value 30, itself); by +45 degrees at
+        // (2, 1) (value 60). Average (20+30+60)/3 = 36.67, rounds to
+        // 37 -- a real, hand-computed change from the pixel's own
+        // original 30.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.spin_blur(id, 1.0, 1.0, 90.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 0)], 37);
+    }
+
+    #[test]
+    fn spin_blur_angle_scales_the_rotation() {
+        // Same pixel and centre, but angle 180 (half-angle 90) rotates
+        // further: a real, hand-computed 43 -- a genuine change from
+        // the angle-90 test's own 37, not a coincidental match.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.spin_blur(id, 1.0, 1.0, 180.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(2, 0)], 43);
+    }
+
+    #[test]
+    fn spin_blur_angle_zero_is_the_identity() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.spin_blur(id, 1.0, 1.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn spin_blur_leaves_the_centre_pixel_untouched() {
+        // The centre pixel's own zero-length offset from itself stays
+        // zero under any rotation, so it's left completely unchanged
+        // regardless of angle.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.spin_blur(id, 1.0, 1.0, 180.0).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 50);
+    }
+
+    #[test]
+    fn spin_blur_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        let dirty = doc.spin_blur(id, 1.0, 1.0, 90.0).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[idx(2, 0)], 37);
+        assert_eq!(after[..idx(2, 0)], before[..idx(2, 0)]); // unselected, untouched
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 2,
+                y0: 0,
+                x1: 3,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn spin_blur_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.spin_blur(id, f32::NAN, 1.0, 90.0).is_err());
+        assert!(doc.spin_blur(id, 1.0, 1.0, -1.0).is_err());
+        assert!(doc.spin_blur(id, 1.0, 1.0, 361.0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.spin_blur(id, 1.0, 1.0, 90.0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.spin_blur(999, 1.0, 1.0, 90.0).is_err());
     }
 
     #[test]

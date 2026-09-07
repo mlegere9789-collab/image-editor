@@ -8199,6 +8199,72 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **855 Rust tests total** (851 → 855, 848 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 124 — Filter Gallery > Blur Gallery > Spin Blur
+
+`spin_blur(id, center_x, center_y, angle)` closes out this project's
+own Blur Gallery quartet (Tilt-Shift, Iris Blur, Field Blur, and now
+Spin Blur), and is a direct sibling of `radial_blur` (Phase 113) rather
+than of the other three: it reuses `radial_blur`'s own three-sample
+averaging shape exactly, but *rotates* each pixel's own offset from a
+centre point instead of scaling it — the classic spinning-wheel motion
+blur. A pixel's own `(dx, dy)` offset from `(center_x, center_y)` is
+rotated by three angles symmetric around `0°` — `-angle/2`, `0°`, and
+`+angle/2`, where `angle` is the total rotation span in degrees — each
+rotated offset resampled via the same edge-clamped, nearest-neighbour
+`sample_nearest` primitive `ripple`/`twirl`/`radial_blur` already
+share, and the three samples averaged across all four channels, alpha
+included, exactly as `radial_blur` already averages its own three zoom
+samples. A pixel sitting exactly at the centre has a zero-length
+offset, which rotation leaves at zero regardless of `angle`, so it
+stays completely unchanged; `angle = 0°` collapses all three rotated
+samples back onto the pixel's own position, the identity. `angle` is
+validated against Photoshop's own `0..=360` Blur Angle range.
+Photoshop's own Spin Blur also lets the blur ellipse be stretched
+independently of rotation and offers a Strobe Effect option; this
+project's own circular, three-sample version is a documented scope
+cut, the same kind of narrowing `radial_blur`'s own fixed three-sample
+count already makes. A new **Spin Blur…** dialog exposes the centre
+X/Y position (defaulting to the canvas middle) and the angle as a
+0-360 slider.
+
+**Verified two ways.** Six new `document.rs` tests, reusing the
+box-blur suite's own `ramped_3x3` fixture and its R-only ramp. Centred
+at `(1.0, 1.0)` with `angle = 90` (half-angle `45°` either way), pixel
+`(row 0, col 2)`'s own offset from the centre is `(1, -1)`: rotating by
+`-45°` lands the sample at `(1, 0)` (value `20`); by `0°` at the
+pixel's own position, `(2, 0)` (value `30`, itself); by `+45°` at
+`(2, 1)` (value `60`). Average `(20 + 30 + 60) / 3 = 36.67`, rounding
+to `37` — a real, hand-computed change from the pixel's own original
+`30`. Raising `angle` to `180` (half-angle `90°`) rotates further,
+giving a distinct, hand-computed `43` — a genuine change from the
+angle-90 test's own `37`, not a coincidental match confirming the
+angle genuinely scales the rotation rather than being ignored. A third
+test confirms `angle = 0` is a byte-for-byte identity (all three
+rotated samples collapse onto the same original position). A fourth
+confirms the centre pixel itself, `(1, 1)`, stays exactly `50`
+regardless of angle, since its own zero-length offset rotates to
+itself. A fifth confines the same `90°` rotation to a single-pixel
+selection, confirming unselected pixels stay byte-for-byte untouched.
+A sixth confirms non-finite centre coordinates, an out-of-range angle
+(both below `0` and above `360`), plus a locked/unknown layer, all
+error. All six tests passed on the first run, cross-checked against an
+independent Python script emulating Rust's own `f32` trigonometry and
+rounding via `struct.pack`/`unpack` round-tripping.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous seventy-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**861 Rust tests total** (855 → 861, 854 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
