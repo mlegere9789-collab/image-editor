@@ -539,6 +539,116 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
     out
 }
 
+/// Edit > Transform > Warp's mesh: the sixteen control points of a
+/// bicubic Bézier surface laid over the layer's opaque bounds, row-major
+/// (`points[row * 4 + column]`, row 0 the top), each in pixel-index
+/// coordinates. The identity mesh is the bounds' pixel-index rectangle
+/// divided in thirds — see [`Document::warp_mesh`] and [`Document::warp`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarpMesh {
+    pub points: [[f32; 2]; 16],
+}
+
+/// Warp's Warp Style presets, each a placement of the sixteen control
+/// points driven by Bend — see [`Document::warp_mesh`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WarpStyle {
+    Custom,
+    Arc,
+    ArcLower,
+    ArcUpper,
+    Arch,
+    Bulge,
+    ShellLower,
+    ShellUpper,
+    Flag,
+    Wave,
+    Fish,
+    Rise,
+    Fisheye,
+    Inflate,
+    Squeeze,
+    Twist,
+}
+
+/// The cubic Bernstein basis at `t`.
+fn bernstein(t: f64) -> [f64; 4] {
+    let s = 1.0 - t;
+    [s * s * s, 3.0 * t * s * s, 3.0 * t * t * s, t * t * t]
+}
+
+/// The derivative of the cubic Bernstein basis at `t`.
+fn bernstein_derivative(t: f64) -> [f64; 4] {
+    let s = 1.0 - t;
+    [
+        -3.0 * s * s,
+        3.0 * s * s - 6.0 * t * s,
+        6.0 * t * s - 3.0 * t * t,
+        3.0 * t * t,
+    ]
+}
+
+impl WarpMesh {
+    /// The identity mesh over `bounds`: its pixel-index rectangle (`x0
+    /// ..= x1 − 1`) divided in thirds.
+    fn identity(bounds: Rect) -> Self {
+        let (x0, y0) = (bounds.x0 as f32, bounds.y0 as f32);
+        let w = (bounds.x1 - bounds.x0 - 1) as f32;
+        let h = (bounds.y1 - bounds.y0 - 1) as f32;
+        let mut points = [[0.0f32; 2]; 16];
+        for (n, point) in points.iter_mut().enumerate() {
+            let (i, j) = ((n % 4) as f32, (n / 4) as f32);
+            *point = [x0 + i * w / 3.0, y0 + j * h / 3.0];
+        }
+        Self { points }
+    }
+
+    /// The surface point at `(u, v)` and its partial derivatives:
+    /// `(x, y, ∂x/∂u, ∂y/∂u, ∂x/∂v, ∂y/∂v)`.
+    fn evaluate(&self, u: f64, v: f64) -> (f64, f64, f64, f64, f64, f64) {
+        let (bu, bv) = (bernstein(u), bernstein(v));
+        let (du, dv) = (bernstein_derivative(u), bernstein_derivative(v));
+        let mut out = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        for (n, [x, y]) in self.points.iter().enumerate() {
+            let (i, j) = (n % 4, n / 4);
+            let (x, y) = (*x as f64, *y as f64);
+            out.0 += bu[i] * bv[j] * x;
+            out.1 += bu[i] * bv[j] * y;
+            out.2 += du[i] * bv[j] * x;
+            out.3 += du[i] * bv[j] * y;
+            out.4 += bu[i] * dv[j] * x;
+            out.5 += bu[i] * dv[j] * y;
+        }
+        out
+    }
+
+    /// The `(u, v)` the surface sends to `(x, y)`, by Newton's method from
+    /// the guess `(u, v)`: `None` when it has not converged within
+    /// twenty-four steps, when the surface is locally flat, or when the
+    /// answer lies far outside the patch.
+    fn invert(&self, x: f64, y: f64, mut u: f64, mut v: f64) -> Option<(f64, f64)> {
+        for _ in 0..24 {
+            let (px, py, xu, yu, xv, yv) = self.evaluate(u, v);
+            let (rx, ry) = (px - x, py - y);
+            if rx.abs() < 1e-6 && ry.abs() < 1e-6 {
+                return (u.abs() <= 4.0 && v.abs() <= 4.0).then_some((u, v));
+            }
+            let det = xu * yv - xv * yu;
+            if det.abs() < 1e-12 {
+                return None;
+            }
+            u -= (yv * rx - xv * ry) / det;
+            v -= (-yu * rx + xu * ry) / det;
+            if !(u.is_finite() && v.is_finite()) {
+                return None;
+            }
+        }
+        None
+    }
+}
+
 /// A plane's inverse homography and its slightly grown target quad.
 type PlaneMapping = ([f64; 8], [(f32, f32); 4]);
 
@@ -16951,6 +17061,199 @@ impl Document {
             }
             let sx = ((a * x + b * y + c) / den).round() as i64;
             let sy = ((d * x + e * y + f) / den).round() as i64;
+            if sx < 0 || sy < 0 || sx >= width || sy >= height {
+                return [0; CHANNELS];
+            }
+            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            out
+        })
+    }
+
+    /// Edit > Transform > Warp's starting mesh for layer `id`: the Warp
+    /// Style at `bend` percent (`−100..=100`) with the options bar's
+    /// Horizontal and Vertical distortion (`−100..=100` each), all placed
+    /// over the layer's opaque bounds. With `w` and `h` the bounds' pixel-
+    /// index spans, `f = bend / 100`, `k` one on the two middle columns,
+    /// and `s` `+1` on column 1 and `−1` on column 2: Arch lifts the
+    /// middle columns of every row by `4/3·f·h` (so the top edge's peak is
+    /// `f·h`); Arc is Arch with each row also stretched about its centre by
+    /// `1 + f·(1 − 2·row/3)/2`; Arc Lower and Arc Upper bend only the
+    /// bottom (`× row/3`, downward) or top (`× (1 − row/3)`) edge; Bulge
+    /// bends the top up and the bottom down (`× (1 − 2·row/3)`); Shell
+    /// Lower and Shell Upper are Arc Lower and Arc Upper with the side
+    /// columns drawn in by `f·w/6` on the bent edge; Flag is an S along
+    /// every row of height `√3·f·h` (columns 1 up, 2 down); Wave is Flag
+    /// with rows 1 and 2 also slid `±f·w/6`; Fish is Flag with the bottom
+    /// rows mirrored (`× (1 − 2·row/3)`); Rise lifts the right two columns
+    /// by `f·h`; Fisheye pushes the four edge midpoints out by a third of
+    /// their span, Inflate also the four inner points by a sixth, and
+    /// Squeeze pulls the side midpoints in while pushing the top and
+    /// bottom ones out; Twist rotates every point about the centre by
+    /// `f·90°` scaled by its taxicab distance from the centre (corners
+    /// full, inner points a third). Horizontal distortion then scales
+    /// each column's height about the centre by `1 + H/100·(column/3 −
+    /// 1/2)` and Vertical each row's width by `1 + V/100·(row/3 − 1/2)`.
+    /// Custom at Bend 0 with no distortion is the identity mesh. Errors
+    /// for an out-of-range or non-finite value, a layer with no opaque
+    /// pixels, one under two pixels wide or tall, or an unknown layer.
+    pub fn warp_mesh(
+        &self,
+        id: LayerId,
+        style: WarpStyle,
+        bend: f32,
+        horizontal: f32,
+        vertical: f32,
+    ) -> Result<WarpMesh, String> {
+        if !(bend.is_finite() && (-100.0..=100.0).contains(&bend)) {
+            return Err("Warp's Bend must be between −100 and 100 percent.".to_string());
+        }
+        for value in [horizontal, vertical] {
+            if !(value.is_finite() && (-100.0..=100.0).contains(&value)) {
+                return Err(
+                    "Warp's Horizontal and Vertical distortion must be between −100 and 100 percent."
+                        .to_string(),
+                );
+            }
+        }
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to warp.".to_string())?;
+        if bounds.x1 - bounds.x0 < 2 || bounds.y1 - bounds.y0 < 2 {
+            return Err("Warp needs a layer at least two pixels wide and tall.".to_string());
+        }
+        let mut mesh = WarpMesh::identity(bounds);
+        let w = (bounds.x1 - bounds.x0 - 1) as f32;
+        let h = (bounds.y1 - bounds.y0 - 1) as f32;
+        let (cx, cy) = (bounds.x0 as f32 + w / 2.0, bounds.y0 as f32 + h / 2.0);
+        let f = bend / 100.0;
+        let arch = 4.0 / 3.0 * f * h;
+        let flag = 3f32.sqrt() * f * h;
+        for (n, point) in mesh.points.iter_mut().enumerate() {
+            let (i, j) = (n % 4, n / 4);
+            let (ii, jj) = (i as f32 / 3.0, j as f32 / 3.0);
+            let k = if i == 1 || i == 2 { 1.0 } else { 0.0 };
+            let s = match i {
+                1 => 1.0,
+                2 => -1.0,
+                _ => 0.0,
+            };
+            let side = match i {
+                0 => 1.0,
+                3 => -1.0,
+                _ => 0.0,
+            };
+            let row_middle = j == 1 || j == 2;
+            let row_s = match j {
+                1 => 1.0,
+                2 => -1.0,
+                _ => 0.0,
+            };
+            let (mut dx, mut dy) = (0.0f32, 0.0f32);
+            match style {
+                WarpStyle::Custom => {}
+                WarpStyle::Arc => {
+                    dy = -arch * k;
+                    dx = (ii - 0.5) * w * f * (1.0 - 2.0 * jj) / 2.0;
+                }
+                WarpStyle::ArcLower => dy = arch * k * jj,
+                WarpStyle::ArcUpper => dy = -arch * k * (1.0 - jj),
+                WarpStyle::Arch => dy = -arch * k,
+                WarpStyle::Bulge => dy = -arch * k * (1.0 - 2.0 * jj),
+                WarpStyle::ShellLower => {
+                    dy = arch * k * jj;
+                    dx = f * w / 6.0 * jj * side;
+                }
+                WarpStyle::ShellUpper => {
+                    dy = -arch * k * (1.0 - jj);
+                    dx = f * w / 6.0 * (1.0 - jj) * side;
+                }
+                WarpStyle::Flag => dy = -flag * s,
+                WarpStyle::Wave => {
+                    dy = -flag * s;
+                    dx = f * w / 6.0 * row_s;
+                }
+                WarpStyle::Fish => dy = -flag * s * (1.0 - 2.0 * jj),
+                WarpStyle::Rise => {
+                    if i >= 2 {
+                        dy = -f * h;
+                    }
+                }
+                WarpStyle::Fisheye | WarpStyle::Inflate | WarpStyle::Squeeze => {
+                    let inward = style == WarpStyle::Squeeze;
+                    if row_middle && (i == 0 || i == 3) {
+                        dx = f * w / 3.0 * if inward { side } else { -side };
+                    }
+                    if k == 1.0 && (j == 0 || j == 3) {
+                        dy = f * h / 3.0 * if j == 0 { -1.0 } else { 1.0 };
+                    }
+                    if style == WarpStyle::Inflate && k == 1.0 && row_middle {
+                        dx = f * w / 6.0 * if i == 1 { -1.0 } else { 1.0 };
+                        dy = f * h / 6.0 * if j == 1 { -1.0 } else { 1.0 };
+                    }
+                }
+                WarpStyle::Twist => {
+                    let angle =
+                        f * std::f32::consts::FRAC_PI_2 * ((ii - 0.5).abs() + (jj - 0.5).abs());
+                    let (px, py) = (ii * w - w / 2.0, jj * h - h / 2.0);
+                    let (sin, cos) = angle.sin_cos();
+                    dx = px * cos - py * sin - px;
+                    dy = px * sin + py * cos - py;
+                }
+            }
+            let x = bounds.x0 as f32 + ii * w + dx;
+            let y = bounds.y0 as f32 + jj * h + dy;
+            let y = cy + (y - cy) * (1.0 + horizontal / 100.0 * (ii - 0.5));
+            let x = cx + (x - cx) * (1.0 + vertical / 100.0 * (jj - 0.5));
+            *point = [x, y];
+        }
+        Ok(mesh)
+    }
+
+    /// Edit > Transform > Warp (and Free Transform's Warp mode): bends
+    /// layer `id` through `mesh`, a bicubic Bézier surface whose sixteen
+    /// control points started as the identity mesh over the layer's
+    /// opaque bounds ([`Self::warp_mesh`]) and were dragged. Every canvas
+    /// pixel is inverse-mapped: Newton's method finds the surface
+    /// parameters `(u, v)` the mesh sends to it, starting from where the
+    /// pixel sits in the identity mesh, and the pixel reads the layer
+    /// nearest-neighbour at the identity mesh's point for those
+    /// parameters — off the canvas, or where the surface folds so that
+    /// no parameters are found, transparent. The identity mesh is the
+    /// identity and a uniformly shifted mesh a move; Photoshop's
+    /// bicubic resampling, its 3×3 and 5×5 split grids, and the
+    /// on-canvas handles are documented scope cuts. Errors for a
+    /// non-finite control point, a layer with no opaque pixels or under
+    /// two pixels wide or tall, or a locked or unknown layer. Not
+    /// recorded for Transform Again.
+    pub fn warp(&mut self, id: LayerId, mesh: &WarpMesh) -> Result<Option<Rect>, String> {
+        if mesh.points.iter().flatten().any(|v| !v.is_finite()) {
+            return Err("Warp's control points must be finite coordinates.".to_string());
+        }
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let bounds = self
+            .layer_bounds(id)?
+            .ok_or_else(|| "The layer has no opaque pixels to warp.".to_string())?;
+        if bounds.x1 - bounds.x0 < 2 || bounds.y1 - bounds.y0 < 2 {
+            return Err("Warp needs a layer at least two pixels wide and tall.".to_string());
+        }
+        let mesh = *mesh;
+        let (x0, y0) = (bounds.x0 as f64, bounds.y0 as f64);
+        let w = (bounds.x1 - bounds.x0 - 1) as f64;
+        let h = (bounds.y1 - bounds.y0 - 1) as f64;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let (x, y) = (col as f64, row as f64);
+            let Some((u, v)) = mesh.invert(x, y, (x - x0) / w, (y - y0) / h) else {
+                return [0; CHANNELS];
+            };
+            let sx = (x0 + u * w).round() as i64;
+            let sy = (y0 + v * h).round() as i64;
             if sx < 0 || sy < 0 || sx >= width || sy >= height {
                 return [0; CHANNELS];
             }
@@ -42473,5 +42776,156 @@ mod tests {
         )
         .unwrap();
         assert_eq!(pixel(&doc, id, 1, 4), [255, 0, 0, 255]);
+    }
+
+    fn identity_mesh_4x4() -> WarpMesh {
+        let mut points = [[0.0f32; 2]; 16];
+        for (n, point) in points.iter_mut().enumerate() {
+            *point = [(n % 4) as f32, (n / 4) as f32];
+        }
+        WarpMesh { points }
+    }
+
+    #[test]
+    fn warp_with_the_identity_mesh_is_the_identity_and_a_shifted_mesh_a_move() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        let mesh = identity_mesh_4x4();
+        assert_eq!(
+            doc.warp_mesh(id, WarpStyle::Custom, 0.0, 0.0, 0.0).unwrap(),
+            mesh
+        );
+        doc.warp(id, &mesh).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        let shifted = WarpMesh {
+            points: mesh.points.map(|[x, y]| [x + 1.0, y]),
+        };
+        doc.warp(id, &shifted).unwrap();
+        let (mut moved, id_b) = ramped_4x4();
+        moved.translate(id_b, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, moved.layers()[0].pixels);
+    }
+
+    #[test]
+    fn warp_stretched_mesh_reads_the_layer_at_two_thirds_speed() {
+        // Control x scaled by 1.5: output column c reads source c / 1.5,
+        // so 0, 0.667 → 1, 1.333 → 1, 2.
+        let (mut doc, id) = ramped_4x4();
+        let mesh = WarpMesh {
+            points: identity_mesh_4x4().points.map(|[x, y]| [x * 1.5, y]),
+        };
+        doc.warp(id, &mesh).unwrap();
+        for row in 0..4u32 {
+            let base = row as u8 * 40 + 10;
+            assert_eq!(pixel(&doc, id, 0, row)[0], base);
+            assert_eq!(pixel(&doc, id, 1, row)[0], base + 10);
+            assert_eq!(pixel(&doc, id, 2, row)[0], base + 10);
+            assert_eq!(pixel(&doc, id, 3, row)[0], base + 20);
+        }
+    }
+
+    #[test]
+    fn warp_arch_at_bend_25_lifts_the_middle_columns_by_a_row() {
+        // Bend 25 on a three-pixel-tall span lifts columns 1 and 2 by
+        // exactly one pixel: y(u, v) = 3v − 3u(1 − u), so those columns read
+        // v = row + 2/3 → the row below, and the last row runs off the canvas.
+        let (mut doc, id) = ramped_4x4();
+        let mesh = doc.warp_mesh(id, WarpStyle::Arch, 25.0, 0.0, 0.0).unwrap();
+        for j in 0..4 {
+            assert_eq!(mesh.points[j * 4], [0.0, j as f32]);
+            assert_eq!(mesh.points[j * 4 + 1], [1.0, j as f32 - 1.0]);
+            assert_eq!(mesh.points[j * 4 + 2], [2.0, j as f32 - 1.0]);
+            assert_eq!(mesh.points[j * 4 + 3], [3.0, j as f32]);
+        }
+        doc.warp(id, &mesh).unwrap();
+        let reds: Vec<u8> = (0..16).map(|n| pixel(&doc, id, n % 4, n / 4)[0]).collect();
+        #[rustfmt::skip]
+        assert_eq!(reds, vec![
+            10, 60, 70, 40,
+            50, 100, 110, 80,
+            90, 140, 150, 120,
+            130, 0, 0, 160,
+        ]);
+        assert_eq!(pixel(&doc, id, 1, 3), [0, 0, 0, 0]);
+        assert_eq!(pixel(&doc, id, 3, 3), [160, 0, 0, 255]);
+    }
+
+    #[test]
+    fn warp_styles_place_the_control_points_as_documented() {
+        let (doc, id) = ramped_4x4();
+        let close =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4;
+        // Flag 50: an S along every row of height √3 · 0.5 · 3.
+        let flag = doc.warp_mesh(id, WarpStyle::Flag, 50.0, 0.0, 0.0).unwrap();
+        assert!(close(flag.points[1], [1.0, -2.598_076]));
+        assert!(close(flag.points[2], [2.0, 2.598_076]));
+        assert!(close(flag.points[13], [1.0, 3.0 - 2.598_076]));
+        assert_eq!(flag.points[0], [0.0, 0.0]);
+        // Rise 100: the right two columns lifted by the whole height.
+        let rise = doc.warp_mesh(id, WarpStyle::Rise, 100.0, 0.0, 0.0).unwrap();
+        assert_eq!(rise.points[2], [2.0, -3.0]);
+        assert_eq!(rise.points[15], [3.0, 0.0]);
+        assert_eq!(rise.points[12], [0.0, 3.0]);
+        // Fisheye 100: edge midpoints pushed out by a third of the span.
+        let fisheye = doc
+            .warp_mesh(id, WarpStyle::Fisheye, 100.0, 0.0, 0.0)
+            .unwrap();
+        assert_eq!(fisheye.points[4], [-1.0, 1.0]);
+        assert_eq!(fisheye.points[1], [1.0, -1.0]);
+        assert_eq!(fisheye.points[3], [3.0, 0.0]);
+        assert_eq!(fisheye.points[5], [1.0, 1.0]);
+        // Bend 0 of any style is the identity mesh.
+        let flat = doc.warp_mesh(id, WarpStyle::Twist, 0.0, 0.0, 0.0).unwrap();
+        assert_eq!(flat, identity_mesh_4x4());
+        // Horizontal distortion 100: column 0 halves its height about the
+        // centre, column 3 grows half again.
+        let h = doc
+            .warp_mesh(id, WarpStyle::Custom, 0.0, 100.0, 0.0)
+            .unwrap();
+        assert_eq!(h.points[0], [0.0, 0.75]);
+        assert_eq!(h.points[12], [0.0, 2.25]);
+        assert_eq!(h.points[3], [3.0, -0.75]);
+        let v = doc
+            .warp_mesh(id, WarpStyle::Custom, 0.0, 0.0, 100.0)
+            .unwrap();
+        assert_eq!(v.points[0], [0.75, 0.0]);
+        assert_eq!(v.points[12], [-0.75, 3.0]);
+    }
+
+    #[test]
+    fn warp_refuses_a_bad_mesh_bend_or_layer() {
+        let (mut doc, id) = ramped_4x4();
+        let before = doc.layers()[0].pixels.clone();
+        let mut bad = identity_mesh_4x4();
+        bad.points[5] = [f32::NAN, 1.0];
+        assert!(doc.warp(id, &bad).unwrap_err().contains("finite"));
+        assert!(doc
+            .warp_mesh(id, WarpStyle::Arc, 101.0, 0.0, 0.0)
+            .unwrap_err()
+            .contains("Bend"));
+        assert!(doc
+            .warp_mesh(id, WarpStyle::Arc, 0.0, 0.0, -101.0)
+            .unwrap_err()
+            .contains("distortion"));
+        assert!(doc.warp(999, &identity_mesh_4x4()).is_err());
+        let empty = doc.add_layer("empty", &[0; 64], 4, 4).unwrap();
+        assert!(doc
+            .warp(empty, &identity_mesh_4x4())
+            .unwrap_err()
+            .contains("opaque"));
+        let mut narrow = [0u8; 64];
+        narrow[3] = 255;
+        narrow[19] = 255;
+        let thin = doc.add_layer("thin", &narrow, 4, 4).unwrap();
+        assert!(doc
+            .warp_mesh(thin, WarpStyle::Custom, 0.0, 0.0, 0.0)
+            .unwrap_err()
+            .contains("two pixels"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .warp(id, &identity_mesh_4x4())
+            .unwrap_err()
+            .contains("locked"));
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 }

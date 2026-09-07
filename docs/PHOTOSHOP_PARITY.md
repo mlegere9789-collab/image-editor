@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 421.**
+**618 distinct capabilities tracked. Currently shipped: 423.**
 
 ## PART I — EVERY TOOL
 
@@ -222,14 +222,14 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Skew (`skew`, horizontal then vertical shear angles (−89..89°) about the canvas centre, each sliding rows/columns by `tan(angle)` pixels per pixel of distance from the centre — `rotate`/`scale`'s own inverse-mapped nearest-neighbour resampling and transparent fill. Applied as two sequential determinant-1 shears rather than Photoshop's single simultaneous affine, which folds flat when `tan(h)·tan(v) = 1` — a documented difference — see README Phase 138)
 - [x] Distort (`distort`, the layer's four corners sent to four typed `[x, y]` positions, everything between warped by the projective homography those correspondences define — solved by an 8×8 Gaussian elimination in `f64`, inverse-mapped with the Transform family's nearest-neighbour resampling and transparent fill; collinear/coincident corners error. Handles and bicubic resampling are documented scope cuts — see README Phase 141)
 - [x] Perspective (`perspective`, `distort` with the corners moved in mirrored pairs — a pixel inset on both ends of the top (positive `horizontal`) or bottom (negative) edge, and of the left (positive `vertical`) or right (negative) edge — the way Photoshop's own Perspective slides a dragged corner's neighbour the opposite way; a collapsed edge errors as a degenerate quad — see README Phase 142)
-- [ ] Warp
+- [x] Warp (`warp` / `warp_mesh`, a 4×4 control-point bicubic Bézier mesh over the layer's opaque bounds, inverse-mapped per pixel by Newton's method and nearest-neighbour resampled — with all fifteen Warp Style presets (Arc … Twist) as documented control-point placements driven by Bend, and the Horizontal/Vertical distortion tilts; on-canvas handles, bicubic resampling, and the 3×3/5×5 split grids are documented scope cuts — see README Phase 243)
 - [x] Rotate 180°
 - [x] Rotate 90° Clockwise (a document-level operation, not per-layer — resizes the whole document and every layer in it together, so the "every layer stays document-sized" invariant holds throughout; see Phase 17 in README.md)
 - [x] Rotate 90° Counter Clockwise (same implementation as Rotate 90° Clockwise, opposite direction)
 - [x] Flip Horizontal
 - [x] Flip Vertical
 - [x] Transform Again (`transform_again`, repeats the most recent non-neutral `rotate`/`scale`/`skew`/`free_transform` on any layer as a `free_transform` with the same values; the remembered transform travels with the document through undo, so an undone transform is forgotten as in Photoshop — see README Phase 140)
-- [ ] Free Transform + Warp Mode
+- [x] Free Transform + Warp Mode (the Free Transform dialog's **Warp** button switches to the Warp dialog on the same layer — see README Phase 243)
 - [x] Reference Point Locator (`FreeTransform.reference`: one of the nine `ReferencePoint`s of the layer's opaque bounds, which scale, rotate, and skew now pivot on through `scale_about` / `rotate_about` / `skew_about`; `None` keeps the canvas centre — see README Phase 236)
 - [x] Relative Positioning (`FreeTransform.relative`: the X/Y Position is a delta the reference point moves by — see README Phase 236)
 - [x] X Position (`FreeTransform.position.0`: where the reference point lands, applied with Move X as the final move — see README Phase 236)

@@ -217,6 +217,28 @@ export type PerspectiveAuto =
   | { kind: "both" }
   | { kind: "edge"; plane: number; edge: number };
 
+/** Mirrors `WarpMesh` / `WarpStyle` in src-tauri/src/document.rs: Edit >
+ * Transform > Warp's sixteen control points, row-major, and its Warp Style
+ * presets. */
+export type WarpMesh = { points: [number, number][] };
+export type WarpStyle =
+  | "custom"
+  | "arc"
+  | "arcLower"
+  | "arcUpper"
+  | "arch"
+  | "bulge"
+  | "shellLower"
+  | "shellUpper"
+  | "flag"
+  | "wave"
+  | "fish"
+  | "rise"
+  | "fisheye"
+  | "inflate"
+  | "squeeze"
+  | "twist";
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness. */
 export type Proof = "protanopia" | "deuteranopia";

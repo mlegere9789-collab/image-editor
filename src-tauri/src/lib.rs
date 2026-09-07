@@ -1331,6 +1331,32 @@ fn perspective_auto(
     document::perspective_auto(&planes, auto)
 }
 
+/// Edit > Transform > Warp on layer `id` through its dragged mesh.
+#[tauri::command]
+fn warp(
+    state: State<'_, AppState>,
+    id: LayerId,
+    mesh: document::WarpMesh,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.warp(id, &mesh))
+}
+
+/// Warp's starting mesh for layer `id`: the Warp Style at `bend` with the
+/// Horizontal and Vertical distortion. Read-only.
+#[tauri::command]
+fn warp_mesh(
+    state: State<'_, AppState>,
+    id: LayerId,
+    style: document::WarpStyle,
+    bend: f32,
+    horizontal: f32,
+    vertical: f32,
+) -> Result<document::WarpMesh, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.warp_mesh(id, style, bend, horizontal, vertical)
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -4733,6 +4759,8 @@ pub fn run() {
             transform_to_bounds,
             perspective_warp,
             perspective_auto,
+            warp,
+            warp_mesh,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

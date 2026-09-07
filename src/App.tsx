@@ -32,6 +32,8 @@ import type {
   Palette,
   PerspectiveAuto,
   PerspectivePlane,
+  WarpMesh,
+  WarpStyle,
   Proof,
   ReferencePoint,
   RefineEdge,
@@ -420,6 +422,15 @@ export default function App() {
   const [showPerspectiveWarp, setShowPerspectiveWarp] = useState(false);
   const [warpPlanes, setWarpPlanes] = useState<PerspectivePlane[]>([]);
   const [warpMode, setWarpMode] = useState<"layout" | "warp">("layout");
+  // Edit > Transform > Warp: the Warp Style options and the dragged mesh.
+  const [showWarpDialog, setShowWarpDialog] = useState(false);
+  const [warpStyle, setWarpStyle] = useState<WarpStyle>("custom");
+  const [warpBend, setWarpBend] = useState(0);
+  const [warpDistortH, setWarpDistortH] = useState(0);
+  const [warpDistortV, setWarpDistortV] = useState(0);
+  const [warpMesh, setWarpMesh] = useState<WarpMesh | null>(null);
+  const [warpDrag, setWarpDrag] = useState<number | null>(null);
+  const warpSvgRef = useRef<SVGSVGElement | null>(null);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1833,6 +1844,103 @@ export default function App() {
     await runCommand("perspective_warp", { id: selectedId, planes: warpPlanes });
     setShowPerspectiveWarp(false);
   }, [runCommand, selectedId, warpPlanes]);
+
+  const loadWarpMesh = useCallback(
+    async (style: WarpStyle, bend: number, horizontal: number, vertical: number) => {
+      if (selectedId === null) return;
+      try {
+        const mesh = await invoke<WarpMesh>("warp_mesh", { id: selectedId, style, bend, horizontal, vertical });
+        setWarpMesh(mesh);
+      } catch (err) {
+        setError(String(err));
+      }
+    },
+    [selectedId],
+  );
+
+  const openWarpDialog = useCallback(() => {
+    setWarpStyle("custom");
+    setWarpBend(0);
+    setWarpDistortH(0);
+    setWarpDistortV(0);
+    setWarpDrag(null);
+    setShowFreeTransformDialog(false);
+    void loadWarpMesh("custom", 0, 0, 0);
+    setShowWarpDialog(true);
+  }, [loadWarpMesh]);
+
+  const setWarpOption = useCallback(
+    (style: WarpStyle, bend: number, horizontal: number, vertical: number) => {
+      setWarpStyle(style);
+      setWarpBend(bend);
+      setWarpDistortH(horizontal);
+      setWarpDistortV(vertical);
+      void loadWarpMesh(style, bend, horizontal, vertical);
+    },
+    [loadWarpMesh],
+  );
+
+  const setWarpPoint = useCallback((index: number, x: number, y: number) => {
+    setWarpStyle("custom");
+    setWarpMesh((mesh) =>
+      mesh ? { points: mesh.points.map((p, i) => (i === index ? [x, y] : p)) } : mesh,
+    );
+  }, []);
+
+  // A pointer position inside the mesh preview, in document pixel-index
+  // coordinates (the SVG's viewBox is the canvas plus a margin).
+  const warpSvgPoint = useCallback((event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
+    const svg = warpSvgRef.current;
+    if (!svg) return null;
+    const box = svg.getBoundingClientRect();
+    const view = svg.viewBox.baseVal;
+    if (box.width === 0 || box.height === 0) return null;
+    return [
+      Math.round((view.x + ((event.clientX - box.left) / box.width) * view.width) * 2) / 2,
+      Math.round((view.y + ((event.clientY - box.top) / box.height) * view.height) * 2) / 2,
+    ];
+  }, []);
+
+  const applyWarp = useCallback(async () => {
+    if (selectedId === null || !warpMesh) return;
+    await runCommand("warp", { id: selectedId, mesh: warpMesh });
+    setShowWarpDialog(false);
+  }, [runCommand, selectedId, warpMesh]);
+
+  // The mesh's iso-curves at u, v ∈ {0, ⅓, ⅔, 1}: each is itself a cubic
+  // Bézier whose control points are the Bernstein blend of the grid's.
+  const warpCurves = (mesh: WarpMesh): string[] => {
+    const bern = (t: number) => {
+      const s = 1 - t;
+      return [s * s * s, 3 * t * s * s, 3 * t * t * s, t * t * t];
+    };
+    const path = (pts: [number, number][]) =>
+      `M ${pts[0][0]} ${pts[0][1]} C ${pts[1][0]} ${pts[1][1]}, ${pts[2][0]} ${pts[2][1]}, ${pts[3][0]} ${pts[3][1]}`;
+    const curves: string[] = [];
+    for (const t of [0, 1 / 3, 2 / 3, 1]) {
+      const b = bern(t);
+      const row: [number, number][] = [0, 1, 2, 3].map((i) => {
+        let x = 0;
+        let y = 0;
+        for (let j = 0; j < 4; j += 1) {
+          x += b[j] * mesh.points[j * 4 + i][0];
+          y += b[j] * mesh.points[j * 4 + i][1];
+        }
+        return [x, y];
+      });
+      const column: [number, number][] = [0, 1, 2, 3].map((j) => {
+        let x = 0;
+        let y = 0;
+        for (let i = 0; i < 4; i += 1) {
+          x += b[i] * mesh.points[j * 4 + i][0];
+          y += b[i] * mesh.points[j * 4 + i][1];
+        }
+        return [x, y];
+      });
+      curves.push(path(row), path(column));
+    }
+    return curves;
+  };
 
   const applyDistort = useCallback(async () => {
     if (selectedId === null) return;
@@ -5210,6 +5318,14 @@ export default function App() {
             title="Edit > Perspective Warp: lay out planes, then drag their corners"
           >
             Perspective Warp…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openWarpDialog}
+            disabled={busy || !canPaint}
+            title="Edit > Transform > Warp: bend the layer through a 4×4 mesh or a Warp Style"
+          >
+            Warp…
           </button>
           <button
             className="button button--quiet"
@@ -10536,6 +10652,14 @@ export default function App() {
               >
                 Cancel
               </button>
+              <button
+                className="button button--quiet"
+                onClick={openWarpDialog}
+                disabled={busy}
+                title="Switch between free transform and warp modes"
+              >
+                Warp
+              </button>
               <button className="button" onClick={applyFreeTransform} disabled={busy}>
                 Apply
               </button>
@@ -10617,6 +10741,130 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyPerspectiveWarp} disabled={busy || warpPlanes.length === 0} title="Commit Perspective Warp">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showWarpDialog && (
+        <div className="modal-overlay" onClick={() => setShowWarpDialog(false)} role="presentation">
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Warp"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Transform &gt; Warp</h2>
+            <p className="modal__hint">
+              Pick a Warp Style and its Bend, or drag the sixteen control points of the
+              mesh over the layer&apos;s bounds (Custom). Horizontal and Vertical
+              distortion tilt the mesh in perspective.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Warp</span>
+              <select
+                value={warpStyle}
+                onChange={(event) =>
+                  setWarpOption(event.target.value as WarpStyle, warpBend, warpDistortH, warpDistortV)
+                }
+              >
+                <option value="custom">Custom</option>
+                <option value="arc">Arc</option>
+                <option value="arcLower">Arc Lower</option>
+                <option value="arcUpper">Arc Upper</option>
+                <option value="arch">Arch</option>
+                <option value="bulge">Bulge</option>
+                <option value="shellLower">Shell Lower</option>
+                <option value="shellUpper">Shell Upper</option>
+                <option value="flag">Flag</option>
+                <option value="wave">Wave</option>
+                <option value="fish">Fish</option>
+                <option value="rise">Rise</option>
+                <option value="fisheye">Fisheye</option>
+                <option value="inflate">Inflate</option>
+                <option value="squeeze">Squeeze</option>
+                <option value="twist">Twist</option>
+              </select>
+            </label>
+            {(
+              [
+                ["Bend %", warpBend, (v: number) => setWarpOption(warpStyle, v, warpDistortH, warpDistortV)],
+                ["H %", warpDistortH, (v: number) => setWarpOption(warpStyle, warpBend, v, warpDistortV)],
+                ["V %", warpDistortV, (v: number) => setWarpOption(warpStyle, warpBend, warpDistortH, v)],
+              ] as const
+            ).map(([label, value, set]) => (
+              <label className="control control--row" key={label}>
+                <span className="control__label">{label}</span>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={value}
+                  disabled={label === "Bend %" && warpStyle === "custom"}
+                  onChange={(event) => set(Number(event.target.value))}
+                />
+                <span className="control__value">{value}</span>
+              </label>
+            ))}
+            {warpMesh && document && (
+              <svg
+                ref={warpSvgRef}
+                className="warp-mesh"
+                viewBox={`${-document.width / 4} ${-document.height / 4} ${document.width * 1.5} ${document.height * 1.5}`}
+                onPointerMove={(event) => {
+                  if (warpDrag === null) return;
+                  const point = warpSvgPoint(event);
+                  if (point) setWarpPoint(warpDrag, point[0], point[1]);
+                }}
+                onPointerUp={() => setWarpDrag(null)}
+                onPointerLeave={() => setWarpDrag(null)}
+              >
+                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                {warpCurves(warpMesh).map((d, i) => (
+                  <path className="warp-mesh__curve" d={d} key={i} />
+                ))}
+                {warpMesh.points.map(([x, y], i) => (
+                  <circle
+                    className="warp-mesh__handle"
+                    cx={x}
+                    cy={y}
+                    r={Math.max(document.width, document.height) / 60}
+                    key={i}
+                    onPointerDown={(event) => {
+                      event.preventDefault();
+                      setWarpDrag(i);
+                    }}
+                  />
+                ))}
+              </svg>
+            )}
+            {warpMesh && (
+              <div className="warp-mesh__points">
+                {warpMesh.points.map(([x, y], i) => (
+                  <span className="control control--row" key={i}>
+                    <span className="control__label">
+                      {["TL", "T1", "T2", "TR", "L1", "C1", "C2", "R1", "L2", "C3", "C4", "R2", "BL", "B1", "B2", "BR"][i]}
+                    </span>
+                    <input type="number" step={0.5} value={x} onChange={(event) => setWarpPoint(i, Number(event.target.value), y)} />
+                    <input type="number" step={0.5} value={y} onChange={(event) => setWarpPoint(i, x, Number(event.target.value))} />
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setWarpOption("custom", 0, 0, 0)}
+                title="Reset the mesh to the layer's bounds"
+              >
+                Reset
+              </button>
+              <button className="button button--quiet" onClick={() => setShowWarpDialog(false)} title="Cancel">
+                Cancel
+              </button>
+              <button className="button" onClick={applyWarp} disabled={busy || !warpMesh} title="Commit Warp">
                 OK
               </button>
             </div>

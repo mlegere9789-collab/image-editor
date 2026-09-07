@@ -14427,6 +14427,78 @@ by hand instead. Every other layer of this project's quality bar
 **1455 Rust tests total** (1450 → 1455, 1448 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 243 — Warp and Free Transform's Warp mode
+
+Edit > Transform > Warp lands as a bicubic Bézier mesh, the surface
+Photoshop's own Warp grid is. A `WarpMesh` is sixteen control points,
+row-major, in pixel-index coordinates; `warp_mesh(id, style, bend,
+horizontal, vertical)` places them over the layer's opaque bounds — the
+identity mesh is the bounds' pixel-index rectangle divided in thirds —
+and `warp(id, mesh)` bends the layer through them. Every canvas pixel
+is inverse-mapped: Newton's method, started from where the pixel sits
+in the identity mesh, finds the surface parameters `(u, v)` the dragged
+mesh sends to it, and the pixel reads the layer nearest-neighbour at
+the identity mesh's point for those parameters; off the canvas, or
+where the surface folds so that no parameters converge, the pixel is
+transparent. Because a Bézier surface with an affine control grid is
+affine, the identity mesh is exactly the identity and a uniformly
+shifted mesh exactly a move. The fifteen Warp Styles are documented
+control-point placements driven by Bend (`f = bend / 100`): Arch lifts
+the two middle columns of every row by `4/3·f·h` so the top edge peaks
+at `f·h`; Arc adds a per-row stretch about the centre; Arc Lower, Arc
+Upper, Bulge, Shell Lower, and Shell Upper weight the same lift by row;
+Flag is an S of height `√3·f·h` along every row, Wave and Fish its
+slid and mirrored variants; Rise lifts the right two columns by `f·h`;
+Fisheye, Inflate, and Squeeze push or pull the edge midpoints by a
+third of their span; Twist rotates each point about the centre by
+`f·90°` scaled by its taxicab distance. The options bar's Horizontal
+and Vertical distortion then scale each column's height and each row's
+width about the centre. A **Warp…** dialog has the Warp Style list,
+Bend / H / V sliders, an SVG mesh preview whose iso-curves are drawn as
+the exact cubic Béziers they are and whose sixteen handles drag, and
+the sixteen point fields; the Free Transform dialog gains Photoshop's
+**Warp** button, switching to it on the same layer. Bicubic
+resampling, the 3×3 and 5×5 split grids, and on-canvas handles are
+documented scope cuts. Out-of-range Bend or distortion, a non-finite
+point, a layer with no opaque pixels or under two pixels wide or
+tall, and a locked or unknown layer are refused.
+
+**Verified two ways.** Five new `document.rs` tests, every mapping
+traced by hand and cross-checked by an independent Python port of the
+Bernstein evaluation and Newton step. On the 4×4 ramp the identity
+mesh is byte-identical to the layer and the mesh shifted right by one
+byte-identical to a one-pixel translate. A mesh whose x coordinates
+are scaled by `1.5` reads source column `c / 1.5`, so every row
+becomes its first, second, second, and third pixels (`10, 20, 20, 30`
+on row `0`). Arch at Bend `25` on a three-pixel span places columns
+`1` and `2` exactly one pixel up, so `y(u, v) = 3v − 3u(1 − u)` and
+those columns read `v = row + 2/3`, the row below: the ramp becomes
+`10 60 70 40 / 50 100 110 80 / 90 140 150 120 / 130 _ _ 160`, the two
+run-off pixels transparent. Flag at `50` puts column `1` at `y =
+−2.598076` (`√3 · 0.5 · 3`) and column `2` at `+2.598076`, Rise at
+`100` lifts columns `2` and `3` by `3`, Fisheye at `100` pushes the
+left midpoint to `x = −1` and the top to `y = −1` with corners and
+inner points fixed, Bend `0` of any style is the identity, and
+Horizontal distortion `100` sets column `0`'s top to `y = 0.75` and
+column `3`'s to `−0.75`. A NaN point, Bend `101`, distortion `−101`,
+an unknown layer, an empty layer, a one-column layer, and a locked
+layer are refused with the ramp untouched. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and ninety:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `npm
+run build`) is fully green.
+
+**1460 Rust tests total** (1455 → 1460, 1453 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -757,3 +757,43 @@ body {
   gap: 6px;
   justify-content: center;
 }
+
+/* Edit > Transform > Warp: the mesh preview, drawn in document pixel-index
+   coordinates with a margin of a quarter canvas on every side. */
+.warp-mesh {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  margin: 0.5rem 0;
+  background: var(--panel-bg, #1f1f24);
+  border: 1px solid var(--border, #3a3a44);
+  touch-action: none;
+}
+.warp-mesh__canvas {
+  fill: rgba(255, 255, 255, 0.08);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 0.5%;
+  vector-effect: non-scaling-stroke;
+}
+.warp-mesh__curve {
+  fill: none;
+  stroke: #7fb2ff;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.warp-mesh__handle {
+  fill: #ffffff;
+  stroke: #1f6fe0;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+.warp-mesh__points {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.warp-mesh__points input {
+  width: 4.5rem;
+}
