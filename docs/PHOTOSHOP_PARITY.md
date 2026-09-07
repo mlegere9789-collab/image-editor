@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 489.**
+**618 distinct capabilities tracked. Currently shipped: 490.**
 
 ## PART I — EVERY TOOL
 
@@ -78,7 +78,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] FOCUS AREA (`select_focus_area_with` / `focus_bits`: a pixel is in focus when the strongest Sobel edge within Spread pixels of it clears `255 · (100 − range) / 100`, combined with the selection by mode; Photoshop's Image Noise Level and Soften Edge are documented scope cuts — see README Phase 256)
 - [x] SKY SELECTION (`select_sky_with` / `sky_bits`: sky-coloured pixels — blue strongest and luma ≥ 80, or near-white clouds — joined 4-connected to the top edge, combined with the selection by mode; Photoshop's trained model is a documented scope cut — see README Phase 256)
 - [x] SUBJECT SELECTION (`select_subject_with`, the Object Selection finder over the whole canvas: the canvas edge's most common colour is the background and the largest connected thing that is not it is the subject — an explicit stand-in for Photoshop's neural detection — see README Phase 210)
-- [ ] SELECT PEOPLE
+- [x] SELECT PEOPLE (`select_people_with` / `people_bits`, the largest 4-connected group of skin-toned pixels by a classic, explainable RGB rule (Kovac, Solina & Peer 2003) — this project's own explicit stand-in for Photoshop's neural person detection, the same kind Object/Subject Selection and Sky Selection already use. Individual Person Selection, Person Components, and Hair Selection/Refine Hair (PART VII) are documented scope cuts, since they need real per-instance segmentation this heuristic cannot give — see README Phase 265)
 - [x] MODIFY > BORDER
 - [x] MODIFY > SMOOTH
 - [x] MODIFY > EXPAND

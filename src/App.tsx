@@ -6657,6 +6657,16 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("select_people", { id: selectedId, mode: selectionMode });
+            }}
+            disabled={busy || selectedId === null}
+            title="Select > People: the largest connected skin-toned region (this app's stand-in for neural person detection)"
+          >
+            Select People
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
               void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })

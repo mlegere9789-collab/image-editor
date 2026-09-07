@@ -7447,6 +7447,80 @@ impl Document {
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
+    /// Select > People's finder: this project's own stand-in for
+    /// Photoshop's neural person detection, the same kind of explicit
+    /// heuristic Object/Subject Selection and Sky Selection already use.
+    /// A pixel counts as skin-toned by a classic, explainable RGB rule
+    /// (Kovac, Solina & Peer 2003's daylight rule): red the strongest
+    /// channel and clearly ahead of both green and blue, with the three
+    /// channels spread wide enough to rule out grey.
+    fn is_skin_tone(r: u8, g: u8, b: u8) -> bool {
+        let (r, g, b) = (i32::from(r), i32::from(g), i32::from(b));
+        let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+        r > 95 && g > 40 && b > 20 && max - min > 15 && (r - g).abs() > 15 && r > g && r > b
+    }
+
+    /// Select > People's finder: the largest 4-connected group of
+    /// skin-toned pixels ([`Self::is_skin_tone`]) on layer `id`, one flag
+    /// per pixel — Individual Person Selection, Person Components, and
+    /// Hair Selection/Refine Hair are documented scope cuts, since they
+    /// need real per-instance segmentation this heuristic cannot give.
+    /// Errors for an unknown layer.
+    pub fn people_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
+        let layer = self.layer(id)?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let skinlike: Vec<bool> = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| px[3] > 0 && Self::is_skin_tone(px[0], px[1], px[2]))
+            .collect();
+        let mut seen = vec![false; w * h];
+        let mut best: Vec<usize> = Vec::new();
+        for start in 0..skinlike.len() {
+            if !skinlike[start] || seen[start] {
+                continue;
+            }
+            seen[start] = true;
+            let mut stack = vec![start];
+            let mut component = Vec::new();
+            while let Some(idx) = stack.pop() {
+                component.push(idx);
+                let (x, y) = (idx % w, idx / w);
+                let neighbours = [
+                    (x > 0).then(|| idx - 1),
+                    (x + 1 < w).then(|| idx + 1),
+                    (y > 0).then(|| idx - w),
+                    (y + 1 < h).then(|| idx + w),
+                ];
+                for n in neighbours.into_iter().flatten() {
+                    if skinlike[n] && !seen[n] {
+                        seen[n] = true;
+                        stack.push(n);
+                    }
+                }
+            }
+            if component.len() > best.len() {
+                best = component;
+            }
+        }
+        let mut bits = vec![false; w * h];
+        for idx in best {
+            bits[idx] = true;
+        }
+        Ok(bits)
+    }
+
+    /// Select > People: [`Self::people_bits`] combined with the current
+    /// selection per `mode`. Errors when no person is found.
+    pub fn select_people_with(&mut self, mode: SelectionMode, id: LayerId) -> Result<(), String> {
+        let bits = self.people_bits(id)?;
+        if !bits.contains(&true) {
+            return Err("No person was found on the layer.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
     /// Object Selection's Object Finder: every object the finder can see
     /// on layer `id` — each 4-connected foreground component against the
     /// canvas edge's background colour within `tolerance`, as Mask All
@@ -50084,5 +50158,68 @@ mod tests {
             doc.layers()[0].pixels,
             vec![128, 128, 128, 255, 0, 0, 0, 128]
         );
+    }
+
+    #[test]
+    fn is_skin_tone_accepts_the_classic_daylight_rule_and_rejects_clear_non_skin() {
+        assert!(Document::is_skin_tone(200, 150, 120));
+        assert!(Document::is_skin_tone(220, 170, 140));
+        assert!(!Document::is_skin_tone(255, 0, 0)); // green too low
+        assert!(!Document::is_skin_tone(255, 255, 255)); // red not ahead of green
+        assert!(!Document::is_skin_tone(128, 128, 128)); // grey: no spread
+        assert!(!Document::is_skin_tone(0, 0, 255)); // red too low
+        assert!(!Document::is_skin_tone(50, 100, 150)); // red too low
+    }
+
+    #[test]
+    fn people_bits_finds_the_largest_connected_skin_toned_region() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[vec![skin, skin, bg, skin, skin, skin]]);
+        assert_eq!(
+            doc.people_bits(id).unwrap(),
+            vec![false, false, false, true, true, true]
+        );
+        // A skin-toned pixel with zero alpha does not count.
+        let transparent_skin = [200, 150, 120, 0];
+        let (doc2, id2) = row_doc(&[vec![transparent_skin, bg]]);
+        assert_eq!(doc2.people_bits(id2).unwrap(), vec![false, false]);
+    }
+
+    #[test]
+    fn select_people_with_selects_the_largest_region_in_new_mode() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (mut doc, id) = row_doc(&[vec![skin, skin, bg], vec![bg, bg, bg], vec![skin, bg, bg]]);
+        // The top-left 2x1 skin block (indices 0, 1) is a 4-connected
+        // component of size 2; the lone skin pixel at index 6 is not
+        // adjacent to it (index 3, directly above it, is background), so
+        // it is its own component of size 1. The block wins.
+        doc.select_people_with(SelectionMode::New, id).unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![true, true, false, false, false, false, false, false, false]
+        );
+    }
+
+    #[test]
+    fn select_people_with_combines_by_mode() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (mut doc, id) = row_doc(&[vec![skin, skin, bg]]);
+        doc.select_rectangle(2.0, 0.0, 3.0, 1.0).unwrap();
+        doc.select_people_with(SelectionMode::Add, id).unwrap();
+        assert_eq!(doc.selected_bits().unwrap(), vec![true, true, true]);
+    }
+
+    #[test]
+    fn select_people_with_errors_when_nothing_is_found_or_the_layer_is_unknown() {
+        let bg = [50, 80, 200, 255];
+        let (mut doc, id) = row_doc(&[vec![bg, bg]]);
+        assert!(doc
+            .select_people_with(SelectionMode::New, id)
+            .unwrap_err()
+            .contains("person"));
+        assert!(doc.select_people_with(SelectionMode::New, 999).is_err());
     }
 }

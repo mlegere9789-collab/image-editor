@@ -15844,6 +15844,59 @@ green.
 **1565 Rust tests total** (1560 → 1565, 1558 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 265 — Select People
+
+The last of this project's neural-detection stand-ins in the Selection
+tools: Object Selection's border-colour finder, Subject Selection's
+whole-canvas version of it, Sky Selection's blue/near-white flood fill,
+and now Select People's own explicit heuristic. `is_skin_tone` is the
+classic, published Kovac–Solina–Peer (2003) daylight rule: red the
+strongest channel, clearly ahead of both green and blue, with the three
+channels spread wide enough to rule out grey — no machine learning, no
+training data, just a documented RGB inequality anyone can check by
+hand. `people_bits` runs that rule over a layer and keeps only the
+largest 4-connected group of pixels it flags, the same "biggest blob
+wins" shape `sky_bits` and the Object Finder already use; a transparent
+pixel never counts, skin-toned or not. `select_people_with` combines
+that region with the current selection by mode, erroring when nothing
+skin-toned is found, matching `select_sky_with`'s own shape exactly.
+Individual Person Selection, Person Components, and Hair
+Selection/Refine Hair are documented scope cuts: they need Photoshop's
+real per-instance segmentation (telling one person from another, and
+finding hair specifically) that a single largest-blob heuristic cannot
+give.
+
+**Verified two ways.** Five new tests, hand-verified integer/boolean
+logic with no floating-point math, so hand-verification alone was
+judged sufficient per this project's own stated bar. `is_skin_tone`
+accepts two representative skin tones, `(200, 150, 120)` and
+`(220, 170, 140)`, and rejects pure red (green too low), pure white (red
+not ahead of green), mid grey (no channel spread), pure blue, and a
+dim blue-grey (red too low in both). On a six-pixel row
+`[skin, skin, bg, skin, skin, skin]`, `people_bits` picks the
+three-pixel run over the two-pixel one; a skin-toned pixel at alpha `0`
+never counts. A 3×3 grid with a 2-pixel skin block at the top-left and
+one lone skin pixel elsewhere (not 4-connected to the block — the pixel
+directly above it is background) selects only the block; adding to an
+existing one-pixel selection unions correctly; a layer with no
+skin-toned pixels at all is refused by name ("person"), and an unknown
+layer id is refused too. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and twelve: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The new Select People button was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1570 Rust tests total** (1565 → 1570, 1563 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

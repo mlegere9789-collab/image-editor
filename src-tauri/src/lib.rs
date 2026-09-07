@@ -3800,6 +3800,19 @@ fn select_sky(
     })
 }
 
+/// Select > People on layer `id`.
+#[tauri::command]
+fn select_people(
+    state: State<'_, AppState>,
+    id: LayerId,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_people_with(mode.unwrap_or(document::SelectionMode::New), id)?;
+        Ok(None)
+    })
+}
+
 /// Object Selection's Object Finder: the objects on layer `id` as boxes,
 /// largest first. Read-only; Refresh asks again.
 #[tauri::command]
@@ -5726,6 +5739,7 @@ pub fn run() {
             place_into_frame,
             select_focus_area,
             select_sky,
+            select_people,
             set_fill,
             add_vector_mask,
             remove_layer_mask,
