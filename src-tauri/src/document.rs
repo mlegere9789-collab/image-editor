@@ -6531,7 +6531,8 @@ impl Document {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
         // Neighbourhood tools read the layer as it stood before the stroke.
-        let snapshot = matches!(stroke, Stroke::Blur { .. }).then(|| layer.pixels.clone());
+        let snapshot = matches!(stroke, Stroke::Blur { .. } | Stroke::Sharpen { .. })
+            .then(|| layer.pixels.clone());
 
         let mut min_x = f32::INFINITY;
         let mut max_x = f32::NEG_INFINITY;
@@ -6661,6 +6662,25 @@ impl Document {
                             .zip(blurred.iter())
                         {
                             *slot = to_byte(lerp(to_unit(*slot), to_unit(target), amount));
+                        }
+                        continue;
+                    }
+                    Stroke::Sharpen { strength } => {
+                        let source = snapshot.as_ref().expect("taken above");
+                        let blurred = box_blur_at(
+                            source,
+                            width as usize,
+                            width as i64,
+                            height as i64,
+                            y0 + row as u32,
+                            x0 + col as u32,
+                            1,
+                        );
+                        let amount = f32::from(strength) / 100.0 * c;
+                        for (channel, slot) in layer.pixels[base..base + 3].iter_mut().enumerate() {
+                            let original = f32::from(source[base + channel]);
+                            let diff = original - f32::from(blurred[channel]);
+                            *slot = (original + diff * amount).round().clamp(0.0, 255.0) as u8;
                         }
                         continue;
                     }
@@ -11765,6 +11785,13 @@ pub enum Stroke {
     /// smears its own output along its path. Photoshop's Sample All Layers
     /// and its blend-mode option are documented scope cuts.
     Blur { strength: u8 },
+    /// The Sharpen tool: [`Stroke::Blur`]'s opposite — each covered pixel's
+    /// R, G, and B move away from the radius-1 box blur of the pre-stroke
+    /// layer by `strength` percent scaled by the brush's coverage, the
+    /// unsharp-mask formula `original + (original − blurred) · amount`
+    /// (clamped, no threshold) that Filter > Sharpen uses, with alpha left
+    /// alone. Reads the same pre-stroke snapshot as Blur.
+    Sharpen { strength: u8 },
 }
 
 /// Shortest distance from `(px, py)` to the segment `a`-`b`.
@@ -18125,6 +18152,83 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Blur { strength: 100 })
+            .is_err());
+    }
+
+    #[test]
+    fn sharpen_tool_at_full_strength_matches_sharpen_more() {
+        // original + (original - box blur): the corner 10 - 13 clamps to 0,
+        // the far corner 90 + 14 = 104, the centre stays 50.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
+            .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 24], vec![37, 50, 64], vec![77, 90, 104]]
+        );
+        let (mut filtered, id2) = ramped_3x3();
+        filtered.sharpen_more(id2).unwrap();
+        assert_eq!(doc.layers()[0].pixels, filtered.layers()[0].pixels);
+    }
+
+    #[test]
+    fn sharpen_tool_strength_scales_the_move() {
+        // Half strength: 10 - 6.5 = 3.5 -> 4 and 90 + 7 = 97; strength 0 is
+        // an identity.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 50 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 4);
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 97);
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 0 })
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn sharpen_tool_scales_with_the_brushs_soft_edge_coverage() {
+        // Pixel (1, 0) sits sqrt(0.5) from (1, 1): coverage 0.7929, so 20
+        // moves by -10 * 0.7929 to 12.07 -> 12.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 1.0, Stroke::Sharpen { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0)[0], 12);
+    }
+
+    #[test]
+    fn sharpen_tool_leaves_alpha_alone_and_respects_the_selection() {
+        let (mut doc, id) = depth_ramped_3x3();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [50, 0, 0, 128]);
+        assert_eq!(pixel(&doc, id, 0, 1)[3], 0);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 2, 2)[0], 104);
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+    }
+
+    #[test]
+    fn sharpen_tool_reads_the_pre_stroke_layer_and_rejects_a_locked_layer() {
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(
+            id,
+            &[(0.0, 0.0), (3.0, 3.0)],
+            3.0,
+            Stroke::Sharpen { strength: 100 },
+        )
+        .unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 10, 24], vec![37, 50, 64], vec![77, 90, 104]]
+        );
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .stroke(id, &[(1.0, 1.0)], 3.0, Stroke::Sharpen { strength: 100 })
             .is_err());
     }
 

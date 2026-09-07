@@ -102,6 +102,7 @@ export type Tool =
   | "burn"
   | "sponge"
   | "blur"
+  | "sharpen"
   | "patternStamp"
   | "magicWand"
   | "selectRect"

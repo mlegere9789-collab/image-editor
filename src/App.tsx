@@ -2955,8 +2955,8 @@ export default function App() {
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
         });
-      } else if (tool === "blur") {
-        void runCommand("blur_stroke", {
+      } else if (tool === "blur" || tool === "sharpen") {
+        void runCommand(tool === "blur" ? "blur_stroke" : "sharpen_stroke", {
           id: selectedId,
           points,
           radius: brushSize,
@@ -3738,6 +3738,15 @@ export default function App() {
             title="Blur: paint to soften (Flow sets the Strength)"
           >
             Blur
+          </button>
+          <button
+            className={`button button--quiet${tool === "sharpen" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "sharpen"}
+            onClick={() => setTool("sharpen")}
+            title="Sharpen: paint to sharpen (Flow sets the Strength)"
+          >
+            Sharpen
           </button>
           <button
             className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
@@ -4981,6 +4990,7 @@ export default function App() {
               tool === "burn" ||
               tool === "sponge" ||
               tool === "blur" ||
+              tool === "sharpen" ||
               tool === "patternStamp"
             }
             aria-label="Brush color"

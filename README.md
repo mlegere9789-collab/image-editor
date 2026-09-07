@@ -10415,6 +10415,51 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1060 Rust tests total** (1055 → 1060, 1053 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 164 — Sharpen tool
+
+`Stroke::Sharpen { strength }` is the Blur tool's opposite and shares
+its machinery: each covered pixel's R, G, and B move *away* from the
+radius-1 box blur of the pre-stroke layer by `strength` percent scaled
+by the brush's coverage — the unsharp-mask formula `original +
+(original − blurred) · amount`, rounded and clamped, with no threshold
+— which is exactly what Filter > Sharpen > Sharpen More computes at
+amount 1.0, so a full-strength stroke covering the whole layer is byte
+for byte that filter. Alpha is left alone (sharpening is a contrast
+operation, not a coverage one, as `unsharp_mask` already says), and the
+blur is read from the same pre-stroke snapshot Blur takes, so a drag
+never sharpens pixels it has already sharpened. A **Sharpen** tool
+button sits beside Blur; the Flow slider is its Strength. Photoshop's
+Sample All Layers, Protect Detail, and per-stroke blend mode are
+documented scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests, every byte
+cross-checked in Python (`f32` arithmetic, round half away from zero,
+clamp). A radius-3 dot at full strength on `ramped_3x3` gives `[[0,
+10, 24], [37, 50, 64], [77, 90, 104]]` — the corner's `10 − 13` clamping
+to `0`, the far corner's `90 + 14 = 104`, the centre unchanged — and
+the layer's bytes equal `sharpen_more`'s. Strength 50 gives `10 − 6.5 =
+3.5 → 4` and `90 + 7 = 97`; strength 0 is an identity. Pixel `(1, 0)`
+at the radius-1 edge coverage of `0.7929` moves `20` by `−10 × 0.7929`
+to `12.07 → 12`. On `depth_ramped_3x3` the centre keeps its alpha `128`
+(and its symmetric red `50`) and the transparent column stays
+transparent; a one-pixel selection at `(2, 2)` sharpens only it. A
+stroke dragged corner to corner gives the same grid as the dot, and a
+locked layer errors. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and eleven: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new tool's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1065 Rust tests total** (1060 → 1065, 1058 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

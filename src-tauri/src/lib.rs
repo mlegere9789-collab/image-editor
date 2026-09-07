@@ -1834,6 +1834,21 @@ fn blur_stroke(
     })
 }
 
+/// Sharpen tool: sharpen along `points` on layer `id` by `strength`
+/// percent. See [`paint_stroke`] for `points` and checkpointing.
+#[tauri::command]
+fn sharpen_stroke(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    strength: u8,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.stroke(id, &points, radius, Stroke::Sharpen { strength })
+    })
+}
+
 /// Pattern Stamp tool: paint the defined pattern along `points` on layer
 /// `id`, tiles aligned to the canvas origin. See [`paint_stroke`] for
 /// `points` and checkpointing.
@@ -3226,6 +3241,7 @@ pub fn run() {
             burn_stroke,
             sponge_stroke,
             blur_stroke,
+            sharpen_stroke,
             flood_fill,
             gradient_fill,
             invert_colors,
