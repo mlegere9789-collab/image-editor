@@ -14,6 +14,7 @@ type Props = {
   onToggleVisible: (id: number, visible: boolean) => void;
   onToggleLocked: (id: number, locked: boolean) => void;
   onToggleLinked: (id: number, linked: boolean) => void;
+  onToggleClipped: (id: number, clipped: boolean) => void;
   onGroupVisible: (index: number, visible: boolean) => void;
   onUngroup: (index: number) => void;
   onOpacity: (id: number, opacity: number) => void;
@@ -42,6 +43,7 @@ export default function LayerPanel({
   onToggleVisible,
   onToggleLocked,
   onToggleLinked,
+  onToggleClipped,
   groups,
   onGroupVisible,
   onUngroup,
@@ -154,6 +156,20 @@ export default function LayerPanel({
                 title={layer.linked ? "Linked: moves with the other linked layers" : "Not linked"}
                 onClick={(event) => event.stopPropagation()}
                 onChange={(event) => onToggleLinked(layer.id, event.target.checked)}
+              />
+              <input
+                type="checkbox"
+                className="layer__clip"
+                checked={layer.clipped}
+                disabled={disabled}
+                aria-label={`${layer.clipped ? "Release" : "Create"} clipping mask for ${layer.name}`}
+                title={
+                  layer.clipped
+                    ? "Clipped: shows only where the layer below has pixels"
+                    : "Not clipped to the layer below"
+                }
+                onClick={(event) => event.stopPropagation()}
+                onChange={(event) => onToggleClipped(layer.id, event.target.checked)}
               />
               <span className="layer__name" title={layer.name}>
                 {layer.name}

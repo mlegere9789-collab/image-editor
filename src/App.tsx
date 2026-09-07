@@ -16222,6 +16222,7 @@ export default function App() {
           }
           onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
           onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
+          onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
           groups={document?.groups ?? []}
           onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
           onUngroup={(index) => void runCommand("ungroup", { index })}

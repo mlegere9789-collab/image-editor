@@ -13068,6 +13068,53 @@ clippy --all-targets -- -D warnings`, `npm run build`) is fully green.
 **1325 Rust tests total** (1320 → 1325, 1318 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 217 — Clipping masks
+
+Every `Layer` gains a `clipped` flag — Layer > Create Clipping Mask —
+set by `set_clipped`, which refuses the bottom layer since it has
+nothing to clip to. The compositor now takes the layers as a slice
+rather than an iterator and, for a clipped layer, finds its *base* —
+the nearest unclipped layer below it in the slice — and scales the
+clipped layer's alpha by the base's own transparency at that pixel
+(not by the base's opacity), so the layer shows only where the base
+has pixels; stacked clipped layers share the one base beneath them,
+and releasing a middle layer makes it the base of those above. A new
+`Document::compositing_layers` supplies that slice: every visible,
+non-zero-opacity layer, except a clipped layer whose base does not
+itself take part, which Photoshop hides along with its base; the three
+flatteners and `composite_pixel` all build the list once per pass
+instead of filtering per pixel. The layer panel gains a clip checkbox
+beside link, through a `set_layer_clipped` command.
+
+**Verified two ways.** Five new `document.rs` tests through
+`composite_pixel`, every byte first computed in Python emulating the
+`f32` Normal composite. Opaque green clipped to a base that is red at
+`(0, 0)` and transparent at `(1, 0)` shows green at the first pixel
+and nothing at the second, and releasing it brings the green back.
+Clipped to a half-transparent red base (`alpha 128`) the green reads
+`[85, 170, 0, 192]` — its alpha scaled to `0.502`, composited over the
+red — and at `50%` layer opacity `[153, 102, 0, 160]`. Hiding the base
+hides the clipped layer too (no layer composites at all), while hiding
+the clipped layer leaves the red base. Blue clipped above clipped
+green shows blue only where the red base has pixels; releasing green
+makes it blue's base, so blue then shows everywhere. Clipping the
+bottom layer errors, as does an unknown one. All five passed on the
+first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+sixty-four: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The panel checkbox was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1330 Rust tests total** (1325 → 1330, 1323 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

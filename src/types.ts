@@ -30,6 +30,8 @@ export type LayerView = {
   locked: boolean;
   /** Layer > Link Layers: linked layers move together under the Move tool. */
   linked: boolean;
+  /** Layer > Create Clipping Mask: shows only where the layer below has pixels. */
+  clipped: boolean;
 };
 
 /** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase).

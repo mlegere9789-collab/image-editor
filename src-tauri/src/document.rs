@@ -36,6 +36,10 @@ pub struct Layer {
     /// tool — one link set for the whole document, as in Photoshop's
     /// original linking.
     pub linked: bool,
+    /// Layer > Create Clipping Mask: this layer shows only where the
+    /// nearest unclipped layer below it (its base) has pixels, its alpha
+    /// scaled by the base's transparency; a hidden base hides it too.
+    pub clipped: bool,
     /// Document-sized, non-premultiplied RGBA8.
     pub pixels: Vec<u8>,
 }
@@ -51,6 +55,7 @@ pub struct LayerView {
     pub blend_mode: BlendMode,
     pub locked: bool,
     pub linked: bool,
+    pub clipped: bool,
 }
 
 impl Layer {
@@ -63,6 +68,7 @@ impl Layer {
             blend_mode: self.blend_mode,
             locked: self.locked,
             linked: self.linked,
+            clipped: self.clipped,
         }
     }
 
@@ -3079,6 +3085,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         });
         Ok(id)
@@ -3114,6 +3121,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         });
         id
@@ -3175,6 +3183,38 @@ impl Document {
     pub fn set_linked(&mut self, id: LayerId, linked: bool) -> Result<(), String> {
         self.layer_mut(id)?.linked = linked;
         Ok(())
+    }
+
+    /// Layer > Create Clipping Mask / Release Clipping Mask for layer
+    /// `id`. The bottom layer has nothing below it to clip to and cannot
+    /// be clipped.
+    pub fn set_clipped(&mut self, id: LayerId, clipped: bool) -> Result<(), String> {
+        let index = self.index_of(id)?;
+        if clipped && index == 0 {
+            return Err("The bottom layer has no layer below it to clip to.".to_string());
+        }
+        self.layers[index].clipped = clipped;
+        Ok(())
+    }
+
+    /// The layers that take part in compositing, bottom to top: every
+    /// visible, non-zero-opacity layer, except a clipped layer whose base
+    /// — the nearest unclipped layer below it in the whole stack — does not
+    /// itself take part, which Photoshop hides along with its base.
+    pub fn compositing_layers(&self) -> Vec<&Layer> {
+        let mut base_shown = true;
+        let mut out = Vec::with_capacity(self.layers.len());
+        for layer in &self.layers {
+            if !layer.clipped {
+                base_shown = layer.contributes();
+                if base_shown {
+                    out.push(layer);
+                }
+            } else if base_shown && layer.contributes() {
+                out.push(layer);
+            }
+        }
+        out
     }
 
     /// The ids of every linked layer, bottom to top.
@@ -4183,6 +4223,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         });
         id
@@ -8282,6 +8323,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         });
 
@@ -8320,6 +8362,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         }];
         Ok(id)
@@ -8358,6 +8401,7 @@ impl Document {
             blend_mode: BlendMode::Normal,
             locked: false,
             linked: false,
+            clipped: false,
             pixels,
         };
         self.layers.splice(index - 1..=index, [merged]);
@@ -25088,6 +25132,86 @@ mod tests {
         // Green is on top now and ungrouped.
         assert_eq!(doc.group_at(0, 0), None);
         assert_eq!(doc.group_at(2, 2), None);
+    }
+
+    /// A 2×1 document: a base layer that is opaque red at (0, 0) and
+    /// transparent at (1, 0), under a solid opaque green layer.
+    fn clip_pair() -> (Document, LayerId, LayerId) {
+        let mut doc = Document::new(2, 1).unwrap();
+        let base = doc
+            .add_layer("base", &[255, 0, 0, 255, 0, 0, 0, 0], 2, 1)
+            .unwrap();
+        let top = doc
+            .add_layer("top", &solid(2, 1, [0, 255, 0, 255]), 2, 1)
+            .unwrap();
+        (doc, base, top)
+    }
+
+    fn composite_at(doc: &Document, x: u32) -> [u8; 4] {
+        crate::composite::composite_pixel(doc, x, 0)
+    }
+
+    #[test]
+    fn a_clipping_mask_shows_the_layer_only_where_its_base_has_pixels() {
+        let (mut doc, _base, top) = clip_pair();
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 255]);
+        doc.set_clipped(top, true).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 255, 0, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 0, 0, 0]);
+        assert!(doc.view().layers[1].clipped);
+        doc.set_clipped(top, false).unwrap();
+        assert_eq!(composite_at(&doc, 1), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn a_clipping_mask_scales_by_the_bases_transparency() {
+        // Python f32 model of the Normal composite: opaque green clipped
+        // to a half-transparent red base reads [85, 170, 0, 192]; at 50%
+        // layer opacity [153, 102, 0, 160].
+        let mut doc = Document::new(1, 1).unwrap();
+        let base = doc.add_layer("base", &[255, 0, 0, 128], 1, 1).unwrap();
+        let top = doc.add_layer("top", &[0, 255, 0, 255], 1, 1).unwrap();
+        doc.set_clipped(top, true).unwrap();
+        assert_eq!(composite_at(&doc, 0), [85, 170, 0, 192]);
+        doc.set_opacity(top, 0.5).unwrap();
+        assert_eq!(composite_at(&doc, 0), [153, 102, 0, 160]);
+        let _ = base;
+    }
+
+    #[test]
+    fn a_hidden_base_hides_its_clipped_layers() {
+        let (mut doc, base, top) = clip_pair();
+        doc.set_clipped(top, true).unwrap();
+        doc.set_visible(base, false).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 0, 0, 0]);
+        assert_eq!(doc.compositing_layers().len(), 0);
+        doc.set_visible(base, true).unwrap();
+        doc.set_visible(top, false).unwrap();
+        assert_eq!(composite_at(&doc, 0), [255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn stacked_clipped_layers_all_clip_to_the_nearest_unclipped_base() {
+        let (mut doc, _base, top) = clip_pair();
+        let blue = doc
+            .add_layer("blue", &solid(2, 1, [0, 0, 255, 255]), 2, 1)
+            .unwrap();
+        doc.set_clipped(top, true).unwrap();
+        doc.set_clipped(blue, true).unwrap();
+        assert_eq!(composite_at(&doc, 0), [0, 0, 255, 255]);
+        assert_eq!(composite_at(&doc, 1), [0, 0, 0, 0]);
+        // Releasing the middle layer makes it blue's base: blue then shows
+        // wherever green does, everywhere.
+        doc.set_clipped(top, false).unwrap();
+        assert_eq!(composite_at(&doc, 1), [0, 0, 255, 255]);
+    }
+
+    #[test]
+    fn the_bottom_layer_cannot_be_clipped() {
+        let (mut doc, base, _top) = clip_pair();
+        assert!(doc.set_clipped(base, true).is_err());
+        assert!(!doc.view().layers[0].clipped);
+        assert!(doc.set_clipped(base + 100, true).is_err());
     }
 
     #[test]

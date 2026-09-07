@@ -51,11 +51,10 @@ pub fn flatten(document: &Document) -> Composite {
     let width = document.width();
     let height = document.height();
     let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
-    let layers = document.layers();
+    let layers = document.compositing_layers();
     for y in 0..height {
         for x in 0..width {
-            let pixel =
-                composite_layers_pixel(layers.iter().filter(|l| l.contributes()), width, x, y);
+            let pixel = composite_layers_pixel(&layers, width, x, y);
             write_pixel(&mut pixels, width, x, y, pixel);
         }
     }
@@ -81,11 +80,10 @@ pub fn flatten(document: &Document) -> Composite {
 /// still go through a full [`flatten`].
 pub fn recomposite_region(document: &Document, rect: Rect, target: &mut [u8]) {
     let width = document.width();
-    let layers = document.layers();
+    let layers = document.compositing_layers();
     for y in rect.y0..rect.y1 {
         for x in rect.x0..rect.x1 {
-            let pixel =
-                composite_layers_pixel(layers.iter().filter(|l| l.contributes()), width, x, y);
+            let pixel = composite_layers_pixel(&layers, width, x, y);
             write_pixel(target, width, x, y, pixel);
         }
     }
@@ -102,10 +100,11 @@ pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
     let width = document.width();
     let height = document.height();
     let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
-    let layers = document.layers();
+    let all = document.layers();
+    let layers: Vec<&Layer> = indices.iter().map(|&i| &all[i]).collect();
     for y in 0..height {
         for x in 0..width {
-            let pixel = composite_layers_pixel(indices.iter().map(|&i| &layers[i]), width, x, y);
+            let pixel = composite_layers_pixel(&layers, width, x, y);
             write_pixel(&mut pixels, width, x, y, pixel);
         }
     }
@@ -121,13 +120,8 @@ pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
 /// point readouts (the Color Sampler) that would otherwise re-flatten the
 /// whole document per sample. `(x, y)` must be on the canvas.
 pub fn composite_pixel(document: &Document, x: u32, y: u32) -> [u8; 4] {
-    let layers = document.layers();
-    let rgba = composite_layers_pixel(
-        layers.iter().filter(|l| l.contributes()),
-        document.width(),
-        x,
-        y,
-    );
+    let layers = document.compositing_layers();
+    let rgba = composite_layers_pixel(&layers, document.width(), x, y);
     [
         to_byte(rgba[0]),
         to_byte(rgba[1]),
@@ -142,19 +136,22 @@ pub fn composite_pixel(document: &Document, x: u32, y: u32) -> [u8; 4] {
 /// [`recomposite_region`] (same layers, just a dirty rect), and
 /// [`flatten_subset`] (an arbitrary layer subset) — the caller decides which
 /// layers and in what order; this only does the accumulation.
-fn composite_layers_pixel<'a>(
-    layers: impl Iterator<Item = &'a Layer>,
-    width: u32,
-    x: u32,
-    y: u32,
-) -> [f32; 4] {
+fn composite_layers_pixel(layers: &[&Layer], width: u32, x: u32, y: u32) -> [f32; 4] {
     let width = width as usize;
     let base = (y as usize * width + x as usize) * CHANNELS;
 
     // Non-premultiplied RGBA, starting fully transparent.
     let mut backdrop = [0f32; 4];
-    for layer in layers {
-        let source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
+    for (index, layer) in layers.iter().enumerate() {
+        let mut source_alpha = to_unit(layer.pixels[base + 3]) * layer.opacity;
+        // A clipping mask: a clipped layer shows only where its base — the
+        // nearest unclipped layer below it — has pixels, its alpha scaled
+        // by the base's own transparency (not the base's opacity).
+        if layer.clipped {
+            if let Some(clip_base) = layers[..index].iter().rev().find(|l| !l.clipped) {
+                source_alpha *= to_unit(clip_base.pixels[base + 3]);
+            }
+        }
         if source_alpha <= 0.0 {
             continue;
         }

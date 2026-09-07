@@ -950,6 +950,18 @@ fn set_layer_linked(
     })
 }
 
+/// Layer > Create Clipping Mask / Release Clipping Mask for layer `id`.
+#[tauri::command]
+fn set_layer_clipped(
+    state: State<'_, AppState>,
+    id: LayerId,
+    clipped: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_clipped(id, clipped).map(|_| None)
+    })
+}
+
 /// Layer > Rasterize on layer `id`. Every layer in this app is already
 /// pixels, so this is always a no-op beyond validating `id` exists.
 #[tauri::command]
@@ -4105,6 +4117,7 @@ pub fn run() {
             set_layer_visible,
             set_layer_locked,
             set_layer_linked,
+            set_layer_clipped,
             rasterize_layer,
             flip_layer_horizontal,
             flip_layer_vertical,
