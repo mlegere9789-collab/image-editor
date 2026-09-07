@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 331.**
+**618 distinct capabilities tracked. Currently shipped: 337.**
 
 ## PART I — EVERY TOOL
 
@@ -368,12 +368,12 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Apply Image — Blending (all twelve layer blend modes — see README Phase 159)
 - [x] Apply Image — Opacity (0–100 percent scaling the source's alpha — see README Phase 159)
 - [x] Apply Image — Preserve Transparency (the target's alpha kept exactly; colour mixes toward the blend by the source's effective alpha and transparent pixels stay untouched — see README Phase 159)
-- [ ] Apply Image — Mask
-- [ ] Apply Image — Mask Image
-- [ ] Apply Image — Mask Layer
-- [ ] Apply Image — Mask Channel
-- [ ] Apply Image — Transparency Mask
-- [ ] Apply Image — Mask Invert
+- [x] Apply Image — Mask (`ApplyMask { source, channel, invert }` in `apply_image_with`: the mask image's chosen channel, over 255, multiplied into the source's effective opacity pixel by pixel alongside Opacity — see README Phase 224)
+- [x] Apply Image — Mask Image (`source: None` reads the merged composite of every visible layer — see README Phase 224)
+- [x] Apply Image — Mask Layer (`source: Some(id)` reads that layer's own pixels, hidden or not; an unknown layer errors — see README Phase 224)
+- [x] Apply Image — Mask Channel (`channel`: Red, Green, or Blue reads that byte, RGB the BT.601 luma rounded, Photoshop's Gray — see README Phase 224)
+- [x] Apply Image — Transparency Mask (`channel: Transparency` reads the mask image's alpha — see README Phase 224)
+- [x] Apply Image — Mask Invert (`invert` uses `255 − value` — see README Phase 224)
 - [ ] Apply Image — Preview
 - [ ] Spot Channel
 - [ ] New Spot Channel

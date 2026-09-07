@@ -1031,7 +1031,7 @@ fn copy(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
 /// Image > Apply Image: blend layer `source` (or the merged composite, with
 /// `None`) seen through `channel` onto layer `target` with `blend` — a
 /// layer blend mode, or Add / Subtract with Scale and Offset — at
-/// `opacity` percent.
+/// `opacity` percent, weighted pixel by pixel by `mask` when given.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn apply_image(
@@ -1040,6 +1040,7 @@ fn apply_image(
     source: Option<LayerId>,
     channel: document::ApplyChannel,
     blend: document::ApplyBlend,
+    mask: Option<document::ApplyMask>,
     opacity: u8,
     invert: bool,
     preserve_transparency: bool,
@@ -1050,6 +1051,7 @@ fn apply_image(
             source,
             channel,
             blend,
+            mask,
             opacity,
             invert,
             preserve_transparency,

@@ -45,6 +45,11 @@ export type LayerView = {
  * source's transparency as an opaque grey. */
 export type ApplyChannel = "rgb" | "red" | "green" | "blue" | "transparency";
 
+/** Mirrors `ApplyMask` in src-tauri/src/document.rs: Apply Image's Mask
+ * group — a mask image (`null` = merged) read through one channel (RGB =
+ * luma), optionally inverted. */
+export type ApplyMask = { source: number | null; channel: ApplyChannel; invert: boolean };
+
 /** Mirrors `ApplyBlend` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`): Apply Image's Blending list — a layer blend mode, or
  * Add / Subtract with Scale (1–2) and Offset (−255..255). */

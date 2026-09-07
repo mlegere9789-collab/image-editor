@@ -8,6 +8,7 @@ import type {
   Adjustment,
   ApplyBlend,
   ApplyChannel,
+  ApplyMask,
   BlendMode,
   BlendModeInfo,
   DocumentView,
@@ -320,6 +321,12 @@ export default function App() {
   // Scale and Offset; "mode" means `applyImageBlend` applies.
   const [applyImageArithmetic, setApplyImageArithmetic] = useState<ApplyBlend["kind"]>("mode");
   const [applyImageChannel, setApplyImageChannel] = useState<ApplyChannel>("rgb");
+  // Apply Image's Mask group: off, or a mask image and channel, optionally
+  // inverted.
+  const [applyImageMasked, setApplyImageMasked] = useState(false);
+  const [applyImageMaskSource, setApplyImageMaskSource] = useState<number | "merged">("merged");
+  const [applyImageMaskChannel, setApplyImageMaskChannel] = useState<ApplyChannel>("rgb");
+  const [applyImageMaskInvert, setApplyImageMaskInvert] = useState(false);
   const [applyImageScale, setApplyImageScale] = useState(1);
   const [applyImageOffset, setApplyImageOffset] = useState(0);
   const [applyImageInvert, setApplyImageInvert] = useState(false);
@@ -1323,11 +1330,19 @@ export default function App() {
       applyImageArithmetic === "mode"
         ? { kind: "mode", mode: applyImageBlend }
         : { kind: applyImageArithmetic, scale: applyImageScale, offset: applyImageOffset };
+    const mask: ApplyMask | null = applyImageMasked
+      ? {
+          source: applyImageMaskSource === "merged" ? null : applyImageMaskSource,
+          channel: applyImageMaskChannel,
+          invert: applyImageMaskInvert,
+        }
+      : null;
     await runCommand("apply_image", {
       target: selectedId,
       source: applyImageSource === "merged" ? null : applyImageSource,
       channel: applyImageChannel,
       blend,
+      mask,
       opacity: Math.round(applyImageOpacity),
       invert: applyImageInvert,
       preserveTransparency: applyImagePreserve,
@@ -1338,6 +1353,10 @@ export default function App() {
     selectedId,
     applyImageSource,
     applyImageChannel,
+    applyImageMasked,
+    applyImageMaskSource,
+    applyImageMaskChannel,
+    applyImageMaskInvert,
     applyImageBlend,
     applyImageArithmetic,
     applyImageScale,
@@ -8527,6 +8546,57 @@ export default function App() {
               />
               <span className="control__label">Preserve Transparency</span>
             </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={applyImageMasked}
+                onChange={(event) => setApplyImageMasked(event.target.checked)}
+              />
+              <span className="control__label">Mask</span>
+            </label>
+            {applyImageMasked && (
+              <>
+                <label className="control control--row">
+                  <span className="control__label">Mask Image</span>
+                  <select
+                    value={applyImageMaskSource === "merged" ? "merged" : String(applyImageMaskSource)}
+                    onChange={(event) =>
+                      setApplyImageMaskSource(
+                        event.target.value === "merged" ? "merged" : Number(event.target.value),
+                      )
+                    }
+                  >
+                    <option value="merged">Merged</option>
+                    {[...layers].reverse().map((layer) => (
+                      <option key={layer.id} value={String(layer.id)}>
+                        {layer.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="control control--row">
+                  <span className="control__label">Mask Channel</span>
+                  <select
+                    value={applyImageMaskChannel}
+                    onChange={(event) => setApplyImageMaskChannel(event.target.value as ApplyChannel)}
+                  >
+                    <option value="rgb">Gray (luma)</option>
+                    <option value="red">Red</option>
+                    <option value="green">Green</option>
+                    <option value="blue">Blue</option>
+                    <option value="transparency">Transparency</option>
+                  </select>
+                </label>
+                <label className="control control--row">
+                  <input
+                    type="checkbox"
+                    checked={applyImageMaskInvert}
+                    onChange={(event) => setApplyImageMaskInvert(event.target.checked)}
+                  />
+                  <span className="control__label">Invert Mask</span>
+                </label>
+              </>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

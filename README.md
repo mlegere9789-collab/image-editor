@@ -13425,6 +13425,52 @@ run build`) is fully green.
 **1360 Rust tests total** (1355 → 1360, 1353 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 224 — Apply Image > Mask
+
+Apply Image gains its Mask group. An `ApplyMask` names a mask image —
+a layer, hidden or not, or with `None` the merged composite — a channel
+read from it, and whether to invert, and its `weight(pixel)` is that
+channel's byte over 255: Red, Green, or Blue the byte itself,
+Transparency the alpha, and RGB the BT.601 luma rounded to a byte,
+Photoshop's Gray; `invert` takes `255 − value` first. `apply_image_with`
+takes an optional mask after the blend, resolves its pixels once up
+front like the source's, and multiplies the weight into the source's
+effective opacity at every pixel right after Opacity — before Invert,
+the blend, and Preserve Transparency, so all of those compose exactly
+as before; `apply_image` passes no mask. An unknown mask layer errors
+with the target untouched. The `apply_image` command takes a `mask`,
+and the dialog gains a Mask checkbox that reveals Mask Image, Mask
+Channel (Gray, Red, Green, Blue, Transparency), and Invert Mask. Alpha
+channels as masks and the live Preview remain scope cuts.
+
+**Verified two ways.** Five new `document.rs` tests on the 1×1 target
+`[100, 200, 30]` and source `[50, 100, 240]` with a hidden mask layer
+`[255, 0, 128, 64]`, every mixed byte first computed in Python
+emulating `f32`. Through the mask's Red the source applies whole and
+through its Green not at all. Through Blue `128` the half mix is `[75,
+150, 135]` and through Transparency `64` the quarter mix `[87, 175,
+83]`. Inverted, Green lets everything through, Red nothing, and
+Transparency (`191`) gives `[63, 125, 187]`. With the merged image as
+the mask — the opaque target itself — its Red `100` at `50%` opacity
+gives `[90, 180, 71]`, and through Gray its luma `150.72` rounds to
+`151` for `[70, 141, 154]`. An unknown mask layer is refused with the
+target untouched, the mask layer is only read, and the old entry point
+stays unmasked. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+seventy-one: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The dialog was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1365 Rust tests total** (1360 → 1365, 1358 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

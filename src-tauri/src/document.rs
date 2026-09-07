@@ -248,6 +248,36 @@ impl ApplyChannel {
     }
 }
 
+/// Apply Image's Mask group: a mask image — a layer, or with `None` the
+/// merged composite — read through one channel and optionally inverted,
+/// scaling the source's effective opacity pixel by pixel. Through RGB the
+/// mask is the pixel's BT.601 luma (Photoshop's Gray), through a colour
+/// channel that channel, through Transparency the alpha.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyMask {
+    pub source: Option<LayerId>,
+    pub channel: ApplyChannel,
+    pub invert: bool,
+}
+
+impl ApplyMask {
+    /// The mask's weight at one pixel, `0..=1`: the channel's byte
+    /// (luma rounded, for RGB), inverted if asked, over 255.
+    pub fn weight(self, [r, g, b, a]: [u8; 4]) -> f32 {
+        let value = match self.channel {
+            ApplyChannel::Rgb => {
+                (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32).round() as u8
+            }
+            ApplyChannel::Red => r,
+            ApplyChannel::Green => g,
+            ApplyChannel::Blue => b,
+            ApplyChannel::Transparency => a,
+        };
+        to_unit(if self.invert { 255 - value } else { value })
+    }
+}
+
 /// Apply Image's Blending list: any of the twelve layer blend modes, or
 /// the two channel-arithmetic modes only Apply Image and Calculations
 /// offer. Add and Subtract work in Photoshop's byte terms — `(target +
@@ -4058,6 +4088,7 @@ impl Document {
             source,
             ApplyChannel::Rgb,
             ApplyBlend::Mode { mode: blend },
+            None,
             opacity,
             invert,
             preserve_transparency,
@@ -4074,8 +4105,11 @@ impl Document {
     /// blend-mode step only. Alpha, opacity, Invert, and Preserve
     /// Transparency compose around both exactly as before, so at full
     /// opacity over an opaque target the channel is the blend result
-    /// itself. Errors additionally for a scale outside `1..=2` or an
-    /// offset outside `-255..=255`.
+    /// itself. `mask`, when given, scales the source's effective opacity
+    /// pixel by pixel by [`ApplyMask::weight`] — Photoshop's Mask group,
+    /// applied alongside Opacity before anything else. Errors additionally
+    /// for a scale outside `1..=2`, an offset outside `-255..=255`, or an
+    /// unknown mask layer.
     #[allow(clippy::too_many_arguments)]
     pub fn apply_image_with(
         &mut self,
@@ -4083,6 +4117,7 @@ impl Document {
         source: Option<LayerId>,
         channel: ApplyChannel,
         blend: ApplyBlend,
+        mask: Option<ApplyMask>,
         opacity: u8,
         invert: bool,
         preserve_transparency: bool,
@@ -4094,6 +4129,13 @@ impl Document {
         let source_pixels = match source {
             Some(id) => self.layer(id)?.pixels.clone(),
             None => crate::composite::flatten(self).pixels,
+        };
+        let mask_pixels = match mask {
+            Some(ApplyMask {
+                source: Some(id), ..
+            }) => Some(self.layer(id)?.pixels.clone()),
+            Some(ApplyMask { source: None, .. }) => Some(crate::composite::flatten(self).pixels),
+            None => None,
         };
         let opacity = f32::from(opacity) / 100.0;
         let doc_width = self.width as usize;
@@ -4107,7 +4149,15 @@ impl Document {
             ]);
             let dst = &dest[base..base + CHANNELS];
             let mut out = [dst[0], dst[1], dst[2], dst[3]];
-            let source_alpha = to_unit(src[3]) * opacity;
+            let mut source_alpha = to_unit(src[3]) * opacity;
+            if let (Some(mask), Some(mask_pixels)) = (mask, &mask_pixels) {
+                source_alpha *= mask.weight([
+                    mask_pixels[base],
+                    mask_pixels[base + 1],
+                    mask_pixels[base + 2],
+                    mask_pixels[base + 3],
+                ]);
+            }
             let backdrop_alpha = to_unit(dst[3]);
             if source_alpha <= 0.0 || (preserve_transparency && backdrop_alpha <= 0.0) {
                 return out;
@@ -35474,6 +35524,7 @@ mod tests {
                 scale: 1.0,
                 offset: 0,
             },
+            None,
             100,
             false,
             false,
@@ -35489,6 +35540,7 @@ mod tests {
                 scale: 2.0,
                 offset: 0,
             },
+            None,
             100,
             false,
             false,
@@ -35511,6 +35563,7 @@ mod tests {
                 scale: 1.5,
                 offset: -20,
             },
+            None,
             100,
             false,
             false,
@@ -35532,6 +35585,7 @@ mod tests {
                 scale: 1.0,
                 offset: 0,
             },
+            None,
             100,
             false,
             false,
@@ -35547,6 +35601,7 @@ mod tests {
                 scale: 1.0,
                 offset: 128,
             },
+            None,
             100,
             false,
             false,
@@ -35562,6 +35617,7 @@ mod tests {
                 scale: 2.0,
                 offset: 64,
             },
+            None,
             100,
             false,
             false,
@@ -35584,6 +35640,7 @@ mod tests {
                 scale: 1.0,
                 offset: 0,
             },
+            None,
             50,
             false,
             false,
@@ -35602,6 +35659,7 @@ mod tests {
                 scale: 1.0,
                 offset: 0,
             },
+            None,
             100,
             false,
             false,
@@ -35641,6 +35699,7 @@ mod tests {
                     Some(source),
                     ApplyChannel::Rgb,
                     blend,
+                    None,
                     100,
                     false,
                     false
@@ -35655,6 +35714,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Multiply,
             },
+            None,
             100,
             false,
             false,
@@ -35677,6 +35737,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Normal,
             },
+            None,
             100,
             false,
             false,
@@ -35739,6 +35800,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Normal,
             },
+            None,
             100,
             true,
             false,
@@ -35759,6 +35821,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Multiply,
             },
+            None,
             100,
             false,
             false,
@@ -35774,6 +35837,7 @@ mod tests {
                 scale: 2.0,
                 offset: 0,
             },
+            None,
             100,
             false,
             false,
@@ -35795,6 +35859,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Normal,
             },
+            None,
             100,
             false,
             false,
@@ -35809,6 +35874,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Normal,
             },
+            None,
             100,
             false,
             false,
@@ -35824,6 +35890,7 @@ mod tests {
             ApplyBlend::Mode {
                 mode: BlendMode::Normal,
             },
+            None,
             100,
             false,
             false,
@@ -35831,6 +35898,164 @@ mod tests {
         .unwrap();
         assert_eq!(pixel(&doc, target, 0, 0), [100, 100, 100, 255]);
         let _ = source;
+    }
+
+    /// [`arithmetic_pair`] plus a hidden mask layer reading
+    /// `[255, 0, 128, 64]` on top.
+    fn masked_triple() -> (Document, LayerId, LayerId, LayerId) {
+        let (mut doc, source, target) = arithmetic_pair();
+        let mask = doc.add_layer("mask", &[255, 0, 128, 64], 1, 1).unwrap();
+        doc.set_visible(mask, false).unwrap();
+        (doc, source, target, mask)
+    }
+
+    fn apply_masked(
+        doc: &mut Document,
+        source: LayerId,
+        target: LayerId,
+        mask: ApplyMask,
+        opacity: u8,
+    ) {
+        doc.apply_image_with(
+            target,
+            Some(source),
+            ApplyChannel::Rgb,
+            ApplyBlend::Mode {
+                mode: BlendMode::Normal,
+            },
+            Some(mask),
+            opacity,
+            false,
+            false,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn apply_image_mask_channel_at_full_and_zero_weight() {
+        // Red 255 lets the source through whole; Green 0 blocks it.
+        let (mut doc, source, target, mask) = masked_triple();
+        let full = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Red,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, full, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
+        let (mut doc, source, target, mask) = masked_triple();
+        let none = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Green,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, none, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 255]);
+    }
+
+    #[test]
+    fn apply_image_mask_weights_the_source_by_the_channel() {
+        // Blue 128: the half mix [75, 150, 135]. Transparency 64: a quarter,
+        // [87, 175, 83].
+        let (mut doc, source, target, mask) = masked_triple();
+        let half = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Blue,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, half, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [75, 150, 135, 255]);
+        let (mut doc, source, target, mask) = masked_triple();
+        let quarter = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Transparency,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, quarter, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [87, 175, 83, 255]);
+    }
+
+    #[test]
+    fn apply_image_mask_invert_flips_the_weight() {
+        // Green 0 inverted lets everything through; Red 255 inverted
+        // nothing; Transparency 64 inverted is 191: [63, 125, 187].
+        let (mut doc, source, target, mask) = masked_triple();
+        let all = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Green,
+            invert: true,
+        };
+        apply_masked(&mut doc, source, target, all, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
+        let (mut doc, source, target, mask) = masked_triple();
+        let none = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Red,
+            invert: true,
+        };
+        apply_masked(&mut doc, source, target, none, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 255]);
+        let (mut doc, source, target, mask) = masked_triple();
+        let three_quarters = ApplyMask {
+            source: Some(mask),
+            channel: ApplyChannel::Transparency,
+            invert: true,
+        };
+        apply_masked(&mut doc, source, target, three_quarters, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [63, 125, 187, 255]);
+    }
+
+    #[test]
+    fn apply_image_mask_from_the_merged_image_and_its_luma() {
+        // The merged image is the opaque target [100, 200, 30]: its Red
+        // channel, 100, at 50% opacity weighs 100/255 · 0.5 → [90, 180, 71];
+        // through RGB its luma rounds to 151 → [70, 141, 154].
+        let (mut doc, source, target, _mask) = masked_triple();
+        let merged_red = ApplyMask {
+            source: None,
+            channel: ApplyChannel::Red,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, merged_red, 50);
+        assert_eq!(pixel(&doc, target, 0, 0), [90, 180, 71, 255]);
+        let (mut doc, source, target, _mask) = masked_triple();
+        let merged_luma = ApplyMask {
+            source: None,
+            channel: ApplyChannel::Rgb,
+            invert: false,
+        };
+        apply_masked(&mut doc, source, target, merged_luma, 100);
+        assert_eq!(pixel(&doc, target, 0, 0), [70, 141, 154, 255]);
+    }
+
+    #[test]
+    fn apply_image_mask_needs_a_known_layer_and_is_optional() {
+        let (mut doc, source, target, mask) = masked_triple();
+        let unknown = ApplyMask {
+            source: Some(999),
+            channel: ApplyChannel::Red,
+            invert: false,
+        };
+        assert!(doc
+            .apply_image_with(
+                target,
+                Some(source),
+                ApplyChannel::Rgb,
+                ApplyBlend::Mode {
+                    mode: BlendMode::Normal,
+                },
+                Some(unknown),
+                100,
+                false,
+                false,
+            )
+            .is_err());
+        assert_eq!(pixel(&doc, target, 0, 0), [100, 200, 30, 255]);
+        // The mask layer itself is only read, and the old entry point is
+        // unmasked.
+        assert_eq!(pixel(&doc, mask, 0, 0), [255, 0, 128, 64]);
+        doc.apply_image(target, Some(source), BlendMode::Normal, 100, false, false)
+            .unwrap();
+        assert_eq!(pixel(&doc, target, 0, 0), [50, 100, 240, 255]);
     }
 
     #[test]
