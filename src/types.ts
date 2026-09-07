@@ -213,6 +213,8 @@ export type DocumentView = {
   adjustmentPresets: AdjustmentPreset[];
   /** The Custom Shape tool's picker's names, in the order first saved. */
   customShapePresets: string[];
+  /** The Artboard Tool's named regions, in creation order. */
+  artboards: Artboard[];
 };
 
 /** Mirrors `GradientPreset` in src-tauri/src/document.rs. */
@@ -220,6 +222,9 @@ export type GradientPreset = { name: string; startColor: [number, number, number
 
 /** Mirrors `AdjustmentPreset` in src-tauri/src/document.rs. */
 export type AdjustmentPreset = { name: string; adjustment: Adjustment };
+
+/** Mirrors `Artboard` in src-tauri/src/document.rs. */
+export type Artboard = { name: string; rect: { x0: number; y0: number; x1: number; y1: number } };
 
 /** Mirrors `PathAnchor` / `Path` in src-tauri/src/document.rs: the Pen
  * tool family's current work path. */

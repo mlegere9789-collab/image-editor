@@ -191,6 +191,8 @@ pub struct Document {
     guides: Vec<Guide>,
     /// Layer > Group Layers' groups, in creation order.
     groups: Vec<LayerGroup>,
+    /// The Artboard Tool's named regions, in creation order.
+    artboards: Vec<Artboard>,
 }
 
 /// One layer's recorded state inside a [`LayerComp`].
@@ -220,6 +222,20 @@ pub struct LayerGroup {
     pub name: String,
     /// Bottom to top, in stack order.
     pub members: Vec<LayerId>,
+}
+
+/// The Artboard Tool's named region: this app's canvas is a single fixed
+/// size, so an artboard is a labelled rectangle of it — a stand-in for
+/// Photoshop's own independently-sized canvases within one file — kept
+/// only for [`Document::export_artboard`] to crop out on its own. Errors
+/// on a crop or rotation the same way [`Path`] and the guides do: a
+/// canvas-size change clears every artboard, a documented scope cut
+/// short of recomputing their rectangles through it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Artboard {
+    pub name: String,
+    pub rect: Rect,
 }
 
 /// What Layer > Layer Mask starts a new mask from.
@@ -3325,6 +3341,8 @@ pub struct DocumentView {
     pub guides: Vec<Guide>,
     /// Layer groups, in creation order; members are ids, bottom to top.
     pub groups: Vec<LayerGroup>,
+    /// The Artboard Tool's named regions, in creation order.
+    pub artboards: Vec<Artboard>,
     /// Alpha channel names, in creation order.
     pub channels: Vec<String>,
     /// Spot colour channels, in overprinting order.
@@ -3381,6 +3399,7 @@ impl Document {
             layer_comps: Vec::new(),
             guides: Vec::new(),
             groups: Vec::new(),
+            artboards: Vec::new(),
         })
     }
 
@@ -3416,6 +3435,7 @@ impl Document {
             layer_comps: self.layer_comp_names(),
             guides: self.guides.clone(),
             groups: self.groups.clone(),
+            artboards: self.artboards.clone(),
             channels: self.channels.iter().map(|c| c.name.clone()).collect(),
             spots: self
                 .spots
@@ -4427,6 +4447,68 @@ impl Document {
     /// View > Clear Guides.
     pub fn clear_guides(&mut self) {
         self.guides.clear();
+    }
+
+    /// The Artboard Tool: adds a named region `rect` of the canvas.
+    /// Errors for a blank name, a name already in use, or a rectangle
+    /// that does not lie inside the canvas or cover at least one pixel.
+    pub fn add_artboard(&mut self, name: &str, rect: Rect) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("An artboard needs a name.".to_string());
+        }
+        if self.artboards.iter().any(|a| a.name == name) {
+            return Err(format!("There is already an artboard named \"{name}\"."));
+        }
+        if rect.x0 >= rect.x1 || rect.y0 >= rect.y1 || rect.x1 > self.width || rect.y1 > self.height
+        {
+            return Err(format!(
+                "Artboard rectangle ({}, {})-({}, {}) must cover at least one pixel inside the {}×{} canvas.",
+                rect.x0, rect.y0, rect.x1, rect.y1, self.width, self.height
+            ));
+        }
+        self.artboards.push(Artboard {
+            name: name.to_string(),
+            rect,
+        });
+        Ok(())
+    }
+
+    /// Renames artboard `name` to `new_name`. Errors when there is no
+    /// artboard named `name`, for a blank `new_name`, or when `new_name`
+    /// is already another artboard's name.
+    pub fn rename_artboard(&mut self, name: &str, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("An artboard needs a name.".to_string());
+        }
+        if self.artboards.iter().any(|a| a.name == new_name) {
+            return Err(format!(
+                "There is already an artboard named \"{new_name}\"."
+            ));
+        }
+        let artboard = self
+            .artboards
+            .iter_mut()
+            .find(|a| a.name == name)
+            .ok_or_else(|| format!("No artboard named \"{name}\"."))?;
+        artboard.name = new_name.to_string();
+        Ok(())
+    }
+
+    /// Deletes the artboard named `name`. Errors when there is none.
+    pub fn delete_artboard(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .artboards
+            .iter()
+            .position(|a| a.name == name)
+            .ok_or_else(|| format!("No artboard named \"{name}\"."))?;
+        self.artboards.remove(index);
+        Ok(())
+    }
+
+    pub fn artboards(&self) -> &[Artboard] {
+        &self.artboards
     }
 
     /// View > New Guide Layout: divides the canvas into `columns` equal
@@ -8401,6 +8483,7 @@ impl Document {
         self.count_marks.clear();
         self.notes.clear();
         self.current_path = None;
+        self.artboards.clear();
         // A guide is a boundary line, so it turns with the picture: a
         // vertical one at x = c becomes horizontal at y = c clockwise (or
         // at old_width − c counter-clockwise), and a horizontal one at
@@ -8471,6 +8554,7 @@ impl Document {
         self.count_marks.clear();
         self.notes.clear();
         self.current_path = None;
+        self.artboards.clear();
         // Guides ride along with the pixels they sit between; those left
         // outside the crop are dropped.
         self.guides = self
@@ -49537,5 +49621,155 @@ mod tests {
             .place_custom_shape_preset("Nope", 0.0, 0.0, 10.0, 10.0, [0, 0, 0, 255])
             .unwrap_err()
             .contains("preset"));
+    }
+
+    #[test]
+    fn artboards_require_a_name_and_a_rect_inside_the_canvas() {
+        let mut doc = Document::new(10, 10).unwrap();
+        assert!(doc
+            .add_artboard(
+                "  ",
+                Rect {
+                    x0: 0,
+                    y0: 0,
+                    x1: 5,
+                    y1: 5
+                }
+            )
+            .unwrap_err()
+            .contains("name"));
+        assert!(doc
+            .add_artboard(
+                "Screen 1",
+                Rect {
+                    x0: 5,
+                    y0: 0,
+                    x1: 5,
+                    y1: 5
+                }
+            )
+            .unwrap_err()
+            .contains("canvas"));
+        assert!(doc
+            .add_artboard(
+                "Screen 1",
+                Rect {
+                    x0: 0,
+                    y0: 0,
+                    x1: 20,
+                    y1: 20
+                }
+            )
+            .unwrap_err()
+            .contains("canvas"));
+        doc.add_artboard(
+            "Screen 1",
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5,
+            },
+        )
+        .unwrap();
+        assert_eq!(doc.artboards().len(), 1);
+        assert!(doc
+            .add_artboard(
+                "Screen 1",
+                Rect {
+                    x0: 5,
+                    y0: 5,
+                    x1: 10,
+                    y1: 10
+                }
+            )
+            .unwrap_err()
+            .contains("already"));
+    }
+
+    #[test]
+    fn artboards_can_be_renamed_and_deleted_by_name() {
+        let mut doc = Document::new(10, 10).unwrap();
+        let rect = Rect {
+            x0: 0,
+            y0: 0,
+            x1: 4,
+            y1: 4,
+        };
+        doc.add_artboard("A", rect).unwrap();
+        doc.add_artboard("B", rect).unwrap();
+        doc.rename_artboard("A", "C").unwrap();
+        assert_eq!(doc.artboards()[0].name, "C");
+        assert!(doc
+            .rename_artboard("A", "D")
+            .unwrap_err()
+            .contains("No artboard"));
+        assert!(doc
+            .rename_artboard("C", "B")
+            .unwrap_err()
+            .contains("already"));
+        doc.delete_artboard("B").unwrap();
+        assert_eq!(doc.artboards().len(), 1);
+        assert_eq!(doc.artboards()[0].name, "C");
+        assert!(doc
+            .delete_artboard("B")
+            .unwrap_err()
+            .contains("No artboard"));
+    }
+
+    #[test]
+    fn artboards_are_exposed_on_the_document_view_in_creation_order() {
+        let mut doc = Document::new(20, 20).unwrap();
+        let a = Rect {
+            x0: 0,
+            y0: 0,
+            x1: 5,
+            y1: 5,
+        };
+        let b = Rect {
+            x0: 5,
+            y0: 5,
+            x1: 10,
+            y1: 10,
+        };
+        doc.add_artboard("A", a).unwrap();
+        doc.add_artboard("B", b).unwrap();
+        let view = doc.view();
+        assert_eq!(
+            view.artboards,
+            vec![
+                Artboard {
+                    name: "A".to_string(),
+                    rect: a
+                },
+                Artboard {
+                    name: "B".to_string(),
+                    rect: b
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn artboards_are_cleared_by_a_crop_or_a_90_degree_rotation() {
+        let mut doc = Document::new(10, 10).unwrap();
+        let rect = Rect {
+            x0: 0,
+            y0: 0,
+            x1: 5,
+            y1: 5,
+        };
+        doc.add_artboard("A", rect).unwrap();
+        doc.crop(Rect {
+            x0: 0,
+            y0: 0,
+            x1: 8,
+            y1: 8,
+        })
+        .unwrap();
+        assert!(doc.artboards().is_empty());
+        doc.add_artboard("B", rect).unwrap();
+        doc.rotate_document_90(true);
+        assert!(doc.artboards().is_empty());
     }
 }

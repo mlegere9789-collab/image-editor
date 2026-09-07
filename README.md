@@ -15650,6 +15650,79 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **1550 Rust tests total** (1545 → 1550, 1543 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 262 — The Artboard Tool
+
+This app's `Document` is a single fixed-size canvas, unlike Photoshop's
+own Artboards, which are independently-sized canvases living side by
+side in one file. Rather than skip the tool, an `Artboard { name, rect }`
+here is a labelled crop rectangle of that one canvas — genuinely
+useful on its own (Photoshop artists do use artboards this way, to lay
+out several same-size screens on one canvas) even without the
+multi-size layout Photoshop's version also offers, which is the
+documented scope cut. `add_artboard` rejects a blank name, a name
+already in use, and a rectangle that does not fit inside the canvas or
+cover at least one pixel — the same bounds check `crop` itself makes.
+`rename_artboard` and `delete_artboard` are ordinary by-name lookups.
+Because a crop or a 90° rotation changes the canvas's own size and
+origin, both now clear every artboard outright, next to `current_path`
+in the same list of position-bound state — a documented scope cut short
+of recomputing an artboard's rectangle through an arbitrary crop or
+rotation the way guides do.
+
+`export_artboard` is new machinery in `lib.rs`, not `document.rs`: it
+flattens the document with the existing `composite::flatten`, crops the
+result to the named artboard's rectangle by slicing rows exactly as
+`Document::crop` already does for a whole document, and PNG-encodes the
+crop with `png::encode_pixels` — kept in `lib.rs` alongside `export`
+and `export_png`, which follow the same read-only, write-to-a-path
+shape, rather than teaching `document.rs` itself to reach into PNG
+encoding. The frontend gains an "Artboards…" button opening a dialog:
+each saved artboard lists its size with Export… (a save dialog, then
+the crop written to the chosen path) and Delete, plus an Add form
+reading a name and the same Box (x0, y0, x1, y1) field the Shape Layer
+and Custom Shape dialogs already share. Renaming from the dialog itself
+is left out — `rename_artboard` exists and is tested, matching Layer
+Comps' own dialog, which never grew a rename control either.
+
+**Verified two ways.** Five new tests — four in `document.rs`, one in
+`lib.rs` for the export path, all plain integer bookkeeping and byte
+slicing with no floating-point math, so hand-verification alone was
+judged sufficient per this project's own stated bar. On a 10×10 canvas,
+a blank name, a rectangle with `x0 == x1`, and a rectangle wider than
+the canvas are all refused (each error names "canvas" or "name"); a
+valid add succeeds, and adding a second artboard under the same name is
+refused ("already"). Renaming "A" to "C" then trying to rename the
+now-nonexistent "A" again, or renaming "C" onto the still-live "B", are
+both refused; deleting "B" leaves "C", and deleting "B" again is
+refused. `DocumentView` exposes two artboards, `A` and `B`, in the exact
+order and with the exact rectangles they were added with. An artboard
+survives being read back, but not a crop or a 90° rotation — both leave
+`artboards()` empty. For the export path, a 4×2 document with sixteen
+distinct hand-picked colour bytes gets a "Right Half" artboard over
+columns 2–3; `export_artboard_region` writes a PNG that decodes back to
+exactly `4` byte quadruples read straight out of the flattened
+composite at that offset — column 2, then column 3, for each of the two
+rows — confirmed against a second, independently-sliced copy built from
+`composite::flatten`'s own output; exporting an unknown artboard name is
+refused. All five passed on the first run (one iteration first failed
+to compile — `u32 * usize` in the export test's own byte-offset
+arithmetic — fixed before ever running; not a wrong hand-verified
+value).
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and nine: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The new dialog and button were reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**1555 Rust tests total** (1550 → 1555, 1548 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

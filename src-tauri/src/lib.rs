@@ -256,6 +256,28 @@ fn export(document: &Document, path: &Path) -> Result<(), String> {
     std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
 
+/// The Artboard Tool: flatten `document`, crop to artboard `name`'s own
+/// rectangle, and write the result to `path` as PNG. Errors when there
+/// is no artboard by that name.
+fn export_artboard_region(document: &Document, name: &str, path: &Path) -> Result<(), String> {
+    let rect = document
+        .artboards()
+        .iter()
+        .find(|a| a.name == name)
+        .map(|a| a.rect)
+        .ok_or_else(|| format!("No artboard named \"{name}\"."))?;
+    let composite = composite::flatten(document);
+    let (crop_width, crop_height) = (rect.x1 - rect.x0, rect.y1 - rect.y0);
+    let mut pixels = Vec::with_capacity(crop_width as usize * crop_height as usize * CHANNELS);
+    for y in rect.y0..rect.y1 {
+        let start = (y as usize * composite.width as usize + rect.x0 as usize) * CHANNELS;
+        let end = start + crop_width as usize * CHANNELS;
+        pixels.extend_from_slice(&composite.pixels[start..end]);
+    }
+    let bytes = png::encode_pixels(crop_width, crop_height, &pixels)?;
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
 /// Eyedropper: the RGBA colour of the cached composite at document pixel
 /// `(x, y)` — what's actually visible on screen, the same convention
 /// Photoshop's own eyedropper defaults to (sampling the merged image, not
@@ -5484,6 +5506,52 @@ fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
     export(document, Path::new(&path))
 }
 
+/// The Artboard Tool: adds a named region of the canvas.
+#[tauri::command]
+fn add_artboard(
+    state: State<'_, AppState>,
+    name: String,
+    x0: u32,
+    y0: u32,
+    x1: u32,
+    y1: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_artboard(&name, Rect { x0, y0, x1, y1 })?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn rename_artboard(
+    state: State<'_, AppState>,
+    name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_artboard(&name, &new_name)?;
+        Ok(None)
+    })
+}
+
+#[tauri::command]
+fn delete_artboard(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_artboard(&name)?;
+        Ok(None)
+    })
+}
+
+/// Flatten the open document, crop to artboard `name`'s own rectangle,
+/// and write it to `path` as a new PNG file. Read-only, like
+/// [`export_png`]: there is no new [`Snapshot`] to return.
+#[tauri::command]
+fn export_artboard(state: State<'_, AppState>, name: String, path: String) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    export_artboard_region(document, &name, Path::new(&path))
+}
+
 /// Write the open document to `path` as a project file — the full editable
 /// layer stack (order, visibility, opacity, blend mode, and each layer's own
 /// pixels), unlike [`export_png`], which only ever writes the flattened
@@ -5941,6 +6009,10 @@ pub fn run() {
             reselect,
             deselect,
             export_png,
+            add_artboard,
+            rename_artboard,
+            delete_artboard,
+            export_artboard,
             save_project,
             open_project,
             checkpoint,
@@ -6138,6 +6210,50 @@ mod tests {
         let decoded = png::read(&path).unwrap();
         assert_eq!((decoded.width, decoded.height), (2, 1));
         assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn export_artboard_region_crops_the_composite_to_the_named_rectangle() {
+        let mut document = Document::new(4, 2).unwrap();
+        document
+            .add_layer(
+                "l",
+                &[
+                    255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 0, 255, //
+                    0, 255, 255, 255, 255, 0, 255, 255, 128, 128, 128, 255, 1, 2, 3, 255,
+                ],
+                4,
+                2,
+            )
+            .unwrap();
+        document
+            .add_artboard(
+                "Right Half",
+                Rect {
+                    x0: 2,
+                    y0: 0,
+                    x1: 4,
+                    y1: 2,
+                },
+            )
+            .unwrap();
+
+        let path = std::env::temp_dir().join("lib_rs_export_artboard_ok.png");
+        export_artboard_region(&document, "Right Half", &path).unwrap();
+
+        let decoded = png::read(&path).unwrap();
+        assert_eq!((decoded.width, decoded.height), (2, 2));
+        let full = composite::flatten(&document);
+        let expected: Vec<u8> = (0..2)
+            .flat_map(|y: u32| {
+                let start = (y as usize * 4 + 2) * CHANNELS;
+                full.pixels[start..start + 2 * CHANNELS].to_vec()
+            })
+            .collect();
+        assert_eq!(decoded.pixels, expected);
+
+        let err = export_artboard_region(&document, "Nope", &path).unwrap_err();
+        assert!(err.contains("No artboard"), "{err}");
     }
 
     #[test]

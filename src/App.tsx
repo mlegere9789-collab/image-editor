@@ -595,6 +595,9 @@ export default function App() {
   // Gradient / Pattern / Adjustment Presets: the dialog and a name field.
   const [showPresetsDialog, setShowPresetsDialog] = useState(false);
   const [presetName, setPresetName] = useState("");
+  // Artboard Tool: the dialog and the new-artboard name field.
+  const [showArtboardsDialog, setShowArtboardsDialog] = useState(false);
+  const [artboardName, setArtboardName] = useState("Artboard 1");
   // Sharpen tool options: Protect Detail and Sample All Layers.
   // Magnetic Lasso options: the edge search reach in pixels and the
   // minimum edge strength (0-255) that counts as an edge.
@@ -4341,6 +4344,23 @@ export default function App() {
     }
   }, []);
 
+  // The Artboard Tool's own export: like exportDocument, but cropped to
+  // one named artboard's rectangle. Reads the open document but never
+  // mutates it.
+  const exportArtboard = useCallback(async (name: string) => {
+    const destination = await save({ filters: PNG_FILTER, defaultPath: `${name}.png` });
+    if (typeof destination !== "string") return;
+    setBusy(true);
+    try {
+      await invoke("export_artboard", { name, path: destination });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   // Unlike Export PNG…, this writes the full editable layer stack (order,
   // visibility, opacity, blend mode, and each layer's own pixels) to a
   // project file, not just the flattened composite — the counterpart to
@@ -5732,6 +5752,14 @@ export default function App() {
           title="Edit > Presets: save and reuse Gradient, Pattern, Adjustment, and Custom Shape presets by name"
         >
           Presets…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowArtboardsDialog(true)}
+          disabled={busy || !hasDocument}
+          title="Artboard Tool: named regions of the canvas, each exportable to its own PNG"
+        >
+          Artboards…
         </button>
         <label className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
           <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
@@ -10737,6 +10765,79 @@ export default function App() {
 
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowPresetsDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showArtboardsDialog && document && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowArtboardsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Artboards"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Artboards</h2>
+            <p className="modal__hint">
+              A named region of the canvas, exported on its own with Export.
+            </p>
+            {document.artboards.length === 0 ? (
+              <p className="modal__hint">No artboards yet.</p>
+            ) : (
+              document.artboards.map((artboard) => (
+                <div className="control control--row" key={artboard.name}>
+                  <span className="control__label">
+                    {artboard.name} ({artboard.rect.x1 - artboard.rect.x0}×{artboard.rect.y1 - artboard.rect.y0})
+                  </span>
+                  <button className="button button--quiet" onClick={() => void exportArtboard(artboard.name)} disabled={busy}>
+                    Export…
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_artboard", { name: artboard.name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <label className="control control--row">
+              <span className="control__label">Name</span>
+              <input type="text" value={artboardName} onChange={(event) => setArtboardName(event.target.value)} />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Box (x0, y0, x1, y1)</span>
+              {shapeBox.map((v, i) => (
+                <input
+                  type="number"
+                  step={1}
+                  value={v}
+                  key={i}
+                  onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                />
+              ))}
+            </label>
+            <button
+              className="button"
+              onClick={() => {
+                const [x0, y0, x1, y1] = shapeBox.map((v) => Math.round(v));
+                void runCommand("add_artboard", { name: artboardName.trim(), x0, y0, x1, y1 });
+              }}
+              disabled={busy || artboardName.trim() === ""}
+            >
+              Add Artboard
+            </button>
+
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowArtboardsDialog(false)}>
                 Close
               </button>
             </div>

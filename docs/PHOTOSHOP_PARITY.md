@@ -2,12 +2,12 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 485.**
+**618 distinct capabilities tracked. Currently shipped: 486.**
 
 ## PART I — EVERY TOOL
 
 - [x] MOVE TOOL (`move_pixels`, a drag or arrow-key nudge that shifts the selected layer's pixels — the whole layer with transparent fill, or only the selected pixels lifted, cleared, and set down at the offset — carrying the selection outline along and dropping it when it leaves the canvas; Auto-Select, Show Transform Controls, and alignment are documented scope cuts — see README Phase 173)
-- [ ] ARTBOARD TOOL
+- [x] ARTBOARD TOOL (`add_artboard`/`rename_artboard`/`delete_artboard`/`export_artboard`, a named rectangle of the canvas exported on its own — cropped from the flattened composite and PNG-encoded. This app's canvas is a single fixed size, so an artboard is a labelled crop region rather than its own independently-sized canvas; artboards are cleared by a crop or 90° rotation, unlike guides, which are documented scope cuts — see README Phase 262)
 - [x] RECTANGULAR MARQUEE TOOL
 - [x] ELLIPTICAL MARQUEE TOOL
 - [x] SINGLE ROW MARQUEE TOOL
