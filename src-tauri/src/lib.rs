@@ -2178,6 +2178,25 @@ fn draw_rectangle(
     })
 }
 
+/// Ellipse tool (Pixels mode): fill and/or inside-stroke the ellipse
+/// inscribed in a dragged box onto a layer.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn draw_ellipse(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    fill: Option<[u8; 4]>,
+    stroke: Option<([u8; 4], u32)>,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.draw_ellipse(id, x0, y0, x1, y1, fill, stroke)
+    })
+}
+
 /// History Brush: remember the current document as the state the brush
 /// paints from. Not an edit — nothing to checkpoint.
 #[tauri::command]
@@ -3663,6 +3682,7 @@ pub fn run() {
             spot_heal_stroke,
             remove_stroke,
             draw_rectangle,
+            draw_ellipse,
             clone_stroke,
             set_history_source,
             history_stroke,

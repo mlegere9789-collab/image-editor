@@ -2786,26 +2786,9 @@ impl Document {
     /// rectangle spanning the two corners `(x0, y0)` and `(x1, y1)` — in
     /// either order, as a drag can go any direction — straight onto layer
     /// `id`, with an optional flat `fill`, an optional `stroke` of
-    /// `(colour, width)` hugging the *inside* of the edge (Photoshop's
-    /// "Inside" stroke alignment; Center and Outside are a documented
-    /// scope cut), and rounded corners of `radius` pixels (`0` for a
-    /// plain rectangle). The box is normalised and clipped to the canvas
-    /// exactly as the Rectangular Marquee's is, and a pixel is inside the
-    /// shape when its centre is — the same `+0.5` pixel-centre rule the
-    /// selection shapes use, via [`shape_contains`] with
-    /// [`SelectionShape::RoundedRectangle`] — so edges are hard;
-    /// Photoshop's Anti-alias option is a documented scope cut. The
-    /// stroke band is the shape minus the same shape shrunk by `width`
-    /// on every side (exactly how Select > Modify > Border is built), so
-    /// a width that swallows the whole box strokes the whole shape. The
-    /// stroke wins where the two overlap; pixels are overwritten outright
-    /// (100% opacity, Normal), and the active selection confines the
-    /// paint. Photoshop's Shape and Path modes — a live vector layer —
-    /// are a documented scope cut; this app's layers are pixels only.
-    /// Errors when neither fill nor stroke is given, for a stroke width
-    /// outside `1..=250`, for non-finite corners, or a locked or unknown
-    /// layer; a box that rounds to no pixels paints nothing and returns
-    /// `None`, like a click with no drag.
+    /// `(colour, width)` hugging the *inside* of the edge, and rounded
+    /// corners of `radius` pixels (`0` for a plain rectangle). See
+    /// [`Self::draw_shape`] for the shared rules and scope cuts.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_rectangle(
         &mut self,
@@ -2815,6 +2798,63 @@ impl Document {
         x1: f32,
         y1: f32,
         radius: u32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+    ) -> Result<Option<Rect>, String> {
+        let shape = if radius == 0 {
+            SelectionShape::Rectangle
+        } else {
+            SelectionShape::RoundedRectangle { radius }
+        };
+        self.draw_shape(id, shape, x0, y0, x1, y1, fill, stroke)
+    }
+
+    /// The Ellipse tool in its Pixels mode: paints the ellipse inscribed
+    /// in the box spanning `(x0, y0)` and `(x1, y1)` — a circle when the
+    /// box is square — onto layer `id`, with the same optional `fill` and
+    /// inside `stroke` as [`Self::draw_rectangle`]. See
+    /// [`Self::draw_shape`] for the shared rules and scope cuts.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_ellipse(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+    ) -> Result<Option<Rect>, String> {
+        self.draw_shape(id, SelectionShape::Ellipse, x0, y0, x1, y1, fill, stroke)
+    }
+
+    /// The pixel-mode shape tools' shared painter. The box is normalised
+    /// and clipped to the canvas exactly as the marquee tools' is, and a
+    /// pixel is inside `shape` when its centre is — the same `+0.5`
+    /// pixel-centre rule the selection shapes use, via [`shape_contains`]
+    /// — so edges are hard; Photoshop's Anti-alias option is a documented
+    /// scope cut. The stroke band is the shape minus the same shape drawn
+    /// in the box shrunk by `width` on every side (exactly how Select >
+    /// Modify > Border is built — Photoshop's "Inside" stroke alignment;
+    /// Center and Outside are a documented scope cut), so a width that
+    /// swallows the whole box strokes the whole shape. The stroke wins
+    /// where the two overlap; pixels are overwritten outright (100%
+    /// opacity, Normal), and the active selection confines the paint.
+    /// Photoshop's Shape and Path modes — a live vector layer — are a
+    /// documented scope cut; this app's layers are pixels only. Errors
+    /// when neither fill nor stroke is given, for a stroke width outside
+    /// `1..=250`, for non-finite corners, or a locked or unknown layer; a
+    /// box that rounds to no pixels paints nothing and returns `None`,
+    /// like a click with no drag.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_shape(
+        &mut self,
+        id: LayerId,
+        shape: SelectionShape,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
         fill: Option<[u8; 4]>,
         stroke: Option<([u8; 4], u32)>,
     ) -> Result<Option<Rect>, String> {
@@ -2831,11 +2871,6 @@ impl Document {
         }
         let Ok(bounds) = normalize_selection_bounds(x0, y0, x1, y1, self.width, self.height) else {
             return Ok(None);
-        };
-        let shape = if radius == 0 {
-            SelectionShape::Rectangle
-        } else {
-            SelectionShape::RoundedRectangle { radius }
         };
         let inner = stroke.and_then(|(_, width)| shrink_rect(bounds, width));
         let selection = self.selection.clone();
@@ -20637,6 +20672,113 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc
             .draw_rectangle(id, 0.0, 0.0, 5.0, 5.0, 0, Some(FILL), None)
+            .is_err());
+        assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn ellipse_tool_fills_the_inscribed_ellipse_in_either_drag_direction() {
+        let mut doc = Document::new(7, 5).unwrap();
+        let id = doc
+            .add_layer("l", &solid(7, 5, [0, 0, 0, 0]), 7, 5)
+            .unwrap();
+        let dirty = doc
+            .draw_ellipse(id, 7.0, 5.0, 0.0, 0.0, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 7,
+                y1: 5
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".FFFFF.", "FFFFFFF", "FFFFFFF", "FFFFFFF", ".FFFFF."]
+        );
+    }
+
+    #[test]
+    fn ellipse_tool_strokes_a_band_inside_the_edge() {
+        let (mut doc, id) = blank_5x5();
+        doc.draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, Some(FILL), Some((STROKE, 1)))
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".SSS.", "SFFFS", "SFFFS", "SFFFS", ".SSS."]
+        );
+        // A 2-pixel band leaves only the centre pixel inside the inner
+        // ellipse, and with no fill it stays untouched.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, None, Some((STROKE, 2)))
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".SSS.", "SSSSS", "SS.SS", "SSSSS", ".SSS."]
+        );
+    }
+
+    #[test]
+    fn ellipse_tool_follows_the_box_not_a_circle() {
+        // A 3-wide, 5-tall box is a thin ellipse (rx 1.5, ry 2.5): the top
+        // and bottom rows keep only their centre pixel, since (1, 0)'s
+        // centre is at 0.444 + 0.64 = 1.084 > 1 while (1, 1)'s is 0.604.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_ellipse(id, 1.0, 0.0, 4.0, 5.0, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..F..", ".FFF.", ".FFF.", ".FFF.", "..F.."]
+        );
+    }
+
+    #[test]
+    fn ellipse_tool_respects_the_selection_and_clips_to_the_canvas() {
+        let (mut doc, id) = blank_5x5();
+        doc.select_rectangle(0.0, 0.0, 2.0, 5.0).unwrap();
+        let dirty = doc
+            .draw_ellipse(id, -1.0, -1.0, 5.0, 6.0, Some(FILL), None)
+            .unwrap();
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5
+            })
+        );
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".F...", "FF...", "FF...", "FF...", ".F..."]
+        );
+    }
+
+    #[test]
+    fn ellipse_tool_rejects_bad_input() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc
+            .draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, None, None)
+            .is_err());
+        assert!(doc
+            .draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, Some(FILL), Some((STROKE, 251)))
+            .is_err());
+        assert!(doc
+            .draw_ellipse(id, 0.0, f32::INFINITY, 5.0, 5.0, Some(FILL), None)
+            .is_err());
+        assert_eq!(
+            doc.draw_ellipse(id, 2.0, 1.0, 2.0, 3.0, Some(FILL), None)
+                .unwrap(),
+            None
+        );
+        assert!(doc
+            .draw_ellipse(id + 1, 0.0, 0.0, 5.0, 5.0, Some(FILL), None)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .draw_ellipse(id, 0.0, 0.0, 5.0, 5.0, Some(FILL), None)
             .is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
     }

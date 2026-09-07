@@ -11574,6 +11574,65 @@ bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
 **1180 Rust tests total** (1175 → 1180, 1173 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 188 — Ellipse tool
+
+`Document::draw_ellipse(id, x0, y0, x1, y1, fill, stroke)` is the
+Ellipse tool in its Pixels mode: the ellipse inscribed in the dragged
+box — a circle when the box is square — painted with the Rectangle
+tool's optional flat `fill` and inside `(colour, width)` `stroke`.
+Phase 187's painter was lifted into a private `draw_shape(id, shape,
+…)` that takes any `SelectionShape`; `draw_rectangle` now passes
+`Rectangle` or `RoundedRectangle { radius }` and `draw_ellipse` passes
+`Ellipse`, so both tools share the marquee's box normalisation, the
+pixel-centre rule (`shape_contains`), the Border-style stroke band
+(the shape minus the same shape in the box shrunk by `width` on every
+side), the selection confinement, and the same errors. Shape and Path
+modes, anti-aliasing, and Center/Outside stroke alignment remain
+documented scope cuts.
+
+A new **Ellipse** tool button sits after Rectangle; the two share the
+Fill, Stroke, and stroke-colour options (the Radius slider is the
+rectangle's alone), the marquee's live outline preview — drawn as an
+ellipse for this tool — and pointer-up painting through a
+`draw_ellipse` command.
+
+**Verified two ways.** Five new `document.rs` tests, each grid drawn
+first by an independent Python model of `(px − cx)²/rx² + (py − cy)²/ry²
+≤ 1` at pixel centres. A reversed drag over a blank `7×5` fills
+`.FFFFF. / FFFFFFF / FFFFFFF / FFFFFFF / .FFFFF.` and reports the whole
+box dirty — `(1, 0)`'s centre scores `0.327 + 0.64 = 0.967`, inside,
+while `(0, 0)`'s scores `0.735 + 0.64`, outside. On a blank `5×5` a
+1-pixel stroke around a fill gives `.SSS. / SFFFS / SFFFS / SFFFS /
+.SSS.`, and a 2-pixel stroke alone leaves only the centre pixel — the
+sole pixel inside the `1×1` inner box — untouched. A `3×5` box is a
+thin ellipse (`rx 1.5, ry 2.5`) whose top and bottom rows keep only
+their centre pixel: `..F.. / .FFF. / .FFF. / .FFF. / ..F..`. A drag
+off every edge with the two left columns selected paints `.F / FF / FF
+/ FF / .F` and reports the clipped `5×5` box. No fill and no stroke, a
+251-pixel stroke, an infinite corner, an unknown layer, and a locked
+layer all error with the pixels untouched, and a zero-width box
+returns `None`. Four of the five passed on the first run: the thin
+ellipse test was first written against a `2×5` box on the guess that
+its tips would miss the top and bottom rows, but `(1, 0)`'s centre
+scores `0.25 + 0.64 = 0.89` there, inside, so a `2×5` ellipse paints
+all ten pixels of its box — indistinguishable from a rectangle. The
+test was moved to the `3×5` box above, whose grid the Python model
+had actually been run on, and passed.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and
+thirty-five: this session's Xvfb instance was already confirmed,
+through a control test and a full Xvfb-and-application restart in
+Phase 52, to have stopped delivering synthetic `xdotool` pointer clicks
+to the webview entirely, and re-running that diagnostic again was
+judged unlikely to produce new information. The new tool's wiring was
+reviewed by hand instead. Every other layer of this project's quality
+bar (hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `npm run build`) is fully green.
+
+**1185 Rust tests total** (1180 → 1185, 1178 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

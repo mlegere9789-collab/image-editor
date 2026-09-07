@@ -195,7 +195,8 @@ body {
   cursor: crosshair;
 }
 
-.canvas--rectangle {
+.canvas--rectangle,
+.canvas--ellipse {
   cursor: crosshair;
 }
 

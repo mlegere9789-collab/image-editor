@@ -3106,7 +3106,8 @@ export default function App() {
   const isPaintBucket = tool === "paintBucket";
   const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
-  const isRectangle = tool === "rectangle";
+  // The pixel-mode shape tools share one drag, preview, and options bar.
+  const isRectangle = tool === "rectangle" || tool === "ellipse";
 
   const selectWandAt = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
@@ -3567,16 +3568,22 @@ export default function App() {
           if (x0 !== x1 || y0 !== y1) {
             const [r, g, b] = hexToRgb(brushColor);
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
-            void runCommand("draw_rectangle", {
-              id: selectedId,
-              x0,
-              y0,
-              x1,
-              y1,
-              radius: shapeRadius,
-              fill: shapeFill ? [r, g, b, 255] : null,
-              stroke: shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null,
-            });
+            const fill = shapeFill ? [r, g, b, 255] : null;
+            const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
+            if (tool === "ellipse") {
+              void runCommand("draw_ellipse", { id: selectedId, x0, y0, x1, y1, fill, stroke });
+            } else {
+              void runCommand("draw_rectangle", {
+                id: selectedId,
+                x0,
+                y0,
+                x1,
+                y1,
+                radius: shapeRadius,
+                fill,
+                stroke,
+              });
+            }
           }
         }
         return;
@@ -4356,6 +4363,15 @@ export default function App() {
             title="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
           >
             Rectangle
+          </button>
+          <button
+            className={`button button--quiet${tool === "ellipse" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "ellipse"}
+            onClick={() => setTool("ellipse")}
+            title="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
+          >
+            Ellipse
           </button>
           <button
             className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
@@ -5616,7 +5632,7 @@ export default function App() {
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
           )}
-          {tool === "rectangle" && (
+          {(tool === "rectangle" || tool === "ellipse") && (
             <>
               <label className="tools__slider">
                 <input
@@ -5647,18 +5663,20 @@ export default function App() {
                 aria-label="Shape stroke color"
                 onChange={(event) => setShapeStrokeColor(event.target.value)}
               />
-              <label className="tools__slider">
-                Radius
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={shapeRadius}
-                  disabled={!canPaint}
-                  onChange={(event) => setShapeRadius(Number(event.target.value))}
-                />
-                {shapeRadius}px
-              </label>
+              {tool === "rectangle" && (
+                <label className="tools__slider">
+                  Radius
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={shapeRadius}
+                    disabled={!canPaint}
+                    onChange={(event) => setShapeRadius(Number(event.target.value))}
+                  />
+                  {shapeRadius}px
+                </label>
+              )}
             </>
           )}
           {(tool === "colorReplace" || tool === "backgroundEraser") && (
@@ -14635,7 +14653,7 @@ export default function App() {
               />
               {marqueePreview && (
                 <div
-                  className={`selection-outline${tool === "selectEllipse" ? " selection-outline--ellipse" : ""}`}
+                  className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
                   style={overlayStyle(
                     marqueeBounds(marqueePreview.start, marqueePreview.current, document),
                     document,

@@ -148,6 +148,7 @@ export type Tool =
   | "patch"
   | "contentAwareMove"
   | "rectangle"
+  | "ellipse"
   | "historyBrush"
   | "magicWand"
   | "lasso"
