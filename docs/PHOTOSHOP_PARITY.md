@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 201.**
+**618 distinct capabilities tracked. Currently shipped: 202.**
 
 ## PART I — EVERY TOOL
 
@@ -228,7 +228,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Rotate 90° Counter Clockwise (same implementation as Rotate 90° Clockwise, opposite direction)
 - [x] Flip Horizontal
 - [x] Flip Vertical
-- [ ] Transform Again
+- [x] Transform Again (`transform_again`, repeats the most recent non-neutral `rotate`/`scale`/`skew`/`free_transform` on any layer as a `free_transform` with the same values; the remembered transform travels with the document through undo, so an undone transform is forgotten as in Photoshop — see README Phase 140)
 - [ ] Free Transform + Warp Mode
 - [ ] Reference Point Locator
 - [ ] Relative Positioning

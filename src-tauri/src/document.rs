@@ -79,6 +79,10 @@ pub struct Document {
     /// `reselect` (Select > Reselect) to restore. Not touched by making a
     /// new selection while one is already active — only by `deselect`.
     last_selection: Option<Selection>,
+    /// The most recent non-neutral transform (`rotate`, `scale`, `skew`,
+    /// or `free_transform`), kept for `transform_again` (Edit > Transform
+    /// > Again) to repeat. Travels with the document through undo/redo.
+    last_transform: Option<FreeTransform>,
 }
 
 /// How Filter > Stylize > Diffuse decides which neighbour a pixel takes.
@@ -795,6 +799,8 @@ pub struct DocumentView {
     pub selection: Option<SelectionView>,
     /// Whether `reselect` has something to restore right now.
     pub can_reselect: bool,
+    /// Whether `transform_again` has a transform to repeat right now.
+    pub can_transform_again: bool,
 }
 
 impl Document {
@@ -810,6 +816,7 @@ impl Document {
             next_id: 1,
             selection: None,
             last_selection: None,
+            last_transform: None,
         })
     }
 
@@ -832,6 +839,7 @@ impl Document {
             layers: self.layers.iter().map(Layer::view).collect(),
             selection: self.selection,
             can_reselect: self.last_selection.is_some(),
+            can_transform_again: self.last_transform.is_some(),
         }
     }
 
@@ -10112,7 +10120,7 @@ impl Document {
         let doc_width = self.width as usize;
         let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
         let (sin, cos) = degrees.to_radians().sin_cos();
-        self.filter_pixels(id, move |source, row, col| {
+        let touched = self.filter_pixels(id, move |source, row, col| {
             let (dx, dy) = (col as f32 - cx, row as f32 - cy);
             let sx = (cx + cos * dx + sin * dy).round() as i64;
             let sy = (cy - sin * dx + cos * dy).round() as i64;
@@ -10123,7 +10131,12 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             out.copy_from_slice(&source[base..base + CHANNELS]);
             out
-        })
+        })?;
+        self.last_transform = Some(FreeTransform {
+            degrees,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
     }
 
     /// Edit > Transform > Scale: resizes layer `id`'s pixels to
@@ -10155,7 +10168,7 @@ impl Document {
         let doc_width = self.width as usize;
         let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
         let (fx, fy) = (width_percent / 100.0, height_percent / 100.0);
-        self.filter_pixels(id, move |source, row, col| {
+        let touched = self.filter_pixels(id, move |source, row, col| {
             let sx = (cx + (col as f32 - cx) / fx).round() as i64;
             let sy = (cy + (row as f32 - cy) / fy).round() as i64;
             if sx < 0 || sy < 0 || sx >= width || sy >= height {
@@ -10165,7 +10178,13 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             out.copy_from_slice(&source[base..base + CHANNELS]);
             out
-        })
+        })?;
+        self.last_transform = Some(FreeTransform {
+            width_percent,
+            height_percent,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
     }
 
     /// Edit > Transform > Skew: shears layer `id` by `horizontal_degrees`
@@ -10200,7 +10219,7 @@ impl Document {
             horizontal_degrees.to_radians().tan(),
             vertical_degrees.to_radians().tan(),
         );
-        self.filter_pixels(id, move |source, row, col| {
+        let touched = self.filter_pixels(id, move |source, row, col| {
             let sy_f = row as f32 - tv * (col as f32 - cx);
             let sx_f = col as f32 - th * (sy_f - cy);
             let (sx, sy) = (sx_f.round() as i64, sy_f.round() as i64);
@@ -10211,7 +10230,13 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             out.copy_from_slice(&source[base..base + CHANNELS]);
             out
-        })
+        })?;
+        self.last_transform = Some(FreeTransform {
+            skew_horizontal: horizontal_degrees,
+            skew_vertical: vertical_degrees,
+            ..FreeTransform::default()
+        });
+        Ok(touched)
     }
 
     /// Moves layer `id`'s pixels by `(dx, dy)` with the vacated edge left
@@ -10271,7 +10296,26 @@ impl Document {
         if (transform.offset_x, transform.offset_y) != (neutral.offset_x, neutral.offset_y) {
             touched = self.translate(id, transform.offset_x, transform.offset_y)?;
         }
+        if transform != neutral {
+            self.last_transform = Some(transform);
+        }
         Ok(touched)
+    }
+
+    /// Edit > Transform > Again: repeats the most recent transform —
+    /// whichever of [`Self::rotate`], [`Self::scale`], [`Self::skew`], or
+    /// [`Self::free_transform`] last ran with non-neutral values — on
+    /// layer `id`, as [`Self::free_transform`] with those same values.
+    /// Photoshop's own Again is what makes stepped copies (rotate a
+    /// petal, duplicate, Again, Again…) cheap; here, because the
+    /// remembered transform travels with the document through undo, an
+    /// undone transform is also forgotten, exactly as Photoshop forgets
+    /// it. Errors when nothing has been transformed yet.
+    pub fn transform_again(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let transform = self
+            .last_transform
+            .ok_or_else(|| "Nothing to transform again.".to_string())?;
+        self.free_transform(id, transform)
     }
 }
 
@@ -24360,6 +24404,81 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.free_transform(999, turn).is_err());
         assert!(empty.free_transform(999, FreeTransform::default()).is_err());
+    }
+
+    #[test]
+    fn transform_again_repeats_the_last_rotate() {
+        // Rotate 90 then Again: two quarter turns equal rotate_layer_180.
+        let (mut doc, id) = ramped_3x3();
+        assert!(!doc.view().can_transform_again);
+        doc.rotate(id, 90.0).unwrap();
+        assert!(doc.view().can_transform_again);
+        doc.transform_again(id).unwrap();
+        let (mut half_turn, id_b) = ramped_3x3();
+        half_turn.rotate_layer_180(id_b).unwrap();
+        assert_eq!(doc.layers()[0].pixels, half_turn.layers()[0].pixels);
+    }
+
+    #[test]
+    fn transform_again_repeats_the_last_free_transform() {
+        // A move by (1, 0), then Again: a total slide of two pixels.
+        let (mut doc, id) = ramped_3x3();
+        let nudge = FreeTransform {
+            offset_x: 1,
+            ..FreeTransform::default()
+        };
+        doc.free_transform(id, nudge).unwrap();
+        doc.transform_again(id).unwrap();
+        assert_eq!(
+            red_channel_grid(&doc),
+            vec![vec![0, 0, 10], vec![0, 0, 40], vec![0, 0, 70]]
+        );
+    }
+
+    #[test]
+    fn transform_again_remembers_scale_and_skew_too_but_not_a_neutral_transform() {
+        let (mut doc, id) = ramped_4x4();
+        doc.scale(id, 50.0, 50.0).unwrap();
+        doc.free_transform(id, FreeTransform::default()).unwrap();
+        // The neutral free transform did not replace the remembered scale.
+        doc.transform_again(id).unwrap();
+        let (mut twice, id_b) = ramped_4x4();
+        twice.scale(id_b, 50.0, 50.0).unwrap();
+        twice.scale(id_b, 50.0, 50.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, twice.layers()[0].pixels);
+
+        let (mut doc, id) = ramped_3x3();
+        doc.skew(id, 45.0, 0.0).unwrap();
+        doc.transform_again(id).unwrap();
+        let (mut twice, id_b) = ramped_3x3();
+        twice.skew(id_b, 45.0, 0.0).unwrap();
+        twice.skew(id_b, 45.0, 0.0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, twice.layers()[0].pixels);
+    }
+
+    #[test]
+    fn transform_again_can_target_a_different_layer() {
+        let mut doc = Document::new(3, 3).unwrap();
+        let first = doc
+            .add_layer("first", &ramped_3x3().0.layers()[0].pixels, 3, 3)
+            .unwrap();
+        let second = doc
+            .add_layer("second", &ramped_3x3().0.layers()[0].pixels, 3, 3)
+            .unwrap();
+        doc.rotate(first, 90.0).unwrap();
+        doc.transform_again(second).unwrap();
+        assert_eq!(doc.layers()[0].pixels, doc.layers()[1].pixels);
+    }
+
+    #[test]
+    fn transform_again_with_nothing_to_repeat_or_a_bad_layer_is_an_error() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.transform_again(id).unwrap_err();
+        assert!(err.contains("Nothing to transform again"), "{err}");
+        doc.rotate(id, 90.0).unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.transform_again(id).is_err());
+        assert!(doc.transform_again(999).is_err());
     }
 
     #[test]

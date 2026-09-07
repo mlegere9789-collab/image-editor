@@ -9118,6 +9118,57 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **937 Rust tests total** (931 → 937, 930 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 140 — Edit > Transform > Again
+
+`transform_again(id)` repeats the most recent transform — whichever of
+`rotate`, `scale`, `skew`, or `free_transform` last ran with
+non-neutral values — on layer `id`, as a `free_transform` with those
+same values. Photoshop's own Again is what makes stepped copies cheap
+(rotate a petal, duplicate the layer, Again, Again…), and the target
+layer is deliberately independent of the layer the transform was first
+applied to, so exactly that workflow works here. The `Document` gains a
+`last_transform: Option<FreeTransform>` field: `rotate`, `scale`, and
+`skew` each record their own values as the equivalent `FreeTransform`
+(`degrees` alone, the two percentages alone, the two skew angles alone),
+and `free_transform` records the whole struct — but only when it is
+non-neutral, so an all-default Free Transform doesn't quietly replace
+the transform you meant to repeat. Because the remembered transform
+travels with the document snapshot through undo and redo, undoing a
+transform also forgets it, exactly as Photoshop does. `DocumentView`
+gains a matching `can_transform_again` flag, and a **Transform Again**
+button beside Free Transform is enabled only when there is something to
+repeat; the command errors with "Nothing to transform again." otherwise.
+
+**Verified two ways.** Five new `document.rs` tests. `rotate(90)` then
+Again equals `rotate_layer_180` byte-for-byte on `ramped_3x3` — two
+quarter turns are a half turn, and `can_transform_again` flips from
+`false` to `true` across the first rotate. A Free Transform move by
+`(1, 0)` then Again slides the layer two pixels in total: `[[0, 0, 10],
+[0, 0, 40], [0, 0, 70]]`. A `50%` scale followed by an all-default
+Free Transform and then Again equals two `50%` scales (the neutral
+transform did not replace the remembered one), and a `45°` skew then
+Again equals two skews. Rotating one layer and calling Again on a second
+layer leaves the two byte-for-byte identical. Finally, Again with
+nothing recorded errors with the expected message, and a locked or
+unknown layer errors even with a transform recorded. All five passed on
+the first run; the second verification is again structural — every
+result is an already-verified command applied twice, and the tests pin
+that Again reproduces exactly that.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty-seven: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**942 Rust tests total** (937 → 942, 935 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

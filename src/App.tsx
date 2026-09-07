@@ -3167,6 +3167,16 @@ export default function App() {
           >
             Free Transform…
           </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("transform_again", { id: selectedId });
+            }}
+            disabled={busy || !canPaint || !(document?.canTransformAgain ?? false)}
+            title="Edit > Transform > Again (repeat the last transform on the selected layer)"
+          >
+            Transform Again
+          </button>
         </div>
 
         <div className="tools" role="group" aria-label="Selection tool">

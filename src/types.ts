@@ -59,6 +59,8 @@ export type DocumentView = {
   selection: Selection | null;
   /** Whether Select > Reselect has something to restore right now. */
   canReselect: boolean;
+  /** Whether Edit > Transform > Again has a transform to repeat right now. */
+  canTransformAgain: boolean;
 };
 
 /** Mirrors `HistoryState` in src-tauri/src/lib.rs. */
