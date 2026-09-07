@@ -8710,6 +8710,55 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **900 Rust tests total** (894 → 900, 893 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 133 — Camera Raw Filter > Point Color
+
+`point_color(id, target, range, hue, saturation, luminance)` fills in
+Camera Raw's Point Color panel. Camera Raw's Point Color is the same
+adjustment Image > Adjustments > Replace Color makes — pick a colour,
+then shift the hue, saturation, and luminance of every pixel within
+some range of it, fading out toward the edge of that range — so this
+is Phase 112's `replace_color` exposed under its Camera Raw name: the
+picked colour is `replace_color`'s `target`, Point Color's Range slider
+is `replace_color`'s Chebyshev-distance `fuzziness` (`0..=200`, erroring
+above), and the three adjustment sliders are `hue_saturation`'s own,
+applied through the same linear `strength = clamp(1 - distance /
+range, 0, 1)` blend. An exact preset, the same relationship
+`camera_raw_point_curve` has to `curves`, and framed as such. Camera
+Raw's own Point Color also lets the hue, saturation, and luminance
+range widths be set independently and offers a Visualize Range
+overlay; both are a documented scope cut. A new **Point Color…**
+dialog exposes the colour picker, Range, and the three sliders.
+
+**Verified two ways.** Four new `document.rs` tests, reusing Replace
+Color's own already hand-verified fixtures and values. Target `(100,
+100, 100)`, range `50`, luminance `-100`: an exact match goes to `(0,
+0, 0)`; `(130, 100, 100)`, at Chebyshev distance `30` (strength `0.4`),
+blends 40% toward black to `(78, 60, 60)`; `(200, 100, 100)`, at
+distance `100`, is beyond the range and untouched. Target `(255, 0,
+0)`, range `10`, hue `+120`: the exact match becomes `(0, 255, 0)`,
+`(255, 20, 20)` at distance `20` is untouched, and `(255, 5, 5)` at
+distance `5` (strength `0.5`) lands halfway at `(130, 130, 5)`. A third
+test confirms the preset equals `replace_color` byte-for-byte on
+`ramped_3x3` with all three sliders non-zero, and a fourth confirms a
+range of `201`, a locked layer, and an unknown layer all error. All
+four passed on the first run; the six colour values are the ones
+Phase 112's independent Python port already produced, re-run for this
+phase.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous eighty: this session's Xvfb
+instance was already confirmed, through a control test and a full
+Xvfb-and-application restart in Phase 52, to have stopped delivering
+synthetic `xdotool` pointer clicks to the webview entirely, and
+re-running that diagnostic again was judged unlikely to produce new
+information. The new dialog's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand/script-verified
+Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**904 Rust tests total** (900 → 904, 897 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

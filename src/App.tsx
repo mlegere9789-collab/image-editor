@@ -250,6 +250,12 @@ export default function App() {
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
   const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [showPointColorDialog, setShowPointColorDialog] = useState(false);
+  const [pointColorTarget, setPointColorTarget] = useState("#ff0000");
+  const [pointColorRange, setPointColorRange] = useState(40);
+  const [pointColorHue, setPointColorHue] = useState(0);
+  const [pointColorSaturation, setPointColorSaturation] = useState(0);
+  const [pointColorLuminance, setPointColorLuminance] = useState(0);
   const [showColorMixerDialog, setShowColorMixerDialog] = useState(false);
   const [colorMixerRange, setColorMixerRange] = useState(0);
   const [colorMixerHue, setColorMixerHue] = useState(0);
@@ -981,6 +987,28 @@ export default function App() {
     colorMixerHue,
     colorMixerSaturation,
     colorMixerLuminance,
+  ]);
+
+  const applyPointColor = useCallback(async () => {
+    if (selectedId === null) return;
+    const [r, g, b] = hexToRgb(pointColorTarget);
+    await runCommand("point_color", {
+      id: selectedId,
+      target: [r, g, b],
+      range: pointColorRange,
+      hue: pointColorHue,
+      saturation: pointColorSaturation,
+      luminance: pointColorLuminance,
+    });
+    setShowPointColorDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    pointColorTarget,
+    pointColorRange,
+    pointColorHue,
+    pointColorSaturation,
+    pointColorLuminance,
   ]);
 
   const applyDefringe = useCallback(async () => {
@@ -3292,6 +3320,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => setShowPointColorDialog(true)}
+            disabled={busy || !canPaint}
+            title="Camera Raw Filter > Point Color"
+          >
+            Point Color…
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowDefringeDialog(true)}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Optics > Defringe"
@@ -5333,6 +5369,94 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyColorMixer} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPointColorDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPointColorDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Point Color"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Camera Raw Filter &gt; Point Color</h2>
+            <label className="control control--row">
+              <span className="control__label">Color</span>
+              <input
+                type="color"
+                value={pointColorTarget}
+                onChange={(event) => setPointColorTarget(event.target.value)}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Range
+                <span className="control__value">{pointColorRange}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={pointColorRange}
+                onChange={(event) => setPointColorRange(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Hue
+                <span className="control__value">{pointColorHue}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={pointColorHue}
+                onChange={(event) => setPointColorHue(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Saturation
+                <span className="control__value">{pointColorSaturation}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={pointColorSaturation}
+                onChange={(event) => setPointColorSaturation(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Luminance
+                <span className="control__value">{pointColorLuminance}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={pointColorLuminance}
+                onChange={(event) => setPointColorLuminance(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPointColorDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyPointColor} disabled={busy}>
                 Apply
               </button>
             </div>

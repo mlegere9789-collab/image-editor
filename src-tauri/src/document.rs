@@ -9962,6 +9962,32 @@ impl Document {
             [r, g, b, a]
         })
     }
+
+    /// Camera Raw Filter > Point Color: Camera Raw's own Point Color is
+    /// the same adjustment Image > Adjustments > Replace Color makes —
+    /// pick a colour, then shift the hue, saturation, and luminance of
+    /// every pixel within some range of it, fading out toward the edge
+    /// of that range — so this is [`Self::replace_color`] under its
+    /// Camera Raw name: `target` is the picked colour, Point Color's
+    /// Range slider is Replace Color's own Chebyshev-distance
+    /// `fuzziness` (`0..=200`, erroring above), and the three sliders
+    /// are [`Self::hue_saturation`]'s, blended in by the same linear
+    /// `strength = clamp(1 - distance / range, 0, 1)`. An exact preset,
+    /// like [`Self::camera_raw_point_curve`] over [`Self::curves`].
+    /// Camera Raw's own independently adjustable hue/saturation/
+    /// luminance range widths and its Visualize Range overlay are a
+    /// documented scope cut.
+    pub fn point_color(
+        &mut self,
+        id: LayerId,
+        target: [u8; 3],
+        range: u32,
+        hue: i32,
+        saturation: i32,
+        luminance: i32,
+    ) -> Result<Option<Rect>, String> {
+        self.replace_color(id, target, range, hue, saturation, luminance)
+    }
 }
 
 /// The centre hue, in degrees, of each of Camera Raw's eight Color Mixer
@@ -23317,6 +23343,76 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.color_mixer(999, 0, 120, 0, 0).is_err());
+    }
+
+    #[test]
+    fn point_color_fades_a_luminance_shift_out_across_its_range() {
+        // Replace Color's own hand-verified fixture: target (100, 100, 100),
+        // range 50, luminance -100. An exact match goes to black; (130, 100,
+        // 100) at Chebyshev distance 30 (strength 0.4) blends 40% toward
+        // black to (78, 60, 60); (200, 100, 100) at distance 100 is beyond
+        // the range and untouched.
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[100, 100, 100, 255, 130, 100, 100, 255, 200, 100, 100, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.point_color(id, [100, 100, 100], 50, 0, 0, -100)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [78, 60, 60, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn point_color_fades_a_hue_shift_out_across_its_range() {
+        // Target (255, 0, 0), range 10, hue +120: the exact match becomes
+        // pure green; (255, 20, 20) at distance 20 is untouched; (255, 5, 5)
+        // at distance 5 (strength 0.5) lands halfway at (130, 130, 5).
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[255, 0, 0, 255, 255, 20, 20, 255, 255, 5, 5, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.point_color(id, [255, 0, 0], 10, 120, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 20, 20, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [130, 130, 5, 255]);
+    }
+
+    #[test]
+    fn point_color_matches_replace_color_exactly() {
+        let (mut via_preset, id_a) = ramped_3x3();
+        let (mut via_replace, id_b) = ramped_3x3();
+        via_preset
+            .point_color(id_a, [50, 0, 0], 60, 90, 40, -20)
+            .unwrap();
+        via_replace
+            .replace_color(id_b, [50, 0, 0], 60, 90, 40, -20)
+            .unwrap();
+        assert_eq!(
+            via_preset.layers()[0].pixels,
+            via_replace.layers()[0].pixels
+        );
+    }
+
+    #[test]
+    fn point_color_propagates_errors() {
+        let (mut doc, id) = doc_with_one_layer();
+        assert!(doc.point_color(id, [10, 20, 30], 201, 0, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.point_color(id, [10, 20, 30], 50, 120, 0, 0).is_err());
+        assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.point_color(999, [10, 20, 30], 50, 120, 0, 0).is_err());
     }
 
     #[test]

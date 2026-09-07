@@ -2628,6 +2628,22 @@ fn color_mixer(
     })
 }
 
+/// Camera Raw Filter > Point Color on layer `id`.
+#[tauri::command]
+fn point_color(
+    state: State<'_, AppState>,
+    id: LayerId,
+    target: [u8; 3],
+    range: u32,
+    hue: i32,
+    saturation: i32,
+    luminance: i32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.point_color(id, target, range, hue, saturation, luminance)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -2882,6 +2898,7 @@ pub fn run() {
             camera_raw_point_curve,
             color_grading,
             color_mixer,
+            point_color,
             select_rectangle,
             select_ellipse,
             select_all,
