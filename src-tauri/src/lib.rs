@@ -2750,6 +2750,15 @@ fn define_pattern(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, S
     edit_checkpointed(&state, |document| document.define_pattern(id).map(|_| None))
 }
 
+/// Layer > New Fill Layer > Pattern: add a new top layer tiled with the
+/// document's defined pattern. Always named "Pattern Fill 1".
+#[tauri::command]
+fn add_pattern_layer(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.add_pattern_layer("Pattern Fill 1").map(|_| None)
+    })
+}
+
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
@@ -3015,6 +3024,7 @@ pub fn run() {
             distort,
             perspective,
             define_pattern,
+            add_pattern_layer,
             select_rectangle,
             select_ellipse,
             select_all,

@@ -9330,6 +9330,48 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 **959 Rust tests total** (954 → 959, 952 lib + 7 pipeline). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 144 — Layer > New Fill Layer > Pattern
+
+`add_pattern_layer(name)` completes the fill-layer trio and gives
+Phase 143's pattern its first consumer: a new top layer, document
+sized, tiled from the top-left corner with the pattern `define_pattern`
+captured, every tile the pattern's own bytes (pixel `(x, y)` reads
+pattern `(x mod width, y mod height)`), alpha included. It errors when
+no pattern has been defined, which is also when the new **Pattern
+Fill** button beside Solid Color and Gradient Fill is disabled. Like
+the other two fill layers it is an ordinary, fully editable pixel layer
+rather than a live, re-openable fill (this app's layer model has no
+generative layer kind — the same documented scope cut Solid Color
+made in Phase 14), and Photoshop's own dialog's Scale, Angle, and
+Link-with-Layer options are a documented scope cut alongside it.
+
+**Verified two ways.** Four new `document.rs` tests. Capturing the
+`2x2` tile `20 30 / 50 60` from `ramped_3x3` (columns `1..3` of rows
+`0..2`) and adding a pattern layer yields a new top layer reading
+`[[20, 30, 20], [50, 60, 50], [20, 30, 20]]` — the tile repeated, with
+the third column and row wrapping back to the tile's first — every
+pixel fully opaque, while the original layer beneath is untouched.
+Capturing the whole `3x3` layer and tiling it into a new `3x3` layer
+reproduces the layer byte-for-byte. The new layer is the top of the
+stack, unlocked, and named as given. With no pattern defined the call
+errors and adds nothing. All four passed on the first run; the tiled
+grid is read directly off the fixture, so the second verification is
+the listing itself.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous ninety-one: this session's
+Xvfb instance was already confirmed, through a control test and a
+full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce
+new information. The new button's wiring was reviewed by hand instead.
+Every other layer of this project's quality bar (hand-verified Rust
+tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build`) is fully green.
+
+**963 Rust tests total** (959 → 963, 956 lib + 7 pipeline). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -3072,6 +3072,14 @@ export default function App() {
         </button>
         <button
           className="button button--quiet"
+          onClick={() => void runCommand("add_pattern_layer")}
+          disabled={busy || !hasDocument || !(document?.hasPattern ?? false)}
+          title="Layer > New Fill Layer > Pattern (tiles the pattern captured by Define Pattern)"
+        >
+          Pattern Fill
+        </button>
+        <button
+          className="button button--quiet"
           onClick={exportDocument}
           disabled={busy || !hasDocument}
         >

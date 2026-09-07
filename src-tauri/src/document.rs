@@ -913,6 +913,29 @@ impl Document {
         Ok(())
     }
 
+    /// Layer > New Fill Layer > Pattern: a new top layer, document sized,
+    /// tiled from the top-left corner with the pattern
+    /// [`Self::define_pattern`] captured — pixel `(x, y)` reads pattern
+    /// `(x mod width, y mod height)`, alpha included. Like
+    /// [`Self::add_solid_color_layer`] and [`Self::add_gradient_layer`] it
+    /// is an ordinary, editable pixel layer rather than a live fill;
+    /// Photoshop's own Scale, Angle, and Link-with-Layer options are a
+    /// documented scope cut. Errors when no pattern has been defined.
+    pub fn add_pattern_layer(&mut self, name: impl Into<String>) -> Result<LayerId, String> {
+        let pattern = self.pattern.as_ref().ok_or_else(|| {
+            "No pattern has been defined yet (Edit > Define Pattern).".to_string()
+        })?;
+        let (pw, ph) = (pattern.width as usize, pattern.height as usize);
+        let mut pixels = Vec::with_capacity(self.buffer_len());
+        for y in 0..self.height as usize {
+            for x in 0..self.width as usize {
+                let src = ((y % ph) * pw + (x % pw)) * CHANNELS;
+                pixels.extend_from_slice(&pattern.pixels[src..src + CHANNELS]);
+            }
+        }
+        self.add_layer(name, &pixels, self.width, self.height)
+    }
+
     /// Replace the selection with an axis-aligned rectangle spanning the two
     /// corners `(x0, y0)` and `(x1, y1)` — in either order, as a drag can go
     /// any direction.
@@ -24971,6 +24994,58 @@ mod tests {
         doc.define_pattern(id).unwrap();
         assert!(doc.pattern().is_some());
         assert!(doc.define_pattern(999).is_err());
+    }
+
+    #[test]
+    fn add_pattern_layer_tiles_the_pattern_from_the_top_left() {
+        // The 2x2 tile 20 30 / 50 60, repeated across 3x3: the third
+        // column and row wrap back to the tile's first.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(1.0, 0.0, 3.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.deselect();
+        let fill = doc.add_pattern_layer("Pattern Fill 1").unwrap();
+        assert_eq!(doc.layers().len(), 2);
+        assert_eq!(doc.layers()[1].id, fill);
+        assert_eq!(doc.layers()[1].name, "Pattern Fill 1");
+        assert!(!doc.layers()[1].locked);
+        let p = &doc.layers()[1].pixels;
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let grid: Vec<Vec<u8>> = (0..3)
+            .map(|y| (0..3).map(|x| p[idx(x, y)]).collect())
+            .collect();
+        assert_eq!(
+            grid,
+            vec![vec![20, 30, 20], vec![50, 60, 50], vec![20, 30, 20]]
+        );
+        assert!(p.chunks_exact(4).all(|px| px[3] == 255));
+        // The source layer is untouched.
+        assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn add_pattern_layer_with_a_whole_layer_pattern_copies_it_exactly() {
+        let (mut doc, id) = ramped_3x3();
+        doc.define_pattern(id).unwrap();
+        doc.add_pattern_layer("copy").unwrap();
+        assert_eq!(doc.layers()[1].pixels, doc.layers()[0].pixels);
+    }
+
+    #[test]
+    fn add_pattern_layer_without_a_pattern_is_an_error() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc.add_pattern_layer("fill").unwrap_err();
+        assert!(err.contains("No pattern"), "{err}");
+        assert_eq!(doc.layers().len(), 1);
+    }
+
+    #[test]
+    fn add_pattern_layer_tiles_a_one_pixel_pattern_everywhere() {
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(2.0, 2.0, 3.0, 3.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.add_pattern_layer("solid 90").unwrap();
+        assert_eq!(doc.layers()[1].pixels, solid(3, 3, [90, 0, 0, 255]));
     }
 
     #[test]
