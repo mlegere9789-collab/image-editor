@@ -264,6 +264,8 @@ export default function App() {
   const [rulerReadout, setRulerReadout] = useState<Measurement | null>(null);
   const rulerStart = useRef<[number, number] | null>(null);
   const [colorSamplers, setColorSamplers] = useState<[number, number][]>([]);
+  const [showLayerCompsDialog, setShowLayerCompsDialog] = useState(false);
+  const [layerCompName, setLayerCompName] = useState("Comp 1");
   // A note being written (index null) or edited (index set).
   const [noteDialog, setNoteDialog] = useState<{
     x: number;
@@ -3080,6 +3082,10 @@ export default function App() {
     setNoteDialog(null);
   }, [runCommand, noteDialog]);
 
+  const saveLayerComp = useCallback(async () => {
+    await runCommand("save_layer_comp", { name: layerCompName });
+  }, [runCommand, layerCompName]);
+
   const placeCountMark = useCallback(
     (event: React.PointerEvent<HTMLImageElement>) => {
       if (!document) return;
@@ -3521,6 +3527,14 @@ export default function App() {
             title="Image > Apply Image (blend another layer, or the merged image, onto the selected layer)"
           >
             Apply Image…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowLayerCompsDialog(true)}
+            disabled={busy || !hasDocument}
+            title="Window > Layer Comps (save and restore every layer's visibility, opacity, and blend mode)"
+          >
+            Layer Comps…
           </button>
           <button
             className="button button--quiet"
@@ -6714,6 +6728,70 @@ export default function App() {
               </button>
               <button className="button" onClick={applyGeometry} disabled={busy}>
                 Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLayerCompsDialog && document && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLayerCompsDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Layer Comps"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Layer Comps</h2>
+            <p className="modal__hint">
+              A comp records every layer&apos;s visibility, opacity, and blend mode. Applying
+              one restores them; layers added since are left as they are.
+            </p>
+            {document.layerComps.length === 0 ? (
+              <p className="modal__hint">No comps saved yet.</p>
+            ) : (
+              document.layerComps.map((name) => (
+                <div className="control control--row" key={name}>
+                  <span className="control__label">{name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("apply_layer_comp", { name })}
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_layer_comp", { name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <label className="control control--row">
+              <span className="control__label">New comp</span>
+              <input
+                type="text"
+                value={layerCompName}
+                onChange={(event) => setLayerCompName(event.target.value)}
+              />
+              <button
+                className="button"
+                onClick={saveLayerComp}
+                disabled={busy || layerCompName.trim() === ""}
+              >
+                Save
+              </button>
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowLayerCompsDialog(false)}>
+                Close
               </button>
             </div>
           </div>

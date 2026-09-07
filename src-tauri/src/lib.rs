@@ -560,6 +560,34 @@ fn clear_notes(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
+/// Layer Comps: record every layer's visibility, opacity, and blend mode
+/// under `name`.
+#[tauri::command]
+fn save_layer_comp(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_layer_comp(&name)?;
+        Ok(None)
+    })
+}
+
+/// Layer Comps: restore the comp saved as `name`.
+#[tauri::command]
+fn apply_layer_comp(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.apply_layer_comp(&name)?;
+        Ok(None)
+    })
+}
+
+/// Layer Comps: delete the comp saved as `name`.
+#[tauri::command]
+fn delete_layer_comp(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_layer_comp(&name)?;
+        Ok(None)
+    })
+}
+
 /// Select > Modify > Contract: shrink the selection inward by `amount` pixels.
 #[tauri::command]
 fn contract_selection(state: State<'_, AppState>, amount: u32) -> Result<Snapshot, String> {
@@ -3454,6 +3482,9 @@ pub fn run() {
             set_note_text,
             remove_note,
             clear_notes,
+            save_layer_comp,
+            apply_layer_comp,
+            delete_layer_comp,
             contract_selection,
             smooth_selection,
             border_selection,

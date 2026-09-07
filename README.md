@@ -10746,6 +10746,53 @@ instead. Every other layer of this project's quality bar
 **1095 Rust tests total** (1090 → 1095, 1088 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 171 — Layer Comps
+
+`save_layer_comp(name)` records every layer's visibility, opacity, and
+blend mode under a name (replacing a same-named comp, keeping the list's
+first-saved order), `apply_layer_comp(name)` restores them, and
+`delete_layer_comp(name)` removes one; `layer_comp_names()` lists them
+and the `DocumentView` carries the names as `layerComps`. The states
+are keyed by layer id, so a comp is robust to reordering, and the two
+ways a stack can drift after a comp is saved are handled the way
+Photoshop's panel does: a layer deleted since is skipped on apply, and
+a layer added since is left exactly as it is. Comps are document data
+— every change is one checkpointed undo step — and, being about layers
+rather than positions, they survive a canvas resize. Names are trimmed
+and must not be blank; applying or deleting an unknown name errors,
+quoting it. Photoshop also captures layer position and layer styles in
+a comp; since layers here are document-sized and styles are baked in,
+both are documented scope cuts. A new **Layer Comps…** dialog beside
+Apply Image lists the saved comps with Apply and Delete buttons and
+saves a new one from a name field.
+
+**Verified two ways.** Five new `document.rs` tests reading the layer
+states back field by field. Saving "day" with the overlay visible at
+opacity `1.0` and Normal, then hiding it, halving its opacity, and
+switching it to Multiply, and applying "day" restores all three, with
+the untouched base layer unchanged and the view listing `["day"]`.
+Saving "a", then "b", then " a " again after a change leaves the names
+`["a", "b"]` with "a" holding the newer state; deleting "a" leaves
+`["b"]`. A comp saved with two layers still applies after one is
+deleted, and a layer added after the save is left hidden as it was. A
+blank name errors mentioning "name", unknown names error quoting the
+name on both apply and delete, and a comp survives
+`rotate_document_90`. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this
+phase, for the same reason as the previous one hundred and eighteen:
+this session's Xvfb instance was already confirmed, through a control
+test and a full Xvfb-and-application restart in Phase 52, to have
+stopped delivering synthetic `xdotool` pointer clicks to the webview
+entirely, and re-running that diagnostic again was judged unlikely to
+produce new information. The dialog's wiring was reviewed by hand
+instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `npm run build`) is fully green.
+
+**1100 Rust tests total** (1095 → 1100, 1093 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -71,6 +71,8 @@ export type DocumentView = {
   countMarks: [number, number][];
   /** The Note tool's annotations in placement order. */
   notes: Note[];
+  /** Layer Comps saved on the document, in the order first saved. */
+  layerComps: string[];
 };
 
 /** A Note tool annotation pinned to a pixel. */

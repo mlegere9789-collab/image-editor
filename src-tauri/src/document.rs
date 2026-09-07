@@ -104,6 +104,27 @@ pub struct Document {
     /// The Note tool's annotations, in placement order — document data,
     /// undoable, and discarded when the canvas changes size.
     notes: Vec<Note>,
+    /// Layer Comps: named snapshots of every layer's visibility, opacity,
+    /// and blend mode, in the order first saved. Keyed by layer id, so
+    /// they survive reordering; layers deleted since are skipped on apply
+    /// and layers added since are left alone.
+    layer_comps: Vec<LayerComp>,
+}
+
+/// One layer's recorded state inside a [`LayerComp`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerCompState {
+    pub id: LayerId,
+    pub visible: bool,
+    pub opacity: f32,
+    pub blend_mode: BlendMode,
+}
+
+/// A Layer Comp: a named snapshot of the stack's visibility and appearance.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LayerComp {
+    pub name: String,
+    pub states: Vec<LayerCompState>,
 }
 
 /// A Note tool annotation pinned to pixel `(x, y)`.
@@ -993,6 +1014,8 @@ pub struct DocumentView {
     pub count_marks: Vec<(u32, u32)>,
     /// The Note tool's annotations in placement order.
     pub notes: Vec<Note>,
+    /// Layer Comps saved on the document, in the order first saved.
+    pub layer_comps: Vec<String>,
 }
 
 impl Document {
@@ -1013,6 +1036,7 @@ impl Document {
             saved_selections: Vec::new(),
             count_marks: Vec::new(),
             notes: Vec::new(),
+            layer_comps: Vec::new(),
         })
     }
 
@@ -1045,6 +1069,7 @@ impl Document {
             saved_selections: self.saved_selection_names(),
             count_marks: self.count_marks.clone(),
             notes: self.notes.clone(),
+            layer_comps: self.layer_comp_names(),
         }
     }
 
@@ -1927,6 +1952,78 @@ impl Document {
     /// The Note tool's annotations in placement order.
     pub fn notes(&self) -> &[Note] {
         &self.notes
+    }
+
+    /// Layer Comps > New Layer Comp: records every layer's visibility,
+    /// opacity, and blend mode under `name` (trimmed, non-blank), replacing
+    /// a comp already saved under that name and otherwise appending. Comps
+    /// are document data — undoable, and kept across a canvas resize, being
+    /// about layers rather than positions. Photoshop's comps also capture
+    /// layer position and layer styles; layers here are document-sized and
+    /// styles are baked in, so both are documented scope cuts.
+    pub fn save_layer_comp(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A layer comp needs a name.".to_string());
+        }
+        let states = self
+            .layers
+            .iter()
+            .map(|layer| LayerCompState {
+                id: layer.id,
+                visible: layer.visible,
+                opacity: layer.opacity,
+                blend_mode: layer.blend_mode,
+            })
+            .collect();
+        match self.layer_comps.iter_mut().find(|c| c.name == name) {
+            Some(comp) => comp.states = states,
+            None => self.layer_comps.push(LayerComp {
+                name: name.to_string(),
+                states,
+            }),
+        }
+        Ok(())
+    }
+
+    /// Applies the comp saved as `name`: every layer it recorded that still
+    /// exists gets its recorded visibility, opacity, and blend mode back;
+    /// layers deleted since are skipped and layers added since are left as
+    /// they are, which is how Photoshop's panel treats a comp the stack has
+    /// drifted from. Errors on an unknown name.
+    pub fn apply_layer_comp(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        let states = self
+            .layer_comps
+            .iter()
+            .find(|c| c.name == name)
+            .map(|c| c.states.clone())
+            .ok_or_else(|| format!("No layer comp named \"{name}\" has been saved."))?;
+        for state in states {
+            if let Some(layer) = self.layers.iter_mut().find(|l| l.id == state.id) {
+                layer.visible = state.visible;
+                layer.opacity = state.opacity;
+                layer.blend_mode = state.blend_mode;
+            }
+        }
+        Ok(())
+    }
+
+    /// Deletes the comp saved as `name`. Errors on an unknown name.
+    pub fn delete_layer_comp(&mut self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        let index = self
+            .layer_comps
+            .iter()
+            .position(|c| c.name == name)
+            .ok_or_else(|| format!("No layer comp named \"{name}\" has been saved."))?;
+        self.layer_comps.remove(index);
+        Ok(())
+    }
+
+    /// The saved comps' names, in the order first saved.
+    pub fn layer_comp_names(&self) -> Vec<String> {
+        self.layer_comps.iter().map(|c| c.name.clone()).collect()
     }
 
     pub fn selection(&self) -> Option<Selection> {
@@ -28926,6 +29023,78 @@ mod tests {
         })
         .unwrap();
         assert!(doc.view().notes.is_empty());
+    }
+
+    #[test]
+    fn a_layer_comp_restores_visibility_opacity_and_blend_mode() {
+        let (mut doc, over) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        let base = doc.layers()[0].id;
+        doc.save_layer_comp("day").unwrap();
+        assert_eq!(doc.view().layer_comps, vec!["day".to_string()]);
+        doc.set_visible(over, false).unwrap();
+        doc.set_opacity(over, 0.5).unwrap();
+        doc.set_blend_mode(over, BlendMode::Multiply).unwrap();
+        doc.apply_layer_comp("day").unwrap();
+        let layer = doc.layer(over).unwrap();
+        assert!(layer.visible);
+        assert_eq!(layer.opacity, 1.0);
+        assert_eq!(layer.blend_mode, BlendMode::Normal);
+        let base_layer = doc.layer(base).unwrap();
+        assert!(base_layer.visible && base_layer.opacity == 1.0);
+    }
+
+    #[test]
+    fn saving_a_layer_comp_under_an_existing_name_replaces_it_in_place() {
+        let (mut doc, over) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        doc.save_layer_comp("a").unwrap();
+        doc.save_layer_comp("b").unwrap();
+        doc.set_visible(over, false).unwrap();
+        doc.save_layer_comp(" a ").unwrap();
+        assert_eq!(doc.layer_comp_names(), vec!["a", "b"]);
+        doc.set_visible(over, true).unwrap();
+        doc.apply_layer_comp("a").unwrap();
+        assert!(!doc.layer(over).unwrap().visible);
+        doc.delete_layer_comp("a").unwrap();
+        assert_eq!(doc.layer_comp_names(), vec!["b"]);
+    }
+
+    #[test]
+    fn a_layer_comp_skips_deleted_layers_and_leaves_new_ones_alone() {
+        let (mut doc, over) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        let base = doc.layers()[0].id;
+        doc.save_layer_comp("both").unwrap();
+        doc.remove_layer(over).unwrap();
+        let added = doc
+            .add_layer("new", &solid(3, 3, [0, 0, 0, 0]), 3, 3)
+            .unwrap();
+        doc.set_visible(added, false).unwrap();
+        doc.set_visible(base, false).unwrap();
+        doc.apply_layer_comp("both").unwrap();
+        assert!(doc.layer(base).unwrap().visible);
+        assert!(!doc.layer(added).unwrap().visible);
+    }
+
+    #[test]
+    fn layer_comps_reject_blank_and_unknown_names() {
+        let (mut doc, _) = ramped_3x3();
+        let err = doc.save_layer_comp("  ").unwrap_err();
+        assert!(err.contains("name"), "{err}");
+        let err = doc.apply_layer_comp("missing").unwrap_err();
+        assert!(err.contains("missing"), "{err}");
+        let err = doc.delete_layer_comp("missing").unwrap_err();
+        assert!(err.contains("missing"), "{err}");
+        assert!(doc.layer_comp_names().is_empty());
+    }
+
+    #[test]
+    fn layer_comps_survive_a_canvas_resize() {
+        let (mut doc, over) = ramped_3x3_with_overlay([200, 0, 0, 255]);
+        doc.save_layer_comp("keep").unwrap();
+        doc.set_visible(over, false).unwrap();
+        doc.rotate_document_90(true);
+        assert_eq!(doc.view().layer_comps, vec!["keep".to_string()]);
+        doc.apply_layer_comp("keep").unwrap();
+        assert!(doc.layer(over).unwrap().visible);
     }
 
     #[test]
