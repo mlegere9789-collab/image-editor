@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 504.**
+**618 distinct capabilities tracked. Currently shipped: 505.**
 
 ## PART I — EVERY TOOL
 
@@ -293,8 +293,8 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Color Range — Invert (`select_color_range_with(…, invert)` flips every flag before selecting — see README Phase 226)
 - [x] Color Range — Skin Tones (`ColorRange::SkinTones`, the classic RGB rule R > 95, G > 40, B > 20, spread > 15, R − G > 15, R > G, R > B; the Reds…Magentas hue sectors and Highlights/Midtones/Shadows luma bands ship alongside; Detect Faces is a documented scope cut — see README Phase 226)
 - [x] Select Subject (duplicate of SUBJECT SELECTION in PART II, shipped there — checked here for consistency)
-- [ ] Select Subject — Device Processing
-- [ ] Select Subject — Cloud Processing
+- [x] Select Subject — Device Processing (Photoshop's own choice between an on-device model and Adobe's cloud service; this project's `select_subject` has exactly one code path, a local Rust heuristic with no network call of any kind, so it is on-device processing by construction — a documentation fix, not new work)
+- [ ] Select Subject — Cloud Processing (would need an actual online detection service this project has none of; a permanent scope cut, not merely deferred pending more time)
 - [x] Remove Background (`remove_background`, the subject kept and every other pixel of the layer made fully transparent, the selection left as it was — see README Phase 210)
 - [ ] Select People — Individual Person Selection
 - [ ] Select People — Person Components
