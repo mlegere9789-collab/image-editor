@@ -16938,6 +16938,49 @@ for the same reason as every phase since 52. `cargo fmt`,
 **1636 Rust tests total** (unchanged — this phase is pure frontend
 composition of already-tested commands).
 
+## Phase 284 — Neural Filters > Output (New Layer Masked)
+
+The third of Photoshop's five Neural Filters Output choices, and the
+last one this project's own architecture can honestly reach: New Layer
+Masked is exactly Phase 283's own New Layer option plus one more step —
+a Reveal All (white) mask added to the duplicate afterward, so the
+filtered result can be painted away selectively rather than accepted or
+rejected outright. `NeuralFilterOutput`'s dropdown gains a third entry,
+and `applyNeuralFilterOutput` grows one more step for it: after the
+filter command finishes running against the duplicate, it calls the
+already-shipped `add_layer_mask(id, "revealAll")` — the exact command
+and mask source Select > Reveal Selection's own Add Layer Mask button
+already uses elsewhere in this app — against that same duplicate's id,
+then updates React state from that response the same way `runCommand`
+always does. No new Rust code once again: `add_layer_mask` needed no
+changes at all to be composed this way, the same "reuse over
+duplication" shape every output-destination phase in this project uses.
+Smart Filter and New Document outputs stay a documented scope cut: this
+app has no Smart Filter/adjustment-layer wrapping to attach a *live*
+filter reference to, and Smart Filter's whole distinguishing feature
+(the filter staying editable after the fact) is exactly what this app's
+architecture cannot offer honestly.
+
+**Verified two ways.** No new Rust tests, for the same reason as Phase
+283: `add_layer_mask` already has its own tests, and this phase composes
+already-tested commands rather than adding new logic; `cargo test` stays
+at 1636. A Playwright browser session confirmed the exact three-call
+sequence Output: New Layer Masked should produce — `duplicate_layer` for
+the original layer's id, `skin_smoothing` against the new duplicate's id
+(not the original), and `add_layer_mask` with `{ id: <duplicate>,
+source: "revealAll" }` against that same duplicate — and confirmed the
+plain New Layer option (Phase 283) still produces its own two-call
+sequence unchanged, so the third option's extra step is additive, not a
+regression.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1636 Rust tests total** (unchanged — this phase is pure frontend
+composition of already-tested commands).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

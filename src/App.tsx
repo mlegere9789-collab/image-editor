@@ -302,15 +302,21 @@ function NeuralFilterOutput({
   value,
   onChange,
 }: {
-  value: "current" | "new";
-  onChange: (value: "current" | "new") => void;
+  value: "current" | "new" | "newMasked";
+  onChange: (value: "current" | "new" | "newMasked") => void;
 }) {
   return (
     <label className="control control--row" title="Neural Filters panel's own Output control">
       <span className="control__label">Output</span>
-      <select value={value} onChange={(event) => onChange(event.target.value as "current" | "new")}>
+      <select
+        value={value}
+        onChange={(event) =>
+          onChange(event.target.value as "current" | "new" | "newMasked")
+        }
+      >
         <option value="current">Current Layer</option>
         <option value="new">New Layer</option>
+        <option value="newMasked">New Layer Masked</option>
       </select>
     </label>
   );
@@ -1160,7 +1166,9 @@ export default function App() {
   const [showSkinSmoothingDialog, setShowSkinSmoothingDialog] = useState(false);
   // Neural Filters > Output: shared across every Neural Filter dialog,
   // since only one is ever open at once.
-  const [neuralFilterOutput, setNeuralFilterOutput] = useState<"current" | "new">("current");
+  const [neuralFilterOutput, setNeuralFilterOutput] = useState<
+    "current" | "new" | "newMasked"
+  >("current");
   const [skinSmoothingRadius, setSkinSmoothingRadius] = useState(5);
   const [skinSmoothingThreshold, setSkinSmoothingThreshold] = useState(15);
   const [skinSmoothingAmount, setSkinSmoothingAmount] = useState(50);
@@ -3524,22 +3532,32 @@ export default function App() {
   }, [runCommand, selectedId, surfaceBlurRadius, surfaceBlurThreshold]);
 
   // Neural Filters > Output: Current Layer (the default, edits `targetId`
-  // in place) or New Layer (Duplicate Layer first, then run `command`
-  // against the duplicate instead) -- Photoshop's own Neural Filters
-  // panel offers the identical choice for where a filter's result lands.
-  // New Layer Masked, Smart Filter, and New Document outputs are a
+  // in place), New Layer (Duplicate Layer first, then run `command`
+  // against the duplicate instead), or New Layer Masked (the same
+  // duplicate, then a Reveal All white mask added afterward so the
+  // filtered result can be painted away selectively) -- Photoshop's own
+  // Neural Filters panel offers the identical three choices for where a
+  // filter's result lands. Smart Filter and New Document outputs are a
   // documented scope cut: this app has no Smart Filter/adjustment-layer
-  // wrapping to attach a mask or a live filter reference to.
+  // wrapping to attach a live filter reference to.
   const applyNeuralFilterOutput = useCallback(
     async (command: string, args: Record<string, unknown>, targetId: number) => {
       let id = targetId;
-      if (neuralFilterOutput === "new") {
+      if (neuralFilterOutput === "new" || neuralFilterOutput === "newMasked") {
         const dup = await invoke<Snapshot>("duplicate_layer", { id: targetId });
         const layers = dup.document.layers;
         const index = layers.findIndex((layer) => layer.id === targetId);
         id = layers[index + 1]?.id ?? targetId;
       }
       await runCommand(command, { ...args, id });
+      if (neuralFilterOutput === "newMasked") {
+        const masked = await invoke<Snapshot>("add_layer_mask", { id, source: "revealAll" });
+        setDocument(masked.document);
+        setGeneration(masked.generation);
+        setCanUndo(masked.canUndo);
+        setCanRedo(masked.canRedo);
+        setHasHistorySource(masked.hasHistorySource);
+      }
     },
     [runCommand, neuralFilterOutput],
   );
