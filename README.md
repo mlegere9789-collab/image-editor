@@ -16664,6 +16664,47 @@ clean.
 additions — a pure frontend phase, like Phases 275 and 276). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 278 — Discover search over Adjustments, Filters, and Layer Styles
+
+Phase 277's Discover dialog shipped searching the Toolbox alone, 57
+tools. This phase makes it a real command palette: a `DISCOVER_ACTIONS`
+registry of 129 more entries — every Adjustment, Filter Gallery entry,
+Camera Raw panel, Layer Style, and Free Transform-family dialog this
+project has — searchable alongside the Toolbox in the same dialog,
+grouped under its own "Adjustments, Filters & Layer Styles" heading.
+
+Each of the 129 was found and verified mechanically, not hand-picked:
+a script scanned every `setShow<Name>Dialog(true)` call site in
+`App.tsx` and kept only the ones whose own trigger button uses the
+exact literal guard `disabled={busy || !canPaint}` — the same
+precondition every one of these dialogs' own existing toolbar buttons
+already requires, a paintable target layer. Discover's own action
+buttons carry that identical `disabled={!canPaint}` check, so picking
+one when nothing paintable is selected is refused the same way its own
+toolbar button already refuses it, rather than opening a dialog whose
+Apply would silently do nothing. Labels come from a mechanical
+PascalCase-to-words split of each dialog's own state name, with a
+handful of hand overrides where that reads badly (`Cas` → "Content-
+Aware Scale", `SumiE` → "Sumi-e", `ChalkAndCharcoal` → "Chalk &
+Charcoal", `Conte` → "Conté Crayon"). Picking a match calls that
+dialog's own `activate` — literally the identical `setShowXDialog(true)`
+its toolbar button already calls — and closes Discover.
+
+**Verified two ways**, continuing this run's real second path. No new
+Rust tests — pure frontend, the same registry-and-guard pattern Phase
+277 already established at a larger scale. A Playwright session
+searched "lens" before any document existed and confirmed both matches
+(Lens Blur, Lens Correction) rendered but disabled; created a document,
+searched again, and confirmed both became enabled; clicked Lens
+Correction and confirmed both that Discover closed and that the real
+Lens Correction dialog's own heading became visible — the full
+search-to-real-dialog path, not just that a button renders. `cargo
+fmt`, `clippy -D warnings`, `cargo test`, and `npm run build` are all
+still clean.
+
+**1619 Rust tests total, unchanged this phase** (0 lib/pipeline
+additions). `cargo fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

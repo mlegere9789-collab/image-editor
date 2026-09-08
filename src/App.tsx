@@ -6166,6 +6166,145 @@ export default function App() {
         }`
       : null;
 
+  // Discover: adjustment and filter dialogs searchable alongside the
+  // Toolbox, each verified to share the exact same disabled={busy ||
+  // !canPaint} guard its own existing trigger button already uses --
+  // opening any of these needs nothing more than a paintable layer, the
+  // same precondition Discover itself does not otherwise enforce, so
+  // Apply activate() calls are gated on canPaint below rather than risking
+  // a dialog whose own Apply silently does nothing.
+  const DISCOVER_ACTIONS: { label: string; activate: () => void }[] = [
+    { label: "Accented Edges", activate: () => setShowAccentedEdgesDialog(true) },
+    { label: "Add Noise", activate: () => setShowAddNoiseDialog(true) },
+    { label: "Angled Strokes", activate: () => setShowAngledStrokesDialog(true) },
+    { label: "Bas Relief", activate: () => setShowBasReliefDialog(true) },
+    { label: "Bevel Emboss", activate: () => setShowBevelEmbossDialog(true) },
+    { label: "Box Blur", activate: () => setShowBoxBlurDialog(true) },
+    { label: "Brightness Contrast", activate: () => setShowBrightnessContrastDialog(true) },
+    { label: "Camera Raw", activate: () => setShowCameraRawDialog(true) },
+    { label: "Camera Raw Saturation", activate: () => setShowCameraRawSaturationDialog(true) },
+    { label: "Content-Aware Scale", activate: () => setShowCasDialog(true) },
+    { label: "Chalk & Charcoal", activate: () => setShowChalkAndCharcoalDialog(true) },
+    { label: "Channel Mixer", activate: () => setShowChannelMixerDialog(true) },
+    { label: "Chrome", activate: () => setShowChromeDialog(true) },
+    { label: "Clarity", activate: () => setShowClarityDialog(true) },
+    { label: "Clouds", activate: () => setShowCloudsDialog(true) },
+    { label: "Color Balance", activate: () => setShowColorBalanceDialog(true) },
+    { label: "Color Grading", activate: () => setShowColorGradingDialog(true) },
+    { label: "Color Halftone", activate: () => setShowColorHalftoneDialog(true) },
+    { label: "Color Mixer", activate: () => setShowColorMixerDialog(true) },
+    { label: "Color Overlay", activate: () => setShowColorOverlayDialog(true) },
+    { label: "Color Range", activate: () => setShowColorRangeDialog(true) },
+    { label: "Colored Pencil", activate: () => setShowColoredPencilDialog(true) },
+    { label: "Conté Crayon", activate: () => setShowConteDialog(true) },
+    { label: "Contour", activate: () => setShowContourDialog(true) },
+    { label: "Craquelure", activate: () => setShowCraquelureDialog(true) },
+    { label: "Crosshatch", activate: () => setShowCrosshatchDialog(true) },
+    { label: "Crystallize", activate: () => setShowCrystallizeDialog(true) },
+    { label: "Custom Filter", activate: () => setShowCustomDialog(true) },
+    { label: "Cutout", activate: () => setShowCutoutDialog(true) },
+    { label: "Dark Strokes", activate: () => setShowDarkStrokesDialog(true) },
+    { label: "Defringe", activate: () => setShowDefringeDialog(true) },
+    { label: "Difference Clouds", activate: () => setShowDifferenceCloudsDialog(true) },
+    { label: "Diffuse", activate: () => setShowDiffuseDialog(true) },
+    { label: "Diffuse Glow", activate: () => setShowDiffuseGlowDialog(true) },
+    { label: "Drop Shadow", activate: () => setShowDropShadowDialog(true) },
+    { label: "Dry Brush", activate: () => setShowDryBrushDialog(true) },
+    { label: "Dust & Scratches", activate: () => setShowDustAndScratchesDialog(true) },
+    { label: "Emboss", activate: () => setShowEmbossDialog(true) },
+    { label: "Exposure", activate: () => setShowExposureDialog(true) },
+    { label: "Extrude", activate: () => setShowExtrudeDialog(true) },
+    { label: "Fibers", activate: () => setShowFibersDialog(true) },
+    { label: "Film Grain", activate: () => setShowFilmGrainDialog(true) },
+    { label: "Free Transform", activate: () => setShowFreeTransformDialog(true) },
+    { label: "Fresco", activate: () => setShowFrescoDialog(true) },
+    { label: "Gaussian Blur", activate: () => setShowGaussianBlurDialog(true) },
+    { label: "Geometry", activate: () => setShowGeometryDialog(true) },
+    { label: "Glass", activate: () => setShowGlassDialog(true) },
+    { label: "Glowing Edges", activate: () => setShowGlowingEdgesDialog(true) },
+    { label: "Gradient Map", activate: () => setShowGradientMapDialog(true) },
+    { label: "Gradient Overlay", activate: () => setShowGradientOverlayDialog(true) },
+    { label: "Grain", activate: () => setShowGrainDialog(true) },
+    { label: "Graphic Pen", activate: () => setShowGraphicPenDialog(true) },
+    { label: "Halftone Pattern", activate: () => setShowHalftonePatternDialog(true) },
+    { label: "High Pass", activate: () => setShowHighPassDialog(true) },
+    { label: "Highlights Shadows", activate: () => setShowHighlightsShadowsDialog(true) },
+    { label: "Hue Saturation", activate: () => setShowHueSaturationDialog(true) },
+    { label: "Ink Outlines", activate: () => setShowInkOutlinesDialog(true) },
+    { label: "Inner Glow", activate: () => setShowInnerGlowDialog(true) },
+    { label: "Inner Shadow", activate: () => setShowInnerShadowDialog(true) },
+    { label: "Lens Blur", activate: () => setShowLensBlurDialog(true) },
+    { label: "Lens Correction", activate: () => setShowLensCorrectionDialog(true) },
+    { label: "Levels", activate: () => setShowLevelsDialog(true) },
+    { label: "Maximum", activate: () => setShowMaximumDialog(true) },
+    { label: "Median", activate: () => setShowMedianDialog(true) },
+    { label: "Mezzotint", activate: () => setShowMezzotintDialog(true) },
+    { label: "Minimum", activate: () => setShowMinimumDialog(true) },
+    { label: "Mosaic", activate: () => setShowMosaicDialog(true) },
+    { label: "Mosaic Tiles", activate: () => setShowMosaicTilesDialog(true) },
+    { label: "Motion Blur", activate: () => setShowMotionBlurDialog(true) },
+    { label: "Neon Glow", activate: () => setShowNeonGlowDialog(true) },
+    { label: "Note Paper", activate: () => setShowNotePaperDialog(true) },
+    { label: "Ocean Ripple", activate: () => setShowOceanRippleDialog(true) },
+    { label: "Offset", activate: () => setShowOffsetDialog(true) },
+    { label: "Outer Glow", activate: () => setShowOuterGlowDialog(true) },
+    { label: "Paint Daubs", activate: () => setShowPaintDaubsDialog(true) },
+    { label: "Palette Knife", activate: () => setShowPaletteKnifeDialog(true) },
+    { label: "Parametric Curve", activate: () => setShowParametricCurveDialog(true) },
+    { label: "Patchwork", activate: () => setShowPatchworkDialog(true) },
+    { label: "Pattern Overlay", activate: () => setShowPatternOverlayDialog(true) },
+    { label: "Perspective", activate: () => setShowPerspectiveDialog(true) },
+    { label: "Photo Filter", activate: () => setShowPhotoFilterDialog(true) },
+    { label: "Photocopy", activate: () => setShowPhotocopyDialog(true) },
+    { label: "Pinch", activate: () => setShowPinchDialog(true) },
+    { label: "Plaster", activate: () => setShowPlasterDialog(true) },
+    { label: "Plastic Wrap", activate: () => setShowPlasticWrapDialog(true) },
+    { label: "Point Color", activate: () => setShowPointColorDialog(true) },
+    { label: "Point Curve", activate: () => setShowPointCurveDialog(true) },
+    { label: "Pointillize", activate: () => setShowPointillizeDialog(true) },
+    { label: "Polar", activate: () => setShowPolarDialog(true) },
+    { label: "Poster Edges", activate: () => setShowPosterEdgesDialog(true) },
+    { label: "Posterize", activate: () => setShowPosterizeDialog(true) },
+    { label: "Reduce Noise", activate: () => setShowReduceNoiseDialog(true) },
+    { label: "Replace Color", activate: () => setShowReplaceColorDialog(true) },
+    { label: "Reticulation", activate: () => setShowReticulationDialog(true) },
+    { label: "Ripple", activate: () => setShowRippleDialog(true) },
+    { label: "Rotate", activate: () => setShowRotateDialog(true) },
+    { label: "Rough Pastels", activate: () => setShowRoughPastelsDialog(true) },
+    { label: "Satin", activate: () => setShowSatinDialog(true) },
+    { label: "Scale", activate: () => setShowScaleDialog(true) },
+    { label: "Selective Color", activate: () => setShowSelectiveColorDialog(true) },
+    { label: "Shape Blur", activate: () => setShowShapeBlurDialog(true) },
+    { label: "Shear", activate: () => setShowShearDialog(true) },
+    { label: "Skew", activate: () => setShowSkewDialog(true) },
+    { label: "Smart Sharpen", activate: () => setShowSmartSharpenDialog(true) },
+    { label: "Smudge Stick", activate: () => setShowSmudgeStickDialog(true) },
+    { label: "Spatter", activate: () => setShowSpatterDialog(true) },
+    { label: "Spherize", activate: () => setShowSpherizeDialog(true) },
+    { label: "Sponge", activate: () => setShowSpongeDialog(true) },
+    { label: "Sprayed Strokes", activate: () => setShowSprayedStrokesDialog(true) },
+    { label: "Stained Glass", activate: () => setShowStainedGlassDialog(true) },
+    { label: "Stamp (Sketch)", activate: () => setShowStampDialog(true) },
+    { label: "Stroke Outline", activate: () => setShowStrokeOutlineDialog(true) },
+    { label: "Sumi-e", activate: () => setShowSumiEDialog(true) },
+    { label: "Surface Blur", activate: () => setShowSurfaceBlurDialog(true) },
+    { label: "Temperature Tint", activate: () => setShowTemperatureTintDialog(true) },
+    { label: "Texture", activate: () => setShowTextureDialog(true) },
+    { label: "Texturizer", activate: () => setShowTexturizerDialog(true) },
+    { label: "Threshold", activate: () => setShowThresholdDialog(true) },
+    { label: "Tiles", activate: () => setShowTilesDialog(true) },
+    { label: "Torn Edges", activate: () => setShowTornEdgesDialog(true) },
+    { label: "Trace Contour", activate: () => setShowTraceContourDialog(true) },
+    { label: "Twirl", activate: () => setShowTwirlDialog(true) },
+    { label: "Underpainting", activate: () => setShowUnderpaintingDialog(true) },
+    { label: "Unsharp Mask", activate: () => setShowUnsharpMaskDialog(true) },
+    { label: "Vibrance", activate: () => setShowVibranceDialog(true) },
+    { label: "Water Paper", activate: () => setShowWaterPaperDialog(true) },
+    { label: "Watercolor", activate: () => setShowWatercolorDialog(true) },
+    { label: "Wave", activate: () => setShowWaveDialog(true) },
+    { label: "Wind", activate: () => setShowWindDialog(true) },
+    { label: "ZigZag", activate: () => setShowZigZagDialog(true) },  ];
+
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
       {hiddenTools.size > 0 && (
@@ -11659,9 +11798,10 @@ export default function App() {
           >
             <h2 className="modal__heading">Discover</h2>
             <p className="modal__hint">
-              Search the Toolbox by name. Tutorials, help articles, and contextual help
-              — Photoshop's Discover panel's other components — are a documented scope
-              cut: this project has no authored instructional content to search.
+              Search the Toolbox and every Adjustment/Filter/Layer Style dialog by name.
+              Tutorials, help articles, and contextual help — Photoshop's Discover
+              panel's other components — are a documented scope cut: this project has
+              no authored instructional content to search.
             </p>
             <label className="control control--row">
               <span className="control__label">Search</span>
@@ -11670,29 +11810,63 @@ export default function App() {
                 autoFocus
                 value={discoverQuery}
                 onChange={(event) => setDiscoverQuery(event.target.value)}
-                placeholder="Tool name…"
+                placeholder="Feature name…"
               />
             </label>
-            <div className="toolbar-customize__list">
-              {ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(discoverQuery.trim().toLowerCase())).map(
-                ({ id, label }) => (
-                  <button
-                    key={id}
-                    className={`button button--quiet${tool === id ? " button--active" : ""}`}
-                    onClick={() => {
-                      setTool(id);
-                      setShowDiscoverDialog(false);
-                      setDiscoverQuery("");
-                    }}
-                  >
-                    {label}
-                  </button>
-                ),
-              )}
-              {ALL_TOOLS.every(({ label }) => !label.toLowerCase().includes(discoverQuery.trim().toLowerCase())) && (
-                <p className="modal__hint">No tool matches "{discoverQuery}".</p>
-              )}
-            </div>
+            {(() => {
+              const query = discoverQuery.trim().toLowerCase();
+              const toolMatches = ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(query));
+              const actionMatches = DISCOVER_ACTIONS.filter(({ label }) => label.toLowerCase().includes(query));
+              if (toolMatches.length === 0 && actionMatches.length === 0) {
+                return <p className="modal__hint">No feature matches "{discoverQuery}".</p>;
+              }
+              return (
+                <>
+                  {toolMatches.length > 0 && (
+                    <>
+                      <h3 className="modal__subheading">Tools</h3>
+                      <div className="toolbar-customize__list">
+                        {toolMatches.map(({ id, label }) => (
+                          <button
+                            key={id}
+                            className={`button button--quiet${tool === id ? " button--active" : ""}`}
+                            onClick={() => {
+                              setTool(id);
+                              setShowDiscoverDialog(false);
+                              setDiscoverQuery("");
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                  {actionMatches.length > 0 && (
+                    <>
+                      <h3 className="modal__subheading">Adjustments, Filters &amp; Layer Styles</h3>
+                      <p className="modal__hint">Needs a paintable layer, like each one's own toolbar button.</p>
+                      <div className="toolbar-customize__list">
+                        {actionMatches.map(({ label, activate }) => (
+                          <button
+                            key={label}
+                            className="button button--quiet"
+                            disabled={!canPaint}
+                            onClick={() => {
+                              activate();
+                              setShowDiscoverDialog(false);
+                              setDiscoverQuery("");
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
