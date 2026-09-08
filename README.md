@@ -17054,6 +17054,63 @@ that changing Radius re-fetches the mesh. `cargo fmt`,
 
 **1641 Rust tests total** (1636 → 1641, 1634 lib + 7 pipeline).
 
+## Phase 286 — Vanishing Point
+
+Another wall that turned out not to be one: Adaptive Wide Angle's own
+locally-varying constraint solver is genuinely out of reach, but
+Vanishing Point's *defining* behaviour — content scaling correctly as it
+is cloned across a receding plane — is exactly what `homography` (Edit >
+Perspective Warp's own eight-coefficient projective solver, unchanged)
+already computes, just applied between a different pair of point sets.
+`vanishing_point_clone(id, plane, source, target, radius)` solves two
+homographies with the identical `homography` call `perspective_warp`
+already makes for its own planes — `plane`'s four image-pixel corners to
+the unit square, and back — flattening the plane into a coordinate space
+where its own perspective has been divided out. Every pixel within
+`radius` of `target` is converted into that flattened space, offset from
+`target`'s own flattened position by the same amount `source`'s flattened
+position is offset from the flattened pixel being painted, and mapped
+back to image pixels to sample — nearest-neighbour, exactly as
+`perspective_warp` resamples its own planes. The one new piece of math is
+`apply_homography`, a four-line function applying a homography's eight
+coefficients to a single point, factored out so both this and (in a
+later phase, potentially) `perspective_warp` itself can share it. A
+single click-and-release, the same documented scope cut Liquify's
+Forward Warp already makes, over one plane rather than Photoshop's own
+connected planes; Heal and Fill within a plane, and a perspective grid
+overlay while the plane is being defined, are further documented scope
+cuts.
+
+**Verified two ways.** Four new `document.rs` tests, the exact expected
+values for two of them independently solved in Python (`numpy.linalg.
+solve` on the identical 8×8 linear system `homography`/`solve_8x8` set up
+by hand) against a real, non-degenerate trapezoid plane — a top edge
+twice as wide as its bottom, an actual receding perspective rather than a
+plain rectangle. The first confirms a clone lands exactly on the source
+colour at the target itself. The second is the real test of the
+mechanism: cloning from the plane's *wide* end to its *narrow* end, the
+pixel one image-pixel to the right of the target samples from *one and a
+half* image-pixels to the right of the source — Python-verified exactly,
+`(11.5, 2.0)`, nearest-neighbour rounding it to the pixel two right of
+source rather than one — because a flattened-space step is a *larger*
+image-space step where the plane is wide. An ordinary clone stamp, which
+just copies a flat `(dx, dy)` offset, would have sampled the pixel
+immediately next to source instead; this is the one hand-verified proof
+that the clone genuinely reads through the plane's own perspective. A
+third confirms the radius cutoff; a fourth exercises every error path,
+including an explicitly collinear plane. All four passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed the
+"Vanishing Point…" dialog sends the exact `{ id, plane, source, target,
+radius }` its Apply button should. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1645 Rust tests total** (1641 → 1645, 1638 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

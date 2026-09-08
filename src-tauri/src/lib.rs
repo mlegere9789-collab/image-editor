@@ -1445,6 +1445,22 @@ fn perspective_warp(
     edit_checkpointed(&state, |document| document.perspective_warp(id, &planes))
 }
 
+/// Filter > Vanishing Point's own Stamp tool: a perspective-correct
+/// clone from `source` to `target` over `plane`'s own homography.
+#[tauri::command]
+fn vanishing_point_clone(
+    state: State<'_, AppState>,
+    id: LayerId,
+    plane: [[f32; 2]; 4],
+    source: [f32; 2],
+    target: [f32; 2],
+    radius: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.vanishing_point_clone(id, plane, source, target, radius)
+    })
+}
+
 /// Perspective Warp's Auto Level / Vertical / Both / Straighten Edge on
 /// the planes' warped corners. Read-only.
 #[tauri::command]
@@ -6088,6 +6104,7 @@ pub fn run() {
             content_aware_scale,
             transform_to_bounds,
             perspective_warp,
+            vanishing_point_clone,
             perspective_auto,
             warp,
             warp_mesh,

@@ -21366,6 +21366,78 @@ impl Document {
         })
     }
 
+    /// Filter > Vanishing Point's own Stamp tool: clones a circular patch
+    /// of `radius` from `source` to `target` on layer `id`, resampled
+    /// through `plane`'s own homography rather than copied 1:1, so
+    /// content scales correctly as it moves across a receding surface —
+    /// Vanishing Point's own defining behaviour, and the one real
+    /// difference from an ordinary clone stamp. `plane`, four image-pixel
+    /// corners in reading order, and the unit square are solved into a
+    /// homography each way by [`homography`] — the exact same solver
+    /// [`Self::perspective_warp`]'s own planes already use, reused
+    /// directly rather than reimplemented; only the two point sets it is
+    /// solved between differ (a plane's own quad and the unit square
+    /// here, rather than one plane's two quads there). Every pixel within
+    /// `radius` of `target` is converted to the plane's flattened
+    /// coordinate via [`apply_homography`], offset from `target`'s own
+    /// flattened position by that same amount relative to `source`'s, and
+    /// mapped back to image pixels to sample — nearest-neighbour, exactly
+    /// as `perspective_warp` resamples its own planes. A hard circular
+    /// cutoff, like Twirl, Pucker, and Bloat: a single click-and-release
+    /// rather than Photoshop's own continuous stamped brush stroke, the
+    /// same documented scope cut Liquify's Forward Warp already makes.
+    /// Errors for a degenerate or collinear plane quad, a non-positive or
+    /// non-finite radius, a non-finite plane/source/target coordinate, or
+    /// a locked or unknown layer.
+    pub fn vanishing_point_clone(
+        &mut self,
+        id: LayerId,
+        plane: [[f32; 2]; 4],
+        source: [f32; 2],
+        target: [f32; 2],
+        radius: f32,
+    ) -> Result<Option<Rect>, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if plane
+            .iter()
+            .chain([&source, &target])
+            .flatten()
+            .any(|v| !v.is_finite())
+        {
+            return Err("Vanishing Point coordinates must be finite.".to_string());
+        }
+        let quad = plane.map(|[x, y]| (x as f64, y as f64));
+        let unit = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)];
+        let degenerate =
+            || "Vanishing Point's plane must not be collinear or coincident.".to_string();
+        let to_uv = homography(quad, unit).ok_or_else(degenerate)?;
+        let to_img = homography(unit, quad).ok_or_else(degenerate)?;
+        let (tx, ty) = apply_homography(to_uv, (target[0] as f64, target[1] as f64));
+        let (sx0, sy0) = apply_homography(to_uv, (source[0] as f64, source[1] as f64));
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |pixels, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&pixels[base..base + CHANNELS]);
+            let (dx, dy) = (col as f32 - target[0], row as f32 - target[1]);
+            if (dx * dx + dy * dy).sqrt() >= radius {
+                return out;
+            }
+            let (px_u, px_v) = apply_homography(to_uv, (col as f64, row as f64));
+            let sample_uv = (sx0 + (px_u - tx), sy0 + (px_v - ty));
+            let (sample_x, sample_y) = apply_homography(to_img, sample_uv);
+            sample_nearest(
+                pixels,
+                doc_width,
+                (width, height),
+                (sample_x as f32, sample_y as f32),
+            )
+        })
+    }
+
     /// Edit > Transform > Warp's starting mesh for layer `id`: the Warp
     /// Style at `bend` percent (`−100..=100`) with the options bar's
     /// Horizontal and Vertical distortion (`−100..=100` each), all placed
@@ -22475,6 +22547,18 @@ fn homography(from: [(f64, f64); 4], to: [(f64, f64); 4]) -> Option<[f64; 8]> {
         rows[2 * i + 1] = [0.0, 0.0, 0.0, x, y, 1.0, -x * v, -y * v, v];
     }
     solve_8x8(rows)
+}
+
+/// Applies a [`homography`]'s eight coefficients to one point, the same
+/// projective divide `perspective_warp` already applies inline for its
+/// own planes. Shared by `Document::vanishing_point_clone`, which solves
+/// a homography between a plane's own quad and the unit square in each
+/// direction and applies it to convert brush positions between image
+/// pixels and that flattened space.
+fn apply_homography(h: [f64; 8], (x, y): (f64, f64)) -> (f64, f64) {
+    let [a, b, c, d, e, f, g, hh] = h;
+    let den = g * x + hh * y + 1.0;
+    ((a * x + b * y + c) / den, (d * x + e * y + f) / den)
 }
 
 /// Gaussian elimination with partial pivoting on an augmented `8 × 9`
@@ -46403,6 +46487,108 @@ mod tests {
             )
             .is_err());
         assert_eq!(doc.layers()[0].pixels, ramped_4x4().0.layers()[0].pixels);
+    }
+
+    // A trapezoidal plane narrowing from a 20px-wide top edge (y = 0) to a
+    // 10px-wide bottom edge (y = 10) -- a real receding perspective plane,
+    // not just an axis-aligned rectangle -- big enough (21x11) to hold
+    // every one of its own pixel-index corners.
+    fn vanishing_point_plane() -> [[f32; 2]; 4] {
+        [[0.0, 0.0], [20.0, 0.0], [15.0, 10.0], [5.0, 10.0]]
+    }
+
+    #[test]
+    fn vanishing_point_clone_copies_the_source_pixel_exactly_at_the_target() {
+        let mut doc = Document::new(21, 11).unwrap();
+        let mut pixels = vec![0u8; 21 * 11 * 4];
+        for px in pixels.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        pixels[(2 * 21 + 10) * 4..(2 * 21 + 10) * 4 + 4].copy_from_slice(&[200, 50, 25, 255]);
+        let id = doc.add_layer("l", &pixels, 21, 11).unwrap();
+
+        doc.vanishing_point_clone(id, vanishing_point_plane(), [10.0, 2.0], [10.0, 8.0], 1.0)
+            .unwrap();
+        let at = |doc: &Document, x: usize, y: usize| {
+            doc.layers()[0].pixels[(y * 21 + x) * 4..(y * 21 + x) * 4 + 4].to_vec()
+        };
+        assert_eq!(at(&doc, 10, 8), vec![200, 50, 25, 255]);
+    }
+
+    #[test]
+    fn vanishing_point_clone_scales_content_with_the_planes_own_perspective() {
+        // Independently solved (Python, numpy.linalg.solve on the exact
+        // same 8x8 system homography/solve_8x8 set up): with this plane,
+        // source (10, 2) has flattened uv (0.5, 1/9); target (10, 8) has
+        // uv (0.5, 2/3). The pixel one to the right of target, (11, 8),
+        // has uv (7/12, 2/3): a delta of 1/12 in u from the target,
+        // which off the *source*'s own uv lands on (0.5 + 1/12, 1/9) --
+        // mapped back through the plane's other homography, exactly
+        // (11.5, 2.0). Nearest-neighbour rounds 11.5 up (Rust's
+        // f32::round rounds halves away from zero) to (12, 2): the pixel
+        // one right of source, not the pixel one right of target --
+        // proof the clone reads through the plane's own perspective
+        // rather than copying a flat (dx, dy) offset the way an ordinary
+        // clone stamp would.
+        let mut doc = Document::new(21, 11).unwrap();
+        let mut pixels = vec![0u8; 21 * 11 * 4];
+        for px in pixels.chunks_exact_mut(4) {
+            px[3] = 255;
+        }
+        pixels[(2 * 21 + 10) * 4..(2 * 21 + 10) * 4 + 4].copy_from_slice(&[200, 50, 25, 255]);
+        pixels[(2 * 21 + 12) * 4..(2 * 21 + 12) * 4 + 4].copy_from_slice(&[10, 20, 30, 255]);
+        let id = doc.add_layer("l", &pixels, 21, 11).unwrap();
+
+        doc.vanishing_point_clone(id, vanishing_point_plane(), [10.0, 2.0], [10.0, 8.0], 3.0)
+            .unwrap();
+        let at = |doc: &Document, x: usize, y: usize| {
+            doc.layers()[0].pixels[(y * 21 + x) * 4..(y * 21 + x) * 4 + 4].to_vec()
+        };
+        assert_eq!(at(&doc, 10, 8), vec![200, 50, 25, 255]);
+        assert_eq!(at(&doc, 11, 8), vec![10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn vanishing_point_clone_leaves_pixels_outside_the_radius_untouched() {
+        let mut doc = Document::new(21, 11).unwrap();
+        let pixels = solid(21, 11, [5, 6, 7, 255]);
+        let id = doc.add_layer("l", &pixels, 21, 11).unwrap();
+        doc.vanishing_point_clone(id, vanishing_point_plane(), [10.0, 2.0], [10.0, 8.0], 1.0)
+            .unwrap();
+        // (18, 8) is far outside the radius-1 brush at (10, 8).
+        let untouched = &doc.layers()[0].pixels[(8 * 21 + 18) * 4..(8 * 21 + 18) * 4 + 4];
+        assert_eq!(untouched, [5, 6, 7, 255]);
+    }
+
+    #[test]
+    fn vanishing_point_clone_validates_its_arguments() {
+        let mut doc = Document::new(21, 11).unwrap();
+        let id = doc
+            .add_layer("l", &solid(21, 11, [1, 2, 3, 255]), 21, 11)
+            .unwrap();
+        let plane = vanishing_point_plane();
+        assert!(doc
+            .vanishing_point_clone(id, plane, [10.0, 2.0], [10.0, 8.0], 0.0)
+            .unwrap_err()
+            .contains("Radius"));
+        let mut bad_plane = plane;
+        bad_plane[0][0] = f32::NAN;
+        assert!(doc
+            .vanishing_point_clone(id, bad_plane, [10.0, 2.0], [10.0, 8.0], 1.0)
+            .unwrap_err()
+            .contains("finite"));
+        let collinear = [[0.0, 0.0], [10.0, 0.0], [20.0, 0.0], [30.0, 0.0]];
+        assert!(doc
+            .vanishing_point_clone(id, collinear, [10.0, 2.0], [10.0, 8.0], 1.0)
+            .unwrap_err()
+            .contains("collinear"));
+        assert!(doc
+            .vanishing_point_clone(999, plane, [10.0, 2.0], [10.0, 8.0], 1.0)
+            .is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .vanishing_point_clone(id, plane, [10.0, 2.0], [10.0, 8.0], 1.0)
+            .is_err());
     }
 
     #[test]

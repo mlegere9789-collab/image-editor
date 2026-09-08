@@ -738,6 +738,20 @@ export default function App() {
   // Bloat, and Forward Warp, which are the tools liquify_mesh previews.
   const [liquifyShowMesh, setLiquifyShowMesh] = useState(false);
   const [liquifyMesh, setLiquifyMesh] = useState<LiquifyMesh | null>(null);
+  // Filter > Vanishing Point > Stamp: a single perspective-correct clone
+  // over a plane defined by four image-pixel corners.
+  const [showVanishingPointDialog, setShowVanishingPointDialog] = useState(false);
+  const [vanishingPointPlane, setVanishingPointPlane] = useState<
+    [[number, number], [number, number], [number, number], [number, number]]
+  >([
+    [0, 0],
+    [100, 0],
+    [100, 100],
+    [0, 100],
+  ]);
+  const [vanishingPointSource, setVanishingPointSource] = useState<[number, number]>([20, 20]);
+  const [vanishingPointTarget, setVanishingPointTarget] = useState<[number, number]>([60, 60]);
+  const [vanishingPointRadius, setVanishingPointRadius] = useState(20);
   // Reconstruct's "original": the layer's pixels captured with layer_pixels
   // before any Liquify tool has run, so Reconstruct has something to blend
   // back toward.
@@ -2642,6 +2656,28 @@ export default function App() {
     liquifyRadius,
     liquifyPush,
     liquifyStrength,
+  ]);
+
+  // Filter > Vanishing Point > Stamp: clones source to target through the
+  // plane's own homography, so content scales with the plane's own
+  // perspective instead of copying 1:1 -- a single application rather
+  // than Photoshop's own continuous, live-painted stroke.
+  const applyVanishingPointClone = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("vanishing_point_clone", {
+      id: selectedId,
+      plane: vanishingPointPlane,
+      source: vanishingPointSource,
+      target: vanishingPointTarget,
+      radius: vanishingPointRadius,
+    });
+  }, [
+    runCommand,
+    selectedId,
+    vanishingPointPlane,
+    vanishingPointSource,
+    vanishingPointTarget,
+    vanishingPointRadius,
   ]);
 
   const applyLensCorrection = useCallback(async () => {
@@ -6933,6 +6969,14 @@ export default function App() {
             title="Filter > Liquify: Twirl, Pucker, Bloat, Forward Warp, and Reconstruct over a circular brush"
           >
             Liquify…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowVanishingPointDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Vanishing Point: clone perspective-correctly within a defined plane"
+          >
+            Vanishing Point…
           </button>
           <button
             className="button button--quiet"
@@ -14114,6 +14158,122 @@ export default function App() {
                 Close
               </button>
               <button className="button" onClick={applyLiquify} disabled={busy || selectedId === null} title="Apply once at this centre">
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVanishingPointDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowVanishingPointDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Vanishing Point"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Vanishing Point</h2>
+            <p className="modal__hint">
+              Clones a circular patch from Source to Target through the Plane's own
+              homography — the same projective map Perspective Warp's own planes already
+              use — so cloned content scales correctly as it moves across a receding
+              surface, instead of copying pixel-for-pixel like an ordinary Clone Stamp. A
+              single application rather than Photoshop&apos;s own continuous painted
+              stroke.
+            </p>
+            {(["Top Left", "Top Right", "Bottom Right", "Bottom Left"] as const).map(
+              (label, i) => (
+                <label className="control control--row" key={label}>
+                  <span className="control__label">Plane {label}</span>
+                  <input
+                    type="number"
+                    value={vanishingPointPlane[i][0]}
+                    onChange={(event) =>
+                      setVanishingPointPlane((corners) => {
+                        const next = [...corners] as typeof corners;
+                        next[i] = [Number(event.target.value), corners[i][1]];
+                        return next;
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    value={vanishingPointPlane[i][1]}
+                    onChange={(event) =>
+                      setVanishingPointPlane((corners) => {
+                        const next = [...corners] as typeof corners;
+                        next[i] = [corners[i][0], Number(event.target.value)];
+                        return next;
+                      })
+                    }
+                  />
+                </label>
+              ),
+            )}
+            <label className="control control--row">
+              <span className="control__label">Source X, Y</span>
+              <input
+                type="number"
+                value={vanishingPointSource[0]}
+                onChange={(event) =>
+                  setVanishingPointSource(([, y]) => [Number(event.target.value), y])
+                }
+              />
+              <input
+                type="number"
+                value={vanishingPointSource[1]}
+                onChange={(event) =>
+                  setVanishingPointSource(([x]) => [x, Number(event.target.value)])
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Target X, Y</span>
+              <input
+                type="number"
+                value={vanishingPointTarget[0]}
+                onChange={(event) =>
+                  setVanishingPointTarget(([, y]) => [Number(event.target.value), y])
+                }
+              />
+              <input
+                type="number"
+                value={vanishingPointTarget[1]}
+                onChange={(event) =>
+                  setVanishingPointTarget(([x]) => [x, Number(event.target.value)])
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Radius</span>
+              <input
+                type="range"
+                min={1}
+                max={200}
+                value={vanishingPointRadius}
+                onChange={(event) => setVanishingPointRadius(Number(event.target.value))}
+              />
+              <span className="control__value">{vanishingPointRadius}</span>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowVanishingPointDialog(false)}
+                title="Close"
+              >
+                Close
+              </button>
+              <button
+                className="button"
+                onClick={() => void applyVanishingPointClone()}
+                disabled={busy || selectedId === null}
+                title="Clone once at this Target"
+              >
                 Apply
               </button>
             </div>

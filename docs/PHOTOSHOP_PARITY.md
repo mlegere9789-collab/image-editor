@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 522.**
+**618 distinct capabilities tracked. Currently shipped: 523.**
 
 ## PART I — EVERY TOOL
 
@@ -541,7 +541,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Face-Aware Liquify
 - [x] Lens Correction (`lens_correction(id, distortion, vignette, red_cyan, blue_yellow)`: Remove Distortion and Vignette Amount exactly as `camera_raw_optics` already applies them, plus Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe — Red and Blue each independently resampled through their own radial scale about the canvas centre, Green and Alpha left at the destination's own position. Auto lens-profile correction (Photoshop's built-in and online lens databases) is a documented scope cut, the same one `camera_raw_optics` already names — see README Phase 267)
 - [ ] Adaptive Wide Angle
-- [ ] Vanishing Point
+- [x] Vanishing Point (`vanishing_point_clone(id, plane, source, target, radius)`, README Phase 286: a perspective-correct clone over a circular brush, reusing `homography` — the exact same solver `perspective_warp`'s own planes already use — to flatten the plane's own quad to a unit square, offset the source point by the same flattened-space delta as the brush, and map back to image pixels, so cloned content scales correctly across the plane's own perspective rather than copying 1:1. A single click-and-release rather than Photoshop's own continuous painted stroke, and one plane only — Photoshop's other Vanishing Point tools (Heal, Fill within a plane, connected planes, a perspective grid overlay) are a documented scope cut)
 - [x] Smart Filters (`SmartObject.filters: Vec<Adjustment>`, `add_smart_filter`/`remove_smart_filter`/`smart_filters`: a smart object's own filter list, re-applied in order to its transformed source every time the list or the transform changes, so removing a filter renders as though it had never run. Restricted to the same four per-pixel `Adjustment`s Adjustment Layers already express live (Invert, Brightness/Contrast, Threshold, Posterize); Photoshop's neighbourhood filters (Blur, Sharpen, and the rest of the Filter menu) as Smart Filters are a documented scope cut — see README Phase 271)
 - [x] Colored Pencil (Filter Gallery → Artistic; the layer's own colour along a dilated Sobel edge map, blended against a flat paper grey — Photoshop's actual directional-hatching pencil-stroke renderer is a documented approximation, not a port — see README Phase 53)
 - [x] Cutout (Filter Gallery → Artistic; a box-blur pre-pass composed with `posterize`'s own quantization, rather than a real segmentation into cut-paper shapes — Photoshop's separate Edge Fidelity slider is a documented scope cut — see README Phase 54)
