@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 548.**
+**618 distinct capabilities tracked. Currently shipped: 549.**
 
 ## PART I — EVERY TOOL
 
@@ -428,7 +428,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Preserve Embedded Profiles (Photoshop's own default Color Management Policy: opening a file whose embedded profile differs from the current working space keeps that file's own profile rather than silently converting or discarding it. `project::decode`'s `assign_profile(manifest.profile)` call — see README Phase 298 — is exactly Preserve, and only Preserve: it relabels the reopened document to whatever profile it was saved under, never runs `convert_to_profile`, and has no working-space-mismatch branch to silently convert down at all. This app's own project file is the one format carrying an embedded profile to preserve; a real embedded-ICC-chunk PNG import path remains a documented scope cut, the same one Embed Color Profile itself names)
 - [ ] Convert to Working Space
 - [ ] Profile Mismatch Warnings
-- [ ] Ask When Opening
+- [x] Ask When Opening (a real "Missing Profile" choice dialog, not just the passive warning message Missing Profile Warning itself already shows, fired by the exact same `profileWasMissing` signal on Open Project and Load from Cloud: pick sRGB or Adobe RGB (1998), Assign runs `assign_profile` with the choice. This app has no multiple-embedded-profile mismatch case to ask about — the only scenario it can genuinely detect is a project file missing a profile outright — so the dialog's own scope is exactly that one real case, not a broader policy menu with nothing behind the other options)
 - [ ] Ask When Pasting
 - [x] Missing Profile Warning (`Document::profile_was_missing`: set by `project::decode` when the project file it just loaded had no `profile` key of its own — a file saved before Embed Color Profile (Phase 298) existed — distinct from one explicitly saved as sRGB, via `Manifest.profile` now an `Option<ColorProfile>` rather than a plain `#[serde(default)]` value. Open Project and Load from Cloud both surface it as a real warning message when it fires. This app's own project file is the only format it opens with an embedded profile to be missing from — see README Phase 305)
 - [x] Embed Color Profile (the project file format's own `Manifest` now carries Assign Profile's own label, set from `Document::profile()` on save and restored with `assign_profile` on load, exactly as `locked` already round-trips — a project file saved before this existed still loads, defaulting to sRGB, `#[serde(default)]` the same way — see README Phase 298. This app's own project file is its one persistence format able to carry a tag at all; a real embedded-ICC-chunk PNG/import path remains a documented scope cut)

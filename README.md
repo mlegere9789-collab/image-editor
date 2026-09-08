@@ -17936,6 +17936,30 @@ Missing Profile Warning flips to shipped.
 
 **1676 Rust tests total** (1675 → 1676, 1669 lib + 7 pipeline).
 
+## Phase 306 — Ask When Opening
+
+A real, interactive choice, on top of Missing Profile Warning's own
+passive message from Phase 305: a "Missing Profile" dialog fires from
+the exact same `profileWasMissing` signal, offering sRGB or Adobe RGB
+(1998) and running `assign_profile` with whichever the user picks
+(Leave as sRGB dismisses without touching anything, the label already
+defaulted correctly). This app has no multiple-embedded-profile
+mismatch case to ask about the way Photoshop's own broader Ask When
+Opening policy can — the only scenario it can genuinely detect is a
+project file missing a profile outright — so the dialog's own scope is
+exactly that one real case, not a policy menu with nothing behind the
+other options.
+
+This session's own second verification path — a Playwright browser
+session — mocked `import_project_bytes` to return
+`profileWasMissing: true`, confirmed the dialog opens, selected Adobe
+RGB (1998), clicked Assign, and confirmed the exact
+`{ profile: "adobeRgb1998" }` `assign_profile` call. No Rust changed in
+this phase — it reuses `profile_was_missing` and `assign_profile`
+outright. `npm run build` is clean.
+
+Ask When Opening flips to shipped (549/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

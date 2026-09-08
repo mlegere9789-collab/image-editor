@@ -623,6 +623,11 @@ export default function App() {
   // rounding with a fresh seed per click instead of always rounding the
   // same way, breaking up gradient banding.
   const [useDitherForProfile, setUseDitherForProfile] = useState(false);
+  // Color Settings > Ask When Opening: a real choice dialog, not just a
+  // passive warning, whenever Open Project/Load from Cloud reports the
+  // loaded project had no embedded colour profile of its own.
+  const [showMissingProfileDialog, setShowMissingProfileDialog] = useState(false);
+  const [missingProfileChoice, setMissingProfileChoice] = useState<ColorProfile>("srgb");
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -1892,14 +1897,15 @@ export default function App() {
         if (ticket !== requestId.current) return;
 
         setError(null);
-        // Color Settings > Missing Profile Warning: only meaningful right
-        // after loading a project, since `profileWasMissing` stays set to
-        // whatever the most recent load left it at otherwise.
+        // Color Settings > Missing Profile Warning / Ask When Opening: only
+        // meaningful right after loading a project, since `profileWasMissing`
+        // stays set to whatever the most recent load left it at otherwise.
         if (
           (command === "open_project" || command === "import_project_bytes") &&
           snapshot.document.profileWasMissing
         ) {
-          setError("This project file has no embedded colour profile — defaulting to sRGB.");
+          setMissingProfileChoice("srgb");
+          setShowMissingProfileDialog(true);
         }
         setDocument(snapshot.document);
         setGeneration(snapshot.generation);
@@ -15456,6 +15462,53 @@ export default function App() {
                 title="Close"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showMissingProfileDialog && (
+        <div className="modal-overlay" onClick={() => setShowMissingProfileDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Missing Profile"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Missing Profile</h2>
+            <p className="modal__hint">
+              This project file has no embedded colour profile of its own — it was saved
+              before Embed Color Profile existed. Choose which working space to treat it
+              as; nothing has been converted yet, only labelled sRGB for now.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Assign</span>
+              <select
+                value={missingProfileChoice}
+                onChange={(event) => setMissingProfileChoice(event.target.value as ColorProfile)}
+              >
+                <option value="srgb">sRGB</option>
+                <option value="adobeRgb1998">Adobe RGB (1998)</option>
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMissingProfileDialog(false)}
+                title="Leave labelled sRGB"
+              >
+                Leave as sRGB
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  void runCommand("assign_profile", { profile: missingProfileChoice });
+                  setShowMissingProfileDialog(false);
+                }}
+                title="Assign the chosen profile"
+              >
+                Assign
               </button>
             </div>
           </div>
