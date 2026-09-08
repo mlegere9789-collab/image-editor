@@ -3605,6 +3605,30 @@ fn place_custom_shape_preset(
     })
 }
 
+/// Edit > Tool Presets: saves (or overwrites by name) `tool`'s current
+/// configuration as `params`, an opaque blob only the frontend interprets.
+#[tauri::command]
+fn save_tool_preset(
+    state: State<'_, AppState>,
+    name: String,
+    tool: String,
+    params: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.save_tool_preset(&name, &tool, &params)?;
+        Ok(None)
+    })
+}
+
+/// Edit > Tool Presets: deletes the preset named `name`.
+#[tauri::command]
+fn delete_tool_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.delete_tool_preset(&name)?;
+        Ok(None)
+    })
+}
+
 /// The Pen Tool: appends an anchor at `(x, y)` to the current path.
 #[tauri::command]
 fn pen_add_anchor(
@@ -5893,6 +5917,8 @@ pub fn run() {
             save_custom_shape_preset,
             delete_custom_shape_preset,
             place_custom_shape_preset,
+            save_tool_preset,
+            delete_tool_preset,
             set_text,
             add_shape_layer,
             set_shape,

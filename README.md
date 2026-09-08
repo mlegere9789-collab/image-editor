@@ -16371,6 +16371,65 @@ green.
 **1609 Rust tests total** (1604 → 1609, 1602 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 273 — Tool Presets
+
+Photoshop's own audit text: "save configurations for tools (brush,
+clone, eraser, gradient...) and recall them" — the "39th System" bucket
+this sat in sounded like it needed real app-shell infrastructure, but it
+turns out to be exactly the shape of five already-shipped preset
+kinds: `ToolPreset { name, tool, params }` joins Gradient, Pattern,
+Adjustment, and Custom Shape Presets as a sixth named-preset store kept
+on the document, saved and overwritten by name with the identical
+`save`/`delete`/list pattern every one of those already uses. The twist
+this project's own architecture forces: a tool's parameters — size,
+opacity, hardness, flow, blend mode, and the rest — live only in
+frontend React state, never on the document itself, so `params` is a
+plain opaque string the frontend alone defines and parses; Rust stores
+and returns it exactly as given, the same way `CustomShapePreset` stores
+a `Path` without knowing what a Custom Shape tool does with it, just one
+step further removed. `save_tool_preset`/`delete_tool_preset` are the
+whole Rust surface. The frontend scopes `params` to this project's own
+shared brush parameters — size, opacity, colour, and the Gradient tool's
+end colour, the handful of state variables Brush, Eraser, Clone Stamp,
+Pattern Stamp, History Brush, and Gradient already share — captured and
+restored as one small JSON object alongside which tool was active.
+Mixer Brush's Wet/Load/Mix, Art History's own Style/Area/Tolerance, and
+shape tools' fill/stroke are a documented scope cut: presets exist for
+this project's own common brush controls, not for every tool's own
+distinct parameter set. The existing Presets dialog gained a fifth
+section, Tool Presets, sharing its Name field with the other four.
+
+**Verified two ways.** Five new `document.rs` tests, pure bookkeeping
+with no floating-point arithmetic to derive — the same reasoning that
+already exempted the other four preset kinds' own save/overwrite/list
+tests from a Python cross-check. One confirms save-overwrites-by-name
+and insertion order, plus the blank-name and delete-nonexistent error
+paths, mirroring `gradient_presets_save_overwrites_by_name_and_lists_in_
+order_added` line for line. A second confirms `tool` and `params` round
+trip byte for byte, including embedded quotes and a decimal size,
+proving Rust never touches the blob's contents. A third confirms every
+field reaches `Document::view()`. A fourth confirms the preset's name
+alone is its key — saving the same name under a different tool
+overwrites in place rather than creating a second entry, exactly as
+every other named preset here already behaves. A fifth confirms
+insertion order survives an interleaved save/delete/save sequence. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and twenty: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Presets dialog's new Tool Presets section was reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1614 Rust tests total** (1609 → 1614, 1607 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

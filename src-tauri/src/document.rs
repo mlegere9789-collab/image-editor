@@ -156,6 +156,8 @@ pub struct Document {
     adjustment_presets: Vec<AdjustmentPreset>,
     /// The Custom Shape tool's picker, in the order first saved.
     custom_shape_presets: Vec<CustomShapePreset>,
+    /// Edit > Tool Presets, in the order first saved.
+    tool_presets: Vec<ToolPreset>,
     /// Select > Save Selection's named selections, in the order first
     /// saved — Photoshop stores these as alpha channels; here they are the
     /// selections themselves (a mask's bitmap shared through its `Arc`),
@@ -1517,6 +1519,25 @@ pub struct AdjustmentPreset {
 pub struct CustomShapePreset {
     pub name: String,
     pub path: Path,
+}
+
+/// Edit > Tool Presets: a named snapshot of one tool's own configuration
+/// (`tool`, matching the frontend's own tool-id strings such as
+/// `"brush"`) and its parameters (`params`, an opaque JSON blob in the
+/// frontend's own shape). This project keeps a tool's size, opacity,
+/// hardness, flow, blend mode, and the rest entirely in frontend state,
+/// never on the document itself, so `params` is stored and returned
+/// exactly as given — Rust never parses or interprets it, only the
+/// frontend does, when it applies a preset back onto its own state. An
+/// application-level preset kept on the document instead, the same
+/// simplification Gradient, Pattern, Adjustment, and Custom Shape
+/// Presets already make.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPreset {
+    pub name: String,
+    pub tool: String,
+    pub params: String,
 }
 
 /// A plane's inverse homography and its slightly grown target quad.
@@ -3414,6 +3435,8 @@ pub struct DocumentView {
     pub adjustment_presets: Vec<AdjustmentPreset>,
     /// The Custom Shape tool's picker's names, in the order first saved.
     pub custom_shape_presets: Vec<String>,
+    /// Tool Presets, in the order first saved.
+    pub tool_presets: Vec<ToolPreset>,
 }
 
 impl Document {
@@ -3437,6 +3460,7 @@ impl Document {
             gradient_presets: Vec::new(),
             adjustment_presets: Vec::new(),
             custom_shape_presets: Vec::new(),
+            tool_presets: Vec::new(),
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             color_table: Vec::new(),
@@ -3512,6 +3536,7 @@ impl Document {
                 .iter()
                 .map(|p| p.name.clone())
                 .collect(),
+            tool_presets: self.tool_presets.clone(),
         }
     }
 
@@ -8399,6 +8424,43 @@ impl Document {
                 stroke: None,
             },
         )
+    }
+
+    /// Tool Presets: saves (or, by name, overwrites) `tool`'s current
+    /// configuration as `params`, an opaque blob the frontend alone
+    /// defines and interprets. Errors for a blank name.
+    pub fn save_tool_preset(&mut self, name: &str, tool: &str, params: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("A tool preset needs a name.".to_string());
+        }
+        match self.tool_presets.iter_mut().find(|p| p.name == name) {
+            Some(preset) => {
+                preset.tool = tool.to_string();
+                preset.params = params.to_string();
+            }
+            None => self.tool_presets.push(ToolPreset {
+                name: name.to_string(),
+                tool: tool.to_string(),
+                params: params.to_string(),
+            }),
+        }
+        Ok(())
+    }
+
+    /// Deletes the tool preset named `name`. Errors when there is none.
+    pub fn delete_tool_preset(&mut self, name: &str) -> Result<(), String> {
+        let index = self
+            .tool_presets
+            .iter()
+            .position(|p| p.name == name)
+            .ok_or_else(|| format!("No tool preset named \"{name}\"."))?;
+        self.tool_presets.remove(index);
+        Ok(())
+    }
+
+    pub fn tool_presets(&self) -> &[ToolPreset] {
+        &self.tool_presets
     }
 
     /// Layer > Layer Mask > Reveal All / Hide All / Reveal Selection / Hide
@@ -50651,6 +50713,87 @@ mod tests {
             .place_custom_shape_preset("Nope", 0.0, 0.0, 10.0, 10.0, [0, 0, 0, 255])
             .unwrap_err()
             .contains("preset"));
+    }
+
+    #[test]
+    fn tool_presets_save_overwrites_by_name_and_lists_in_order_added() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_tool_preset("Big Soft Brush", "brush", "{\"size\":200,\"hardness\":0}")
+            .unwrap();
+        doc.save_tool_preset("Fine Eraser", "eraser", "{\"size\":2}")
+            .unwrap();
+        assert_eq!(doc.tool_presets().len(), 2);
+        assert_eq!(doc.tool_presets()[0].name, "Big Soft Brush");
+        assert_eq!(doc.tool_presets()[1].name, "Fine Eraser");
+        // Saving "Big Soft Brush" again overwrites it in place rather than
+        // adding a third preset.
+        doc.save_tool_preset("Big Soft Brush", "brush", "{\"size\":50,\"hardness\":100}")
+            .unwrap();
+        assert_eq!(doc.tool_presets().len(), 2);
+        assert_eq!(
+            doc.tool_presets()[0].params,
+            "{\"size\":50,\"hardness\":100}"
+        );
+        doc.delete_tool_preset("Fine Eraser").unwrap();
+        assert_eq!(doc.tool_presets().len(), 1);
+        assert!(doc
+            .delete_tool_preset("Fine Eraser")
+            .unwrap_err()
+            .contains("preset"));
+        assert!(doc
+            .save_tool_preset("  ", "brush", "{}")
+            .unwrap_err()
+            .contains("name"));
+    }
+
+    #[test]
+    fn tool_presets_round_trip_the_tool_and_opaque_params_exactly() {
+        let mut doc = Document::new(4, 4).unwrap();
+        let params = "{\"size\":37.5,\"flow\":80,\"blendMode\":\"multiply\",\"note\":\"quotes \\\"in\\\" here\"}";
+        doc.save_tool_preset("Textured Ink", "brush", params)
+            .unwrap();
+        let preset = &doc.tool_presets()[0];
+        assert_eq!(preset.tool, "brush");
+        assert_eq!(preset.params, params);
+    }
+
+    #[test]
+    fn tool_presets_appear_on_the_document_view_with_every_field() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_tool_preset("Clone Aligned", "cloneStamp", "{\"aligned\":true}")
+            .unwrap();
+        let view = doc.view();
+        assert_eq!(view.tool_presets.len(), 1);
+        assert_eq!(view.tool_presets[0].name, "Clone Aligned");
+        assert_eq!(view.tool_presets[0].tool, "cloneStamp");
+        assert_eq!(view.tool_presets[0].params, "{\"aligned\":true}");
+    }
+
+    #[test]
+    fn tool_presets_key_is_the_name_alone_regardless_of_tool() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_tool_preset("Favorite", "brush", "{\"size\":10}")
+            .unwrap();
+        // Saving the same name for a completely different tool still
+        // overwrites the one preset in place -- the name is the sole key,
+        // the same convention every other named preset here uses.
+        doc.save_tool_preset("Favorite", "eraser", "{\"size\":99}")
+            .unwrap();
+        assert_eq!(doc.tool_presets().len(), 1);
+        assert_eq!(doc.tool_presets()[0].tool, "eraser");
+        assert_eq!(doc.tool_presets()[0].params, "{\"size\":99}");
+    }
+
+    #[test]
+    fn tool_presets_preserve_order_through_interleaved_deletes_and_saves() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_tool_preset("A", "brush", "{}").unwrap();
+        doc.save_tool_preset("B", "brush", "{}").unwrap();
+        doc.save_tool_preset("C", "brush", "{}").unwrap();
+        doc.delete_tool_preset("B").unwrap();
+        doc.save_tool_preset("D", "brush", "{}").unwrap();
+        let names: Vec<&str> = doc.tool_presets().iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, vec!["A", "C", "D"]);
     }
 
     #[test]

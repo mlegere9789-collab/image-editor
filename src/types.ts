@@ -215,6 +215,16 @@ export type DocumentView = {
   customShapePresets: string[];
   /** The Artboard Tool's named regions, in creation order. */
   artboards: Artboard[];
+  /** Tool Presets, in the order first saved. */
+  toolPresets: ToolPreset[];
+};
+
+/** Mirrors `ToolPreset` in src-tauri/src/document.rs. */
+export type ToolPreset = {
+  name: string;
+  tool: string;
+  /** An opaque JSON blob in the frontend's own shape; Rust never parses it. */
+  params: string;
 };
 
 /** Mirrors `GradientPreset` in src-tauri/src/document.rs. */

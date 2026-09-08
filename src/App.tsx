@@ -5954,7 +5954,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowPresetsDialog(true)}
           disabled={busy || !hasDocument}
-          title="Edit > Presets: save and reuse Gradient, Pattern, Adjustment, and Custom Shape presets by name"
+          title="Edit > Presets: save and reuse Gradient, Pattern, Adjustment, Custom Shape, and Tool presets by name"
         >
           Presets…
         </button>
@@ -11014,6 +11014,74 @@ export default function App() {
               disabled={busy || presetName.trim() === "" || !document.currentPath}
             >
               Save Shape
+            </button>
+
+            <h3 className="modal__subheading">Tool Presets</h3>
+            <p className="modal__hint">
+              Saves the active tool ({tool}) with this project's own shared brush
+              parameters (size, opacity, colour, and the Gradient tool's end colour).
+              Mixer Brush's Wet/Load/Mix, Art History's own controls, and shape tools'
+              fill/stroke are a documented scope cut.
+            </p>
+            {document.toolPresets.length === 0 ? (
+              <p className="modal__hint">No tool presets saved yet.</p>
+            ) : (
+              document.toolPresets.map((preset) => (
+                <div className="control control--row" key={preset.name}>
+                  <span className="control__label">
+                    {preset.name} ({preset.tool})
+                  </span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setTool(preset.tool as Tool);
+                      try {
+                        const params = JSON.parse(preset.params) as {
+                          size?: number;
+                          opacity?: number;
+                          color?: string;
+                          endColor?: string;
+                        };
+                        if (typeof params.size === "number") setBrushSize(params.size);
+                        if (typeof params.opacity === "number") setBrushOpacity(params.opacity);
+                        if (typeof params.color === "string") setBrushColor(params.color);
+                        if (typeof params.endColor === "string") setGradientEndColor(params.endColor);
+                      } catch {
+                        // A preset saved by an incompatible future version of this
+                        // app -- the tool switch above still applies.
+                      }
+                    }}
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("delete_tool_preset", { name: preset.name })}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              className="button"
+              onClick={() =>
+                void runCommand("save_tool_preset", {
+                  name: presetName.trim(),
+                  tool,
+                  params: JSON.stringify({
+                    size: brushSize,
+                    opacity: brushOpacity,
+                    color: brushColor,
+                    endColor: gradientEndColor,
+                  }),
+                })
+              }
+              disabled={busy || presetName.trim() === ""}
+            >
+              Save Tool
             </button>
 
             <div className="modal__actions">
