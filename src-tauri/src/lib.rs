@@ -3501,6 +3501,19 @@ fn delete_gradient_preset(state: State<'_, AppState>, name: String) -> Result<Sn
     })
 }
 
+/// The Preset Manager: renames gradient preset `old_name` to `new_name`.
+#[tauri::command]
+fn rename_gradient_preset(
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_gradient_preset(&old_name, &new_name)?;
+        Ok(None)
+    })
+}
+
 /// Pattern Presets: save (or overwrite) the current pattern by name.
 #[tauri::command]
 fn save_pattern_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
@@ -3526,6 +3539,19 @@ fn delete_pattern_preset(state: State<'_, AppState>, name: String) -> Result<Sna
     })
 }
 
+/// The Preset Manager: renames pattern preset `old_name` to `new_name`.
+#[tauri::command]
+fn rename_pattern_preset(
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_pattern_preset(&old_name, &new_name)?;
+        Ok(None)
+    })
+}
+
 /// Adjustment Presets: save (or overwrite) one by name.
 #[tauri::command]
 fn save_adjustment_preset(
@@ -3543,6 +3569,19 @@ fn save_adjustment_preset(
 fn delete_adjustment_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.delete_adjustment_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// The Preset Manager: renames adjustment preset `old_name` to `new_name`.
+#[tauri::command]
+fn rename_adjustment_preset(
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_adjustment_preset(&old_name, &new_name)?;
         Ok(None)
     })
 }
@@ -3577,6 +3616,19 @@ fn delete_custom_shape_preset(
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.delete_custom_shape_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// The Preset Manager: renames custom shape preset `old_name` to `new_name`.
+#[tauri::command]
+fn rename_custom_shape_preset(
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_custom_shape_preset(&old_name, &new_name)?;
         Ok(None)
     })
 }
@@ -3625,6 +3677,19 @@ fn save_tool_preset(
 fn delete_tool_preset(state: State<'_, AppState>, name: String) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.delete_tool_preset(&name)?;
+        Ok(None)
+    })
+}
+
+/// The Preset Manager: renames tool preset `old_name` to `new_name`.
+#[tauri::command]
+fn rename_tool_preset(
+    state: State<'_, AppState>,
+    old_name: String,
+    new_name: String,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rename_tool_preset(&old_name, &new_name)?;
         Ok(None)
     })
 }
@@ -5908,17 +5973,22 @@ pub fn run() {
             move_anchor,
             save_gradient_preset,
             delete_gradient_preset,
+            rename_gradient_preset,
             save_pattern_preset,
             load_pattern_preset,
             delete_pattern_preset,
+            rename_pattern_preset,
             save_adjustment_preset,
             delete_adjustment_preset,
             apply_adjustment_preset,
+            rename_adjustment_preset,
             save_custom_shape_preset,
             delete_custom_shape_preset,
             place_custom_shape_preset,
+            rename_custom_shape_preset,
             save_tool_preset,
             delete_tool_preset,
+            rename_tool_preset,
             set_text,
             add_shape_layer,
             set_shape,

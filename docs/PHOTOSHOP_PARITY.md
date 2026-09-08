@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 505.**
+**618 distinct capabilities tracked. Currently shipped: 506.**
 
 ## PART I — EVERY TOOL
 
@@ -188,7 +188,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Rich Tooltips
 - [ ] Custom Toolbar
 - [x] Tool Presets (`ToolPreset { name, tool, params }`, `save_tool_preset`/`delete_tool_preset`: a named snapshot of the active tool plus an opaque `params` blob Rust never interprets, only the frontend does — the same "app-level preset kept on the document" simplification Gradient/Pattern/Adjustment/Custom Shape Presets already make. Scoped to this project's own shared brush parameters (size, opacity, colour, and the Gradient tool's end colour); Mixer Brush's Wet/Load/Mix, Art History's own controls, and shape tools' fill/stroke are a documented scope cut — see README Phase 273)
-- [ ] Preset Manager
+- [x] Preset Manager (`rename_gradient_preset`/`rename_pattern_preset`/`rename_adjustment_preset`/`rename_custom_shape_preset`/`rename_tool_preset`: renaming by name, in place, alongside each preset kind's existing save/delete/list, in the consolidated Presets dialog. Pattern and Custom Shape presets are the real driver — the frontend never sees a pattern's own pixels or a custom shape's own Bézier anchors, only their names, so rename is the only lossless way to retitle either at all; the other three could otherwise be renamed by delete-and-resave with data the frontend already has. A single cross-type panel with drag-to-reorder and import/export is a documented scope cut — see README Phase 274)
 - [x] Adjustment Presets (`save_adjustment_preset`/`delete_adjustment_preset`/`apply_adjustment_preset`, a named `Adjustment` saved on the document — overwritten in place when the name repeats, validated before saving — and applied by adding a new adjustment layer set to it; see README Phase 260)
 - [x] Gradient Presets (`save_gradient_preset`/`delete_gradient_preset`, a named two-colour start/end pair; Apply loads the colours into the Gradient tool's own foreground/end-colour fields. Photoshop's built-in swatch library and multi-stop gradients are documented scope cuts — see README Phase 260)
 - [x] Pattern Presets (`save_pattern_preset`/`load_pattern_preset`/`delete_pattern_preset`, the currently-defined pattern (Define Pattern, above) saved by name and reloaded as the current pattern; see README Phase 260)

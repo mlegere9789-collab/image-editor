@@ -61,7 +61,7 @@ import type {
 } from "./types";
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
-const PROJECT_FILTER = [{ name: "Image Editor Project", extensions: ["iep"] }];
+const PROJECT_FILTER = [{ name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] }];
 const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
 /** One row per output channel (R, G, B); each row is
@@ -5908,7 +5908,7 @@ export default function App() {
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
       <header className="toolbar">
-        <h1 className="toolbar__title">Image Editor</h1>
+        <h1 className="toolbar__title">LegeLabs: Photo Editing Suite</h1>
         <button
           className="button"
           onClick={() => setShowNewDialog(true)}
@@ -10846,7 +10846,7 @@ export default function App() {
           >
             <h2 className="modal__heading">Presets</h2>
             <label className="control control--row">
-              <span className="control__label">Name</span>
+              <span className="control__label">Name (for Save and Rename below)</span>
               <input
                 type="text"
                 value={presetName}
@@ -10884,6 +10884,14 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
+                    onClick={() => void runCommand("rename_gradient_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="button button--quiet"
                     onClick={() => void runCommand("delete_gradient_preset", { name: preset.name })}
                     disabled={busy}
                   >
@@ -10910,6 +10918,14 @@ export default function App() {
                     disabled={busy}
                   >
                     Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("rename_pattern_preset", { oldName: name, newName: presetName.trim() })}
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
                   </button>
                   <button
                     className="button button--quiet"
@@ -10943,6 +10959,14 @@ export default function App() {
                     disabled={busy}
                   >
                     Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("rename_adjustment_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
                   </button>
                   <button
                     className="button button--quiet"
@@ -10985,6 +11009,14 @@ export default function App() {
                     disabled={busy}
                   >
                     Place
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("rename_custom_shape_preset", { oldName: name, newName: presetName.trim() })}
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
                   </button>
                   <button
                     className="button button--quiet"
@@ -11054,6 +11086,14 @@ export default function App() {
                     disabled={busy}
                   >
                     Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void runCommand("rename_tool_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
                   </button>
                   <button
                     className="button button--quiet"

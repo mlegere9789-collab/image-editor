@@ -8220,6 +8220,31 @@ impl Document {
         Ok(())
     }
 
+    /// The Preset Manager: renames the gradient preset named `old_name`
+    /// to `new_name`, in place, keeping its position in the list. Errors
+    /// for a blank `new_name`, an unknown `old_name`, or a `new_name`
+    /// already used by a different gradient preset.
+    pub fn rename_gradient_preset(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("A gradient preset needs a name.".to_string());
+        }
+        if !self.gradient_presets.iter().any(|p| p.name == old_name) {
+            return Err(format!("No gradient preset named \"{old_name}\"."));
+        }
+        if new_name != old_name && self.gradient_presets.iter().any(|p| p.name == new_name) {
+            return Err(format!(
+                "A gradient preset named \"{new_name}\" already exists."
+            ));
+        }
+        self.gradient_presets
+            .iter_mut()
+            .find(|p| p.name == old_name)
+            .expect("checked above")
+            .name = new_name.to_string();
+        Ok(())
+    }
+
     pub fn gradient_presets(&self) -> &[GradientPreset] {
         &self.gradient_presets
     }
@@ -8267,6 +8292,35 @@ impl Document {
         Ok(())
     }
 
+    /// The Preset Manager: renames the pattern preset named `old_name` to
+    /// `new_name`, in place, keeping its position and pixels untouched —
+    /// the only way to rename one losslessly, since the frontend never
+    /// sees a pattern preset's own pixels (only its name), unlike
+    /// gradient, adjustment, and tool presets, which it could otherwise
+    /// rename by deleting and re-saving with data it already has. Errors
+    /// for a blank `new_name`, an unknown `old_name`, or a `new_name`
+    /// already used by a different pattern preset.
+    pub fn rename_pattern_preset(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("A pattern preset needs a name.".to_string());
+        }
+        if !self.pattern_presets.iter().any(|(n, _)| n == old_name) {
+            return Err(format!("No pattern preset named \"{old_name}\"."));
+        }
+        if new_name != old_name && self.pattern_presets.iter().any(|(n, _)| n == new_name) {
+            return Err(format!(
+                "A pattern preset named \"{new_name}\" already exists."
+            ));
+        }
+        self.pattern_presets
+            .iter_mut()
+            .find(|(n, _)| n == old_name)
+            .expect("checked above")
+            .0 = new_name.to_string();
+        Ok(())
+    }
+
     /// Adjustment Presets: saves (or, by name, overwrites) an
     /// [`Adjustment`]. A rejected adjustment leaves any existing preset of
     /// the same name untouched. Errors for a blank name or an invalid
@@ -8300,6 +8354,35 @@ impl Document {
             .position(|p| p.name == name)
             .ok_or_else(|| format!("No adjustment preset named \"{name}\"."))?;
         self.adjustment_presets.remove(index);
+        Ok(())
+    }
+
+    /// The Preset Manager: renames the adjustment preset named `old_name`
+    /// to `new_name`, in place, keeping its position and its adjustment
+    /// untouched. Errors for a blank `new_name`, an unknown `old_name`,
+    /// or a `new_name` already used by a different adjustment preset.
+    pub fn rename_adjustment_preset(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("An adjustment preset needs a name.".to_string());
+        }
+        if !self.adjustment_presets.iter().any(|p| p.name == old_name) {
+            return Err(format!("No adjustment preset named \"{old_name}\"."));
+        }
+        if new_name != old_name && self.adjustment_presets.iter().any(|p| p.name == new_name) {
+            return Err(format!(
+                "An adjustment preset named \"{new_name}\" already exists."
+            ));
+        }
+        self.adjustment_presets
+            .iter_mut()
+            .find(|p| p.name == old_name)
+            .expect("checked above")
+            .name = new_name.to_string();
         Ok(())
     }
 
@@ -8360,6 +8443,40 @@ impl Document {
             .position(|p| p.name == name)
             .ok_or_else(|| format!("No custom shape preset named \"{name}\"."))?;
         self.custom_shape_presets.remove(index);
+        Ok(())
+    }
+
+    /// The Preset Manager: renames the custom shape preset named
+    /// `old_name` to `new_name`, in place, its path untouched. The only
+    /// lossless way to rename one at all: the frontend never sees a
+    /// custom shape preset's own anchors (only its name), and
+    /// [`Self::place_custom_shape_preset`] flattens curves to a polygon,
+    /// so routing a rename through delete-and-resave would destroy every
+    /// Bézier handle. Errors for a blank `new_name`, an unknown
+    /// `old_name`, or a `new_name` already used by a different custom
+    /// shape preset.
+    pub fn rename_custom_shape_preset(
+        &mut self,
+        old_name: &str,
+        new_name: &str,
+    ) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("A custom shape preset needs a name.".to_string());
+        }
+        if !self.custom_shape_presets.iter().any(|p| p.name == old_name) {
+            return Err(format!("No custom shape preset named \"{old_name}\"."));
+        }
+        if new_name != old_name && self.custom_shape_presets.iter().any(|p| p.name == new_name) {
+            return Err(format!(
+                "A custom shape preset named \"{new_name}\" already exists."
+            ));
+        }
+        self.custom_shape_presets
+            .iter_mut()
+            .find(|p| p.name == old_name)
+            .expect("checked above")
+            .name = new_name.to_string();
         Ok(())
     }
 
@@ -8456,6 +8573,31 @@ impl Document {
             .position(|p| p.name == name)
             .ok_or_else(|| format!("No tool preset named \"{name}\"."))?;
         self.tool_presets.remove(index);
+        Ok(())
+    }
+
+    /// The Preset Manager: renames the tool preset named `old_name` to
+    /// `new_name`, in place, its tool and params untouched. Errors for a
+    /// blank `new_name`, an unknown `old_name`, or a `new_name` already
+    /// used by a different tool preset.
+    pub fn rename_tool_preset(&mut self, old_name: &str, new_name: &str) -> Result<(), String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err("A tool preset needs a name.".to_string());
+        }
+        if !self.tool_presets.iter().any(|p| p.name == old_name) {
+            return Err(format!("No tool preset named \"{old_name}\"."));
+        }
+        if new_name != old_name && self.tool_presets.iter().any(|p| p.name == new_name) {
+            return Err(format!(
+                "A tool preset named \"{new_name}\" already exists."
+            ));
+        }
+        self.tool_presets
+            .iter_mut()
+            .find(|p| p.name == old_name)
+            .expect("checked above")
+            .name = new_name.to_string();
         Ok(())
     }
 
@@ -50418,6 +50560,34 @@ mod tests {
     }
 
     #[test]
+    fn rename_gradient_preset_keeps_its_position_and_colours() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_gradient_preset("Sunset", [255, 100, 0, 255], [0, 0, 50, 255])
+            .unwrap();
+        doc.save_gradient_preset("Ocean", [0, 100, 200, 255], [0, 0, 50, 255])
+            .unwrap();
+        doc.rename_gradient_preset("Sunset", "Dusk").unwrap();
+        assert_eq!(doc.gradient_presets()[0].name, "Dusk");
+        assert_eq!(doc.gradient_presets()[0].start_color, [255, 100, 0, 255]);
+        assert_eq!(doc.gradient_presets()[1].name, "Ocean");
+        // Renaming to its own current name is a harmless no-op.
+        doc.rename_gradient_preset("Dusk", "Dusk").unwrap();
+        assert_eq!(doc.gradient_presets().len(), 2);
+        assert!(doc
+            .rename_gradient_preset("Dusk", "Ocean")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(doc
+            .rename_gradient_preset("Nope", "Anything")
+            .unwrap_err()
+            .contains("No gradient preset"));
+        assert!(doc
+            .rename_gradient_preset("Dusk", "  ")
+            .unwrap_err()
+            .contains("name"));
+    }
+
+    #[test]
     fn pattern_presets_require_a_defined_pattern_and_round_trip_its_pixels() {
         let mut doc = Document::new(4, 4).unwrap();
         let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
@@ -50452,6 +50622,32 @@ mod tests {
     }
 
     #[test]
+    fn rename_pattern_preset_keeps_its_pixels_byte_for_byte() {
+        // The only lossless way to rename a pattern preset at all: the
+        // frontend never sees its pixels, only its name.
+        let mut doc = Document::new(4, 4).unwrap();
+        let pixels: Vec<u8> = (0..16u8).flat_map(|i| [i, i, i, 255]).collect();
+        let id = doc.add_layer("swatch", &pixels, 4, 4).unwrap();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        doc.define_pattern(id).unwrap();
+        doc.save_pattern_preset("Bricks").unwrap();
+        let before = doc.pattern().unwrap().clone();
+        doc.rename_pattern_preset("Bricks", "Cobblestone").unwrap();
+        assert_eq!(doc.view().pattern_presets, vec!["Cobblestone".to_string()]);
+        doc.load_pattern_preset("Cobblestone").unwrap();
+        assert_eq!(doc.pattern().unwrap(), &before);
+        assert!(doc.load_pattern_preset("Bricks").is_err());
+        assert!(doc
+            .rename_pattern_preset("Nope", "Anything")
+            .unwrap_err()
+            .contains("No pattern preset"));
+        assert!(doc
+            .rename_pattern_preset("Cobblestone", "  ")
+            .unwrap_err()
+            .contains("name"));
+    }
+
+    #[test]
     fn adjustment_presets_validate_before_saving_and_apply_as_a_new_layer() {
         let mut doc = Document::new(4, 4).unwrap();
         doc.save_adjustment_preset(
@@ -50481,6 +50677,42 @@ mod tests {
             .apply_adjustment_preset("Nope")
             .unwrap_err()
             .contains("preset"));
+    }
+
+    #[test]
+    fn rename_adjustment_preset_keeps_its_adjustment_and_is_applicable_under_the_new_name() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_adjustment_preset(
+            "High Contrast",
+            Adjustment::BrightnessContrast {
+                brightness: 0,
+                contrast: 40,
+            },
+        )
+        .unwrap();
+        doc.rename_adjustment_preset("High Contrast", "Punchy")
+            .unwrap();
+        assert_eq!(doc.adjustment_presets()[0].name, "Punchy");
+        let id = doc.apply_adjustment_preset("Punchy").unwrap();
+        assert_eq!(doc.layers()[0].id, id);
+        assert_eq!(
+            doc.layers()[0].adjustment,
+            Some(Adjustment::BrightnessContrast {
+                brightness: 0,
+                contrast: 40
+            })
+        );
+        assert!(doc.apply_adjustment_preset("High Contrast").is_err());
+        doc.save_adjustment_preset("Other", Adjustment::Invert)
+            .unwrap();
+        assert!(doc
+            .rename_adjustment_preset("Punchy", "Other")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(doc
+            .rename_adjustment_preset("Nope", "Anything")
+            .unwrap_err()
+            .contains("No adjustment preset"));
     }
 
     #[test]
@@ -50575,6 +50807,36 @@ mod tests {
             .delete_custom_shape_preset("Triangle")
             .unwrap_err()
             .contains("preset"));
+    }
+
+    #[test]
+    fn rename_custom_shape_preset_keeps_its_bezier_handles_intact() {
+        // The only lossless way to rename a custom shape preset at all:
+        // place_custom_shape_preset flattens curves to a polygon, so a
+        // delete-and-resave through it would destroy this out_handle.
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.pen_add_anchor((0.0, 0.0), Some((2.0, 2.0))).unwrap();
+        doc.pen_add_anchor((10.0, 0.0), None).unwrap();
+        doc.pen_add_anchor((5.0, 10.0), None).unwrap();
+        doc.close_current_path().unwrap();
+        doc.save_custom_shape_preset("Triangle").unwrap();
+        let before = doc.custom_shape_presets()[0].path.clone();
+        doc.rename_custom_shape_preset("Triangle", "Curvy Triangle")
+            .unwrap();
+        assert_eq!(doc.custom_shape_presets()[0].name, "Curvy Triangle");
+        assert_eq!(doc.custom_shape_presets()[0].path, before);
+        assert!(doc
+            .place_custom_shape_preset("Triangle", 0.0, 0.0, 5.0, 5.0, [0, 0, 0, 255])
+            .is_err());
+        doc.save_custom_shape_preset("Square").unwrap();
+        assert!(doc
+            .rename_custom_shape_preset("Curvy Triangle", "Square")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(doc
+            .rename_custom_shape_preset("Nope", "Anything")
+            .unwrap_err()
+            .contains("No custom shape preset"));
     }
 
     #[test]
@@ -50794,6 +51056,34 @@ mod tests {
         doc.save_tool_preset("D", "brush", "{}").unwrap();
         let names: Vec<&str> = doc.tool_presets().iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, vec!["A", "C", "D"]);
+    }
+
+    #[test]
+    fn rename_tool_preset_keeps_its_tool_and_opaque_params() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.save_tool_preset("Big Soft Brush", "brush", "{\"size\":200,\"hardness\":0}")
+            .unwrap();
+        doc.rename_tool_preset("Big Soft Brush", "Cloud Brush")
+            .unwrap();
+        assert_eq!(doc.tool_presets()[0].name, "Cloud Brush");
+        assert_eq!(doc.tool_presets()[0].tool, "brush");
+        assert_eq!(
+            doc.tool_presets()[0].params,
+            "{\"size\":200,\"hardness\":0}"
+        );
+        doc.save_tool_preset("Fine Eraser", "eraser", "{}").unwrap();
+        assert!(doc
+            .rename_tool_preset("Cloud Brush", "Fine Eraser")
+            .unwrap_err()
+            .contains("already exists"));
+        assert!(doc
+            .rename_tool_preset("Nope", "Anything")
+            .unwrap_err()
+            .contains("No tool preset"));
+        assert!(doc
+            .rename_tool_preset("Cloud Brush", "  ")
+            .unwrap_err()
+            .contains("name"));
     }
 
     #[test]

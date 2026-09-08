@@ -1,6 +1,7 @@
-# image-editor
+# LegeLabs: Photo Editing Suite
 
-Desktop image editor, Tauri + Rust + React.
+Desktop image editor, Tauri + Rust + React. The first product under the
+LegeLabs umbrella.
 
 ## Status
 
@@ -16428,6 +16429,66 @@ by hand instead. Every other layer of this project's quality bar
 green.
 
 **1614 Rust tests total** (1609 → 1614, 1607 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
+## Phase 274 — Preset Manager
+
+Photoshop's Preset Manager panel views, renames, deletes, and reorders
+presets across every preset type in one place — this project already
+had save and delete for all five kinds it tracks (Gradient, Pattern,
+Adjustment, Custom Shape, and Tool Presets), so this phase adds the one
+piece that was missing: `rename_gradient_preset`, `rename_pattern_
+preset`, `rename_adjustment_preset`, `rename_custom_shape_preset`, and
+`rename_tool_preset`, five near-identical functions matching the five
+near-identical save/delete pairs these preset kinds already have —
+rename by name, in place, keeping the preset's position and its own
+content untouched, erroring on a blank new name, an unknown old name,
+or a new name already used by a different preset of the same kind.
+This is not symmetry for its own sake: Pattern and Custom Shape presets
+are the real driver. The frontend never sees a pattern preset's own
+pixels or a custom shape preset's own Bézier anchors — only their
+names — so before this phase there was no way to rename either of them
+at all without data loss; routing a rename through
+`place_custom_shape_preset` would flatten every curve to a polygon
+first, destroying handles a real rename must keep. Gradient,
+Adjustment, and Tool Presets could technically already be renamed from
+the frontend by deleting and re-saving with data it already holds, but
+a dedicated rename is the same honest completion of an existing
+capability, not a workaround. The consolidated Presets dialog's five
+sections each gained a Rename button next to Delete, sharing the same
+Name field the dialog's five Save buttons already use — typing a new
+name and pressing Rename retitles that row in place. A single
+cross-type panel with drag-to-reorder and import/export, Photoshop's
+own fuller Preset Manager, is a documented scope cut.
+
+**Verified two ways.** Five new `document.rs` tests, one per preset
+kind, pure bookkeeping with no floating-point arithmetic to derive —
+the same reasoning that already exempted every one of these five
+preset kinds' own save/delete tests from a Python cross-check. Each
+confirms the rename lands, the preset's own content survives exactly
+(the gradient's colours, the adjustment's enum, the tool preset's
+opaque params blob, and — the two that matter most — the pattern's
+pixels compared byte for byte through `load_pattern_preset` and the
+custom shape's path compared field for field, including a Bézier
+`out_handle` that would not survive a flatten-and-replace), a duplicate
+new name is rejected, an unknown old name is rejected, and (gradient
+only, representative of all five) a blank new name is rejected and
+renaming to the preset's own current name is a harmless no-op. All
+five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and twenty-one: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Presets dialog's five new Rename buttons were reviewed
+by hand instead. Every other layer of this project's quality bar
+(hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1619 Rust tests total** (1614 → 1619, 1612 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
 ## Prerequisites
