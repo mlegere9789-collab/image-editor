@@ -17842,10 +17842,10 @@ Threshold.
 
 ## Phase 303 — PART XXX's own already-covered recipes
 
-Three more rows from "Non-Obvious Things Photoshop Can Do," found the
+Four more rows from "Non-Obvious Things Photoshop Can Do," found the
 same way Phase 302 was: reading `photoshop-capability-audit.txt`'s own
 text for each row instead of assuming every one needed AI. Unlike Turn
-a Photograph into Linework, none of these three gets a new one-click
+a Photograph into Linework, none of these four gets a new one-click
 command — the audit's own recipe for each is itself a multi-step manual
 workflow, never a single deterministic filter, so what flips each row
 is recognising that every one of the audit's own named ingredients
@@ -17874,10 +17874,20 @@ independently masked, blended, and given a real `drop_shadow` layer
 style for grounding, with "atmospheric effects" any low-opacity
 gradient fill or adjustment layer over the rest.
 
+**Remove an Entire Crowd** names four tools to combine — Remove,
+Content-Aware Fill, Clone, Generative Fill — and three of the four are
+real and shipped: `camera_raw_retouch`'s own Remove mode,
+`content_aware_fill`, and the Clone Stamp Tool. This is exactly how
+Photoshop users removed crowds before Generative Fill existed at all —
+repeated Content-Aware Fill and Clone Stamp strokes over each figure.
+Generative Fill itself, the recipe's fourth and newest tool, stays
+separately tracked under its own row (Phase 296's real client layer,
+still needing a real provider) rather than claimed here.
+
 No code changed in this phase and no new tests were needed — each row
 flips on the strength of confirming its own named ingredients are real,
 shipped, and tested elsewhere in this project's history, not on
-anything new built here. Three rows flip to shipped (545/618).
+anything new built here. Four rows flip to shipped (546/618).
 
 ## Prerequisites
 

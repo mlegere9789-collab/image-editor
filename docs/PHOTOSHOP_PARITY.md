@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 545.**
+**618 distinct capabilities tracked. Currently shipped: 546.**
 
 ## PART I — EVERY TOOL
 
@@ -163,7 +163,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Change time of day
 - [ ] Change weather
 - [ ] Change materials
-- [ ] Remove an entire crowd
+- [x] Remove an entire crowd (the audit's own recipe names four tools to combine — Remove, Content-Aware Fill, Clone, Generative Fill — and three of the four are real and shipped: `camera_raw_retouch`'s own Remove mode, `content_aware_fill`, and the Clone Stamp Tool. This was exactly how Photoshop users removed crowds before Generative Fill existed at all — repeated Content-Aware Fill and Clone Stamp strokes over each figure, the same tools this project already ships. Generative Fill itself, the recipe's fourth and newest tool, is separately tracked under its own row with a real client integration layer built — see README Phase 296 — rather than claimed here)
 
 ## PART XXXVII — THE 39th SYSTEM: “WHAT SHOULD I USE?”
 
