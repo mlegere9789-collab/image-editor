@@ -51,7 +51,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  width: 260px;
+  width: fit-content;
   flex: none;
   overflow-y: auto;
   padding: 4px;
@@ -97,6 +97,46 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
   border-radius: 8px;
   overflow: hidden;
+}
+
+.dockable-panel__collapse {
+  position: absolute;
+  top: 2px;
+  right: 26px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Window > Collapsed Icon Panels: the panel's own content is replaced by
+ * a narrow vertical label, its own two buttons still reachable to expand
+ * or re-dock it. */
+.dockable-panel--collapsed {
+  width: 32px !important;
+  min-width: 32px;
+}
+.dockable-panel--collapsed .dockable-panel__collapse {
+  right: 6px;
+  top: 26px;
+}
+.dockable-panel__label {
+  display: block;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 30px 0 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .app--dropping .stage {
@@ -361,6 +401,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: 260px;
   padding: 14px;
   overflow-y: auto;
   background: var(--surface);

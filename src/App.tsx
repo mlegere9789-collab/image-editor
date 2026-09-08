@@ -7032,6 +7032,7 @@ export default function App() {
     <DockablePanel
       key="layers"
       id="layers"
+      title="Layers"
       placement={panelLayout.layers ?? DEFAULT_PANEL_LAYOUT.layers}
       onPlacementChange={setPanelPlacement}
     >
@@ -7068,6 +7069,7 @@ export default function App() {
     <DockablePanel
       key="channels"
       id="channels"
+      title="Channels"
       placement={panelLayout.channels ?? DEFAULT_PANEL_LAYOUT.channels}
       onPlacementChange={setPanelPlacement}
     >

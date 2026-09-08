@@ -18015,6 +18015,35 @@ clean; this phase is pure frontend, so no Rust tests changed.
 
 Panel Docking and Floating Panels flip to shipped (551/618).
 
+## Phase 308 — Collapsed Icon Panels
+
+A second, independent toggle on `DockablePanel` from Phase 307: a `«`
+button next to the drag grip shrinks the panel to a 32px labelled strip
+— `writing-mode: vertical-rl` for the label, its own content hidden
+outright — and `»` expands it back, either docked or floating. Genuinely
+independent of placement: `PanelPlacement` gains an optional `collapsed`
+flag alongside `zone`, saved in the same `localStorage` entry, so a
+panel can be collapsed-and-docked-left, collapsed-and-floating, or any
+other combination.
+
+The one real layout fix needed alongside it: `.dock-zone` was a fixed
+260px column, so collapsing the one panel inside it would shrink to a
+32px strip sitting in a still-260px-wide column, leaving a wide dead
+gap. Switched to `width: fit-content` with `.panel` itself carrying the
+explicit `260px` that used to live on the column, so the zone now
+genuinely shrinks once every panel inside it is collapsed, and stays
+full width the moment any one panel inside it is expanded again.
+
+**Verified two ways.** A Playwright browser session collapsed the
+Layers panel, confirmed its own heading and layer list were hidden in
+favour of a `Layers` label, confirmed the collapsed panel's own width
+is exactly `32px`, confirmed the placement persisted to `localStorage`
+with `collapsed: true` alongside its zone, and confirmed expanding it
+again restored the full panel. `npm run build` is clean; pure frontend,
+no Rust changed.
+
+Collapsed Icon Panels flips to shipped (552/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

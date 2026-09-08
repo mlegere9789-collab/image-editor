@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 551.**
+**618 distinct capabilities tracked. Currently shipped: 552.**
 
 ## PART I — EVERY TOOL
 
@@ -206,7 +206,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Workspaces (README Phase 288: a named, saved combination of `hiddenTools` and `keyBindings` — this app's own two existing per-installation UI customizations, and its only analogue of a panel layout, since it has no dockable panels for a workspace to actually lay out — kept in `localStorage` and switchable from a new Save/Load/Delete list in the Customize Toolbar dialog)
 - [x] Panel Docking (`DockablePanel`: a real drag handle on both of this app's own non-modal panels, Layers and Channels, dragged to either edge of the window to dock there — an 80px zone from either edge, decided purely by where the pointer releases — or dropped anywhere else to float, exactly Photoshop's own left/right dock model minus its top/bottom docking, which this app's own single-row toolbar layout has no room for. Placement is saved per panel in `localStorage`, like `hiddenTools`, and protected by Lock Workspace exactly as those are — see README Phase 307)
 - [ ] Panel Groups
-- [ ] Collapsed Icon Panels
+- [x] Collapsed Icon Panels (`DockablePanel`'s second, independent toggle — `«`/`»` — shrinks the panel to a 32px labelled strip, its own content hidden, either docked or floating; the dock zone itself shrinks to fit once every panel inside it is collapsed, rather than leaving a wide empty column. Placement is saved with `collapsed` alongside the zone, in the same `localStorage` entry Panel Docking already uses — see README Phase 308)
 - [x] Floating Panels (the same `DockablePanel` drag handle: dropped anywhere that isn't within 80px of either edge, a panel floats at that exact position — `position: fixed`, its own border and drop shadow — instead of docking. Both this app's own panels, Layers and Channels, can float independently — see README Phase 307)
 - [ ] Panel Stacking
 - [ ] Photoshop Cloud Documents (the client side is real and fully wired — `export_project_bytes`/`import_project_bytes` round-trip the same project format `save_project`/`open_project` already do, and Save to Cloud/Load from Cloud send/fetch those bytes to a configured endpoint, PUT/GET `/documents/<name>` — see README Phase 296. Still unchecked: without a real backend behind that endpoint, there is nowhere for the bytes to actually go, and this project has no server of its own to be that backend)

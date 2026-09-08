@@ -3,24 +3,39 @@ import { useCallback, useRef, useState } from "react";
 import type React from "react";
 
 /** Window > Panel Docking's own placement for one panel: pinned to a
- * dock zone beside the canvas, or floating at an absolute position. */
-export type PanelPlacement = { zone: "left" | "right" } | { zone: "float"; x: number; y: number };
+ * dock zone beside the canvas, or floating at an absolute position --
+ * plus Window > Collapsed Icon Panels' own flag, orthogonal to where
+ * the panel sits. */
+export type PanelPlacement = (
+  | { zone: "left" | "right" }
+  | { zone: "float"; x: number; y: number }
+) & {
+  /** Window > Collapsed Icon Panels: shrunk to a narrow labelled strip,
+   * its own content hidden, until expanded again. */
+  collapsed?: boolean;
+};
 
 type Props = {
   id: string;
+  /** Shown on the collapsed strip, and as the grip's own title text. */
+  title: string;
   placement: PanelPlacement;
   onPlacementChange: (id: string, placement: PanelPlacement) => void;
   children: React.ReactNode;
 };
 
-/** Window > Panel Docking / Floating Panels: a real drag handle that lets
- * any panel it wraps be dragged to the left or right edge of the window to
- * dock there, or dropped anywhere else to float at that position -- the
- * same left/right/float model this app's own Workspaces (Phase 288) could
- * one day save alongside `hiddenTools`/`keyBindings`. Docking is decided
- * purely by where the pointer releases, an 80px zone from either edge of
- * the window; everything else floats. */
-export default function DockablePanel({ id, placement, onPlacementChange, children }: Props) {
+/** Window > Panel Docking / Floating Panels / Collapsed Icon Panels: a
+ * real drag handle that lets any panel it wraps be dragged to the left or
+ * right edge of the window to dock there, or dropped anywhere else to
+ * float at that position -- the same left/right/float model this app's
+ * own Workspaces (Phase 288) could one day save alongside
+ * `hiddenTools`/`keyBindings`. Docking is decided purely by where the
+ * pointer releases, an 80px zone from either edge of the window;
+ * everything else floats. A second, independent toggle collapses the
+ * panel to a narrow labelled strip, its own content hidden until
+ * expanded again -- Photoshop's own Collapse to Icons, applying to
+ * either a docked or a floating panel alike. */
+export default function DockablePanel({ id, title, placement, onPlacementChange, children }: Props) {
   // `livePos` is the source of truth read by pointerup -- a ref, not
   // state, so it is always current the instant the drag ends even if a
   // pointerup lands before React has re-rendered the last pointermove's
@@ -63,24 +78,33 @@ export default function DockablePanel({ id, placement, onPlacementChange, childr
       setLive(null);
       const edgeZone = 80;
       const width = event.currentTarget.closest(".dockable-panel")?.clientWidth ?? 260;
+      const collapsed = placement.collapsed;
       if (finalX < edgeZone) {
-        onPlacementChange(id, { zone: "left" });
+        onPlacementChange(id, { zone: "left", collapsed });
       } else if (finalX + width > window.innerWidth - edgeZone) {
-        onPlacementChange(id, { zone: "right" });
+        onPlacementChange(id, { zone: "right", collapsed });
       } else {
-        onPlacementChange(id, { zone: "float", x: Math.max(0, finalX), y: Math.max(0, finalY) });
+        onPlacementChange(id, { zone: "float", x: Math.max(0, finalX), y: Math.max(0, finalY), collapsed });
       }
     },
-    [id, onPlacementChange],
+    [id, onPlacementChange, placement.collapsed],
   );
 
+  const toggleCollapsed = useCallback(() => {
+    onPlacementChange(id, { ...placement, collapsed: !placement.collapsed });
+  }, [id, placement, onPlacementChange]);
+
   const floating = placement.zone === "float";
+  const collapsed = placement.collapsed ?? false;
   const style: React.CSSProperties | undefined = floating
     ? { left: live?.x ?? placement.x, top: live?.y ?? placement.y }
     : undefined;
 
   return (
-    <div className={`dockable-panel${floating ? " dockable-panel--floating" : ""}`} style={style}>
+    <div
+      className={`dockable-panel${floating ? " dockable-panel--floating" : ""}${collapsed ? " dockable-panel--collapsed" : ""}`}
+      style={style}
+    >
       <button
         type="button"
         className="dockable-panel__grip"
@@ -92,7 +116,15 @@ export default function DockablePanel({ id, placement, onPlacementChange, childr
       >
         ⠿
       </button>
-      {children}
+      <button
+        type="button"
+        className="dockable-panel__collapse"
+        title={collapsed ? `Expand ${title}` : `Collapse ${title} to an icon`}
+        onClick={toggleCollapsed}
+      >
+        {collapsed ? "»" : "«"}
+      </button>
+      {collapsed ? <span className="dockable-panel__label">{title}</span> : children}
     </div>
   );
 }
