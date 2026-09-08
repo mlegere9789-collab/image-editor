@@ -17282,6 +17282,51 @@ unaffected and still clean.
 
 **1651 Rust tests total** (unchanged — this phase is pure frontend).
 
+## Phase 291 — Lock Workspace
+
+A seventh wall this session reconsidered, immediately after Custom
+Menus made the pattern obvious: Photoshop's own Lock Workspace protects
+panels from accidental dragging and resizing. This app has no panels —
+but by this phase it has three real, live "workspace" customizations of
+its own (`hiddenTools`, `keyBindings`, and the same phase's own
+`hiddenMenuCommands`), and those are exactly the things a stray click
+could accidentally change. Locking those instead is the honest version
+of the same protection, aimed at what this app's "workspace" actually
+is.
+
+A single `lockWorkspace` boolean, kept in `localStorage` like everything
+else in this family, guards every mutator that can change those three
+customizations — `toggleToolHidden`/`resetHiddenTools`,
+`toggleMenuCommandHidden`/`resetHiddenMenuCommands`,
+`setKeyBinding`/`resetKeyBindings`, and `loadWorkspace`/`deleteWorkspace`
+— with an early return, so the lock holds regardless of which dialog's
+button tries to call them, not just whichever ones happen to be greyed
+out in the UI at the time. Every checkbox and button that would normally
+trigger one of those guarded calls is also visually `disabled` while
+locked, so the protection is legible, not just silently inert. Saving a
+new workspace is deliberately left unguarded — it only reads the current
+state into a new named entry, so it cannot itself change anything the
+lock protects. A new checkbox in the existing Window > Workspace section
+of the Customize Toolbar dialog toggles it.
+
+**Verified two ways.** No new Rust tests, for the same reason as
+Workspaces and Custom Menus — pure frontend, no Rust code touched. A
+Playwright browser session confirmed the real mechanism, not just the
+visual one: turning Lock Workspace on writes `true` to its own
+`localStorage` key, the first tool's own checkbox comes back `disabled`,
+and a *forced* click on it anyway (bypassing Playwright's own
+actionability check) leaves `hiddenTools` completely unset in
+`localStorage` — proof the guard lives in the mutator itself, not only
+in a disabled attribute a determined user could route around. Turning
+the lock back off and clicking the same checkbox then does update
+`hiddenTools` normally. The existing Workspaces save/load/delete flow
+and Custom Menus hide/search flow were both re-run and still pass
+unchanged. `npm run build` is clean; `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, and `cargo test` are
+unaffected and still clean.
+
+**1651 Rust tests total** (unchanged — this phase is pure frontend).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

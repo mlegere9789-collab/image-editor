@@ -137,6 +137,7 @@ const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
+const LOCK_WORKSPACE_STORAGE_KEY = "legelabs.lockWorkspace";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -1557,6 +1558,29 @@ export default function App() {
   });
   const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
   const [showCustomizeMenusDialog, setShowCustomizeMenusDialog] = useState(false);
+  // Window > Workspace > Lock Workspace: Photoshop's own locks panels
+  // against accidental dragging/resizing; this app has no draggable
+  // panels to protect, so it locks the real thing this app's own
+  // "workspace" is made of instead -- hiddenTools, keyBindings, and
+  // hiddenMenuCommands stop accepting changes until unlocked.
+  const [lockWorkspace, setLockWorkspace] = useState(() => {
+    try {
+      return localStorage.getItem(LOCK_WORKSPACE_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleLockWorkspace = useCallback(() => {
+    setLockWorkspace((previous) => {
+      const next = !previous;
+      try {
+        localStorage.setItem(LOCK_WORKSPACE_STORAGE_KEY, String(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
   // Discover Panel: search this app's own Toolbox by name -- the one
   // component of Photoshop's Discover panel that is pure search rather
   // than authored help content (tutorials, articles, contextual help),
@@ -1564,6 +1588,7 @@ export default function App() {
   const [showDiscoverDialog, setShowDiscoverDialog] = useState(false);
   const [discoverQuery, setDiscoverQuery] = useState("");
   const toggleToolHidden = useCallback((id: Tool) => {
+    if (lockWorkspace) return;
     setHiddenTools((previous) => {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
@@ -1576,15 +1601,16 @@ export default function App() {
       }
       return next;
     });
-  }, []);
+  }, [lockWorkspace]);
   const resetHiddenTools = useCallback(() => {
+    if (lockWorkspace) return;
     setHiddenTools(new Set());
     try {
       localStorage.removeItem(HIDDEN_TOOLS_STORAGE_KEY);
     } catch {
       // ignore
     }
-  }, []);
+  }, [lockWorkspace]);
   // Edit > Menus (Custom Menus): DISCOVER_ACTIONS entries hidden from the
   // Discover panel's own "Adjustments, Filters & Layer Styles" list --
   // this app's own analogue of a menu command, since it has no
@@ -1599,27 +1625,32 @@ export default function App() {
       return new Set();
     }
   });
-  const toggleMenuCommandHidden = useCallback((label: string) => {
-    setHiddenMenuCommands((previous) => {
-      const next = new Set(previous);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      try {
-        localStorage.setItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY, JSON.stringify([...next]));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }, []);
+  const toggleMenuCommandHidden = useCallback(
+    (label: string) => {
+      if (lockWorkspace) return;
+      setHiddenMenuCommands((previous) => {
+        const next = new Set(previous);
+        if (next.has(label)) next.delete(label);
+        else next.add(label);
+        try {
+          localStorage.setItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY, JSON.stringify([...next]));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   const resetHiddenMenuCommands = useCallback(() => {
+    if (lockWorkspace) return;
     setHiddenMenuCommands(new Set());
     try {
       localStorage.removeItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
     } catch {
       // ignore
     }
-  }, []);
+  }, [lockWorkspace]);
   // Edit > Keyboard Shortcuts: this app's Ctrl/Cmd shortcuts, rebindable
   // and kept in the browser like hiddenTools above.
   const [keyBindings, setKeyBindings] = useState<Record<ShortcutAction, KeyBinding>>(() => {
@@ -1635,18 +1666,23 @@ export default function App() {
   const [showKeyboardShortcutsDialog, setShowKeyboardShortcutsDialog] = useState(false);
   const [rebindingAction, setRebindingAction] = useState<ShortcutAction | null>(null);
   const [keyBindingError, setKeyBindingError] = useState<string | null>(null);
-  const setKeyBinding = useCallback((action: ShortcutAction, binding: KeyBinding) => {
-    setKeyBindings((previous) => {
-      const next = { ...previous, [action]: binding };
-      try {
-        localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }, []);
+  const setKeyBinding = useCallback(
+    (action: ShortcutAction, binding: KeyBinding) => {
+      if (lockWorkspace) return;
+      setKeyBindings((previous) => {
+        const next = { ...previous, [action]: binding };
+        try {
+          localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   const resetKeyBindings = useCallback(() => {
+    if (lockWorkspace) return;
     setKeyBindings({ ...DEFAULT_KEY_BINDINGS });
     setKeyBindingError(null);
     try {
@@ -1654,7 +1690,7 @@ export default function App() {
     } catch {
       // ignore
     }
-  }, []);
+  }, [lockWorkspace]);
   // Window > Workspace: named, saved combinations of hiddenTools and
   // keyBindings above -- this app's own analogue of a saved panel
   // layout, since it has no dockable panels to lay out.
@@ -1688,6 +1724,7 @@ export default function App() {
   );
   const loadWorkspace = useCallback(
     (name: string) => {
+      if (lockWorkspace) return;
       const workspace = workspaces.find((w) => w.name === name);
       if (!workspace) return;
       setHiddenTools(new Set(workspace.hiddenTools));
@@ -1699,19 +1736,23 @@ export default function App() {
         // ignore
       }
     },
-    [workspaces],
+    [workspaces, lockWorkspace],
   );
-  const deleteWorkspace = useCallback((name: string) => {
-    setWorkspaces((previous) => {
-      const next = previous.filter((w) => w.name !== name);
-      try {
-        localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // ignore
-      }
-      return next;
-    });
-  }, []);
+  const deleteWorkspace = useCallback(
+    (name: string) => {
+      if (lockWorkspace) return;
+      setWorkspaces((previous) => {
+        const next = previous.filter((w) => w.name !== name);
+        try {
+          localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
@@ -12230,6 +12271,7 @@ export default function App() {
                     type="checkbox"
                     checked={!hiddenTools.has(id)}
                     onChange={() => toggleToolHidden(id)}
+                    disabled={lockWorkspace}
                   />
                   <span className="control__label">{label}</span>
                 </label>
@@ -12246,10 +12288,18 @@ export default function App() {
                 {workspaces.map(({ name }) => (
                   <label className="control control--row" key={name}>
                     <span className="control__label">{name}</span>
-                    <button className="button button--quiet" onClick={() => loadWorkspace(name)}>
+                    <button
+                      className="button button--quiet"
+                      onClick={() => loadWorkspace(name)}
+                      disabled={lockWorkspace}
+                    >
                       Load
                     </button>
-                    <button className="button button--quiet" onClick={() => deleteWorkspace(name)}>
+                    <button
+                      className="button button--quiet"
+                      onClick={() => deleteWorkspace(name)}
+                      disabled={lockWorkspace}
+                    >
                       Delete
                     </button>
                   </label>
@@ -12274,8 +12324,19 @@ export default function App() {
                 Save Workspace
               </button>
             </label>
+            <label
+              className="control control--row"
+              title="Photoshop's own Lock Workspace protects panels from accidental dragging; this app has none, so it protects the toolbar, keyboard shortcut, and menu customizations above instead"
+            >
+              <input type="checkbox" checked={lockWorkspace} onChange={toggleLockWorkspace} />
+              <span className="control__label">Lock Workspace</span>
+            </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={resetHiddenTools} disabled={hiddenTools.size === 0}>
+              <button
+                className="button button--quiet"
+                onClick={resetHiddenTools}
+                disabled={hiddenTools.size === 0 || lockWorkspace}
+              >
                 Show All
               </button>
               <button className="button" onClick={() => setShowCustomizeToolbarDialog(false)}>
@@ -12312,6 +12373,7 @@ export default function App() {
                     type="checkbox"
                     checked={!hiddenMenuCommands.has(label)}
                     onChange={() => toggleMenuCommandHidden(label)}
+                    disabled={lockWorkspace}
                   />
                   <span className="control__label">{label}</span>
                 </label>
@@ -12321,7 +12383,7 @@ export default function App() {
               <button
                 className="button button--quiet"
                 onClick={resetHiddenMenuCommands}
-                disabled={hiddenMenuCommands.size === 0}
+                disabled={hiddenMenuCommands.size === 0 || lockWorkspace}
               >
                 Show All
               </button>
@@ -12366,14 +12428,14 @@ export default function App() {
                     setKeyBindingError(null);
                     setRebindingAction(action);
                   }}
-                  disabled={rebindingAction !== null}
+                  disabled={rebindingAction !== null || lockWorkspace}
                 >
                   {rebindingAction === action ? "Press a key…" : "Change"}
                 </button>
               </div>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={resetKeyBindings}>
+              <button className="button button--quiet" onClick={resetKeyBindings} disabled={lockWorkspace}>
                 Reset to Defaults
               </button>
               <button
