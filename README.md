@@ -17246,6 +17246,42 @@ for the same reason as every phase since 52. `cargo fmt`,
 
 **1651 Rust tests total** (1649 → 1651, 1644 lib + 7 pipeline).
 
+## Phase 290 — Custom Menus
+
+A sixth wall this session reconsidered, and the second time Discover's
+own command registry turned out to be exactly the missing piece: Custom
+Menus hides individual dropdown-menu commands in Photoshop, and this app
+has no dropdown menu bar to hide commands from — but it does already have
+`DISCOVER_ACTIONS`, the 129-entry registry Discover's own search already
+runs against, standing in as this app's real analogue of "the menu," the
+same way `hiddenTools`/`keyBindings` already stood in for a panel layout
+in Phase 288's own Workspaces.
+
+A new `hiddenMenuCommands` set, kept in `localStorage` by each command's
+own label, filters `DISCOVER_ACTIONS` before Discover's search ever sees
+them — a hidden command simply does not appear in results, exactly as a
+hidden Photoshop menu command does not appear in its own dropdown. A new
+"Customize Menus…" dialog (a sibling to Phase 275's own Customize
+Toolbar, matching how Photoshop keeps Edit > Toolbar and Edit > Menus as
+two separate commands rather than one) lists all 129 with a checkbox
+each, plus Show All. Colour-coding menu commands, the other half of
+Photoshop's own Custom Menus, is a documented scope cut. Pure frontend,
+like Workspaces before it: no Rust code changed.
+
+**Verified two ways.** No new Rust tests, for the same reason as
+Workspaces — there is no new Rust code this phase touches. A Playwright
+browser session confirmed "Harmonize" appears in a Discover search for
+"harmonize" before hiding it, that unchecking it in the new Customize
+Menus dialog writes the exact `["Harmonize"]` to `localStorage`, and
+that the identical search afterward returns zero matches; the earlier
+Workspaces save/load/delete flow (Phase 288) was re-run and still passes
+unchanged, confirming no regression from sharing the same "Customize"
+dialog family. `npm run build` is clean; `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, and `cargo test` are
+unaffected and still clean.
+
+**1651 Rust tests total** (unchanged — this phase is pure frontend).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

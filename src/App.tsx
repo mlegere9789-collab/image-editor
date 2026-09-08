@@ -136,6 +136,7 @@ const ALL_TOOLS: { id: Tool; label: string }[] = [
 const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
+const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -1555,6 +1556,7 @@ export default function App() {
     }
   });
   const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
+  const [showCustomizeMenusDialog, setShowCustomizeMenusDialog] = useState(false);
   // Discover Panel: search this app's own Toolbox by name -- the one
   // component of Photoshop's Discover panel that is pure search rather
   // than authored help content (tutorials, articles, contextual help),
@@ -1579,6 +1581,41 @@ export default function App() {
     setHiddenTools(new Set());
     try {
       localStorage.removeItem(HIDDEN_TOOLS_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+  // Edit > Menus (Custom Menus): DISCOVER_ACTIONS entries hidden from the
+  // Discover panel's own "Adjustments, Filters & Layer Styles" list --
+  // this app's own analogue of a menu command, since it has no
+  // File/Edit/Image dropdown menu bar of its own, just Discover's search
+  // over the same command set. Kept in the browser like hiddenTools
+  // above, by each command's own label (its stable identity here).
+  const [hiddenMenuCommands, setHiddenMenuCommands] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const toggleMenuCommandHidden = useCallback((label: string) => {
+    setHiddenMenuCommands((previous) => {
+      const next = new Set(previous);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      try {
+        localStorage.setItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+  const resetHiddenMenuCommands = useCallback(() => {
+    setHiddenMenuCommands(new Set());
+    try {
+      localStorage.removeItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
     } catch {
       // ignore
     }
@@ -6673,6 +6710,14 @@ export default function App() {
           title="Edit > Toolbar: show or hide individual tools"
         >
           Customize Toolbar…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowCustomizeMenusDialog(true)}
+          disabled={busy}
+          title="Edit > Menus: show or hide individual commands from Discover's own list"
+        >
+          Customize Menus…
         </button>
         <button
           className="button button--quiet"
@@ -12241,6 +12286,53 @@ export default function App() {
         </div>
       )}
 
+      {showCustomizeMenusDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCustomizeMenusDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Customize Menus"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Menus</h2>
+            <p className="modal__hint">
+              Uncheck a command to hide it from Discover's own "Adjustments, Filters &amp;
+              Layer Styles" list — this app's own analogue of a menu command, since it has
+              no File/Edit/Image dropdown menu bar of its own. A browser preference, not
+              document data. Colour-coding menu commands is a documented scope cut.
+            </p>
+            <div className="toolbar-customize__list">
+              {DISCOVER_ACTIONS.map(({ label }) => (
+                <label className="control control--row" key={label}>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenMenuCommands.has(label)}
+                    onChange={() => toggleMenuCommandHidden(label)}
+                  />
+                  <span className="control__label">{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={resetHiddenMenuCommands}
+                disabled={hiddenMenuCommands.size === 0}
+              >
+                Show All
+              </button>
+              <button className="button" onClick={() => setShowCustomizeMenusDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showKeyboardShortcutsDialog && (
         <div
           className="modal-overlay"
@@ -12334,7 +12426,9 @@ export default function App() {
             {(() => {
               const query = discoverQuery.trim().toLowerCase();
               const toolMatches = ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(query));
-              const actionMatches = DISCOVER_ACTIONS.filter(({ label }) => label.toLowerCase().includes(query));
+              const actionMatches = DISCOVER_ACTIONS.filter(
+                ({ label }) => label.toLowerCase().includes(query) && !hiddenMenuCommands.has(label),
+              );
               if (toolMatches.length === 0 && actionMatches.length === 0) {
                 return <p className="modal__hint">No feature matches "{discoverQuery}".</p>;
               }
