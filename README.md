@@ -17777,6 +17777,36 @@ Use Dither flips to shipped.
 
 **1673 Rust tests total** (1671 → 1673, 1666 lib + 7 pipeline).
 
+## Phase 301 — Search Your Cloud Files
+
+Cloud Documents' own list view, now that the client layer for Save/Load
+to Cloud (Phase 296) exists to build it on. A "Search Cloud Files…"
+dialog GETs `{endpoint}/documents`, expecting back a JSON
+`{ documents: string[] }` — this project's own defined contract, same
+as Cloud Documents' own PUT/GET shape — and filters that list
+client-side by whatever the Filter box holds, no server-side query
+parameter to define at all. Each matching row's own Load button runs
+the exact same fetch-then-`import_project_bytes` flow Load from Cloud
+already does, for that row's own name — `loadFromCloud` now takes an
+optional name, defaulting to the Cloud Document Name field when called
+with none, so both paths share one implementation.
+
+This session's own second verification path — a Playwright browser
+session with a mocked `fetch` — drove the full flow: opening the dialog
+fetched the list, the Filter box narrowed three fake document names
+down to the one matching "vaca", and clicking that row's Load fetched
+`{endpoint}/documents/vacation-photo` and handed the response straight
+to `import_project_bytes`. `npm run build` is clean; no Rust changed in
+this phase.
+
+Search Your Cloud Files stays unchecked, for the same reason Photoshop
+Cloud Documents itself does: without a real backend behind the
+configured endpoint, there is no list to fetch, and this project has no
+server of its own to be that backend. What's built here is the same
+honest, complete, tested client half — real and wired end to end,
+needing nothing further from this codebase to go live once the user
+points it at a real one.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

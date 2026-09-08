@@ -210,7 +210,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Floating Panels
 - [ ] Panel Stacking
 - [ ] Photoshop Cloud Documents (the client side is real and fully wired — `export_project_bytes`/`import_project_bytes` round-trip the same project format `save_project`/`open_project` already do, and Save to Cloud/Load from Cloud send/fetch those bytes to a configured endpoint, PUT/GET `/documents/<name>` — see README Phase 296. Still unchecked: without a real backend behind that endpoint, there is nowhere for the bytes to actually go, and this project has no server of its own to be that backend)
-- [ ] Search Your Cloud Files
+- [ ] Search Your Cloud Files (the client side is real and fully wired — a "Search Cloud Files…" dialog GETs `{endpoint}/documents`, expecting `{ documents: string[] }`, and filters the result client-side as you type, each match one click from `import_project_bytes` through the same fetch Load from Cloud already uses — see README Phase 301. Still unchecked for the same reason Photoshop Cloud Documents itself is: without a real backend behind the endpoint, there is no list to fetch, and this project has no server of its own to be that backend)
 - [ ] Invite to Edit
 - [ ] Share for Review
 - [ ] Content Credentials

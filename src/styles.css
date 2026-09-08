@@ -921,3 +921,25 @@ body {
   background: var(--surface);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
+
+/* Search Your Cloud Files: the filtered document-name list. */
+.cloud-search__list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.cloud-search__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.cloud-search__row:last-child {
+  border-bottom: none;
+}

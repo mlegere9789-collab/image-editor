@@ -849,6 +849,13 @@ export default function App() {
   const [generativeFillBusy, setGenerativeFillBusy] = useState(false);
   const [cloudDocumentName, setCloudDocumentName] = useState("untitled");
   const [cloudBusy, setCloudBusy] = useState(false);
+  // Search Your Cloud Files: GET `{endpoint}/documents` -- this app's own
+  // defined contract, `{ documents: string[] }` -- filtered client-side
+  // by name, each result a one-click Load into `cloudDocumentName`.
+  const [showCloudSearchDialog, setShowCloudSearchDialog] = useState(false);
+  const [cloudSearchQuery, setCloudSearchQuery] = useState("");
+  const [cloudDocumentList, setCloudDocumentList] = useState<string[]>([]);
+  const [cloudSearchBusy, setCloudSearchBusy] = useState(false);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -3071,26 +3078,53 @@ export default function App() {
     }
   }, [cloudEndpoint, cloudToken, cloudDocumentName]);
 
-  const loadFromCloud = useCallback(async () => {
+  const loadFromCloud = useCallback(
+    async (name?: string) => {
+      if (!cloudEndpoint) {
+        setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+        return;
+      }
+      setCloudBusy(true);
+      try {
+        const response = await fetch(
+          `${cloudEndpoint.replace(/\/$/, "")}/documents/${encodeURIComponent(name ?? cloudDocumentName)}`,
+          { headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {} },
+        );
+        if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+        const buffer = await response.arrayBuffer();
+        await runCommand("import_project_bytes", { bytes: Array.from(new Uint8Array(buffer)) });
+        if (name) setCloudDocumentName(name);
+      } catch (err) {
+        setError(`Load from Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setCloudBusy(false);
+      }
+    },
+    [cloudEndpoint, cloudToken, cloudDocumentName, runCommand],
+  );
+
+  // Search Your Cloud Files: fetches the endpoint's own document list once
+  // per Refresh, filtered client-side by the search box on every render --
+  // no server-side query contract to define beyond returning the list.
+  const refreshCloudDocuments = useCallback(async () => {
     if (!cloudEndpoint) {
       setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
       return;
     }
-    setCloudBusy(true);
+    setCloudSearchBusy(true);
     try {
-      const response = await fetch(
-        `${cloudEndpoint.replace(/\/$/, "")}/documents/${encodeURIComponent(cloudDocumentName)}`,
-        { headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {} },
-      );
+      const response = await fetch(`${cloudEndpoint.replace(/\/$/, "")}/documents`, {
+        headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {},
+      });
       if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
-      const buffer = await response.arrayBuffer();
-      await runCommand("import_project_bytes", { bytes: Array.from(new Uint8Array(buffer)) });
+      const body = (await response.json()) as { documents?: string[] };
+      setCloudDocumentList(Array.isArray(body.documents) ? body.documents : []);
     } catch (err) {
-      setError(`Load from Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(`Search Your Cloud Files failed: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
-      setCloudBusy(false);
+      setCloudSearchBusy(false);
     }
-  }, [cloudEndpoint, cloudToken, cloudDocumentName, runCommand]);
+  }, [cloudEndpoint, cloudToken]);
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -7090,6 +7124,17 @@ export default function App() {
           title="Cloud Documents: replace the open document with one fetched from a user-configured endpoint"
         >
           Load from Cloud
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => {
+            setShowCloudSearchDialog(true);
+            void refreshCloudDocuments();
+          }}
+          disabled={busy}
+          title="Search Your Cloud Files: lists and filters the documents at the configured Cloud Documents endpoint"
+        >
+          Search Cloud Files…
         </button>
         <button
           className="button button--quiet"
@@ -15302,6 +15347,76 @@ export default function App() {
               </button>
               <button className="button" onClick={saveExternalServicesSettings} title="Save these settings">
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCloudSearchDialog && (
+        <div className="modal-overlay" onClick={() => setShowCloudSearchDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Search Your Cloud Files"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Search Your Cloud Files</h2>
+            <p className="modal__hint">
+              Fetches every document name at the configured Cloud Documents endpoint — a
+              GET to `{"{"}endpoint{"}"}/documents`, expecting back{" "}
+              `{"{"}
+              documents: string[]{"}"}`
+              — and filters the result by whatever you type below. Refresh re-fetches;
+              Load runs the same fetch Load from Cloud already does, for the chosen name.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Filter</span>
+              <input
+                type="text"
+                value={cloudSearchQuery}
+                onChange={(event) => setCloudSearchQuery(event.target.value)}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="button button--quiet"
+                onClick={() => void refreshCloudDocuments()}
+                disabled={cloudSearchBusy || !cloudEndpoint}
+                title="Re-fetch the document list"
+              >
+                Refresh
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {cloudDocumentList
+                .filter((name) => name.toLowerCase().includes(cloudSearchQuery.toLowerCase()))
+                .map((name) => (
+                  <li key={name} className="cloud-search__row">
+                    <span>{name}</span>
+                    <button
+                      className="button button--quiet"
+                      onClick={() => void loadFromCloud(name)}
+                      disabled={busy || cloudBusy}
+                      title={`Load "${name}" from Cloud Documents`}
+                    >
+                      Load
+                    </button>
+                  </li>
+                ))}
+            </ul>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCloudSearchDialog(false)}
+                title="Close"
+              >
+                Close
               </button>
             </div>
           </div>
