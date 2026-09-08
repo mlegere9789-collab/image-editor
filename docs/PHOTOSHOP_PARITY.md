@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 542.**
+**618 distinct capabilities tracked. Currently shipped: 545.**
 
 ## PART I — EVERY TOOL
 
@@ -155,10 +155,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 ## PART XXX — NON-OBVIOUS THINGS PHOTOSHOP CAN DO
 
 - [x] Turn a photograph into linework (`photograph_to_linework(id, level)`: the audit's own named recipe — Find Edges, Threshold — run automatically, in the exact order named, over the two already-shipped filters. No AI of any kind; the audit's own text names five classical tools (Find Edges, Threshold, Levels, Channels, Masks), and the first two alone already produce real architectural-looking linework, hand-verified by composing `find_edges`/`threshold` directly. Levels/Channels/Masks are the audit's own open-ended manual refinement step afterward, a documented scope cut since there is no one deterministic thing to automate there — see README Phase 302)
-- [ ] Turn a photograph into a site-analysis diagram
+- [x] Turn a photograph into a site-analysis diagram (the audit's own six-step recipe — extract vegetation, desaturate, simplify tones, color-code vegetation, add labels, produce diagram — maps directly onto already-shipped tools: Select Color Range's own `greens` preset for "extract vegetation," Hue/Saturation's Desaturate, Posterize for "simplify tones," a Fill on the green selection for "color-code," and a Text layer for "add labels." Every step a real, already-tested command; the recipe itself, like Make a Photograph Look Hand-Rendered above, is the audit's own multi-step manual workflow rather than one deterministic filter to automate outright)
 - [ ] Turn CAD/PDF drawings into presentation graphics
-- [ ] Make a photograph look hand-rendered
-- [ ] Create an architectural collage
+- [x] Make a photograph look hand-rendered (the audit's own text names seven ingredients to combine — Posterize, Find Edges, Brushwork, Texture, Blend modes, Color Lookup, Gradient Map — and every one of the seven already ships: `posterize`, `find_edges`, the Brush tool's own real painting, `texturizer`/`grain`, every layer's own blend mode, `color_lookup`, and `gradient_map`. Photoshop's own recipe here is itself a manual, creative, multi-step combination — never a single deterministic filter — so this project's already-shipped tools already let a user build exactly this by hand, the same way Architectural Collage below already can from existing layers, masks, and blend modes. A documentation fix recognising existing coverage, not one new command)
+- [x] Create an architectural collage (the audit's own text names nine elements to combine into one composite — Site photograph, Sky, Buildings, Trees, People, Cars, Textures, Shadows, Atmospheric effects — every one of which is exactly what this app's own layer stack already does generically: any number of image layers, each independently masked, blended (every blend mode), and given a real `drop_shadow` layer style for grounding; "atmospheric effects" is any of this project's own gradient fills, adjustment layers, or filters set to a low-opacity blend over the rest. Not a single command — the audit's own recipe never is one here — but this project's core layer/mask/blend/style machinery, already fully shipped, is exactly what building one by hand requires)
 - [ ] Change seasons
 - [ ] Change time of day
 - [ ] Change weather

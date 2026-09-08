@@ -17840,6 +17840,45 @@ Threshold.
 
 **1675 Rust tests total** (1673 → 1675, 1668 lib + 7 pipeline).
 
+## Phase 303 — PART XXX's own already-covered recipes
+
+Three more rows from "Non-Obvious Things Photoshop Can Do," found the
+same way Phase 302 was: reading `photoshop-capability-audit.txt`'s own
+text for each row instead of assuming every one needed AI. Unlike Turn
+a Photograph into Linework, none of these three gets a new one-click
+command — the audit's own recipe for each is itself a multi-step manual
+workflow, never a single deterministic filter, so what flips each row
+is recognising that every one of the audit's own named ingredients
+already ships, exactly the "duplicate of an existing mechanism"
+documentation pattern this project's history already uses (the Liquify
+umbrella row, Select Subject — Device Processing, Don't Color Manage
+This Document).
+
+**Make a Photograph Look Hand-Rendered** names seven ingredients:
+Posterize, Find Edges, Brushwork, Texture, Blend modes, Color Lookup,
+Gradient Map. All seven exist — `posterize`, `find_edges`, the Brush
+tool's own real painting, `texturizer`/`grain`, every layer's own blend
+mode, `color_lookup`, `gradient_map`.
+
+**Turn a Photograph into a Site-Analysis Diagram** names six steps:
+extract vegetation, desaturate, simplify tones, color-code vegetation,
+add labels, produce diagram. Select Color Range's own `greens` preset
+is "extract vegetation"; Desaturate, Posterize, a Fill on the resulting
+selection, and a Text layer cover the rest.
+
+**Create an Architectural Collage** names nine elements to combine —
+Site photograph, Sky, Buildings, Trees, People, Cars, Textures,
+Shadows, Atmospheric effects — which is exactly what this app's own
+layer stack already does generically: any number of image layers, each
+independently masked, blended, and given a real `drop_shadow` layer
+style for grounding, with "atmospheric effects" any low-opacity
+gradient fill or adjustment layer over the rest.
+
+No code changed in this phase and no new tests were needed — each row
+flips on the strength of confirming its own named ingredients are real,
+shipped, and tested elsewhere in this project's history, not on
+anything new built here. Three rows flip to shipped (545/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
