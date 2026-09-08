@@ -862,6 +862,25 @@ pub enum LiquifyTool {
     Bloat,
 }
 
+/// Select > Subject > Person Components' own three-way split — see
+/// [`Document::person_components_bits`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PersonComponent {
+    /// [`Document::face_bbox`]'s own box, intersected with the person's
+    /// skin-toned pixels.
+    Face,
+    /// [`Document::hair_bits`]'s own non-skin pixels bordering the head.
+    Hair,
+    /// Every other skin-toned pixel of the same person (torso, arms,
+    /// neck — whatever skin the face's own box doesn't already cover).
+    Body,
+}
+
+/// [`Document::person_components_bits`]'s own return shape: one
+/// flag-per-pixel mask each for Face, Hair, and Body, in that order.
+type PersonComponentBits = (Vec<bool>, Vec<bool>, Vec<bool>);
+
 /// Edit > Puppet Warp's Mode: how the mesh moves between pins — see
 /// [`puppet_deform`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -8035,6 +8054,153 @@ impl Document {
             right_cheek: at(0.92, 0.55),
             radius: (w.min(h) * 0.22).max(1.0),
         })
+    }
+
+    /// Select > Hair (Select and Mask's own Refine Hair edge, standing in
+    /// for Photoshop's own neural hair-strand detection): every
+    /// non-skin-toned, opaque pixel reachable by 4-connected flood fill
+    /// from a pixel bordering the person's own skin, confined to a
+    /// head-sized margin around [`Self::face_bbox`] (one box-width to
+    /// either side, one-and-a-half box-heights above, down to the box's
+    /// own bottom edge) — the region hair actually occupies around a
+    /// head. An honest classical stand-in sharing Select People's own
+    /// limitation: it finds whatever non-skin pixels border the head
+    /// within that margin, not specifically hair strands, so a collar, an
+    /// earring, or background showing through loose hair can be included
+    /// or missed. Errors exactly as `face_bbox` does.
+    pub fn hair_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
+        let bbox = self.face_bbox(id)?;
+        let layer = self.layer(id)?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let skin: Vec<bool> = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| px[3] > 0 && is_skin_tone([px[0], px[1], px[2]]))
+            .collect();
+        let opaque: Vec<bool> = layer
+            .pixels
+            .chunks_exact(CHANNELS)
+            .map(|px| px[3] > 0)
+            .collect();
+
+        let box_w = (bbox.x1 - bbox.x0).max(1) as i64;
+        let box_h = (bbox.y1 - bbox.y0).max(1) as i64;
+        let region_x0 = (bbox.x0 as i64 - box_w).max(0) as usize;
+        let region_x1 = (bbox.x1 as i64 + box_w).clamp(0, w as i64) as usize;
+        let region_y0 = (bbox.y0 as i64 - (box_h * 3) / 2).max(0) as usize;
+        let region_y1 = (bbox.y1 as usize).min(h);
+        let in_region =
+            |x: usize, y: usize| x >= region_x0 && x < region_x1 && y >= region_y0 && y < region_y1;
+        let neighbours_of = |idx: usize| {
+            let (x, y) = (idx % w, idx / w);
+            [
+                (x > 0).then(|| idx - 1),
+                (x + 1 < w).then(|| idx + 1),
+                (y > 0).then(|| idx - w),
+                (y + 1 < h).then(|| idx + w),
+            ]
+        };
+
+        let mut seen = vec![false; w * h];
+        let mut stack: Vec<usize> = Vec::new();
+        for y in region_y0..region_y1 {
+            for x in region_x0..region_x1 {
+                let idx = y * w + x;
+                if skin[idx] || !opaque[idx] || seen[idx] {
+                    continue;
+                }
+                let borders_skin = neighbours_of(idx).into_iter().flatten().any(|n| skin[n]);
+                if borders_skin {
+                    seen[idx] = true;
+                    stack.push(idx);
+                }
+            }
+        }
+        let mut bits = vec![false; w * h];
+        while let Some(idx) = stack.pop() {
+            bits[idx] = true;
+            for n in neighbours_of(idx).into_iter().flatten() {
+                let (nx, ny) = (n % w, n / w);
+                if !seen[n] && in_region(nx, ny) && !skin[n] && opaque[n] {
+                    seen[n] = true;
+                    stack.push(n);
+                }
+            }
+        }
+        Ok(bits)
+    }
+
+    /// Select > Hair: [`Self::hair_bits`] combined with the current
+    /// selection per `mode`. Errors when no hair-shaped region is found
+    /// bordering a face, or the layer is unknown.
+    pub fn select_hair_with(&mut self, mode: SelectionMode, id: LayerId) -> Result<(), String> {
+        let bits = self.hair_bits(id)?;
+        if !bits.contains(&true) {
+            return Err(
+                "No hair-shaped region was found bordering a face on this layer.".to_string(),
+            );
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// Select > Subject > Person Components: a coarse three-way partition
+    /// of [`Self::people_components`]'s own largest person into Face,
+    /// Hair, and Body. [`Self::face_bbox`] necessarily bounds every pixel
+    /// of that same component (it is defined as that component's own
+    /// tight box), so Face can't be "inside the box, Body outside it" —
+    /// instead Face is the component's own pixels in the top 35% of the
+    /// box's height (a coarse head:body proportion, not a face detector
+    /// of its own) and Body is the rest (torso, arms, neck). Hair is
+    /// [`Self::hair_bits`]. An honest classical partition, not
+    /// Photoshop's own neural person segmentation: Body here is skin
+    /// only, not clothing, since this project has no general
+    /// clothing/garment classifier — a documented limitation, not a
+    /// hidden one. Errors exactly as `face_bbox` does.
+    pub fn person_components_bits(&self, id: LayerId) -> Result<PersonComponentBits, String> {
+        let bbox = self.face_bbox(id)?;
+        let (w, _h) = (self.width as usize, self.height as usize);
+        let components = self.people_components(id)?;
+        let largest = components
+            .first()
+            .filter(|c| !c.is_empty())
+            .ok_or_else(|| "No face was found on the layer.".to_string())?;
+        let face_y1 = bbox.y0 + (((bbox.y1 - bbox.y0) as f32 * 0.35).round() as u32).max(1);
+        let mut face = vec![false; w * self.height as usize];
+        let mut body = vec![false; w * self.height as usize];
+        for &idx in largest {
+            let y = (idx / w) as u32;
+            if y < face_y1 {
+                face[idx] = true;
+            } else {
+                body[idx] = true;
+            }
+        }
+        let hair = self.hair_bits(id)?;
+        Ok((face, hair, body))
+    }
+
+    /// Select > Subject > Person Components: the chosen `component` of
+    /// [`Self::person_components_bits`], combined with the current
+    /// selection per `mode`. Errors when that component is empty, or the
+    /// layer is unknown.
+    pub fn select_person_component_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        component: PersonComponent,
+    ) -> Result<(), String> {
+        let (face, hair, body) = self.person_components_bits(id)?;
+        let bits = match component {
+            PersonComponent::Face => face,
+            PersonComponent::Hair => hair,
+            PersonComponent::Body => body,
+        };
+        if !bits.contains(&true) {
+            return Err("That part of the person was not found on this layer.".to_string());
+        }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
     /// Object Selection's Object Finder: every object the finder can see
@@ -52944,6 +53110,108 @@ mod tests {
         assert!(doc.face_landmarks(id).unwrap_err().contains("face"));
         assert!(doc.face_bbox(999).is_err());
         assert!(doc.face_landmarks(999).is_err());
+    }
+
+    #[test]
+    fn hair_bits_flood_fills_non_skin_pixels_bordering_the_face_within_its_margin() {
+        let skin = [200, 150, 120, 255];
+        let hair = [40, 25, 15, 255];
+        let clear = [0, 0, 0, 0];
+        // 50x20: a hair-coloured strip the full canvas width across rows
+        // 0-4, a 10-wide skin block at columns 20-29 across rows 5-14
+        // (bbox 10x10, so the margin is one box-width either side, and
+        // one-and-a-half box-heights above), everything else transparent.
+        // face_bbox is exactly (20, 5, 30, 15), so the margin clips hair's
+        // own region to columns 10-39 -- the hair strip is wider than
+        // that on both sides, so only the confined middle should end up
+        // selected, independently confirmed by hand: 30 columns x 5 rows
+        // = 150 pixels exactly.
+        let mut rows: Vec<Vec<[u8; 4]>> = (0..5).map(|_| vec![hair; 50]).collect();
+        for _ in 0..10 {
+            rows.push([vec![clear; 20], vec![skin; 10], vec![clear; 20]].concat());
+        }
+        for _ in 0..5 {
+            rows.push(vec![clear; 50]);
+        }
+        let (doc, id) = row_doc(&rows);
+        assert_eq!(
+            doc.face_bbox(id).unwrap(),
+            Rect {
+                x0: 20,
+                y0: 5,
+                x1: 30,
+                y1: 15
+            }
+        );
+        let bits = doc.hair_bits(id).unwrap();
+        assert_eq!(bits.iter().filter(|&&b| b).count(), 150);
+        // Inside the confined strip.
+        assert!(bits[2 * 50 + 25]);
+        assert!(bits[2 * 50 + 15]);
+        assert!(bits[2 * 50 + 35]);
+        // Past the margin on either side, though the same hair colour.
+        assert!(!bits[2 * 50 + 5]);
+        assert!(!bits[2 * 50 + 45]);
+        // The face itself is excluded.
+        assert!(!bits[10 * 50 + 25]);
+    }
+
+    #[test]
+    fn select_hair_with_errors_when_nothing_borders_a_face() {
+        let skin = [200, 150, 120, 255];
+        let rows: Vec<Vec<[u8; 4]>> = (0..20).map(|_| vec![skin; 10]).collect();
+        let (mut doc, id) = row_doc(&rows);
+        // A face-shaped block with nothing non-skin bordering it -- no
+        // hair to find, but face_bbox itself still succeeds.
+        assert!(doc
+            .select_hair_with(SelectionMode::New, id)
+            .unwrap_err()
+            .contains("hair"));
+        assert!(doc.select_hair_with(SelectionMode::New, 999).is_err());
+    }
+
+    #[test]
+    fn person_components_bits_splits_the_largest_person_into_face_hair_and_body() {
+        let skin = [200, 150, 120, 255];
+        // A 10x20 skin block: bbox height 20, so Face is the top
+        // round(20 * 0.35) = 7 rows, Body the remaining 13.
+        let rows: Vec<Vec<[u8; 4]>> = (0..20).map(|_| vec![skin; 10]).collect();
+        let (doc, id) = row_doc(&rows);
+        let (face, hair, body) = doc.person_components_bits(id).unwrap();
+        assert_eq!(face.iter().filter(|&&b| b).count(), 70);
+        assert_eq!(body.iter().filter(|&&b| b).count(), 130);
+        assert!(!hair.contains(&true));
+        // Every Face pixel is strictly above every Body pixel.
+        for (idx, &is_face) in face.iter().enumerate() {
+            if is_face {
+                assert!(idx / 10 < 7);
+            }
+        }
+        for (idx, &is_body) in body.iter().enumerate() {
+            if is_body {
+                assert!(idx / 10 >= 7);
+            }
+        }
+    }
+
+    #[test]
+    fn select_person_component_with_selects_the_chosen_part_and_errors_when_empty() {
+        let skin = [200, 150, 120, 255];
+        let rows: Vec<Vec<[u8; 4]>> = (0..20).map(|_| vec![skin; 10]).collect();
+        let (mut doc, id) = row_doc(&rows);
+        doc.select_person_component_with(SelectionMode::New, id, PersonComponent::Face)
+            .unwrap();
+        assert!(doc.selection().is_some());
+        doc.select_person_component_with(SelectionMode::New, id, PersonComponent::Body)
+            .unwrap();
+        assert!(doc.selection().is_some());
+        assert!(doc
+            .select_person_component_with(SelectionMode::New, id, PersonComponent::Hair)
+            .unwrap_err()
+            .contains("part of the person"));
+        assert!(doc
+            .select_person_component_with(SelectionMode::New, 999, PersonComponent::Face)
+            .is_err());
     }
 
     /// A `21x21` grey canvas with a coloured marker pixel at `(x, y)`.

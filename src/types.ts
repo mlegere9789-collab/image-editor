@@ -505,6 +505,10 @@ export type Symmetry = "vertical" | "horizontal" | "both";
  * buttons in Photoshop's selection-tool options bar. */
 export type SelectionMode = "new" | "add" | "subtract" | "intersect";
 
+/** Mirrors `PersonComponent` in src-tauri/src/document.rs: Select >
+ * Subject > Person Components' own three-way split. */
+export type PersonComponent = "face" | "hair" | "body";
+
 /** Mirrors `ShapeBlurKernel` in src-tauri/src/document.rs: the shape
  * Filter > Blur > Shape Blur averages over. */
 export type ShapeBlurKernel = "square" | "diamond" | "circle";

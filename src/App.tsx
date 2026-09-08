@@ -34,6 +34,7 @@ import type {
   Measurement,
   MoveDirection,
   Palette,
+  PersonComponent,
   PerspectiveAuto,
   PerspectivePlane,
   TextLayer,
@@ -608,6 +609,9 @@ export default function App() {
   // people people_count found to select (0 = the largest, matching plain
   // Select People).
   const [personIndex, setPersonIndex] = useState(0);
+  // Select > Subject > Person Components: which of Face/Hair/Body the
+  // Select Person Component button targets.
+  const [personComponent, setPersonComponent] = useState<PersonComponent>("face");
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -7949,6 +7953,42 @@ export default function App() {
             title="Select > People > Individual Person Selection: select the chosen Person # instead of always the largest"
           >
             Select Person #
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("select_hair", { id: selectedId, mode: selectionMode });
+            }}
+            disabled={busy || selectedId === null}
+            title="Select > Hair: non-skin pixels bordering a face within a head-sized margin (this app's stand-in for neural hair-strand detection)"
+          >
+            Select Hair
+          </button>
+          <label
+            className="tools__slider"
+            title="Select > Subject > Person Components: which part of the person to select"
+          >
+            Component
+            <select value={personComponent} onChange={(event) => setPersonComponent(event.target.value as PersonComponent)}>
+              <option value="face">Face</option>
+              <option value="hair">Hair</option>
+              <option value="body">Body</option>
+            </select>
+          </label>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null)
+                void runCommand("select_person_component", {
+                  id: selectedId,
+                  component: personComponent,
+                  mode: selectionMode,
+                });
+            }}
+            disabled={busy || selectedId === null}
+            title="Select > Subject > Person Components: select the chosen part (Face/Hair/Body) of the largest person found"
+          >
+            Select Person Component
           </button>
           <button
             className="button button--quiet"

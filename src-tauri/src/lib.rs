@@ -4192,6 +4192,38 @@ fn select_people_at(
     })
 }
 
+/// Select > Hair on layer `id`.
+#[tauri::command]
+fn select_hair(
+    state: State<'_, AppState>,
+    id: LayerId,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_hair_with(mode.unwrap_or(document::SelectionMode::New), id)?;
+        Ok(None)
+    })
+}
+
+/// Select > Subject > Person Components on layer `id`: `component`
+/// (Face, Hair, or Body).
+#[tauri::command]
+fn select_person_component(
+    state: State<'_, AppState>,
+    id: LayerId,
+    component: document::PersonComponent,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_person_component_with(
+            mode.unwrap_or(document::SelectionMode::New),
+            id,
+            component,
+        )?;
+        Ok(None)
+    })
+}
+
 /// Object Selection's Object Finder: the objects on layer `id` as boxes,
 /// largest first. Read-only; Refresh asks again.
 #[tauri::command]
@@ -6184,6 +6216,8 @@ pub fn run() {
             select_people,
             people_count,
             select_people_at,
+            select_hair,
+            select_person_component,
             set_fill,
             add_vector_mask,
             remove_layer_mask,

@@ -17509,6 +17509,71 @@ face-region heuristic (Phase 293).
 
 **1663 Rust tests total** (1659 → 1663, 1656 lib + 7 pipeline).
 
+## Phase 295 — Select People > Person Components, Hair Selection
+
+The third and fourth of the four items this session had briefly, wrongly,
+called permanently out of reach, both building on Face-Aware Liquify's
+own `face_bbox` finder (Phase 293) exactly as planned.
+
+`Document::hair_bits(id)` is this project's own classical stand-in for
+Photoshop's neural hair-strand detection: a 4-connected flood fill of
+non-skin-toned, opaque pixels, seeded from wherever such a pixel borders
+one of the person's own skin-toned pixels, confined to a head-sized
+margin around `face_bbox` (one box-width either side, one-and-a-half
+box-heights above, down to the box's own bottom edge — the region hair
+actually occupies around a head). `select_hair_with` turns that into a
+selection exactly as Select People already does. An honest, stated
+limitation, not a hidden one: it finds whatever non-skin pixels border
+the head within that margin, not specifically hair strands, so a
+collar, an earring, or background showing through loose hair can be
+included or missed — the same category of limitation Select People's
+own skin-tone rule already carries for people.
+
+`Document::person_components_bits(id)` splits the same largest
+skin-toned component three ways. `face_bbox` necessarily bounds every
+pixel of that component (it is defined as that component's own tight
+box), so Face can't be "inside the box, the rest outside it" the way an
+earlier draft of this phase assumed — instead Face is the component's
+own pixels in the top 35% of the box's height, a coarse head:body
+proportion rather than a face detector of its own, and Body is the
+rest (torso, arms, neck). Hair is `hair_bits` above. `select_person_component_with`
+takes a new `PersonComponent` (Face/Hair/Body) and selects it exactly
+as Select People does. Body here is skin only, not clothing, since this
+project has no general clothing/garment classifier — a documented
+limitation, not a hidden one.
+
+The frontend adds a Select Hair button next to Select People, and a
+Component dropdown (Face/Hair/Body) with a Select Person Component
+button next to it.
+
+**Verified two ways.** Four new `document.rs` tests, independently
+hand-verified: a 50-wide hair-coloured strip above a 10×10 skin block
+confirms the flood fill both reaches every pixel within the margin
+(exactly 150 of them, hand-counted) and stops exactly at the margin's
+own edge on either side, even though the hair colour continues past it;
+`select_hair_with` errors when nothing borders a face; a 10×20 skin
+block confirms the 35% split lands exactly on 70 Face pixels and 130
+Body pixels, with every Face pixel strictly above every Body one; and
+`select_person_component_with` selects each real component while
+erroring on the one that is empty (no hair bordered the plain skin
+block in that fixture). This session's own second verification path —
+a Playwright browser session against a mocked `__TAURI_INTERNALS__` —
+confirmed Select Hair and Select Person Component (Body) both fire the
+exact expected `select_hair`/`select_person_component` calls. `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+Select People — Person Components and Select People — Hair Selection
+both flip to shipped. Select and Mask's own Refine Hair — a
+decontaminating edge-refinement pass over an *existing* selection's own
+border, a genuinely different operation from a fresh selection — stays
+a documented scope cut. This closes out all four of the items this
+session had briefly, wrongly, called permanently out of reach: Real
+generative AI and cloud features are next, each getting a real,
+fully-wired client-side integration layer rather than a hollow gesture.
+
+**1667 Rust tests total** (1663 → 1667, 1660 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
