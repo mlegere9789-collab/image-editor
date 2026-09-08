@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 541.**
+**618 distinct capabilities tracked. Currently shipped: 542.**
 
 ## PART I — EVERY TOOL
 
@@ -154,7 +154,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 
 ## PART XXX — NON-OBVIOUS THINGS PHOTOSHOP CAN DO
 
-- [ ] Turn a photograph into linework
+- [x] Turn a photograph into linework (`photograph_to_linework(id, level)`: the audit's own named recipe — Find Edges, Threshold — run automatically, in the exact order named, over the two already-shipped filters. No AI of any kind; the audit's own text names five classical tools (Find Edges, Threshold, Levels, Channels, Masks), and the first two alone already produce real architectural-looking linework, hand-verified by composing `find_edges`/`threshold` directly. Levels/Channels/Masks are the audit's own open-ended manual refinement step afterward, a documented scope cut since there is no one deterministic thing to automate there — see README Phase 302)
 - [ ] Turn a photograph into a site-analysis diagram
 - [ ] Turn CAD/PDF drawings into presentation graphics
 - [ ] Make a photograph look hand-rendered

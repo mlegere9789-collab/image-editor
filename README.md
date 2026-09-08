@@ -17807,6 +17807,39 @@ honest, complete, tested client half — real and wired end to end,
 needing nothing further from this codebase to go live once the user
 points it at a real one.
 
+## Phase 302 — Turn a Photograph into Linework
+
+The first of PART XXX's own "Non-Obvious Things Photoshop Can Do" —
+found by actually reading `photoshop-capability-audit.txt`'s own text
+for this row rather than assuming it needed AI: it names five classical
+tools outright — Find Edges, Threshold, Levels, Channels, Masks — no
+generative model anywhere in the recipe. `find_edges` and `threshold`
+were both already shipped (Phases predating this session); the new
+`Document::photograph_to_linework(id, level)` is nothing but the two
+run back to back, in the audit's own order — zero new pixel-mutating
+code, a fixed, named composition exactly like the reuse pattern this
+session's other phases already established.
+
+**Verified two ways.** Two new `document.rs` tests: calling
+`photograph_to_linework` produces byte-identical output to calling
+`find_edges` then `threshold` by hand, and the result is confirmed
+different from the untouched original — a real transform, not a
+coincidental no-op. A second test confirms both filters' own error
+paths (an out-of-range Threshold level, an unknown layer) still
+propagate correctly. This session's own second verification path — a
+Playwright browser session — confirmed the new Linework Level number
+input and its Turn into Linework button send the exact `{ id, level }`
+call. `cargo fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo
+test`, and `npm run build` are all clean.
+
+Turn a photograph into linework flips to shipped. Levels, Channels, and
+Masks — the audit's own manual creative-refinement step after the
+automatic recipe — are a documented scope cut: there is no one
+deterministic thing to automate there, unlike Find Edges into
+Threshold.
+
+**1675 Rust tests total** (1673 → 1675, 1668 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

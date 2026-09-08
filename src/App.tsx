@@ -856,6 +856,9 @@ export default function App() {
   const [cloudSearchQuery, setCloudSearchQuery] = useState("");
   const [cloudDocumentList, setCloudDocumentList] = useState<string[]>([]);
   const [cloudSearchBusy, setCloudSearchBusy] = useState(false);
+  // PART XXX > Turn a Photograph into Linework: Find Edges into
+  // Threshold at this level, the audit's own named recipe.
+  const [lineworkThreshold, setLineworkThreshold] = useState(128);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -9256,6 +9259,33 @@ export default function App() {
             title="Filter > Stylize > Find Edges"
           >
             Find Edges
+          </button>
+          <label
+            className="tools__slider"
+            title="PART XXX > Turn a Photograph into Linework: Find Edges into Threshold at this level, in one step"
+          >
+            Linework Level
+            <input
+              type="number"
+              min={1}
+              max={255}
+              value={lineworkThreshold}
+              onChange={(event) =>
+                setLineworkThreshold(Math.min(255, Math.max(1, Math.round(Number(event.target.value)))))
+              }
+              style={{ width: "4em" }}
+            />
+          </label>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("photograph_to_linework", { id: selectedId, level: lineworkThreshold })
+            }
+            disabled={busy || !canPaint}
+            title="Turn a Photograph into Linework: Find Edges into Threshold, the audit's own named recipe"
+          >
+            Turn into Linework
           </button>
           <button
             className="button button--quiet"

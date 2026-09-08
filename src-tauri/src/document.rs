@@ -11828,6 +11828,27 @@ impl Document {
         })
     }
 
+    /// PART XXX — Turn a photograph into linework: the audit's own named
+    /// recipe, run automatically — [`Self::find_edges`] (the "pencil
+    /// sketch on white" edge map) into [`Self::threshold`] at `level`
+    /// (cleaning the sketch to pure black-and-white linework), the same
+    /// two filters already shipped, in the exact order the audit names
+    /// them. No new pixel-mutating code: this is a fixed, named
+    /// composition of two already-tested commands. The audit's own
+    /// recipe also names Levels, Channels, and Masks for manual creative
+    /// refinement afterward — a documented scope cut, since those are
+    /// open-ended choices rather than one more deterministic step this
+    /// function could run on its own. Errors exactly as `find_edges` and
+    /// `threshold` themselves do.
+    pub fn photograph_to_linework(
+        &mut self,
+        id: LayerId,
+        level: u8,
+    ) -> Result<Option<Rect>, String> {
+        self.find_edges(id)?;
+        self.threshold(id, level)
+    }
+
     /// Filter > Stylize > Solarize: each colour channel becomes
     /// `min(v, 255 − v)` — the lower half of the range is left alone and
     /// the upper half is folded back down, the tent-shaped curve that
@@ -26206,6 +26227,32 @@ mod tests {
         let (mut doc, id) = grey_2x2();
         doc.find_edges(id).unwrap();
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn photograph_to_linework_runs_find_edges_then_threshold_in_order() {
+        let (mut combined, id) = ramped_3x3();
+        combined.photograph_to_linework(id, 128).unwrap();
+
+        let (mut manual, id2) = ramped_3x3();
+        manual.find_edges(id2).unwrap();
+        manual.threshold(id2, 128).unwrap();
+        assert_eq!(combined.layers()[0].pixels, manual.layers()[0].pixels);
+
+        // Confirms this is a real transform, not a coincidental no-op: the
+        // original ramp's own pixels are untouched by neither filter alone.
+        let (original, _) = ramped_3x3();
+        assert_ne!(combined.layers()[0].pixels, original.layers()[0].pixels);
+    }
+
+    #[test]
+    fn photograph_to_linework_propagates_find_edges_and_threshold_errors() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc
+            .photograph_to_linework(id, 0)
+            .unwrap_err()
+            .contains("level"));
+        assert!(doc.photograph_to_linework(999, 128).is_err());
     }
 
     #[test]

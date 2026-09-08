@@ -2380,6 +2380,19 @@ fn find_edges(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, Strin
     edit_checkpointed(&state, |document| document.find_edges(id))
 }
 
+/// Turn a Photograph into Linework: `find_edges` into `threshold(level)`
+/// on layer `id`, the audit's own named recipe run in one step.
+#[tauri::command]
+fn photograph_to_linework(
+    state: State<'_, AppState>,
+    id: LayerId,
+    level: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.photograph_to_linework(id, level)
+    })
+}
+
 /// Filter > Stylize > Solarize on layer `id`.
 #[tauri::command]
 fn solarize(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
@@ -6365,6 +6378,7 @@ pub fn run() {
             offset,
             custom,
             find_edges,
+            photograph_to_linework,
             solarize,
             emboss,
             trace_contour,
