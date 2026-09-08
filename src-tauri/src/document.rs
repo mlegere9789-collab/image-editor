@@ -469,18 +469,6 @@ fn srgb_linearize(v: u8) -> f64 {
     }
 }
 
-/// The inverse of [`srgb_linearize`]: one linear channel back to an sRGB
-/// byte.
-fn srgb_encode(c: f64) -> u8 {
-    let c = c.clamp(0.0, 1.0);
-    let v = if c <= 0.0031308 {
-        12.92 * c
-    } else {
-        1.055 * c.powf(1.0 / 2.4) - 0.055
-    };
-    (v * 255.0).round().clamp(0.0, 255.0) as u8
-}
-
 /// Adobe RGB (1998)'s own pure power-law gamma, `2.19921875` — Adobe's
 /// own published value, no piecewise toe.
 const ADOBE_RGB_GAMMA: f64 = 2.19921875;
@@ -489,22 +477,35 @@ fn adobe_rgb_linearize(v: u8) -> f64 {
     (v as f64 / 255.0).powf(ADOBE_RGB_GAMMA)
 }
 
-fn adobe_rgb_encode(c: f64) -> u8 {
-    (c.clamp(0.0, 1.0).powf(1.0 / ADOBE_RGB_GAMMA) * 255.0)
-        .round()
-        .clamp(0.0, 255.0) as u8
+/// `to`'s own linear channel, quantized to a byte with `dither` (typically
+/// `-0.5..=0.5`, one 8-bit level's own sub-LSB noise) added before
+/// rounding — Use Dither's own real effect: without it, a smooth gradient
+/// through a profile conversion can band wherever adjacent source values
+/// round to the same destination byte; a small per-pixel offset breaks
+/// that band up into a finer-grained dither pattern instead. `dither ==
+/// 0.0` is [`srgb_encode`]/[`adobe_rgb_encode`]'s own plain rounding.
+fn encode_dithered(profile: ColorProfile, c: f64, dither: f64) -> u8 {
+    let c01 = c.clamp(0.0, 1.0);
+    let v = match profile {
+        ColorProfile::Srgb if c01 <= 0.0031308 => 12.92 * c01,
+        ColorProfile::Srgb => 1.055 * c01.powf(1.0 / 2.4) - 0.055,
+        ColorProfile::AdobeRgb1998 => c01.powf(1.0 / ADOBE_RGB_GAMMA),
+    };
+    (v * 255.0 + dither).round().clamp(0.0, 255.0) as u8
 }
 
-/// Edit > Convert to Profile: one pixel's RGB converted from `from`'s own
-/// working space to `to`'s, through their real, standard, published D65
-/// RGB↔XYZ matrices (Lindbloom's own reference values) — gamma-decode in
-/// `from`, matrix into CIE XYZ, matrix out of XYZ into `to`'s own linear
-/// RGB, gamma-encode in `to`. Identity (returns the pixel unchanged) when
-/// `from == to`, matching Photoshop's own no-op there. Alpha is not
-/// touched by any caller of this — it is a pure RGB function.
-pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u8; 3]) -> [u8; 3] {
+/// [`convert_profile_pixel`]'s own gamma-decode-then-matrix math, shared
+/// with [`Document::convert_to_profile`]'s own dithered per-pixel pass —
+/// everything up to (but not including) the final gamma-encode and
+/// rounding, which is the one step dithering changes. `None` when
+/// `from == to`, the identity case both callers handle themselves.
+fn convert_profile_linear(
+    from: ColorProfile,
+    to: ColorProfile,
+    [r, g, b]: [u8; 3],
+) -> Option<(f64, f64, f64)> {
     if from == to {
-        return [r, g, b];
+        return None;
     }
     let (lr, lg, lb) = match from {
         ColorProfile::Srgb => (srgb_linearize(r), srgb_linearize(g), srgb_linearize(b)),
@@ -526,7 +527,7 @@ pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u
             0.0270343 * lr + 0.0706872 * lg + 0.9911085 * lb,
         ),
     };
-    let (lr2, lg2, lb2) = match to {
+    Some(match to {
         ColorProfile::Srgb => (
             3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
             -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
@@ -537,13 +538,43 @@ pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u
             -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
             0.0134474 * x - 0.1183897 * y + 1.0154096 * z,
         ),
-    };
-    match to {
-        ColorProfile::Srgb => [srgb_encode(lr2), srgb_encode(lg2), srgb_encode(lb2)],
-        ColorProfile::AdobeRgb1998 => [
-            adobe_rgb_encode(lr2),
-            adobe_rgb_encode(lg2),
-            adobe_rgb_encode(lb2),
+    })
+}
+
+/// Edit > Convert to Profile: one pixel's RGB converted from `from`'s own
+/// working space to `to`'s, through their real, standard, published D65
+/// RGB↔XYZ matrices (Lindbloom's own reference values) — gamma-decode in
+/// `from`, matrix into CIE XYZ, matrix out of XYZ into `to`'s own linear
+/// RGB, gamma-encode in `to`. Identity (returns the pixel unchanged) when
+/// `from == to`, matching Photoshop's own no-op there. Alpha is not
+/// touched by any caller of this — it is a pure RGB function.
+pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u8; 3]) -> [u8; 3] {
+    match convert_profile_linear(from, to, [r, g, b]) {
+        None => [r, g, b],
+        Some((lr2, lg2, lb2)) => [
+            encode_dithered(to, lr2, 0.0),
+            encode_dithered(to, lg2, 0.0),
+            encode_dithered(to, lb2, 0.0),
+        ],
+    }
+}
+
+/// [`convert_profile_pixel`], with `[dr, dg, db]` (each typically
+/// `-0.5..=0.5`) added to the respective channel before its own final
+/// rounding — Edit > Convert to Profile's own Use Dither option. See
+/// [`encode_dithered`] for what that changes and why.
+fn convert_profile_pixel_dithered(
+    from: ColorProfile,
+    to: ColorProfile,
+    [r, g, b]: [u8; 3],
+    [dr, dg, db]: [f64; 3],
+) -> [u8; 3] {
+    match convert_profile_linear(from, to, [r, g, b]) {
+        None => [r, g, b],
+        Some((lr2, lg2, lb2)) => [
+            encode_dithered(to, lr2, dr),
+            encode_dithered(to, lg2, dg),
+            encode_dithered(to, lb2, db),
         ],
     }
 }
@@ -3949,6 +3980,51 @@ impl Document {
             for layer in &mut self.layers {
                 for px in layer.pixels.chunks_exact_mut(CHANNELS) {
                     let [r, g, b] = convert_profile_pixel(from, profile, [px[0], px[1], px[2]]);
+                    px[0] = r;
+                    px[1] = g;
+                    px[2] = b;
+                }
+            }
+        }
+        self.profile = profile;
+        Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        })
+    }
+
+    /// Edit > Convert to Profile > Use Dither: identical to
+    /// [`Self::convert_to_profile`], except each channel's own final
+    /// rounding gets a pixel-and-channel-specific offset in `-0.5..=0.5`
+    /// from a seeded [`XorShift32`] (the same generator [`Self::add_noise`]
+    /// already uses) instead of always rounding the same way — breaking
+    /// up the banding a smooth gradient can otherwise show after a
+    /// profile conversion. Deterministic for a given seed, exactly like
+    /// Add Noise's own "consistent under test, fresh in the UI" split. A
+    /// no-op, still updating the label, when `profile` already matches.
+    pub fn convert_to_profile_dithered(
+        &mut self,
+        profile: ColorProfile,
+        seed: u32,
+    ) -> Option<Rect> {
+        if profile != self.profile {
+            let from = self.profile;
+            let mut rng = XorShift32::new(seed);
+            for layer in &mut self.layers {
+                for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                    let dither = [
+                        rng.next_unit() as f64 * 0.5,
+                        rng.next_unit() as f64 * 0.5,
+                        rng.next_unit() as f64 * 0.5,
+                    ];
+                    let [r, g, b] = convert_profile_pixel_dithered(
+                        from,
+                        profile,
+                        [px[0], px[1], px[2]],
+                        dither,
+                    );
                     px[0] = r;
                     px[1] = g;
                     px[2] = b;
@@ -47241,6 +47317,33 @@ mod tests {
         // no-op on the pixels, even though it still re-confirms the label.
         doc.convert_to_profile(ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
+    }
+
+    #[test]
+    fn convert_to_profile_dithered_can_move_a_channel_across_its_rounding_boundary() {
+        // Same sRGB (0, 255, 0) -> Adobe RGB (1998) conversion as the
+        // plain (undithered) test above, landing on (144, 255, 60)
+        // without dither. Seed 2's own first three `next_unit() * 0.5`
+        // draws -- independently confirmed in Python emulating Rust's
+        // f32 arithmetic exactly (struct.pack/unpack round-tripping) --
+        // are approximately (-0.4999, -0.4687, -0.3375); the third
+        // pushes Blue's own pre-round value down just enough to round to
+        // 59 instead of 60, while Red and Green land on the exact same
+        // byte the undithered conversion already does.
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
+        doc.convert_to_profile_dithered(ColorProfile::AdobeRgb1998, 2);
+        assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.layers()[0].pixels, vec![144, 255, 59, 255]);
+    }
+
+    #[test]
+    fn convert_to_profile_dithered_is_a_pixel_no_op_when_the_profile_already_matches() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        doc.convert_to_profile_dithered(ColorProfile::Srgb, 2);
+        assert_eq!(doc.profile(), ColorProfile::Srgb);
+        assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
     }
 
     #[test]

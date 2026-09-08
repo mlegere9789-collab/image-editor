@@ -1769,6 +1769,20 @@ fn convert_to_profile(
     edit_checkpointed(&state, |document| Ok(document.convert_to_profile(profile)))
 }
 
+/// Edit > Convert to Profile > Use Dither: identical to [`convert_to_profile`],
+/// with each channel's own rounding perturbed by a seeded generator to
+/// break up gradient banding instead of always rounding the same way.
+#[tauri::command]
+fn convert_to_profile_dithered(
+    state: State<'_, AppState>,
+    profile: document::ColorProfile,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        Ok(document.convert_to_profile_dithered(profile, seed))
+    })
+}
+
 /// Image > Mode > Indexed Color with the dialog's `palette`.
 #[tauri::command]
 fn convert_to_indexed(
@@ -6298,6 +6312,7 @@ pub fn run() {
             convert_to_indexed,
             assign_profile,
             convert_to_profile,
+            convert_to_profile_dithered,
             convert_to_duotone,
             rename_channel,
             move_channel,

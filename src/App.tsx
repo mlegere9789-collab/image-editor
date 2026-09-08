@@ -619,6 +619,10 @@ export default function App() {
   // Select > Subject > Person Components: which of Face/Hair/Body the
   // Select Person Component button targets.
   const [personComponent, setPersonComponent] = useState<PersonComponent>("face");
+  // Edit > Convert to Profile > Use Dither: perturbs each channel's own
+  // rounding with a fresh seed per click instead of always rounding the
+  // same way, breaking up gradient banding.
+  const [useDitherForProfile, setUseDitherForProfile] = useState(false);
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -7202,16 +7206,34 @@ export default function App() {
           </label>
           <button
             className="button button--quiet"
-            onClick={() =>
-              void runCommand("convert_to_profile", {
-                profile: document?.profile === "srgb" ? "adobeRgb1998" : "srgb",
-              })
-            }
+            onClick={() => {
+              const profile = document?.profile === "srgb" ? "adobeRgb1998" : "srgb";
+              if (useDitherForProfile) {
+                void runCommand("convert_to_profile_dithered", {
+                  profile,
+                  seed: Math.floor(Math.random() * 0xffffffff),
+                });
+              } else {
+                void runCommand("convert_to_profile", { profile });
+              }
+            }}
             disabled={busy || !hasDocument}
             title="Edit > Convert to Profile: remaps every layer's own pixels into the other working space, unlike Assign Profile"
           >
             Convert to {document?.profile === "srgb" ? "Adobe RGB (1998)" : "sRGB"}…
           </button>
+          <label
+            className="tools__slider"
+            title="Edit > Convert to Profile > Use Dither: perturbs each channel's own rounding to break up gradient banding"
+          >
+            <input
+              type="checkbox"
+              checked={useDitherForProfile}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setUseDitherForProfile(event.target.checked)}
+            />
+            Use Dither
+          </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select

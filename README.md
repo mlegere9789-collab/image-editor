@@ -17732,6 +17732,51 @@ preserve in the first place; a real embedded-ICC-chunk PNG import path
 is the same documented scope cut Embed Color Profile itself already
 names.
 
+## Phase 300 — Use Dither
+
+Real work again, in the ICC bucket's own Color Settings dialog: Use
+Dither perturbs Convert to Profile's own final per-channel rounding
+instead of always rounding the same way, so a smooth gradient through a
+profile conversion bands less. `convert_profile_pixel`'s own
+gamma-decode-then-matrix math is factored out into a new
+`convert_profile_linear` (identical output, shared by both the
+undithered and dithered paths) so the only code that changes between
+them is the final step: a new `encode_dithered(profile, c, dither)`
+takes the same gamma-encode `srgb_encode`/`adobe_rgb_encode` already did,
+plus one more term — a `-0.5..=0.5` offset — added before rounding.
+`Document::convert_to_profile_dithered(profile, seed)` runs the exact
+same per-layer loop `convert_to_profile` already does, but draws three
+fresh offsets per pixel from a seeded `XorShift32` (the same generator
+Add Noise already uses, chosen for the same reason: deterministic for a
+given seed, so a test can hand-verify the exact bytes it produces, while
+the frontend draws a fresh seed on every click for Photoshop's own
+"different every time" Use Dither behaviour). A new checkbox next to
+Convert to Profile routes to `convert_to_profile_dithered` with
+`Math.random()`'s own seed when checked, `convert_to_profile` otherwise.
+
+**Verified two ways.** Two new `document.rs` tests, independently
+cross-checked in Python (an exact port of `XorShift32`, emulating Rust's
+`f32` arithmetic via `struct.pack`/`unpack` round-tripping, and of
+`convert_profile_linear`/`encode_dithered`): seed 2's own first three
+`next_unit() * 0.5` draws, applied to sRGB's fully-saturated green
+converting to Adobe RGB (1998) (the same `(0, 255, 0)` fixture Phase 292
+already hand-verified to `(144, 255, 60)` undithered), push Blue's own
+pre-round value down just enough to round to `59` instead of `60` while
+Red and Green land on the exact same bytes — a real, visible,
+independently-confirmed difference, not a coincidence the same value
+happened to reproduce. A second test confirms the dithered path is
+still a pixel no-op, like the undithered one, when the target profile
+already matches. This session's own second verification path — a
+Playwright browser session — confirmed the Use Dither checkbox toggles
+`convert_to_profile_dithered` (carrying a fresh numeric `seed` each
+click) versus plain `convert_to_profile` correctly. `cargo fmt`, `cargo
+clippy --all-targets -- -D warnings`, `cargo test`, and `npm run build`
+are all clean.
+
+Use Dither flips to shipped.
+
+**1673 Rust tests total** (1671 → 1673, 1666 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

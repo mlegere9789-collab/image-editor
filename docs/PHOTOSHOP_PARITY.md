@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 539.**
+**618 distinct capabilities tracked. Currently shipped: 540.**
 
 ## PART I — EVERY TOOL
 
@@ -421,7 +421,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Conversion Engine
 - [ ] Rendering Intent
 - [ ] Black Point Compensation
-- [ ] Use Dither
+- [x] Use Dither (`convert_to_profile_dithered(profile, seed)`: identical to `convert_to_profile`, except each channel's own final rounding gets a pixel-and-channel-specific offset from a seeded `XorShift32` — the same generator Add Noise already uses — instead of always rounding the same way, breaking up the banding a smooth gradient can otherwise show after a profile conversion. A real toggle in the Convert to Profile UI, a fresh seed drawn per click; deterministic for a given seed under test — see README Phase 300)
 - [ ] Color Settings
 - [ ] Working Spaces
 - [ ] Color Management Policies
