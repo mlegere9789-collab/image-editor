@@ -16892,6 +16892,52 @@ updates the live query string. `cargo fmt`, `cargo clippy --all-targets
 
 **1636 Rust tests total** (1633 → 1636, 1629 lib + 7 pipeline).
 
+## Phase 283 — Neural Filters > Output (Current Layer / New Layer)
+
+Photoshop's own Neural Filters panel offers an Output control — where a
+filter's result actually lands: the Current Layer, a New Layer, a New
+Layer Masked, a Smart Filter, or a New Document. This project's four
+Neural Filters (Color Transfer, Harmonize, Skin Smoothing, JPEG Artifacts
+Removal) had only ever supported the first, in-place option; this phase
+adds the second. A new shared `NeuralFilterOutput` component renders an
+"Output" dropdown — Current Layer (the existing default) or New Layer —
+in all four dialogs (Color Transfer's inside the Match Color dialog it
+already shares); one piece of `App.tsx` state, `neuralFilterOutput`,
+covers all of them since only one such dialog is ever open at a time.
+Choosing New Layer routes the Apply click through a new
+`applyNeuralFilterOutput` helper: it calls the existing `duplicate_layer`
+command first, reads the new layer's id straight out of that response
+(the layer inserted directly above the original, exactly where Duplicate
+Layer always puts it), and runs the filter command against that id
+instead of the original layer — no new Rust code at all, since
+`duplicate_layer` and every filter command already existed and needed no
+changes to be composed this way. New Layer Masked, Smart Filter, and New
+Document outputs are a documented scope cut: this app has no Smart
+Filter/adjustment-layer wrapping to attach a mask or a live filter
+reference to.
+
+**Verified two ways.** This phase is pure composition of already-tested
+commands (`duplicate_layer`'s own tests and each filter's own tests still
+cover their individual correctness), so no new Rust tests were needed;
+`cargo test` stays at 1636. What is new is entirely in `App.tsx`, and a
+Playwright browser session is exactly the right tool for it: it exercised
+the Skin Smoothing dialog with the Output dropdown switched to New Layer
+and confirmed the exact sequence Photoshop's own Output control should
+produce — a `duplicate_layer` call for the original layer's id, followed
+by a `skin_smoothing` call against the *new* layer's id (one higher, the
+next id after the original in this test's fixture) rather than the
+original — while the Current Layer default (already covered by every
+earlier Neural Filter phase's own Playwright verification) continued to
+send the original layer's id unchanged.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1636 Rust tests total** (unchanged — this phase is pure frontend
+composition of already-tested commands).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

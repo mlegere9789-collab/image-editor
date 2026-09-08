@@ -292,6 +292,30 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, "0")).join("")}`;
 }
 
+/** Neural Filters panel's own Output control, shared by every Neural
+ * Filter dialog: apply to the Current Layer, or duplicate it first and
+ * apply to that New Layer instead. New Layer Masked, Smart Filter, and
+ * New Document are a documented scope cut -- this app has no Smart
+ * Filter/adjustment-layer wrapping to attach a mask or a live filter
+ * reference to. */
+function NeuralFilterOutput({
+  value,
+  onChange,
+}: {
+  value: "current" | "new";
+  onChange: (value: "current" | "new") => void;
+}) {
+  return (
+    <label className="control control--row" title="Neural Filters panel's own Output control">
+      <span className="control__label">Output</span>
+      <select value={value} onChange={(event) => onChange(event.target.value as "current" | "new")}>
+        <option value="current">Current Layer</option>
+        <option value="new">New Layer</option>
+      </select>
+    </label>
+  );
+}
+
 /** An `Adjustment["kind"]` as the Adjustment Layer dialog's own option text — used for both that dialog and a smart object's Smart Filters list. */
 function adjustmentKindLabel(kind: Adjustment["kind"]): string {
   switch (kind) {
@@ -1134,6 +1158,9 @@ export default function App() {
   // Neural Filters > Skin Smoothing: Surface Blur's own radius/threshold,
   // confined to skin-toned pixels, plus how strongly to blend it in.
   const [showSkinSmoothingDialog, setShowSkinSmoothingDialog] = useState(false);
+  // Neural Filters > Output: shared across every Neural Filter dialog,
+  // since only one is ever open at once.
+  const [neuralFilterOutput, setNeuralFilterOutput] = useState<"current" | "new">("current");
   const [skinSmoothingRadius, setSkinSmoothingRadius] = useState(5);
   const [skinSmoothingThreshold, setSkinSmoothingThreshold] = useState(15);
   const [skinSmoothingAmount, setSkinSmoothingAmount] = useState(50);
@@ -3496,16 +3523,46 @@ export default function App() {
     setShowSurfaceBlurDialog(false);
   }, [runCommand, selectedId, surfaceBlurRadius, surfaceBlurThreshold]);
 
+  // Neural Filters > Output: Current Layer (the default, edits `targetId`
+  // in place) or New Layer (Duplicate Layer first, then run `command`
+  // against the duplicate instead) -- Photoshop's own Neural Filters
+  // panel offers the identical choice for where a filter's result lands.
+  // New Layer Masked, Smart Filter, and New Document outputs are a
+  // documented scope cut: this app has no Smart Filter/adjustment-layer
+  // wrapping to attach a mask or a live filter reference to.
+  const applyNeuralFilterOutput = useCallback(
+    async (command: string, args: Record<string, unknown>, targetId: number) => {
+      let id = targetId;
+      if (neuralFilterOutput === "new") {
+        const dup = await invoke<Snapshot>("duplicate_layer", { id: targetId });
+        const layers = dup.document.layers;
+        const index = layers.findIndex((layer) => layer.id === targetId);
+        id = layers[index + 1]?.id ?? targetId;
+      }
+      await runCommand(command, { ...args, id });
+    },
+    [runCommand, neuralFilterOutput],
+  );
+
   const applySkinSmoothing = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("skin_smoothing", {
-      id: selectedId,
-      radius: skinSmoothingRadius,
-      threshold: skinSmoothingThreshold,
-      amount: skinSmoothingAmount,
-    });
+    await applyNeuralFilterOutput(
+      "skin_smoothing",
+      {
+        radius: skinSmoothingRadius,
+        threshold: skinSmoothingThreshold,
+        amount: skinSmoothingAmount,
+      },
+      selectedId,
+    );
     setShowSkinSmoothingDialog(false);
-  }, [runCommand, selectedId, skinSmoothingRadius, skinSmoothingThreshold, skinSmoothingAmount]);
+  }, [
+    applyNeuralFilterOutput,
+    selectedId,
+    skinSmoothingRadius,
+    skinSmoothingThreshold,
+    skinSmoothingAmount,
+  ]);
 
   const applyGlowingEdges = useCallback(async () => {
     if (selectedId === null) return;
@@ -3656,34 +3713,35 @@ export default function App() {
   // matching, not an AI model.
   const applyHarmonize = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("harmonize", { id: selectedId, fade: harmonizeFade });
+    await applyNeuralFilterOutput("harmonize", { fade: harmonizeFade }, selectedId);
     setShowHarmonizeDialog(false);
-  }, [runCommand, selectedId, harmonizeFade]);
+  }, [applyNeuralFilterOutput, selectedId, harmonizeFade]);
 
   // Neural Filters > JPEG Artifacts Removal: a classic deblocking filter
   // smoothing pixels on or next to an 8x8 JPEG block boundary, the same
   // real, non-AI technique video codecs use at their own block edges.
   const applyJpegArtifactsRemoval = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("jpeg_artifacts_removal", {
-      id: selectedId,
-      strength: jpegArtifactsRemovalStrength,
-    });
+    await applyNeuralFilterOutput(
+      "jpeg_artifacts_removal",
+      { strength: jpegArtifactsRemovalStrength },
+      selectedId,
+    );
     setShowJpegArtifactsRemovalDialog(false);
-  }, [runCommand, selectedId, jpegArtifactsRemovalStrength]);
+  }, [applyNeuralFilterOutput, selectedId, jpegArtifactsRemovalStrength]);
 
   // Neural Filters > Color Transfer: Match Color's own statistical
   // transfer under its newer name, sharing this dialog's Source Layer
   // and Fade controls.
   const applyColorTransfer = useCallback(async () => {
     if (selectedId === null || matchColorSourceLayerId === null) return;
-    await runCommand("color_transfer", {
-      id: selectedId,
-      sourceLayerId: matchColorSourceLayerId,
-      fade: matchColorFade,
-    });
+    await applyNeuralFilterOutput(
+      "color_transfer",
+      { sourceLayerId: matchColorSourceLayerId, fade: matchColorFade },
+      selectedId,
+    );
     setShowMatchColorDialog(false);
-  }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
+  }, [applyNeuralFilterOutput, selectedId, matchColorSourceLayerId, matchColorFade]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
@@ -10095,6 +10153,9 @@ export default function App() {
                 onChange={(event) => setMatchColorFade(Number(event.target.value))}
               />
             </label>
+            <div title="Only Apply as Color Transfer, a Neural Filter, offers an Output choice — plain Match Color always edits the current layer">
+              <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
+            </div>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -10153,6 +10214,7 @@ export default function App() {
                 onChange={(event) => setHarmonizeFade(Number(event.target.value))}
               />
             </label>
+            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -10200,6 +10262,7 @@ export default function App() {
                 }
               />
             </label>
+            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -17924,6 +17987,7 @@ export default function App() {
                 onChange={(event) => setSkinSmoothingAmount(Number(event.target.value))}
               />
             </label>
+            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
