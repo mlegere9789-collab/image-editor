@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 524.**
+**618 distinct capabilities tracked. Currently shipped: 525.**
 
 ## PART I — EVERY TOOL
 
@@ -203,7 +203,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Lock Workspace
 - [ ] Custom Menus
 - [x] Keyboard Shortcuts customization (Edit > Keyboard Shortcuts: every one of this app's Ctrl/Cmd-modified shortcuts — Undo, Redo, Deselect, Reselect, Select All, Invert Selection, Copy, Copy Merged, Cut, Paste, Layer via Copy, Layer via Cut — is now a rebindable `{key, shift}` pair kept in `localStorage`, with the keydown handler doing a data-driven lookup instead of a hard-coded key check, and a rebind rejected outright when it collides with another action's own binding. Arrow-key selection/layer nudging is a fixed directional convention, not a named rebindable command, a documented scope cut — see README Phase 275)
-- [ ] Workspaces
+- [x] Workspaces (README Phase 288: a named, saved combination of `hiddenTools` and `keyBindings` — this app's own two existing per-installation UI customizations, and its only analogue of a panel layout, since it has no dockable panels for a workspace to actually lay out — kept in `localStorage` and switchable from a new Save/Load/Delete list in the Customize Toolbar dialog)
 - [ ] Panel Docking
 - [ ] Panel Groups
 - [ ] Collapsed Icon Panels

@@ -17158,6 +17158,45 @@ setting Person # to 2 and clicking "Select Person #" sends the exact
 
 **1649 Rust tests total** (1645 → 1649, 1642 lib + 7 pipeline).
 
+## Phase 288 — Workspaces
+
+A fourth wall this session reconsidered: Workspaces sits in the same
+"39th System" app-chrome bucket Phase 275's own Custom Toolbar and
+Keyboard Shortcuts customization already proved buildable without a
+dockable-panel rewrite. Photoshop's own Workspace switches between saved
+panel *layouts*; this app has no panels, but it does already have two
+real, per-installation UI customizations of its own — `hiddenTools` and
+`keyBindings` — and a Workspace is honestly just a named, saved
+combination of those two, exactly the same "reduce to what this app's
+own architecture actually has" move Phase 275 already made twice.
+
+A new `Workspace = { name, hiddenTools, keyBindings }` type, kept as an
+array in `localStorage` under `legelabs.workspaces`, alongside the two
+settings it bundles. Save Workspace captures the *current* `hiddenTools`
+and `keyBindings` under a typed name (overwriting a workspace of the same
+name rather than duplicating it); Load restores both from a saved
+workspace, writing straight back to `hiddenTools`' and `keyBindings`' own
+`localStorage` keys so the restore survives a reload exactly as if the
+user had set each by hand; Delete removes one. All three live in a new
+list at the bottom of the existing Customize Toolbar dialog, right below
+the tool checkboxes they (partly) capture. Pure frontend: no Rust code
+changed, since `hiddenTools` and `keyBindings` were themselves always a
+frontend-only, `localStorage`-backed preference, never document data.
+
+**Verified two ways.** No new Rust tests — there is no new Rust code this
+phase touches. A Playwright browser session did the real verification:
+hid one toolbar tool, saved it as a named workspace, confirmed the exact
+`{ name, hiddenTools: ["selectRect"], keyBindings: {...} }` landed in
+`localStorage`, clicked Show All and confirmed the tool's checkbox came
+back checked, then clicked Load and confirmed the checkbox was
+unchecked again — restored from the saved workspace, not just left over
+from before Show All ran. `npm run build` is clean; `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, and `cargo test` are
+unaffected and still clean, run as part of this phase's own sweep
+regardless.
+
+**1649 Rust tests total** (unchanged — this phase is pure frontend).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

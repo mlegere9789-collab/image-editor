@@ -135,6 +135,7 @@ const ALL_TOOLS: { id: Tool; label: string }[] = [
  * document data, so they live in the browser, not on the document. */
 const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
+const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -204,6 +205,18 @@ const DEFAULT_KEY_BINDINGS: Record<ShortcutAction, KeyBinding> = {
   paste: { key: "v", shift: false },
   layerViaCopy: { key: "j", shift: false },
   layerViaCut: { key: "j", shift: true },
+};
+
+/** Window > Workspace: a named, saved combination of this app's own two
+ * UI customizations -- which toolbar buttons are hidden and how the
+ * keyboard shortcuts are bound -- since this single-toolbar-strip app
+ * has no dockable panels for a workspace to lay out. A per-installation
+ * preference kept in `localStorage`, like `hiddenTools` and
+ * `keyBindings` themselves. */
+type Workspace = {
+  name: string;
+  hiddenTools: Tool[];
+  keyBindings: Record<ShortcutAction, KeyBinding>;
 };
 
 /** `binding` as the toolbar and dialog display it, e.g. "Ctrl/Cmd+Shift+D". */
@@ -1603,6 +1616,63 @@ export default function App() {
     } catch {
       // ignore
     }
+  }, []);
+  // Window > Workspace: named, saved combinations of hiddenTools and
+  // keyBindings above -- this app's own analogue of a saved panel
+  // layout, since it has no dockable panels to lay out.
+  const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
+    try {
+      const saved = localStorage.getItem(WORKSPACES_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Workspace[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const saveWorkspace = useCallback(
+    (name: string) => {
+      if (!name.trim()) return;
+      setWorkspaces((previous) => {
+        const next = [
+          ...previous.filter((w) => w.name !== name),
+          { name, hiddenTools: [...hiddenTools], keyBindings },
+        ];
+        try {
+          localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // Storage unavailable -- the save still applies for this
+          // session, just does not persist.
+        }
+        return next;
+      });
+    },
+    [hiddenTools, keyBindings],
+  );
+  const loadWorkspace = useCallback(
+    (name: string) => {
+      const workspace = workspaces.find((w) => w.name === name);
+      if (!workspace) return;
+      setHiddenTools(new Set(workspace.hiddenTools));
+      setKeyBindings({ ...DEFAULT_KEY_BINDINGS, ...workspace.keyBindings });
+      try {
+        localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify(workspace.hiddenTools));
+        localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(workspace.keyBindings));
+      } catch {
+        // ignore
+      }
+    },
+    [workspaces],
+  );
+  const deleteWorkspace = useCallback((name: string) => {
+    setWorkspaces((previous) => {
+      const next = previous.filter((w) => w.name !== name);
+      try {
+        localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
   }, []);
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
@@ -12102,6 +12172,45 @@ export default function App() {
                 </label>
               ))}
             </div>
+            <h2 className="modal__heading">Window &gt; Workspace</h2>
+            <p className="modal__hint">
+              A named, saved combination of which toolbar buttons are hidden above and how
+              the keyboard shortcuts are bound — this app's own analogue of a saved panel
+              layout, since it has no dockable panels to lay out.
+            </p>
+            {workspaces.length > 0 && (
+              <div className="toolbar-customize__list">
+                {workspaces.map(({ name }) => (
+                  <label className="control control--row" key={name}>
+                    <span className="control__label">{name}</span>
+                    <button className="button button--quiet" onClick={() => loadWorkspace(name)}>
+                      Load
+                    </button>
+                    <button className="button button--quiet" onClick={() => deleteWorkspace(name)}>
+                      Delete
+                    </button>
+                  </label>
+                ))}
+              </div>
+            )}
+            <label className="control control--row">
+              <span className="control__label">New Workspace Name</span>
+              <input
+                type="text"
+                value={newWorkspaceName}
+                onChange={(event) => setNewWorkspaceName(event.target.value)}
+              />
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  saveWorkspace(newWorkspaceName);
+                  setNewWorkspaceName("");
+                }}
+                disabled={!newWorkspaceName.trim()}
+              >
+                Save Workspace
+              </button>
+            </label>
             <div className="modal__actions">
               <button className="button button--quiet" onClick={resetHiddenTools} disabled={hiddenTools.size === 0}>
                 Show All
