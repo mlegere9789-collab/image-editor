@@ -6625,6 +6625,8 @@ export default function App() {
             aria-pressed={tool === "selectRect"}
             onClick={() => setTool("selectRect")}
             data-tool="selectRect"
+            data-tooltip-name="Rect Select"
+            data-tooltip="Rectangular Marquee: drag to select a rectangular region"
           >
             Rect Select
           </button>
@@ -6634,6 +6636,8 @@ export default function App() {
             aria-pressed={tool === "selectEllipse"}
             onClick={() => setTool("selectEllipse")}
             data-tool="selectEllipse"
+            data-tooltip-name="Ellipse Select"
+            data-tooltip="Elliptical Marquee: drag to select an elliptical region"
           >
             Ellipse Select
           </button>
@@ -6643,7 +6647,8 @@ export default function App() {
             aria-pressed={tool === "magicWand"}
             onClick={() => setTool("magicWand")}
             data-tool="magicWand"
-            title="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
+            data-tooltip-name="Magic Wand"
+            data-tooltip="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
           >
             Magic Wand
           </button>
@@ -6717,7 +6722,8 @@ export default function App() {
             aria-pressed={tool === "selectRow"}
             onClick={() => setTool("selectRow")}
             data-tool="selectRow"
-            title="Single Row Marquee: selects one full-width, 1px-tall row"
+            data-tooltip-name="Single Row"
+            data-tooltip="Single Row Marquee: selects one full-width, 1px-tall row"
           >
             Single Row
           </button>
@@ -6727,7 +6733,8 @@ export default function App() {
             aria-pressed={tool === "selectColumn"}
             onClick={() => setTool("selectColumn")}
             data-tool="selectColumn"
-            title="Single Column Marquee: selects one full-height, 1px-wide column"
+            data-tooltip-name="Single Column"
+            data-tooltip="Single Column Marquee: selects one full-height, 1px-wide column"
           >
             Single Column
           </button>
@@ -6820,6 +6827,8 @@ export default function App() {
             aria-pressed={tool === "brush"}
             onClick={() => setTool("brush")}
             data-tool="brush"
+            data-tooltip-name="Brush"
+            data-tooltip="Brush: paint with the current colour, size, and opacity"
           >
             Brush
           </button>
@@ -6829,6 +6838,8 @@ export default function App() {
             aria-pressed={tool === "eraser"}
             onClick={() => setTool("eraser")}
             data-tool="eraser"
+            data-tooltip-name="Eraser"
+            data-tooltip="Eraser: erase to transparency (or the background colour on a locked layer) with the current size and opacity"
           >
             Eraser
           </button>
@@ -6838,7 +6849,8 @@ export default function App() {
             aria-pressed={tool === "magicEraser"}
             onClick={() => setTool("magicEraser")}
             data-tool="magicEraser"
-            title="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
+            data-tooltip-name="Magic Eraser"
+            data-tooltip="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
           >
             Magic Eraser
           </button>
@@ -6848,7 +6860,8 @@ export default function App() {
             aria-pressed={tool === "backgroundEraser"}
             onClick={() => setTool("backgroundEraser")}
             data-tool="backgroundEraser"
-            title="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
+            data-tooltip-name="Background Eraser"
+            data-tooltip="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
           >
             Background Eraser
           </button>
@@ -6858,7 +6871,8 @@ export default function App() {
             aria-pressed={tool === "dodge"}
             onClick={() => setTool("dodge")}
             data-tool="dodge"
-            title="Dodge: paint to lighten toward white (Flow sets the Exposure)"
+            data-tooltip-name="Dodge"
+            data-tooltip="Dodge: paint to lighten toward white (Flow sets the Exposure)"
           >
             Dodge
           </button>
@@ -6868,7 +6882,8 @@ export default function App() {
             aria-pressed={tool === "burn"}
             onClick={() => setTool("burn")}
             data-tool="burn"
-            title="Burn: paint to darken toward black (Flow sets the Exposure)"
+            data-tooltip-name="Burn"
+            data-tooltip="Burn: paint to darken toward black (Flow sets the Exposure)"
           >
             Burn
           </button>
@@ -6878,7 +6893,8 @@ export default function App() {
             aria-pressed={tool === "sponge"}
             onClick={() => setTool("sponge")}
             data-tool="sponge"
-            title="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
+            data-tooltip-name="Sponge"
+            data-tooltip="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
           >
             Sponge
           </button>
@@ -6888,7 +6904,8 @@ export default function App() {
             aria-pressed={tool === "blur"}
             onClick={() => setTool("blur")}
             data-tool="blur"
-            title="Blur: paint to soften (Flow sets the Strength)"
+            data-tooltip-name="Blur"
+            data-tooltip="Blur: paint to soften (Flow sets the Strength)"
           >
             Blur
           </button>
@@ -6898,7 +6915,8 @@ export default function App() {
             aria-pressed={tool === "sharpen"}
             onClick={() => setTool("sharpen")}
             data-tool="sharpen"
-            title="Sharpen: paint to sharpen (Flow sets the Strength)"
+            data-tooltip-name="Sharpen"
+            data-tooltip="Sharpen: paint to sharpen (Flow sets the Strength)"
           >
             Sharpen
           </button>
@@ -6908,7 +6926,8 @@ export default function App() {
             aria-pressed={tool === "smudge"}
             onClick={() => setTool("smudge")}
             data-tool="smudge"
-            title="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
+            data-tooltip-name="Smudge"
+            data-tooltip="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
           >
             Smudge
           </button>
@@ -6918,7 +6937,8 @@ export default function App() {
             aria-pressed={tool === "colorReplace"}
             onClick={() => setTool("colorReplace")}
             data-tool="colorReplace"
-            title="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
+            data-tooltip-name="Color Replacement"
+            data-tooltip="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
           >
             Color Replacement
           </button>
@@ -6928,7 +6948,8 @@ export default function App() {
             aria-pressed={tool === "redEye"}
             onClick={() => setTool("redEye")}
             data-tool="redEye"
-            title="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
+            data-tooltip-name="Red Eye"
+            data-tooltip="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
           >
             Red Eye
           </button>
@@ -6938,7 +6959,8 @@ export default function App() {
             aria-pressed={tool === "ruler"}
             onClick={() => setTool("ruler")}
             data-tool="ruler"
-            title="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
+            data-tooltip-name="Ruler"
+            data-tooltip="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
           >
             Ruler
           </button>
@@ -6948,7 +6970,8 @@ export default function App() {
             aria-pressed={tool === "colorSampler"}
             onClick={() => setTool("colorSampler")}
             data-tool="colorSampler"
-            title="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
+            data-tooltip-name="Color Sampler"
+            data-tooltip="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
           >
             Color Sampler
           </button>
@@ -6958,7 +6981,8 @@ export default function App() {
             aria-pressed={tool === "count"}
             onClick={() => setTool("count")}
             data-tool="count"
-            title="Count: click to place numbered marks; the running total shows in the status bar"
+            data-tooltip-name="Count"
+            data-tooltip="Count: click to place numbered marks; the running total shows in the status bar"
           >
             Count
           </button>
@@ -6968,7 +6992,8 @@ export default function App() {
             aria-pressed={tool === "note"}
             onClick={() => setTool("note")}
             data-tool="note"
-            title="Note: click to pin a text note; click a note's badge to edit or delete it"
+            data-tooltip-name="Note"
+            data-tooltip="Note: click to pin a text note; click a note's badge to edit or delete it"
           >
             Note
           </button>
@@ -6978,7 +7003,8 @@ export default function App() {
             aria-pressed={tool === "move"}
             onClick={() => setTool("move")}
             data-tool="move"
-            title="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
+            data-tooltip-name="Move"
+            data-tooltip="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
           >
             Move
           </button>
@@ -6988,7 +7014,8 @@ export default function App() {
             aria-pressed={tool === "polygonLasso"}
             onClick={() => setTool("polygonLasso")}
             data-tool="polygonLasso"
-            title="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
+            data-tooltip-name="Polygonal Lasso"
+            data-tooltip="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
           >
             Polygonal Lasso
           </button>
@@ -6998,7 +7025,8 @@ export default function App() {
             aria-pressed={tool === "lasso"}
             onClick={() => setTool("lasso")}
             data-tool="lasso"
-            title="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
+            data-tooltip-name="Lasso"
+            data-tooltip="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
           >
             Lasso
           </button>
@@ -7008,7 +7036,8 @@ export default function App() {
             aria-pressed={tool === "magneticLasso"}
             onClick={() => setTool("magneticLasso")}
             data-tool="magneticLasso"
-            title="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
+            data-tooltip-name="Magnetic Lasso"
+            data-tooltip="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
           >
             Magnetic Lasso
           </button>
@@ -7018,7 +7047,8 @@ export default function App() {
             aria-pressed={isPen}
             onClick={() => setTool("pen")}
             data-tool="pen"
-            title="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
+            data-tooltip-name="Pen"
+            data-tooltip="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
           >
             Pen
           </button>
@@ -7028,7 +7058,8 @@ export default function App() {
             aria-pressed={isFreeformPen}
             onClick={() => setTool("freeformPen")}
             data-tool="freeformPen"
-            title="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
+            data-tooltip-name="Freeform Pen"
+            data-tooltip="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
           >
             Freeform Pen
           </button>
@@ -7038,7 +7069,8 @@ export default function App() {
             aria-pressed={isCurvaturePen}
             onClick={() => setTool("curvaturePen")}
             data-tool="curvaturePen"
-            title="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
+            data-tooltip-name="Curvature Pen"
+            data-tooltip="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
           >
             Curvature Pen
           </button>
@@ -7048,7 +7080,8 @@ export default function App() {
             aria-pressed={isAddAnchorPoint}
             onClick={() => setTool("addAnchorPoint")}
             data-tool="addAnchorPoint"
-            title="Add Anchor Point: click near the path to insert a new anchor there"
+            data-tooltip-name="Add Anchor Point"
+            data-tooltip="Add Anchor Point: click near the path to insert a new anchor there"
           >
             Add Anchor Point
           </button>
@@ -7058,7 +7091,8 @@ export default function App() {
             aria-pressed={isDeleteAnchorPoint}
             onClick={() => setTool("deleteAnchorPoint")}
             data-tool="deleteAnchorPoint"
-            title="Delete Anchor Point: click an anchor to remove it"
+            data-tooltip-name="Delete Anchor Point"
+            data-tooltip="Delete Anchor Point: click an anchor to remove it"
           >
             Delete Anchor Point
           </button>
@@ -7068,7 +7102,8 @@ export default function App() {
             aria-pressed={isConvertPoint}
             onClick={() => setTool("convertPoint")}
             data-tool="convertPoint"
-            title="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
+            data-tooltip-name="Convert Point"
+            data-tooltip="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
           >
             Convert Point
           </button>
@@ -7078,7 +7113,8 @@ export default function App() {
             aria-pressed={isPathSelection}
             onClick={() => setTool("pathSelection")}
             data-tool="pathSelection"
-            title="Path Selection: drag anywhere to move the whole current path"
+            data-tooltip-name="Path Selection"
+            data-tooltip="Path Selection: drag anywhere to move the whole current path"
           >
             Path Selection
           </button>
@@ -7088,7 +7124,8 @@ export default function App() {
             aria-pressed={isDirectSelection}
             onClick={() => setTool("directSelection")}
             data-tool="directSelection"
-            title="Direct Selection: drag an anchor to move just that point"
+            data-tooltip-name="Direct Selection"
+            data-tooltip="Direct Selection: drag an anchor to move just that point"
           >
             Direct Selection
           </button>
@@ -7106,7 +7143,8 @@ export default function App() {
             aria-pressed={tool === "objectSelect"}
             onClick={() => setTool("objectSelect")}
             data-tool="objectSelect"
-            title="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
+            data-tooltip-name="Object Select"
+            data-tooltip="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
           >
             Object Select
           </button>
@@ -7116,7 +7154,8 @@ export default function App() {
             aria-pressed={tool === "objectSelectLasso"}
             onClick={() => setTool("objectSelectLasso")}
             data-tool="objectSelectLasso"
-            title="Object Selection, Lasso mode: draw a rough outline around an object to select it"
+            data-tooltip-name="Object Lasso"
+            data-tooltip="Object Selection, Lasso mode: draw a rough outline around an object to select it"
           >
             Object Lasso
           </button>
@@ -7294,7 +7333,8 @@ export default function App() {
             aria-pressed={tool === "vectorMask"}
             onClick={() => setTool("vectorMask")}
             data-tool="vectorMask"
-            title="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
+            data-tooltip-name="Vector Mask"
+            data-tooltip="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
           >
             Vector Mask
           </button>
@@ -7352,7 +7392,8 @@ export default function App() {
             aria-pressed={tool === "selectionBrush"}
             onClick={() => setTool("selectionBrush")}
             data-tool="selectionBrush"
-            title="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
+            data-tooltip-name="Selection Brush"
+            data-tooltip="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
           >
             Selection Brush
           </button>
@@ -7362,7 +7403,8 @@ export default function App() {
             aria-pressed={tool === "quickSelection"}
             onClick={() => setTool("quickSelection")}
             data-tool="quickSelection"
-            title="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
+            data-tooltip-name="Quick Selection"
+            data-tooltip="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
           >
             Quick Selection
           </button>
@@ -7372,7 +7414,8 @@ export default function App() {
             aria-pressed={tool === "patternStamp"}
             onClick={() => setTool("patternStamp")}
             data-tool="patternStamp"
-            title="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
+            data-tooltip-name="Pattern Stamp"
+            data-tooltip="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
           >
             Pattern Stamp
           </button>
@@ -7382,7 +7425,8 @@ export default function App() {
             aria-pressed={tool === "cloneStamp"}
             onClick={() => setTool("cloneStamp")}
             data-tool="cloneStamp"
-            title="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
+            data-tooltip-name="Clone Stamp"
+            data-tooltip="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
           >
             Clone Stamp
           </button>
@@ -7392,7 +7436,8 @@ export default function App() {
             aria-pressed={tool === "healingBrush"}
             onClick={() => setTool("healingBrush")}
             data-tool="healingBrush"
-            title="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
+            data-tooltip-name="Healing Brush"
+            data-tooltip="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
           >
             Healing Brush
           </button>
@@ -7402,7 +7447,8 @@ export default function App() {
             aria-pressed={tool === "spotHealingBrush"}
             onClick={() => setTool("spotHealingBrush")}
             data-tool="spotHealingBrush"
-            title="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
+            data-tooltip-name="Spot Healing"
+            data-tooltip="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
           >
             Spot Healing
           </button>
@@ -7412,7 +7458,8 @@ export default function App() {
             aria-pressed={tool === "remove"}
             onClick={() => setTool("remove")}
             data-tool="remove"
-            title="Remove: brush over an object to fill it from the surroundings outside the brushed area"
+            data-tooltip-name="Remove"
+            data-tooltip="Remove: brush over an object to fill it from the surroundings outside the brushed area"
           >
             Remove
           </button>
@@ -7422,7 +7469,8 @@ export default function App() {
             aria-pressed={tool === "patch"}
             onClick={() => setTool("patch")}
             data-tool="patch"
-            title="Patch: select the area to repair, then drag it onto the area to sample from"
+            data-tooltip-name="Patch"
+            data-tooltip="Patch: select the area to repair, then drag it onto the area to sample from"
           >
             Patch
           </button>
@@ -7432,7 +7480,8 @@ export default function App() {
             aria-pressed={tool === "contentAwareMove"}
             onClick={() => setTool("contentAwareMove")}
             data-tool="contentAwareMove"
-            title="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
+            data-tooltip-name="Content-Aware Move"
+            data-tooltip="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
           >
             Content-Aware Move
           </button>
@@ -7442,7 +7491,8 @@ export default function App() {
             aria-pressed={tool === "historyBrush"}
             onClick={() => setTool("historyBrush")}
             data-tool="historyBrush"
-            title="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
+            data-tooltip-name="History Brush"
+            data-tooltip="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
           >
             History Brush
           </button>
@@ -7452,7 +7502,8 @@ export default function App() {
             aria-pressed={tool === "mixerBrush"}
             onClick={() => setTool("mixerBrush")}
             data-tool="mixerBrush"
-            title="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
+            data-tooltip-name="Mixer Brush"
+            data-tooltip="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
           >
             Mixer Brush
           </button>
@@ -7462,7 +7513,8 @@ export default function App() {
             aria-pressed={tool === "artHistoryBrush"}
             onClick={() => setTool("artHistoryBrush")}
             data-tool="artHistoryBrush"
-            title="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
+            data-tooltip-name="Art History Brush"
+            data-tooltip="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
           >
             Art History Brush
           </button>
@@ -7472,7 +7524,8 @@ export default function App() {
             aria-pressed={tool === "rectangle"}
             onClick={() => setTool("rectangle")}
             data-tool="rectangle"
-            title="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
+            data-tooltip-name="Rectangle"
+            data-tooltip="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
           >
             Rectangle
           </button>
@@ -7482,7 +7535,8 @@ export default function App() {
             aria-pressed={tool === "ellipse"}
             onClick={() => setTool("ellipse")}
             data-tool="ellipse"
-            title="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
+            data-tooltip-name="Ellipse"
+            data-tooltip="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
           >
             Ellipse
           </button>
@@ -7492,7 +7546,8 @@ export default function App() {
             aria-pressed={tool === "line"}
             onClick={() => setTool("line")}
             data-tool="line"
-            title="Line: drag to paint a straight line of the chosen weight in the brush colour"
+            data-tooltip-name="Line"
+            data-tooltip="Line: drag to paint a straight line of the chosen weight in the brush colour"
           >
             Line
           </button>
@@ -7502,7 +7557,8 @@ export default function App() {
             aria-pressed={tool === "polygon"}
             onClick={() => setTool("polygon")}
             data-tool="polygon"
-            title="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
+            data-tooltip-name="Polygon"
+            data-tooltip="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
           >
             Polygon
           </button>
@@ -7512,7 +7568,8 @@ export default function App() {
             aria-pressed={tool === "star"}
             onClick={() => setTool("star")}
             data-tool="star"
-            title="Star: drag from the centre to the first point to paint a star in the brush colour"
+            data-tooltip-name="Star"
+            data-tooltip="Star: drag from the centre to the first point to paint a star in the brush colour"
           >
             Star
           </button>
@@ -7522,7 +7579,8 @@ export default function App() {
             aria-pressed={tool === "triangle"}
             onClick={() => setTool("triangle")}
             data-tool="triangle"
-            title="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
+            data-tooltip-name="Triangle"
+            data-tooltip="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
           >
             Triangle
           </button>
@@ -7532,7 +7590,8 @@ export default function App() {
             aria-pressed={tool === "eyedropper"}
             onClick={() => setTool("eyedropper")}
             data-tool="eyedropper"
-            title="Eyedropper: click the canvas to pick up its color"
+            data-tooltip-name="Eyedropper"
+            data-tooltip="Eyedropper: click the canvas to pick up its color"
           >
             Eyedropper
           </button>
@@ -7542,7 +7601,8 @@ export default function App() {
             aria-pressed={tool === "paintBucket"}
             onClick={() => setTool("paintBucket")}
             data-tool="paintBucket"
-            title="Paint Bucket: click to fill the connected region under the pointer"
+            data-tooltip-name="Paint Bucket"
+            data-tooltip="Paint Bucket: click to fill the connected region under the pointer"
           >
             Paint Bucket
           </button>
@@ -7552,7 +7612,8 @@ export default function App() {
             aria-pressed={tool === "gradient"}
             onClick={() => setTool("gradient")}
             data-tool="gradient"
-            title="Gradient: drag to blend from color to end color along that line"
+            data-tooltip-name="Gradient"
+            data-tooltip="Gradient: drag to blend from color to end color along that line"
           >
             Gradient
           </button>
@@ -22015,6 +22076,81 @@ export default function App() {
                       );
                     })()}
                 </>
+              )}
+            </div>
+          )}
+          {document && (hasSelection || selectedId !== null) && (
+            <div className="contextual-task-bar" role="toolbar" aria-label="Contextual Task Bar">
+              {hasSelection ? (
+                <>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => setModifyMode("feather")}
+                    disabled={busy}
+                    data-tooltip-name="Feather"
+                    data-tooltip="Select > Modify > Feather: soften the selection's edge for painting, filling, cutting, and gradients"
+                  >
+                    Feather…
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={invertSelection}
+                    disabled={busy}
+                    data-tooltip-name="Invert Selection"
+                    data-tooltip="Select > Inverse: swap what is and isn't selected"
+                  >
+                    Invert
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => setShowSaveSelectionDialog(true)}
+                    disabled={busy}
+                    data-tooltip-name="Save Selection"
+                    data-tooltip="Select > Save Selection: keep this selection by name to load again later"
+                  >
+                    Save Selection…
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={deselect}
+                    disabled={busy}
+                    data-tooltip-name="Deselect"
+                    data-tooltip="Select > Deselect: clear the active selection"
+                  >
+                    Deselect
+                  </button>
+                </>
+              ) : (
+                selectedId !== null && (
+                  <>
+                    <button
+                      className="button button--quiet"
+                      onClick={() =>
+                        void runCommand("select_subject", {
+                          id: selectedId,
+                          tolerance: magicWandTolerance,
+                          mode: selectionMode,
+                        })
+                      }
+                      disabled={busy}
+                      data-tooltip-name="Select Subject"
+                      data-tooltip="Select > Subject: select the largest thing on the layer that is not its edge colour"
+                    >
+                      Select Subject
+                    </button>
+                    <button
+                      className="button button--quiet"
+                      onClick={() =>
+                        void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
+                      }
+                      disabled={busy}
+                      data-tooltip-name="Remove Background"
+                      data-tooltip="Layer > Remove Background: keep the subject, make everything else on the layer fully transparent"
+                    >
+                      Remove Background
+                    </button>
+                  </>
+                )
               )}
             </div>
           )}

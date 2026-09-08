@@ -16558,6 +16558,75 @@ to end. `cargo fmt`, `clippy -D warnings`, `cargo test`, and
 additions — a pure frontend phase). `cargo fmt`, `clippy`, and
 `npm run build` all clean.
 
+## Phase 276 — Contextual Task Bar, Quick Actions, and Rich Tooltips
+
+Three more "39th System" items, all pure frontend like Phase 275's
+pair, all real once read past their audit text's heaviest examples
+(which lean almost entirely on Generative Fill, Prompt to Edit, and AI
+model selection — every one a documented, permanent scope cut here).
+
+**Contextual Task Bar** reaches the one example in its own audit entry
+that is not AI: "selection controls." A floating bar over the bottom
+of the canvas — `position: absolute`, centred, `.stage` given
+`position: relative` to anchor it — appears only while a document is
+open, and its contents switch on exactly the same `hasSelection` and
+`selectedId` state that already drives the rest of this toolbar: with
+an active selection, Feather (opens the existing Select > Modify
+dialog), Invert, Save Selection, and Deselect; with a plain layer and
+no selection, Select Subject and Remove Background, both existing
+commands invoked with the exact same arguments their own toolbar
+buttons already use. **Quick Actions** is satisfied by the very same
+bar rather than a second one: its own audit text defines it as
+"select task, Photoshop performs the associated operation" instead of
+finding a tool and configuring settings — precisely what every button
+on the Contextual Task Bar already is, one click, no dialog for four
+of the six.
+
+**Rich Tooltips** replaces the plain single-line browser tooltip on
+all 57 Toolbox buttons (the same 57 Phase 275's Custom Toolbar already
+tagged with `data-tool`) with two stacked floating boxes: a bold
+`data-tooltip-name` (the tool's own name) above a `data-tooltip` (its
+explanation, lifted from whichever `title` attribute each button
+already had — four had none and got a short hand-written one instead),
+rendered by two CSS pseudo-elements, `::before` and `::after`, reading
+`attr(data-tooltip-name)` and `attr(data-tooltip)`. No hover-delay
+timer, no positioning JavaScript, nothing to clean up on unmount — a
+script mechanically moved each button's `title` into `data-tooltip`
+(removing `title` itself, so the native tooltip never doubles up
+alongside this one) and added `data-tooltip-name` from the same label
+list Custom Toolbar's dialog already uses. Short video demonstrations,
+the audit's other named component, are a documented scope cut, as is
+retrofitting the same treatment onto this app's other roughly 320
+`title` attributes outside the Toolbox.
+
+**Verified two ways**, continuing Phase 275's real second path instead
+of the usual single hand-review: the same kind of Playwright session,
+extended this time to actually create a document (mocking
+`invoke("new_document", ...)` to return a minimal but real
+`DocumentView` shape) rather than only exercising dialogs that need no
+document at all. With a fresh document and no selection, the
+Contextual Task Bar appeared showing exactly Select Subject and Remove
+Background; clicking each recorded the mocked `invoke` call and
+confirmed it fired `select_subject`/`remove_background` with the same
+`{ id, tolerance, mode }` / `{ id, tolerance }` arguments their own
+existing toolbar buttons already send — the full click-to-command
+wire, not just that the buttons render. A second check hovered the
+Brush tool button and read `getComputedStyle(el, "::before"|"::after"
+).content` directly, confirming the browser actually renders
+`"Brush"` and `"Brush: paint with the current colour, size, and
+opacity"` from the two attributes, not just that the attributes exist
+in the DOM. The Contextual Task Bar's other branch (an active
+selection) reuses the identical `hasSelection`/`invertSelection`/
+`setShowSaveSelectionDialog` wiring already exercised throughout the
+rest of this toolbar, so it was reviewed by hand rather than
+re-mocking a synthetic selection shape purely to re-prove already-
+proven code. `cargo fmt`, `clippy -D warnings`, `cargo test`, and
+`npm run build` are all still clean.
+
+**1619 Rust tests total, unchanged this phase** (0 lib/pipeline
+additions — a pure frontend phase, like Phase 275). `cargo fmt`,
+`clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

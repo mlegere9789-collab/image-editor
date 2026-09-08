@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 508.**
+**618 distinct capabilities tracked. Currently shipped: 511.**
 
 ## PART I — EVERY TOOL
 
@@ -182,10 +182,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Firefly Boards Integration
 - [ ] AI Assisted Editor
 - [ ] AI On-Device Model
-- [ ] Contextual Task Bar
+- [x] Contextual Task Bar (a floating bar over the bottom of the canvas, shown only while a document is open: selection-refinement one-click controls — Feather, Invert, Save Selection, Deselect — while a selection is active, or Select Subject / Remove Background on a plain layer otherwise. The audit's own AI-heavy examples for this bar — generative controls, Prompt to Edit, AI model selection — are a documented scope cut; only its selection-controls example is non-AI and in scope — see README Phase 276)
 - [ ] Discover Panel
-- [ ] Quick Actions
-- [ ] Rich Tooltips
+- [x] Quick Actions ("select task, the app performs the associated operation" instead of finding a tool and configuring settings — exactly what the Contextual Task Bar's own one-click buttons already are, so Quick Actions is satisfied by the same mechanism rather than a second, separate one — see README Phase 276)
+- [x] Rich Tooltips (every one of the 57 Toolbox buttons `data-tool` already tags carries a `data-tooltip-name` (tool name, bold) and `data-tooltip` (its explanation), rendered as two stacked floating boxes by pure CSS on hover — no native single-line browser tooltip, no hover-delay JS to manage. Short video demonstrations, the audit's other named component, are a documented scope cut; retrofitting the same treatment onto every other button in the app (380 `title` attributes) beyond the Toolbox is a further documented scope cut — see README Phase 276)
 - [x] Custom Toolbar (Edit > Toolbar: every persistent tool-selection button — all 57 of them, matching Photoshop's own scope for Customize Toolbar, the Tools panel alone rather than every menu command — carries a `data-tool` attribute, and hidden ones are removed by a plain `[data-tool="x"]{display:none}` rule generated from a `hiddenTools` set kept in `localStorage`, a per-installation browser preference rather than document data. Reordering the toolbar and Photoshop's own tool groups/Extra Tools well are a documented scope cut — see README Phase 275)
 - [x] Tool Presets (`ToolPreset { name, tool, params }`, `save_tool_preset`/`delete_tool_preset`: a named snapshot of the active tool plus an opaque `params` blob Rust never interprets, only the frontend does — the same "app-level preset kept on the document" simplification Gradient/Pattern/Adjustment/Custom Shape Presets already make. Scoped to this project's own shared brush parameters (size, opacity, colour, and the Gradient tool's end colour); Mixer Brush's Wet/Load/Mix, Art History's own controls, and shape tools' fill/stroke are a documented scope cut — see README Phase 273)
 - [x] Preset Manager (`rename_gradient_preset`/`rename_pattern_preset`/`rename_adjustment_preset`/`rename_custom_shape_preset`/`rename_tool_preset`: renaming by name, in place, alongside each preset kind's existing save/delete/list, in the consolidated Presets dialog. Pattern and Custom Shape presets are the real driver — the frontend never sees a pattern's own pixels or a custom shape's own Bézier anchors, only their names, so rename is the only lossless way to retitle either at all; the other three could otherwise be renamed by delete-and-resave with data the frontend already has. A single cross-type panel with drag-to-reorder and import/export is a documented scope cut — see README Phase 274)

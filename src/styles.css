@@ -124,6 +124,7 @@ body {
 }
 
 .stage {
+  position: relative;
   display: grid;
   place-items: center;
   overflow: auto;
@@ -855,4 +856,68 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 2px;
   margin-right: 6px;
+}
+
+/* Rich Tooltips: a `data-tooltip-name` (the tool's own name, bold) and a
+ * `data-tooltip` (its explanation) rendered as two stacked floating boxes
+ * on hover, in place of a plain single-line browser title tooltip.
+ * `title` is deliberately not set on these elements — a native tooltip
+ * alongside this one would double up. Pure CSS: no positioning JS, no
+ * hover-delay timer to manage, nothing to clean up on unmount. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+  position: absolute;
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+[data-tooltip]:hover::before {
+  content: attr(data-tooltip-name);
+  bottom: calc(100% + 30px);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  bottom: 100%;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Contextual Task Bar: one-click controls relevant to whatever is
+ * currently selected — selection-refinement tools with an active
+ * selection, or Quick Actions (Select Subject, Remove Background) on a
+ * plain layer otherwise. Floats over the bottom of the canvas the same
+ * way Photoshop's own does, rather than living in the fixed toolbar. */
+.contextual-task-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
 }
