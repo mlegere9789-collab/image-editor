@@ -17712,6 +17712,26 @@ this project's PNG codec doesn't read or write ICC chunks.
 
 **1671 Rust tests total** (1669 → 1671, 1664 lib + 7 pipeline).
 
+## Phase 299 — Preserve Embedded Profiles
+
+Another documentation fix following straight from Phase 298: Photoshop's
+own default Color Management Policy, opening a file whose embedded
+profile differs from the current working space, is to keep that file's
+own profile rather than silently converting or discarding it — Preserve
+Embedded Profiles. `project::decode`'s own `assign_profile(manifest.profile)`
+call, added in Phase 298, is exactly that and only that: it relabels
+the reopened document to whichever profile it was saved under, never
+calls `convert_to_profile`, and has no mismatch-detection branch to
+silently convert down at all. There was no "policy choice" to
+implement — the one thing `decode` does with a saved profile already
+*is* Preserve.
+
+Preserve Embedded Profiles flips to shipped. This app's own project
+file remains the one persistence format able to carry a profile to
+preserve in the first place; a real embedded-ICC-chunk PNG import path
+is the same documented scope cut Embed Color Profile itself already
+names.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 538.**
+**618 distinct capabilities tracked. Currently shipped: 539.**
 
 ## PART I — EVERY TOOL
 
@@ -425,7 +425,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Color Settings
 - [ ] Working Spaces
 - [ ] Color Management Policies
-- [ ] Preserve Embedded Profiles
+- [x] Preserve Embedded Profiles (Photoshop's own default Color Management Policy: opening a file whose embedded profile differs from the current working space keeps that file's own profile rather than silently converting or discarding it. `project::decode`'s `assign_profile(manifest.profile)` call — see README Phase 298 — is exactly Preserve, and only Preserve: it relabels the reopened document to whatever profile it was saved under, never runs `convert_to_profile`, and has no working-space-mismatch branch to silently convert down at all. This app's own project file is the one format carrying an embedded profile to preserve; a real embedded-ICC-chunk PNG import path remains a documented scope cut, the same one Embed Color Profile itself names)
 - [ ] Convert to Working Space
 - [ ] Profile Mismatch Warnings
 - [ ] Ask When Opening
