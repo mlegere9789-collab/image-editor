@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 549.**
+**618 distinct capabilities tracked. Currently shipped: 551.**
 
 ## PART I — EVERY TOOL
 
@@ -204,10 +204,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Custom Menus (README Phase 290: a "Customize Menus…" dialog hides individual `DISCOVER_ACTIONS` entries from Discover's own "Adjustments, Filters & Layer Styles" list, by label, kept in `localStorage` like `hiddenTools` — this app's own analogue of a menu command, since it has no File/Edit/Image dropdown menu bar of its own, just Discover's search over the same command set. Colour-coding menu commands is a documented scope cut)
 - [x] Keyboard Shortcuts customization (Edit > Keyboard Shortcuts: every one of this app's Ctrl/Cmd-modified shortcuts — Undo, Redo, Deselect, Reselect, Select All, Invert Selection, Copy, Copy Merged, Cut, Paste, Layer via Copy, Layer via Cut — is now a rebindable `{key, shift}` pair kept in `localStorage`, with the keydown handler doing a data-driven lookup instead of a hard-coded key check, and a rebind rejected outright when it collides with another action's own binding. Arrow-key selection/layer nudging is a fixed directional convention, not a named rebindable command, a documented scope cut — see README Phase 275)
 - [x] Workspaces (README Phase 288: a named, saved combination of `hiddenTools` and `keyBindings` — this app's own two existing per-installation UI customizations, and its only analogue of a panel layout, since it has no dockable panels for a workspace to actually lay out — kept in `localStorage` and switchable from a new Save/Load/Delete list in the Customize Toolbar dialog)
-- [ ] Panel Docking
+- [x] Panel Docking (`DockablePanel`: a real drag handle on both of this app's own non-modal panels, Layers and Channels, dragged to either edge of the window to dock there — an 80px zone from either edge, decided purely by where the pointer releases — or dropped anywhere else to float, exactly Photoshop's own left/right dock model minus its top/bottom docking, which this app's own single-row toolbar layout has no room for. Placement is saved per panel in `localStorage`, like `hiddenTools`, and protected by Lock Workspace exactly as those are — see README Phase 307)
 - [ ] Panel Groups
 - [ ] Collapsed Icon Panels
-- [ ] Floating Panels
+- [x] Floating Panels (the same `DockablePanel` drag handle: dropped anywhere that isn't within 80px of either edge, a panel floats at that exact position — `position: fixed`, its own border and drop shadow — instead of docking. Both this app's own panels, Layers and Channels, can float independently — see README Phase 307)
 - [ ] Panel Stacking
 - [ ] Photoshop Cloud Documents (the client side is real and fully wired — `export_project_bytes`/`import_project_bytes` round-trip the same project format `save_project`/`open_project` already do, and Save to Cloud/Load from Cloud send/fetch those bytes to a configured endpoint, PUT/GET `/documents/<name>` — see README Phase 296. Still unchecked: without a real backend behind that endpoint, there is nowhere for the bytes to actually go, and this project has no server of its own to be that backend)
 - [ ] Search Your Cloud Files (the client side is real and fully wired — a "Search Cloud Files…" dialog GETs `{endpoint}/documents`, expecting `{ documents: string[] }`, and filters the result client-side as you type, each match one click from `import_project_bytes` through the same fetch Load from Cloud already uses — see README Phase 301. Still unchecked for the same reason Photoshop Cloud Documents itself is: without a real backend behind the endpoint, there is no list to fetch, and this project has no server of its own to be that backend)

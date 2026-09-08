@@ -38,9 +38,65 @@ body {
 }
 
 .workspace {
-  display: grid;
-  grid-template-columns: 1fr 260px;
+  display: flex;
+  align-items: stretch;
   min-height: 0;
+}
+
+/* Window > Panel Docking: a column of docked panels beside the canvas,
+ * left or right. Only rendered when at least one panel is docked there,
+ * so undocking every panel from a side collapses it rather than leaving
+ * an empty column. */
+.dock-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  flex: none;
+  overflow-y: auto;
+  padding: 4px;
+}
+.dock-zone--left {
+  order: 0;
+  border-right: 1px solid var(--border);
+}
+.dock-zone--right {
+  order: 2;
+  border-left: 1px solid var(--border);
+}
+
+/* Window > Panel Docking / Floating Panels: the drag handle every
+ * dockable panel gets, and the floating variant's own window chrome. */
+.dockable-panel {
+  position: relative;
+}
+.dockable-panel__grip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.dockable-panel__grip:active {
+  cursor: grabbing;
+}
+.dockable-panel--floating {
+  position: fixed;
+  z-index: 50;
+  width: 260px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .app--dropping .stage {
@@ -129,6 +185,9 @@ body {
   place-items: center;
   overflow: auto;
   padding: 24px;
+  order: 1;
+  flex: 1;
+  min-width: 0;
   /* Checkerboard, so transparent PNGs read correctly. */
   background-color: #15171a;
   background-image:
@@ -305,7 +364,16 @@ body {
   padding: 14px;
   overflow-y: auto;
   background: var(--surface);
-  border-left: 1px solid var(--border);
+}
+
+/* A docked panel's own edge border comes from `.dock-zone--left`/`--right`
+ * now that Panel Docking lets `.panel` land on either side or float; a
+ * floating one gets a full border of its own instead. */
+.dockable-panel--floating .panel,
+.dockable-panel--floating .channels {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 70vh;
 }
 
 .panel__heading {

@@ -5,6 +5,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 
 import LayerPanel from "./LayerPanel";
 import ChannelPanel, { channelQuery, type ChannelThumbs } from "./ChannelPanel";
+import DockablePanel, { type PanelPlacement } from "./DockablePanel";
 import type {
   Adjustment,
   ApplyBlend,
@@ -148,6 +149,13 @@ const GENERATIVE_AI_ENDPOINT_STORAGE_KEY = "legelabs.generativeAi.endpoint";
 const GENERATIVE_AI_API_KEY_STORAGE_KEY = "legelabs.generativeAi.apiKey";
 const CLOUD_ENDPOINT_STORAGE_KEY = "legelabs.cloud.endpoint";
 const CLOUD_TOKEN_STORAGE_KEY = "legelabs.cloud.token";
+// Window > Panel Docking: which dock zone (or floating position) each
+// panel is in, a per-installation preference like `hiddenTools`.
+const PANEL_LAYOUT_STORAGE_KEY = "legelabs.panelLayout";
+const DEFAULT_PANEL_LAYOUT: Record<string, PanelPlacement> = {
+  layers: { zone: "right" },
+  channels: { zone: "right" },
+};
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -1636,10 +1644,11 @@ export default function App() {
   const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
   const [showCustomizeMenusDialog, setShowCustomizeMenusDialog] = useState(false);
   // Window > Workspace > Lock Workspace: Photoshop's own locks panels
-  // against accidental dragging/resizing; this app has no draggable
-  // panels to protect, so it locks the real thing this app's own
-  // "workspace" is made of instead -- hiddenTools, keyBindings, and
-  // hiddenMenuCommands stop accepting changes until unlocked.
+  // against accidental dragging/resizing -- now that Panel Docking
+  // (below) gives this app real draggable panels of its own, Lock
+  // Workspace protects those directly, alongside hiddenTools,
+  // keyBindings, and hiddenMenuCommands, which stop accepting changes
+  // until unlocked.
   const [lockWorkspace, setLockWorkspace] = useState(() => {
     try {
       return localStorage.getItem(LOCK_WORKSPACE_STORAGE_KEY) === "true";
@@ -1658,6 +1667,34 @@ export default function App() {
       return next;
     });
   }, []);
+  // Window > Panel Docking / Panel Groups / Floating Panels: which dock
+  // zone (or floating position) each of this app's own panels is in --
+  // Layers and Channels today, the only two panels this app has that
+  // aren't a modal dialog.
+  const [panelLayout, setPanelLayout] = useState<Record<string, PanelPlacement>>(() => {
+    try {
+      const saved = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY);
+      return saved ? { ...DEFAULT_PANEL_LAYOUT, ...(JSON.parse(saved) as Record<string, PanelPlacement>) } : DEFAULT_PANEL_LAYOUT;
+    } catch {
+      return DEFAULT_PANEL_LAYOUT;
+    }
+  });
+  const setPanelPlacement = useCallback(
+    (id: string, placement: PanelPlacement) => {
+      if (lockWorkspace) return;
+      setPanelLayout((current) => {
+        const next = { ...current, [id]: placement };
+        try {
+          localStorage.setItem(PANEL_LAYOUT_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // Storage unavailable -- the move still applies for this
+          // session, just does not persist.
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   // Discover Panel: search this app's own Toolbox by name -- the one
   // component of Photoshop's Discover panel that is pure search rather
   // than authored help content (tutorials, articles, contextual help),
@@ -6985,6 +7022,115 @@ export default function App() {
     { label: "Wave", activate: () => setShowWaveDialog(true) },
     { label: "Wind", activate: () => setShowWindDialog(true) },
     { label: "ZigZag", activate: () => setShowZigZagDialog(true) },  ];
+
+  // Window > Panel Docking: Layers and Channels, this app's own two
+  // non-modal panels, each wrapped in a DockablePanel so they can be
+  // dragged to either edge of the window or floated -- computed once
+  // here so the same node can be placed into whichever dock zone (or
+  // the floating layer) its own saved placement calls for below.
+  const layersPanelNode = (
+    <DockablePanel
+      key="layers"
+      id="layers"
+      placement={panelLayout.layers ?? DEFAULT_PANEL_LAYOUT.layers}
+      onPlacementChange={setPanelPlacement}
+    >
+      <LayerPanel
+        layers={layers}
+        selectedId={selectedId}
+        blendModes={blendModes}
+        disabled={busy}
+        onSelect={setSelectedId}
+        onToggleVisible={(id, visible) => void runCommand("set_layer_visible", { id, visible })}
+        onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
+        onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
+        onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
+        groups={document?.groups ?? []}
+        onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
+        onUngroup={(index) => void runCommand("ungroup", { index })}
+        onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
+        onOpacityDragStart={checkpoint}
+        onBlendMode={(id, blendMode: BlendMode) => void runCommand("set_layer_blend_mode", { id, blendMode })}
+        onMove={(id, direction: MoveDirection) => void runCommand("move_layer", { id, direction })}
+        onRemove={(id) => void runCommand("remove_layer", { id })}
+        onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
+        onMergeVisible={() => void runCommand("merge_visible")}
+        onFlattenImage={() => void runCommand("flatten_image")}
+        onMergeDown={(id) => void runCommand("merge_down", { id })}
+        onRasterize={(id) => void runCommand("rasterize_layer", { id })}
+        onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
+        onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
+        onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
+      />
+    </DockablePanel>
+  );
+  const channelsPanelNode = hasDocument && (
+    <DockablePanel
+      key="channels"
+      id="channels"
+      placement={panelLayout.channels ?? DEFAULT_PANEL_LAYOUT.channels}
+      onPlacementChange={setPanelPlacement}
+    >
+      <aside className="panel">
+        <ChannelPanel
+          generation={generation}
+          channels={document?.channels ?? []}
+          spots={document?.spots ?? []}
+          view={shownChannel}
+          mode={document?.mode ?? "rgb"}
+          thumbs={channelThumbs}
+          disabled={busy}
+          onSelect={setChannelView}
+          onThumbs={setChannelThumbs}
+          onAdd={() => void runCommand("add_channel", { name: "" })}
+          onRename={(old, next) => {
+            void runCommand("rename_channel", { old, new: next }).then(() => {
+              setChannelView((current) =>
+                current.kind === "alpha" && current.name === old
+                  ? { kind: "alpha", name: next.trim() }
+                  : current,
+              );
+            });
+          }}
+          onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
+          onDelete={(name) => void runCommand("delete_channel", { name })}
+          onLoad={(name) => void runCommand("load_channel", { name })}
+          onNewSpot={() => openSpotDialog({ mode: "new" })}
+          onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
+          onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
+          onDeleteSpot={(name) => {
+            void runCommand("delete_spot_channel", { name }).then(() => {
+              setChannelView((current) =>
+                current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+              );
+            });
+          }}
+          onMergeSpot={(name) => {
+            void runCommand("merge_spot_channel", { name }).then(() => {
+              setChannelView((current) =>
+                current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+              );
+            });
+          }}
+          onConvertToSpot={(name) => openSpotDialog({ mode: "convert", name })}
+        />
+      </aside>
+    </DockablePanel>
+  );
+  const layersZone = panelLayout.layers?.zone ?? DEFAULT_PANEL_LAYOUT.layers.zone;
+  const channelsZone = panelLayout.channels?.zone ?? DEFAULT_PANEL_LAYOUT.channels.zone;
+  const leftDockedPanels = [
+    layersZone === "left" && layersPanelNode,
+    channelsZone === "left" && channelsPanelNode,
+  ].filter(Boolean);
+  const rightDockedPanels = [
+    layersZone === "right" && layersPanelNode,
+    channelsZone === "right" && channelsPanelNode,
+  ].filter(Boolean);
+  const floatingPanels = [
+    layersZone === "float" && layersPanelNode,
+    channelsZone === "float" && channelsPanelNode,
+  ].filter(Boolean);
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
@@ -23773,6 +23919,7 @@ export default function App() {
       )}
 
       <div className="workspace">
+        {leftDockedPanels.length > 0 && <div className="dock-zone dock-zone--left">{leftDockedPanels}</div>}
         <main className="stage">
           {error && (
             <div className="notice notice--error" role="alert">
@@ -24167,85 +24314,9 @@ export default function App() {
           )}
         </main>
 
-        <LayerPanel
-          layers={layers}
-          selectedId={selectedId}
-          blendModes={blendModes}
-          disabled={busy}
-          onSelect={setSelectedId}
-          onToggleVisible={(id, visible) =>
-            void runCommand("set_layer_visible", { id, visible })
-          }
-          onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
-          onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
-          onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
-          groups={document?.groups ?? []}
-          onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
-          onUngroup={(index) => void runCommand("ungroup", { index })}
-          onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
-          onOpacityDragStart={checkpoint}
-          onBlendMode={(id, blendMode: BlendMode) =>
-            void runCommand("set_layer_blend_mode", { id, blendMode })
-          }
-          onMove={(id, direction: MoveDirection) =>
-            void runCommand("move_layer", { id, direction })
-          }
-          onRemove={(id) => void runCommand("remove_layer", { id })}
-          onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
-          onMergeVisible={() => void runCommand("merge_visible")}
-          onFlattenImage={() => void runCommand("flatten_image")}
-          onMergeDown={(id) => void runCommand("merge_down", { id })}
-          onRasterize={(id) => void runCommand("rasterize_layer", { id })}
-          onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
-          onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
-          onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
-        >
-          {hasDocument && (
-            <ChannelPanel
-              generation={generation}
-              channels={document?.channels ?? []}
-              spots={document?.spots ?? []}
-              view={shownChannel}
-              mode={document?.mode ?? "rgb"}
-              thumbs={channelThumbs}
-              disabled={busy}
-              onSelect={setChannelView}
-              onThumbs={setChannelThumbs}
-              onAdd={() => void runCommand("add_channel", { name: "" })}
-              onRename={(old, next) => {
-                void runCommand("rename_channel", { old, new: next }).then(() => {
-                  setChannelView((current) =>
-                    current.kind === "alpha" && current.name === old
-                      ? { kind: "alpha", name: next.trim() }
-                      : current,
-                  );
-                });
-              }}
-              onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
-              onDelete={(name) => void runCommand("delete_channel", { name })}
-              onLoad={(name) => void runCommand("load_channel", { name })}
-              onNewSpot={() => openSpotDialog({ mode: "new" })}
-              onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
-              onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
-              onDeleteSpot={(name) => {
-                void runCommand("delete_spot_channel", { name }).then(() => {
-                  setChannelView((current) =>
-                    current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
-                  );
-                });
-              }}
-              onMergeSpot={(name) => {
-                void runCommand("merge_spot_channel", { name }).then(() => {
-                  setChannelView((current) =>
-                    current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
-                  );
-                });
-              }}
-              onConvertToSpot={(name) => openSpotDialog({ mode: "convert", name })}
-            />
-          )}
-        </LayerPanel>
+        {rightDockedPanels.length > 0 && <div className="dock-zone dock-zone--right">{rightDockedPanels}</div>}
       </div>
+      {floatingPanels}
 
       <footer className="statusbar">
         {document ? (

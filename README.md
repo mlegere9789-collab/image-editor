@@ -17960,6 +17960,61 @@ outright. `npm run build` is clean.
 
 Ask When Opening flips to shipped (549/618).
 
+## Phase 307 — Panel Docking, Floating Panels
+
+Real, substantial frontend work: this app's two non-modal panels,
+Layers and Channels, were a single fixed sidebar to the canvas's right
+for the whole project's history until now. A new `DockablePanel`
+component wraps each one with a real pointer-driven drag handle (a
+small `⠿` grip in its own top-right corner): drag it within 80px of
+either edge of the window and release to dock there, or release
+anywhere else to float at that exact position. `.workspace` moves from
+a fixed two-column grid to a flexbox row with conditionally-rendered
+`.dock-zone--left`/`.dock-zone--right` columns — present only when a
+panel is actually docked there, so undocking every panel from a side
+collapses that column rather than leaving a blank one — plus a floating
+layer of `position: fixed` panels rendered as siblings of `.workspace`
+itself. Placement per panel (`{ zone: "left" | "right" }` or
+`{ zone: "float", x, y }`) is saved to `localStorage`, the same
+per-installation preference `hiddenTools`/`keyBindings` already are,
+and — since this app finally has real draggable panels — Lock
+Workspace (Phase 291) now actually protects them, the thing its own
+doc comment always said it did.
+
+The one real engineering trap: the drag handle originally read its drop
+position from React state (`live`) inside the pointerup handler, which
+is correct for a real mouse drag (many pointermove events spread across
+several animation frames, each one committed before the next fires) but
+is a stale-closure bug waiting to happen — a pointerup whose handler
+closure captured `live` from before the last pointermove's own state
+update had committed would read the wrong position. Fixed by tracking
+the live drag position in a `ref` (always current the instant a drag
+ends, synchronously) and keeping `live` state only for repainting the
+floating panel's position mid-drag. Caught by a same-tick synthetic
+`PointerEvent` test — dispatching pointerdown/pointermove/pointerup
+back-to-back within one script, with no animation frame between them —
+which is exactly the case a real drag would hit only rarely (a very
+fast flick) but a synthetic test hits every time, precisely the kind of
+edge case worth fixing outright rather than leaving to chance.
+
+Photoshop's own panel docking also allows the top and bottom edges of
+the window; this app's own single-row toolbar layout has no room for a
+horizontal dock, so left/right/float is the real, honest subset that
+fits this app's own layout. Panel Groups (tabbing several panels into
+one) and Collapsed Icon Panels (shrinking a docked panel to an icon
+strip) remain documented scope cuts — real further engineering, not
+covered by the drag mechanism this phase built.
+
+**Verified two ways.** This session's own second verification path — a
+Playwright browser session — dragged the Layers panel's own grip to the
+left edge and confirmed it moved into `.dock-zone--left` while Channels
+stayed docked right, confirmed the move persisted to `localStorage`,
+then dragged it again away from both edges and confirmed it floated
+(`.dockable-panel--floating`) at the drop position. `npm run build` is
+clean; this phase is pure frontend, so no Rust tests changed.
+
+Panel Docking and Floating Panels flip to shipped (551/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
