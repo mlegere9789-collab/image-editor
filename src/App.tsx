@@ -141,6 +141,13 @@ const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
 const LOCK_WORKSPACE_STORAGE_KEY = "legelabs.lockWorkspace";
+// Generative Fill and Cloud Documents: a user-configured provider endpoint
+// and credential for each, held only in this browser's own localStorage --
+// never sent anywhere but the endpoint the user themselves entered.
+const GENERATIVE_AI_ENDPOINT_STORAGE_KEY = "legelabs.generativeAi.endpoint";
+const GENERATIVE_AI_API_KEY_STORAGE_KEY = "legelabs.generativeAi.apiKey";
+const CLOUD_ENDPOINT_STORAGE_KEY = "legelabs.cloud.endpoint";
+const CLOUD_TOKEN_STORAGE_KEY = "legelabs.cloud.token";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -819,6 +826,25 @@ export default function App() {
     [50, 0],
     [100, 0],
   ]);
+  // Generative Fill and Cloud Documents: a settings dialog for each
+  // provider's own endpoint URL and credential, held in localStorage --
+  // this app's own network-capable features, fully wired end to end,
+  // waiting only on the user's own provider details. See the External
+  // Services dialog below for the one contract each endpoint must speak.
+  const [showExternalServicesDialog, setShowExternalServicesDialog] = useState(false);
+  const [generativeAiEndpoint, setGenerativeAiEndpoint] = useState(
+    () => localStorage.getItem(GENERATIVE_AI_ENDPOINT_STORAGE_KEY) ?? "",
+  );
+  const [generativeAiApiKey, setGenerativeAiApiKey] = useState(
+    () => localStorage.getItem(GENERATIVE_AI_API_KEY_STORAGE_KEY) ?? "",
+  );
+  const [cloudEndpoint, setCloudEndpoint] = useState(() => localStorage.getItem(CLOUD_ENDPOINT_STORAGE_KEY) ?? "");
+  const [cloudToken, setCloudToken] = useState(() => localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY) ?? "");
+  const [showGenerativeFillDialog, setShowGenerativeFillDialog] = useState(false);
+  const [generativeFillPrompt, setGenerativeFillPrompt] = useState("");
+  const [generativeFillBusy, setGenerativeFillBusy] = useState(false);
+  const [cloudDocumentName, setCloudDocumentName] = useState("untitled");
+  const [cloudBusy, setCloudBusy] = useState(false);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -2959,6 +2985,108 @@ export default function App() {
     await runCommand("adaptive_wide_angle", { id: selectedId, lines: [adaptiveWideAngleLine] });
     setShowAdaptiveWideAngleDialog(false);
   }, [runCommand, selectedId, adaptiveWideAngleLine]);
+
+  const saveExternalServicesSettings = useCallback(() => {
+    localStorage.setItem(GENERATIVE_AI_ENDPOINT_STORAGE_KEY, generativeAiEndpoint);
+    localStorage.setItem(GENERATIVE_AI_API_KEY_STORAGE_KEY, generativeAiApiKey);
+    localStorage.setItem(CLOUD_ENDPOINT_STORAGE_KEY, cloudEndpoint);
+    localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, cloudToken);
+    setShowExternalServicesDialog(false);
+  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken]);
+
+  // Filter > Generative Fill: a settings-gated call to a user-configured
+  // image-generation endpoint. This app defines the contract it speaks --
+  // POST `{ prompt, width, height }`, expecting back `{ image: "<base64
+  // PNG>" }` -- since there is no universal standard shape across real
+  // providers; a thin adapter in front of a real provider (or a provider
+  // that already speaks this shape directly) is the only thing missing
+  // to make this live. The returned image lands through the same
+  // `add_layer_from_bytes` primitive a pasted screenshot would.
+  const applyGenerativeFill = useCallback(async () => {
+    if (selectedId === null || !document) return;
+    if (!generativeAiEndpoint) {
+      setError("Generative Fill needs a provider endpoint -- set one in Edit > External Services.");
+      return;
+    }
+    setGenerativeFillBusy(true);
+    try {
+      const response = await fetch(generativeAiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(generativeAiApiKey ? { Authorization: `Bearer ${generativeAiApiKey}` } : {}),
+        },
+        body: JSON.stringify({ prompt: generativeFillPrompt, width: document.width, height: document.height }),
+      });
+      if (!response.ok) throw new Error(`The provider returned ${response.status}.`);
+      const body = (await response.json()) as { image?: string };
+      if (!body.image) throw new Error("The provider's response had no image field.");
+      const binary = atob(body.image);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      await runCommand("add_layer_from_bytes", { name: "Generative Fill", bytes: Array.from(bytes) }, "top");
+      setShowGenerativeFillDialog(false);
+    } catch (err) {
+      setError(`Generative Fill failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerativeFillBusy(false);
+    }
+  }, [selectedId, document, generativeAiEndpoint, generativeAiApiKey, generativeFillPrompt, runCommand]);
+
+  // Cloud Documents: the same project-file bytes Save Project/Open
+  // Project already round-trip through `export_project_bytes`/
+  // `import_project_bytes`, sent to (or fetched from) a user-configured
+  // document store instead of the filesystem -- a REST endpoint this app
+  // expects to expose `PUT`/`GET /documents/<name>`, again this app's own
+  // defined contract rather than an existing standard, since there is no
+  // one already-agreed shape for "a document store."
+  const saveToCloud = useCallback(async () => {
+    if (!cloudEndpoint) {
+      setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const bytes = await invoke<number[]>("export_project_bytes");
+      const response = await fetch(
+        `${cloudEndpoint.replace(/\/$/, "")}/documents/${encodeURIComponent(cloudDocumentName)}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            ...(cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {}),
+          },
+          body: new Uint8Array(bytes),
+        },
+      );
+      if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+    } catch (err) {
+      setError(`Save to Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCloudBusy(false);
+    }
+  }, [cloudEndpoint, cloudToken, cloudDocumentName]);
+
+  const loadFromCloud = useCallback(async () => {
+    if (!cloudEndpoint) {
+      setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      const response = await fetch(
+        `${cloudEndpoint.replace(/\/$/, "")}/documents/${encodeURIComponent(cloudDocumentName)}`,
+        { headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {} },
+      );
+      if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+      const buffer = await response.arrayBuffer();
+      await runCommand("import_project_bytes", { bytes: Array.from(new Uint8Array(buffer)) });
+    } catch (err) {
+      setError(`Load from Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCloudBusy(false);
+    }
+  }, [cloudEndpoint, cloudToken, cloudDocumentName, runCommand]);
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -6943,6 +7071,30 @@ export default function App() {
         >
           Save Project…
         </button>
+        <button
+          className="button button--quiet"
+          onClick={() => void saveToCloud()}
+          disabled={busy || cloudBusy || !hasDocument}
+          title="Cloud Documents: upload the open document's project bytes to a user-configured endpoint"
+        >
+          Save to Cloud
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => void loadFromCloud()}
+          disabled={busy || cloudBusy}
+          title="Cloud Documents: replace the open document with one fetched from a user-configured endpoint"
+        >
+          Load from Cloud
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowExternalServicesDialog(true)}
+          disabled={busy}
+          title="Generative Fill and Cloud Documents' own provider endpoint and credential"
+        >
+          External Services…
+        </button>
 
         <div className="tools" role="group" aria-label="Undo history">
           <button
@@ -7323,6 +7475,14 @@ export default function App() {
             title="Filter > Adaptive Wide Angle: fit Lens Correction's own Distortion to a marked line"
           >
             Adaptive Wide Angle…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGenerativeFillDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Generative Fill: a settings-gated call to a user-configured image-generation endpoint"
+          >
+            Generative Fill…
           </button>
           <button
             className="button button--quiet"
@@ -14989,6 +15149,137 @@ export default function App() {
                 title="Fit Distortion to the marked line and apply it"
               >
                 OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGenerativeFillDialog && (
+        <div className="modal-overlay" onClick={() => setShowGenerativeFillDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Generative Fill"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Generative Fill</h2>
+            <p className="modal__hint">
+              Sends Prompt, the document&apos;s Width, and its Height as JSON to the
+              provider endpoint configured in External Services, expecting back `{"{"}
+              image: "&lt;base64 PNG&gt;"{"}"}`. This is this app&apos;s own defined
+              contract, not a universal standard — a thin adapter in front of a real
+              image-generation provider, or a provider that already speaks this shape
+              directly, is the only thing needed to make this live. The returned image
+              lands as a new top layer.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Prompt</span>
+              <input
+                type="text"
+                value={generativeFillPrompt}
+                onChange={(event) => setGenerativeFillPrompt(event.target.value)}
+                style={{ flex: 1 }}
+              />
+            </label>
+            {!generativeAiEndpoint && (
+              <p className="modal__hint">
+                No provider endpoint is configured — set one in External Services first.
+              </p>
+            )}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGenerativeFillDialog(false)}
+                title="Cancel"
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => void applyGenerativeFill()}
+                disabled={busy || generativeFillBusy || selectedId === null || !generativeAiEndpoint}
+                title="Call the configured provider and insert its response as a new layer"
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExternalServicesDialog && (
+        <div className="modal-overlay" onClick={() => setShowExternalServicesDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="External Services"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">External Services</h2>
+            <p className="modal__hint">
+              Generative Fill and Cloud Documents each need a real provider endpoint of
+              your own — this app has no server or model of its own to call. Both
+              values are kept only in this browser&apos;s own storage and sent only to
+              the endpoint you enter here.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Generative AI Endpoint</span>
+              <input
+                type="text"
+                value={generativeAiEndpoint}
+                onChange={(event) => setGenerativeAiEndpoint(event.target.value)}
+                placeholder="https://your-provider.example/generate"
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Generative AI API Key</span>
+              <input
+                type="password"
+                value={generativeAiApiKey}
+                onChange={(event) => setGenerativeAiApiKey(event.target.value)}
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Cloud Documents Endpoint</span>
+              <input
+                type="text"
+                value={cloudEndpoint}
+                onChange={(event) => setCloudEndpoint(event.target.value)}
+                placeholder="https://your-backend.example"
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Cloud Documents Token</span>
+              <input
+                type="password"
+                value={cloudToken}
+                onChange={(event) => setCloudToken(event.target.value)}
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Cloud Document Name</span>
+              <input
+                type="text"
+                value={cloudDocumentName}
+                onChange={(event) => setCloudDocumentName(event.target.value)}
+                style={{ flex: 1 }}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowExternalServicesDialog(false)}
+                title="Cancel"
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={saveExternalServicesSettings} title="Save these settings">
+                Save
               </button>
             </div>
           </div>

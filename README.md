@@ -17574,6 +17574,91 @@ fully-wired client-side integration layer rather than a hollow gesture.
 
 **1667 Rust tests total** (1663 → 1667, 1660 lib + 7 pipeline).
 
+## Phase 296 — Generative AI and Cloud Documents: the client integration layer
+
+The user rejected this session's earlier claim that Generative Fill and
+Cloud Documents were permanently out of reach, and asked for a real
+plan to put them in reach rather than a restated wall. This phase is
+that plan's first half: everything on this project's own side of the
+line is built, real, and tested. The other half of the line —
+credentials for a real image-generation provider, and a real backend
+for cloud storage — is not something a coding session can conjure into
+existence from nothing; it needs the user's own account with a real
+provider, or a real server the user stands up. What follows is exactly
+what's built, and exactly what remains.
+
+**Generative Fill.** A "Generative Fill…" dialog (Prompt, plus the
+document's own Width/Height) `fetch`es a POST to a provider endpoint
+configured in a new "External Services…" settings dialog, with the API
+key (also configured there) as a Bearer token. This project defines the
+request/response contract itself, since no single standard shape exists
+across real providers: `{ prompt, width, height }` out,
+`{ image: "<base64 PNG>" }` back. The returned base64 is decoded to
+bytes in the browser and handed to a new Rust primitive,
+`add_layer_from_bytes` (`png::decode_bytes` plus the same
+`Document::add_layer` every other image-insertion path already uses),
+which lands it as a new top layer — the same insertion point a pasted
+screenshot or a future clipboard paste would use.
+
+**What's still needed to make Generative Fill live:** a real
+image-generation provider (OpenAI's Images API, Stability AI,
+Replicate, or similar) reachable at a URL, and either that provider
+already speaking this project's own request/response shape, or a thin
+adapter — a few lines of serverless function or a small proxy — in
+front of it that translates this shape into whatever that provider's
+own API expects and translates its own image response back to
+`{ image: "<base64 PNG>" }`. Enter that URL and an API key into
+External Services and Generative Fill calls it on every Generate.
+
+**Cloud Documents.** `project::encode`/`project::decode` are `save`/
+`load`'s own project-file format, factored out from the filesystem I/O
+around them so the same bytes can round-trip somewhere other than disk.
+Two new Tauri commands, `export_project_bytes`/`import_project_bytes`,
+expose that in-memory round trip. "Save to Cloud" fetches those bytes
+and `PUT`s them to `{endpoint}/documents/{name}`; "Load from Cloud"
+`GET`s them back and hands them to `import_project_bytes`, replacing
+the open document exactly as Open Project already does — both against
+an endpoint and a bearer token configured in the same External Services
+dialog. This project again defines its own contract (`PUT`/`GET` raw
+project bytes at that one path shape) rather than adopting an existing
+standard, since there is no one already-agreed "document store" API.
+
+**What's still needed to make Cloud Documents live:** a real backend
+at that URL accepting `PUT`/`GET` of raw bytes under `/documents/<name>`
+with Bearer auth — this project has no server of its own to be that
+backend. The smallest real option is an object-storage bucket (S3,
+R2, or similar) behind a thin authenticating proxy; a slightly larger
+one is a small Express/Flask/serverless function backed by any
+key-value or blob store. Either way, once something answers at that
+shape, entering its URL and a token into External Services makes both
+buttons live immediately — no further changes to this app.
+
+**Verified two ways.** Ten new `project.rs` tests already existed for
+`save`/`load`'s own format; two more confirm `encode`/`decode`
+round-trip purely in memory and reject the same malformed bytes `load`
+does, with every existing `save`/`load` test re-passing unchanged after
+the refactor. This session's own second verification path — a
+Playwright browser session with a mocked `fetch` standing in for both a
+generative-image provider and a cloud backend — drove the full flow:
+entering settings in External Services, calling Generative Fill and
+confirming the exact POST body, headers, and the resulting
+`add_layer_from_bytes` call with the decoded image's own byte length;
+calling Save to Cloud and confirming the exact PUT URL, headers, and
+uploaded byte count; and calling Load from Cloud and confirming the
+fetched bytes reached `import_project_bytes` unchanged. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+Generative Fill, Generative Expand, and Photoshop Cloud Documents stay
+unchecked — no pixel is actually generated and no document is actually
+stored without the real provider/backend described above, and checking
+them off without one would be exactly the hollow gesture this session
+was asked not to make. What's checked off nowhere in this project is
+the honest, complete, tested client half of both, real and wired end to
+end, needing nothing further from this codebase to go live.
+
+**1669 Rust tests total** (1667 → 1669, 1662 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

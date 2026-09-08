@@ -168,7 +168,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 ## PART XXXVII — THE 39th SYSTEM: “WHAT SHOULD I USE?”
 
 - [x] Content-Aware Fill (`content_aware_fill`, every selected pixel replaced by the ring mean of its pre-fill surroundings, all four channels — the explicit proximity fill the Content-Aware Move leaves behind; Photoshop's patch synthesis, sampling-area brush, Color/Rotation Adaptation, Scale, and Mirror are documented scope cuts — see README Phase 185)
-- [ ] Generative Fill
+- [ ] Generative Fill (the client side is real and fully wired — a "Generative Fill…" dialog, a defined request/response contract, and `add_layer_from_bytes` to insert the result — see README Phase 296. Still unchecked: without a real image-generation provider behind the configured endpoint, no pixel is actually generated, and this project has no model or hosted service of its own to be that provider)
 - [ ] Generative Expand
 - [ ] Generate Background
 - [ ] Generate Similar
@@ -209,7 +209,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Collapsed Icon Panels
 - [ ] Floating Panels
 - [ ] Panel Stacking
-- [ ] Photoshop Cloud Documents
+- [ ] Photoshop Cloud Documents (the client side is real and fully wired — `export_project_bytes`/`import_project_bytes` round-trip the same project format `save_project`/`open_project` already do, and Save to Cloud/Load from Cloud send/fetch those bytes to a configured endpoint, PUT/GET `/documents/<name>` — see README Phase 296. Still unchecked: without a real backend behind that endpoint, there is nowhere for the bytes to actually go, and this project has no server of its own to be that backend)
 - [ ] Search Your Cloud Files
 - [ ] Invite to Edit
 - [ ] Share for Review

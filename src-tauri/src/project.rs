@@ -50,8 +50,12 @@ struct LayerManifest {
     png_len: u32,
 }
 
-/// Write `document` to `path` as a project file.
-pub fn save(document: &Document, path: &Path) -> Result<(), String> {
+/// Encode `document` as project-file bytes, in memory -- the format
+/// [`save`] itself writes to disk, and what [`decode`] reads back. Split
+/// out so a project can round-trip somewhere other than the filesystem
+/// (Cloud Documents' own upload, sending these same bytes to a
+/// user-configured endpoint instead of `std::fs::write`).
+pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
     let mut layers = Vec::with_capacity(document.layers().len());
     let mut layer_bytes = Vec::with_capacity(document.layers().len());
     for layer in document.layers() {
@@ -85,20 +89,22 @@ pub fn save(document: &Document, path: &Path) -> Result<(), String> {
     for bytes in layer_bytes {
         out.extend_from_slice(&bytes);
     }
-
-    std::fs::write(path, out).map_err(|err| format!("Could not write {}: {err}", path.display()))
+    Ok(out)
 }
 
-/// Read a project file back into a [`Document`], layer stack and all.
-pub fn load(path: &Path) -> Result<Document, String> {
-    let bytes =
-        std::fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+/// Write `document` to `path` as a project file.
+pub fn save(document: &Document, path: &Path) -> Result<(), String> {
+    let bytes = encode(document)?;
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
 
+/// Decode already-in-memory project-file `bytes` back into a [`Document`],
+/// layer stack and all -- [`load`]'s own format, minus the filesystem read,
+/// for a project fetched from somewhere other than disk (Cloud Documents'
+/// own download).
+pub fn decode(bytes: &[u8]) -> Result<Document, String> {
     if bytes.len() < MAGIC.len() + 4 || &bytes[..MAGIC.len()] != MAGIC {
-        return Err(format!(
-            "{} is not an image-editor project file.",
-            path.display()
-        ));
+        return Err("not an image-editor project file.".to_string());
     }
     let mut offset = MAGIC.len();
 
@@ -108,9 +114,9 @@ pub fn load(path: &Path) -> Result<Document, String> {
     let manifest_end = offset
         .checked_add(manifest_len)
         .filter(|&end| end <= bytes.len())
-        .ok_or_else(|| format!("{} is truncated (manifest).", path.display()))?;
+        .ok_or_else(|| "truncated (manifest).".to_string())?;
     let manifest: Manifest = serde_json::from_slice(&bytes[offset..manifest_end])
-        .map_err(|err| format!("{} has a corrupt project manifest: {err}", path.display()))?;
+        .map_err(|err| format!("Corrupt project manifest: {err}"))?;
     offset = manifest_end;
 
     let mut document = Document::new(manifest.width, manifest.height)?;
@@ -119,25 +125,15 @@ pub fn load(path: &Path) -> Result<Document, String> {
         let end = offset
             .checked_add(len)
             .filter(|&end| end <= bytes.len())
-            .ok_or_else(|| format!("{} is truncated (layer '{}').", path.display(), layer.name))?;
-        let decoded = png::decode_bytes(&bytes[offset..end]).map_err(|err| {
-            format!(
-                "{} has a corrupt layer '{}': {err}",
-                path.display(),
-                layer.name
-            )
-        })?;
+            .ok_or_else(|| format!("truncated (layer '{}').", layer.name))?;
+        let decoded = png::decode_bytes(&bytes[offset..end])
+            .map_err(|err| format!("Corrupt layer '{}': {err}", layer.name))?;
         offset = end;
 
         if decoded.width != manifest.width || decoded.height != manifest.height {
             return Err(format!(
-                "{}: layer '{}' is {}x{}, but the document is {}x{}.",
-                path.display(),
-                layer.name,
-                decoded.width,
-                decoded.height,
-                manifest.width,
-                manifest.height
+                "Layer '{}' is {}x{}, but the document is {}x{}.",
+                layer.name, decoded.width, decoded.height, manifest.width, manifest.height
             ));
         }
 
@@ -154,6 +150,13 @@ pub fn load(path: &Path) -> Result<Document, String> {
     }
 
     Ok(document)
+}
+
+/// Read a project file back into a [`Document`], layer stack and all.
+pub fn load(path: &Path) -> Result<Document, String> {
+    let bytes =
+        std::fs::read(path).map_err(|err| format!("Could not read {}: {err}", path.display()))?;
+    decode(&bytes).map_err(|err| format!("{}: {err}", path.display()))
 }
 
 #[cfg(test)]
@@ -209,6 +212,35 @@ mod tests {
         assert_eq!(reloaded_top.blend_mode, BlendMode::Multiply);
         assert!(reloaded_top.locked);
         assert_eq!(reloaded_top.pixels, solid(2, 2, [0, 255, 0, 200]));
+    }
+
+    #[test]
+    fn encode_and_decode_round_trip_purely_in_memory() {
+        // Cloud Documents' own path -- `save`/`load` minus the filesystem,
+        // for bytes that come from (and go to) a network call instead of a
+        // path. `save`/`load` already exercise the exact same bytes, so
+        // this only needs to confirm `encode`/`decode` themselves work
+        // without ever touching disk.
+        let mut document = Document::new(2, 1).unwrap();
+        document
+            .add_layer("only", &solid(2, 1, [10, 20, 30, 255]), 2, 1)
+            .unwrap();
+        let bytes = encode(&document).unwrap();
+        assert_eq!(&bytes[..MAGIC.len()], MAGIC);
+        let reloaded = decode(&bytes).unwrap();
+        assert_eq!((reloaded.width(), reloaded.height()), (2, 1));
+        assert_eq!(reloaded.layers()[0].name, "only");
+        assert_eq!(reloaded.layers()[0].pixels, solid(2, 1, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn decode_rejects_the_same_malformed_bytes_load_does() {
+        assert!(decode(b"NOTAPROJECTFILE")
+            .unwrap_err()
+            .contains("not an image-editor project file"));
+        let mut truncated = MAGIC.to_vec();
+        truncated.extend_from_slice(&1000u32.to_le_bytes());
+        assert!(decode(&truncated).unwrap_err().contains("truncated"));
     }
 
     #[test]

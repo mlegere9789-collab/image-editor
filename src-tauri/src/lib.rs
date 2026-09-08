@@ -1195,6 +1195,25 @@ fn add_layer(state: State<'_, AppState>, path: String) -> Result<Snapshot, Strin
     })
 }
 
+/// Add already-in-memory `bytes` (PNG-encoded) as a new top layer named
+/// `name`, exactly as [`add_layer`] does for a file on disk -- the primitive
+/// a fetched image (Generative Fill's own response, a pasted screenshot, a
+/// future clipboard paste) is inserted through, since it never has a
+/// filesystem path of its own.
+#[tauri::command]
+fn add_layer_from_bytes(
+    state: State<'_, AppState>,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<Snapshot, String> {
+    let decoded = png::decode_bytes(&bytes).map_err(|err| format!("Not a readable PNG: {err}"))?;
+    edit_checkpointed(&state, |document| {
+        document
+            .add_layer(name, &decoded.pixels, decoded.width, decoded.height)
+            .map(|_| None)
+    })
+}
+
 /// Layer > New Fill Layer > Solid Color: add a new top layer filled
 /// entirely with `color` (RGBA8). Always named "Color Fill 1" — there is
 /// no auto-incrementing layer-name scheme in this app yet (the first
@@ -6098,6 +6117,28 @@ fn open_project(state: State<'_, AppState>, path: String) -> Result<Snapshot, St
     replace_open_document(&state, document)
 }
 
+/// Cloud Documents' own upload: the open document as project-file bytes,
+/// in memory, exactly [`save_project`]'s own format minus the filesystem
+/// write -- for the frontend to send wherever a user-configured Cloud
+/// Documents endpoint expects them. Read-only, like `save_project`.
+#[tauri::command]
+fn export_project_bytes(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    project::encode(document)
+}
+
+/// Cloud Documents' own download: replace the open document with one
+/// decoded from already-in-memory project-file `bytes`, exactly
+/// [`open_project`]'s own format minus the filesystem read -- for bytes
+/// the frontend already fetched from a user-configured Cloud Documents
+/// endpoint.
+#[tauri::command]
+fn import_project_bytes(state: State<'_, AppState>, bytes: Vec<u8>) -> Result<Snapshot, String> {
+    let document = project::decode(&bytes)?;
+    replace_open_document(&state, document)
+}
+
 /// Snapshot the open document onto the undo stack, for the frontend to call
 /// once at the start of a multi-step gesture (a stroke, an opacity drag) —
 /// see [`edit`] vs [`edit_checkpointed`]. A no-op, not an error, when no
@@ -6159,6 +6200,7 @@ pub fn run() {
             open_document,
             new_document,
             add_layer,
+            add_layer_from_bytes,
             add_solid_color_layer,
             add_gradient_layer,
             set_layer_visible,
@@ -6573,6 +6615,8 @@ pub fn run() {
             export_artboard,
             save_project,
             open_project,
+            export_project_bytes,
+            import_project_bytes,
             checkpoint,
             undo,
             redo,
