@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 523.**
+**618 distinct capabilities tracked. Currently shipped: 524.**
 
 ## PART I — EVERY TOOL
 
@@ -78,7 +78,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] FOCUS AREA (`select_focus_area_with` / `focus_bits`: a pixel is in focus when the strongest Sobel edge within Spread pixels of it clears `255 · (100 − range) / 100`, combined with the selection by mode; Photoshop's Image Noise Level and Soften Edge are documented scope cuts — see README Phase 256)
 - [x] SKY SELECTION (`select_sky_with` / `sky_bits`: sky-coloured pixels — blue strongest and luma ≥ 80, or near-white clouds — joined 4-connected to the top edge, combined with the selection by mode; Photoshop's trained model is a documented scope cut — see README Phase 256)
 - [x] SUBJECT SELECTION (`select_subject_with`, the Object Selection finder over the whole canvas: the canvas edge's most common colour is the background and the largest connected thing that is not it is the subject — an explicit stand-in for Photoshop's neural detection — see README Phase 210)
-- [x] SELECT PEOPLE (`select_people_with` / `people_bits`, the largest 4-connected group of skin-toned pixels by a classic, explainable RGB rule (Kovac, Solina & Peer 2003) — this project's own explicit stand-in for Photoshop's neural person detection, the same kind Object/Subject Selection and Sky Selection already use. Individual Person Selection, Person Components, and Hair Selection/Refine Hair (PART VII) are documented scope cuts, since they need real per-instance segmentation this heuristic cannot give — see README Phase 265)
+- [x] SELECT PEOPLE (`select_people_with` / `people_bits`, the largest 4-connected group of skin-toned pixels by a classic, explainable RGB rule (Kovac, Solina & Peer 2003) — this project's own explicit stand-in for Photoshop's neural person detection, the same kind Object/Subject Selection and Sky Selection already use — see README Phase 265; Individual Person Selection indexes into the same finder's own components — see README Phase 287. Person Components and Hair Selection/Refine Hair (PART VII) remain documented scope cuts, since neither has a comparably honest heuristic reduction)
 - [x] MODIFY > BORDER
 - [x] MODIFY > SMOOTH
 - [x] MODIFY > EXPAND
@@ -296,7 +296,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Select Subject — Device Processing (Photoshop's own choice between an on-device model and Adobe's cloud service; this project's `select_subject` has exactly one code path, a local Rust heuristic with no network call of any kind, so it is on-device processing by construction — a documentation fix, not new work)
 - [ ] Select Subject — Cloud Processing (would need an actual online detection service this project has none of; a permanent scope cut, not merely deferred pending more time)
 - [x] Remove Background (`remove_background`, the subject kept and every other pixel of the layer made fully transparent, the selection left as it was — see README Phase 210)
-- [ ] Select People — Individual Person Selection
+- [x] Select People — Individual Person Selection (`people_bits_at`/`select_people_at_with`, README Phase 287: the finder's own connected components, sorted largest first, indexed instead of always taking the largest — a real, honest way to pick out one of several *separate* people in a photo. Two people who touch or overlap are still one component to this heuristic, which real per-instance segmentation would tell apart and this does not — Person Components and Hair Selection/Refine Hair remain documented scope cuts, since neither has a comparably honest heuristic reduction)
 - [ ] Select People — Person Components
 - [ ] Select People — Hair Selection
 - [ ] Refine Hair

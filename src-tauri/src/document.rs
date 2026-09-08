@@ -7672,17 +7672,23 @@ impl Document {
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
-    /// Select > People's finder: the largest 4-connected group of
-    /// skin-toned pixels ([`is_skin_tone`], the same classic RGB rule
-    /// Color Range's Skin Tones and Content-Aware Scale's Protect Skin
-    /// Tones already use) on layer `id`, one flag per pixel — this
-    /// project's own stand-in for Photoshop's neural person detection,
-    /// the same kind of explicit heuristic Object/Subject Selection and
-    /// Sky Selection already use. Individual Person Selection, Person
-    /// Components, and Hair Selection/Refine Hair are documented scope
-    /// cuts, since they need real per-instance segmentation this
-    /// heuristic cannot give. Errors for an unknown layer.
-    pub fn people_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
+    /// Select > People's finder: every 4-connected group of skin-toned
+    /// pixels ([`is_skin_tone`], the same classic RGB rule Color Range's
+    /// Skin Tones and Content-Aware Scale's Protect Skin Tones already
+    /// use) on layer `id`, each as flat pixel indices, sorted largest
+    /// first — this project's own stand-in for Photoshop's neural person
+    /// detection, the same kind of explicit heuristic Object/Subject
+    /// Selection and Sky Selection already use. Shared by
+    /// [`Self::people_bits`] (the largest, alone — Photoshop's own
+    /// default when Select People finds several) and
+    /// [`Self::people_bits_at`] (the `index`th largest, Individual
+    /// Person Selection for several *separate* people in one photo — two
+    /// people who touch or overlap are still one component to this
+    /// heuristic, which real per-instance segmentation would tell apart
+    /// and this does not; Person Components and Hair Selection/Refine
+    /// Hair remain documented scope cuts, since neither has a comparably
+    /// honest heuristic reduction). Errors for an unknown layer.
+    fn people_components(&self, id: LayerId) -> Result<Vec<Vec<usize>>, String> {
         let layer = self.layer(id)?;
         let (w, h) = (self.width as usize, self.height as usize);
         let skinlike: Vec<bool> = layer
@@ -7691,7 +7697,7 @@ impl Document {
             .map(|px| px[3] > 0 && is_skin_tone([px[0], px[1], px[2]]))
             .collect();
         let mut seen = vec![false; w * h];
-        let mut best: Vec<usize> = Vec::new();
+        let mut components: Vec<Vec<usize>> = Vec::new();
         for start in 0..skinlike.len() {
             if !skinlike[start] || seen[start] {
                 continue;
@@ -7715,13 +7721,21 @@ impl Document {
                     }
                 }
             }
-            if component.len() > best.len() {
-                best = component;
-            }
+            components.push(component);
         }
+        components.sort_by_key(|b| std::cmp::Reverse(b.len()));
+        Ok(components)
+    }
+
+    /// The largest of [`Self::people_components`], one flag per pixel —
+    /// see there for the full mechanism. Errors for an unknown layer.
+    pub fn people_bits(&self, id: LayerId) -> Result<Vec<bool>, String> {
+        let (w, h) = (self.width as usize, self.height as usize);
         let mut bits = vec![false; w * h];
-        for idx in best {
-            bits[idx] = true;
+        if let Some(largest) = self.people_components(id)?.first() {
+            for &idx in largest {
+                bits[idx] = true;
+            }
         }
         Ok(bits)
     }
@@ -7733,6 +7747,54 @@ impl Document {
         if !bits.contains(&true) {
             return Err("No person was found on the layer.".to_string());
         }
+        let (width, height) = (self.width, self.height);
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// How many separate people [`Self::people_components`] can currently
+    /// tell apart on layer `id` — the count Individual Person Selection's
+    /// own index picks among. Errors for an unknown layer.
+    pub fn people_count(&self, id: LayerId) -> Result<usize, String> {
+        Ok(self.people_components(id)?.len())
+    }
+
+    /// Select > People > Individual Person Selection: the `index`th
+    /// largest of [`Self::people_components`] (`index` 0 is the largest,
+    /// matching [`Self::people_bits`] exactly), one flag per pixel. An
+    /// `index` at or past [`Self::people_count`] is an error rather than
+    /// an empty selection, so a caller iterating people never mistakes
+    /// running out for one being empty.
+    pub fn people_bits_at(&self, id: LayerId, index: usize) -> Result<Vec<bool>, String> {
+        let (w, h) = (self.width as usize, self.height as usize);
+        let components = self.people_components(id)?;
+        let component = components.get(index).ok_or_else(|| {
+            format!(
+                "Only {} {} found on this layer.",
+                components.len(),
+                if components.len() == 1 {
+                    "person was"
+                } else {
+                    "people were"
+                }
+            )
+        })?;
+        let mut bits = vec![false; w * h];
+        for &idx in component {
+            bits[idx] = true;
+        }
+        Ok(bits)
+    }
+
+    /// Select > People > Individual Person Selection: [`Self::people_bits_at`]
+    /// combined with the current selection per `mode`. Errors when
+    /// `index` is out of range or the layer is unknown.
+    pub fn select_people_at_with(
+        &mut self,
+        mode: SelectionMode,
+        id: LayerId,
+        index: usize,
+    ) -> Result<(), String> {
+        let bits = self.people_bits_at(id, index)?;
         let (width, height) = (self.width, self.height);
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
@@ -52331,6 +52393,80 @@ mod tests {
             .unwrap_err()
             .contains("person"));
         assert!(doc.select_people_with(SelectionMode::New, 999).is_err());
+    }
+
+    #[test]
+    fn people_bits_at_zero_matches_people_bits_exactly() {
+        // Index 0 is the largest component, the same one people_bits
+        // itself always returns -- an equivalence check, no fresh
+        // derivation needed.
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[vec![skin, skin, bg, skin, skin, skin]]);
+        assert_eq!(
+            doc.people_bits(id).unwrap(),
+            doc.people_bits_at(id, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn people_bits_at_picks_out_one_of_several_separate_people() {
+        // Two skin-toned blocks separated by background on every side are
+        // two separate 4-connected components: a 2-pixel block (indices
+        // 0, 1) and a 3-pixel block (indices 6, 7, 8) on the row below,
+        // with row 1 all background keeping them apart.
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[
+            vec![skin, skin, bg],
+            vec![bg, bg, bg],
+            vec![skin, skin, skin],
+        ]);
+        assert_eq!(doc.people_count(id).unwrap(), 2);
+        // The larger block (3 pixels) is index 0.
+        assert_eq!(
+            doc.people_bits_at(id, 0).unwrap(),
+            vec![false, false, false, false, false, false, true, true, true]
+        );
+        // The smaller block (2 pixels) is index 1.
+        assert_eq!(
+            doc.people_bits_at(id, 1).unwrap(),
+            vec![true, true, false, false, false, false, false, false, false]
+        );
+    }
+
+    #[test]
+    fn select_people_at_with_selects_the_chosen_person_and_combines_by_mode() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (mut doc, id) = row_doc(&[
+            vec![skin, skin, bg],
+            vec![bg, bg, bg],
+            vec![skin, skin, skin],
+        ]);
+        doc.select_people_at_with(SelectionMode::New, id, 1)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![true, true, false, false, false, false, false, false, false]
+        );
+        doc.select_people_at_with(SelectionMode::Add, id, 0)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![true, true, false, false, false, false, true, true, true]
+        );
+    }
+
+    #[test]
+    fn people_bits_at_errors_past_the_number_found() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[vec![skin, skin, bg]]);
+        assert_eq!(doc.people_count(id).unwrap(), 1);
+        assert!(doc.people_bits_at(id, 1).unwrap_err().contains("1 person"));
+        assert!(doc.people_bits_at(999, 0).is_err());
+        assert!(doc.people_count(999).is_err());
     }
 
     /// A `21x21` grey canvas with a coloured marker pixel at `(x, y)`.

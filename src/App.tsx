@@ -586,6 +586,10 @@ export default function App() {
   const [moveSelectionX, setMoveSelectionX] = useState(0);
   const [moveSelectionY, setMoveSelectionY] = useState(0);
   const [selectionMode, setSelectionMode] = useState<SelectionMode>("new");
+  // Select > People > Individual Person Selection: which of the separate
+  // people people_count found to select (0 = the largest, matching plain
+  // Select People).
+  const [personIndex, setPersonIndex] = useState(0);
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -7587,6 +7591,34 @@ export default function App() {
             title="Select > People: the largest connected skin-toned region (this app's stand-in for neural person detection)"
           >
             Select People
+          </button>
+          <label
+            className="tools__slider"
+            title="Select > People > Individual Person Selection: the Nth-largest separate skin-toned region, 0 = the largest"
+          >
+            Person #
+            <input
+              type="number"
+              min={0}
+              value={personIndex}
+              onChange={(event) => setPersonIndex(Math.max(0, Math.round(Number(event.target.value))))}
+              style={{ width: "3em" }}
+            />
+          </label>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null)
+                void runCommand("select_people_at", {
+                  id: selectedId,
+                  index: personIndex,
+                  mode: selectionMode,
+                });
+            }}
+            disabled={busy || selectedId === null}
+            title="Select > People > Individual Person Selection: select the chosen Person # instead of always the largest"
+          >
+            Select Person #
           </button>
           <button
             className="button button--quiet"

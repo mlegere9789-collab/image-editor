@@ -17111,6 +17111,53 @@ radius }` its Apply button should. `cargo fmt`,
 
 **1645 Rust tests total** (1641 → 1645, 1638 lib + 7 pipeline).
 
+## Phase 287 — Select People > Individual Person Selection
+
+A third wall this session reconsidered and found unnecessary: Select
+People's own doc comment called Individual Person Selection a scope cut
+needing "real per-instance segmentation this heuristic cannot give." That
+is true for two people who touch or overlap in frame — but most photos
+where picking out "an individual person" matters have several *separate*
+people, each already its own 4-connected skin-toned component under the
+finder Select People already runs. Nothing about the finder needed to
+change; it just needed to stop throwing every component away except the
+largest.
+
+`people_bits`'s own connected-component search became `people_components`,
+returning every component it finds, sorted largest first, instead of only
+ever keeping the biggest as it built up. `people_bits` is now four lines
+built on that (the largest, alone — behaviourally identical, confirmed by
+all 5 of its own pre-existing tests passing unchanged). `people_bits_at(id,
+index)` takes the `index`th largest instead — index 0 is the largest,
+so it agrees with `people_bits` exactly there — and a new `people_count`
+reports how many separate people the finder currently tells apart, the
+range `index` picks among. A new "Person #" field next to the toolbar's
+own Select People button, and a "Select Person #" button beside it, call
+`select_people_at` instead of `select_people` when a specific person
+(rather than always the largest) is wanted.
+
+**Verified two ways.** Four new `document.rs` tests, three of them
+building on the existing `row_doc` fixture: an equivalence check
+confirms `people_bits_at(id, 0)` matches `people_bits` exactly, no fresh
+derivation needed; a second places two skin-toned blocks (2 and 3 pixels)
+separated by a row of background, confirming `people_count` finds
+exactly 2 and each index returns the correct block, largest first; a
+third confirms `select_people_at_with` selects the chosen person and
+still combines by `SelectionMode` correctly; a fourth confirms an
+`index` at or past the count errors by name (`"Only 1 person..."`) rather
+than silently returning an empty selection. All four passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed
+setting Person # to 2 and clicking "Select Person #" sends the exact
+`{ id, index: 2, mode }` `select_people_at` should. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1649 Rust tests total** (1645 → 1649, 1642 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

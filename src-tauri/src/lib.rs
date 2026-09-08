@@ -4130,6 +4130,32 @@ fn select_people(
     })
 }
 
+/// Select > People's own count of separate people it can currently tell
+/// apart on layer `id` — the range Individual Person Selection's own
+/// index picks among. Read-only.
+#[tauri::command]
+fn people_count(state: State<'_, AppState>, id: LayerId) -> Result<usize, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.people_count(id)
+}
+
+/// Select > People > Individual Person Selection: the `index`th largest
+/// separate person [`people_count`] can tell apart, rather than always
+/// the largest.
+#[tauri::command]
+fn select_people_at(
+    state: State<'_, AppState>,
+    id: LayerId,
+    index: usize,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.select_people_at_with(mode.unwrap_or(document::SelectionMode::New), id, index)?;
+        Ok(None)
+    })
+}
+
 /// Object Selection's Object Finder: the objects on layer `id` as boxes,
 /// largest first. Read-only; Refresh asks again.
 #[tauri::command]
@@ -6083,6 +6109,8 @@ pub fn run() {
             select_focus_area,
             select_sky,
             select_people,
+            people_count,
+            select_people_at,
             set_fill,
             add_vector_mask,
             remove_layer_mask,
