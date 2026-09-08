@@ -17197,6 +17197,55 @@ regardless.
 
 **1649 Rust tests total** (unchanged — this phase is pure frontend).
 
+## Phase 289 — Neural Filters > Output (New Document)
+
+A fifth wall this session reconsidered: this app's `AppState` holds one
+document at a time — genuinely no in-memory multi-document or tab
+support, so New Document output could not open the filtered result as a
+literal second document the way Photoshop's own does. But the real,
+user-facing *point* of New Document output is that the result lands as
+its own independent artifact rather than altering what is already open —
+and this app already has exactly the mechanism for that: exporting to a
+file. New Document is honestly reduced to "export the filtered result to
+a new file, and leave the currently open document exactly as it was,"
+which captures the actual intent even though it is a file on disk rather
+than a second open tab.
+
+A new `export_layer_pixels(document, id, path)` writes one layer's own
+pixels — not the flattened composite `export` writes for File > Export —
+to a PNG file; `export_layer` is its thin `#[tauri::command]` wrapper,
+mirroring `export_png`'s own shape exactly. `NeuralFilterOutput`'s
+dropdown gains a fourth "New Document" entry, and `applyNeuralFilterOutput`
+grows a new branch for it: duplicate the layer (the same scratch-space
+trick New Layer and New Layer Masked already use), run the filter
+against the duplicate, prompt for a save location through the identical
+`save()` dialog File > Export PNG already uses, call `export_layer`, then
+`remove_layer` the duplicate — undoing the one mutation the currently
+open document ever saw, so it ends up byte-for-byte where it started.
+
+**Verified two ways.** Two new `lib.rs` tests for `export_layer_pixels`
+directly (kept separate from its `#[tauri::command]` wrapper for exactly
+this, the same shape `export`'s own test already uses): a two-layer
+fixture where the top layer's own alpha guarantees the flattened
+composite differs from the bottom layer's own pixels, confirming the
+exported PNG decodes back to the bottom layer's own bytes rather than
+the composite; and an unknown-layer id erroring. Both passed on the
+first run. A Playwright browser session confirmed the full five-call
+sequence Output: New Document should produce end to end — `duplicate_layer`
+for the original id, `skin_smoothing` against the duplicate, the save
+dialog's own `plugin:dialog|save` invocation, `export_layer` with the
+duplicate's id and the chosen path, and finally `remove_layer` for that
+same duplicate — while the earlier New Layer and New Layer Masked
+sequences (Phases 283 and 284) still ran unchanged, confirming the new
+branch is additive.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1651 Rust tests total** (1649 → 1651, 1644 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

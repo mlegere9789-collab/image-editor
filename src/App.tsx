@@ -316,8 +316,8 @@ function NeuralFilterOutput({
   value,
   onChange,
 }: {
-  value: "current" | "new" | "newMasked";
-  onChange: (value: "current" | "new" | "newMasked") => void;
+  value: "current" | "new" | "newMasked" | "newDocument";
+  onChange: (value: "current" | "new" | "newMasked" | "newDocument") => void;
 }) {
   return (
     <label className="control control--row" title="Neural Filters panel's own Output control">
@@ -325,12 +325,13 @@ function NeuralFilterOutput({
       <select
         value={value}
         onChange={(event) =>
-          onChange(event.target.value as "current" | "new" | "newMasked")
+          onChange(event.target.value as "current" | "new" | "newMasked" | "newDocument")
         }
       >
         <option value="current">Current Layer</option>
         <option value="new">New Layer</option>
         <option value="newMasked">New Layer Masked</option>
+        <option value="newDocument">New Document</option>
       </select>
     </label>
   );
@@ -1204,7 +1205,7 @@ export default function App() {
   // Neural Filters > Output: shared across every Neural Filter dialog,
   // since only one is ever open at once.
   const [neuralFilterOutput, setNeuralFilterOutput] = useState<
-    "current" | "new" | "newMasked"
+    "current" | "new" | "newMasked" | "newDocument"
   >("current");
   const [skinSmoothingRadius, setSkinSmoothingRadius] = useState(5);
   const [skinSmoothingThreshold, setSkinSmoothingThreshold] = useState(15);
@@ -3689,17 +3690,25 @@ export default function App() {
 
   // Neural Filters > Output: Current Layer (the default, edits `targetId`
   // in place), New Layer (Duplicate Layer first, then run `command`
-  // against the duplicate instead), or New Layer Masked (the same
+  // against the duplicate instead), New Layer Masked (the same
   // duplicate, then a Reveal All white mask added afterward so the
-  // filtered result can be painted away selectively) -- Photoshop's own
-  // Neural Filters panel offers the identical three choices for where a
-  // filter's result lands. Smart Filter and New Document outputs are a
-  // documented scope cut: this app has no Smart Filter/adjustment-layer
-  // wrapping to attach a live filter reference to.
+  // filtered result can be painted away selectively), or New Document
+  // (the duplicate, filtered, exported to a new file, then removed
+  // again -- this app holds one document at a time, with no in-memory
+  // multi-document/tab support to open a second document into, so "new
+  // document" is honestly reduced to "a new, independent file on disk,"
+  // and the currently open document ends up completely untouched,
+  // exactly as Photoshop's own New Document output leaves it). Smart
+  // Filter is a documented scope cut: this app has no Smart Filter/
+  // adjustment-layer wrapping to attach a *live* filter reference to.
   const applyNeuralFilterOutput = useCallback(
     async (command: string, args: Record<string, unknown>, targetId: number) => {
       let id = targetId;
-      if (neuralFilterOutput === "new" || neuralFilterOutput === "newMasked") {
+      const duplicating =
+        neuralFilterOutput === "new" ||
+        neuralFilterOutput === "newMasked" ||
+        neuralFilterOutput === "newDocument";
+      if (duplicating) {
         const dup = await invoke<Snapshot>("duplicate_layer", { id: targetId });
         const layers = dup.document.layers;
         const index = layers.findIndex((layer) => layer.id === targetId);
@@ -3713,6 +3722,15 @@ export default function App() {
         setCanUndo(masked.canUndo);
         setCanRedo(masked.canRedo);
         setHasHistorySource(masked.hasHistorySource);
+      } else if (neuralFilterOutput === "newDocument") {
+        const destination = await save({ filters: PNG_FILTER, defaultPath: "untitled.png" });
+        if (typeof destination === "string") {
+          await invoke("export_layer", { id, path: destination });
+        }
+        // Leave the currently open document exactly as it was: remove
+        // the duplicate this output mode only ever needed as scratch
+        // space to filter and export from.
+        await runCommand("remove_layer", { id });
       }
     },
     [runCommand, neuralFilterOutput],

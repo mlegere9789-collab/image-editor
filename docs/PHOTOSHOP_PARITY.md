@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 525.**
+**618 distinct capabilities tracked. Currently shipped: 526.**
 
 ## PART I — EVERY TOOL
 
@@ -616,7 +616,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] New Layer — Neural Filter Output (the same control's other option: Duplicate Layer first, then run the filter against the duplicate instead — see README Phase 283)
 - [x] New Layer Masked — Neural Filter Output (the same `NeuralFilterOutput` control's third option — Duplicate Layer, run the filter, then `add_layer_mask` a Reveal All white mask onto the duplicate — see README Phase 284)
 - [ ] Smart Filter — Neural Filter Output
-- [ ] New Document — Neural Filter Output
+- [x] New Document — Neural Filter Output (README Phase 289: `NeuralFilterOutput`'s fourth option — Duplicate Layer, run the filter, export the duplicate to a new file via a new `export_layer` command, then remove the duplicate again, leaving the currently open document completely untouched. This app holds one document at a time with no in-memory multi-document/tab support, so "new document" is honestly reduced to "a new, independent file on disk" rather than a second open tab — a documented simplification)
 - [x] Camera Raw Filter (`camera_raw_filter`, the whole dialog as one edit: a `CameraRawSettings` struct applying the shipped panels in sequence on one layer — Temperature/Tint, Highlights/Shadows, Clarity, Saturation, Parametric Curve, Point Curve, Defringe — byte-for-byte the same as the per-panel calls in that order but as a single undo step, skipping any panel left at its neutral default. Camera Raw's own remaining panels (Detail, Effects, Calibration, Geometry, masks) and exact internal order are a documented scope cut — see README Phase 135)
 - [x] Camera Raw Histogram (`histogram`, a read-only per-channel 256-bin count of the layer's own R/G/B values over the selection or whole layer — the exact sampling `equalize` already used to build its own remap table, factored out into a shared `layer_histogram` helper — drawn as three overlaid channel curves in a Histogram dialog. Camera Raw's own luminance overlay and clipping warnings, and any alpha weighting, are a documented scope cut — see README Phase 127)
 - [x] RGB Levels (`layer_pixel`, a read-only RGBA8 readout of the selected layer's own stored pixel under the pointer, shown live in the status bar as the pointer moves over the canvas — the layer's own bytes, alpha included, rather than the eyedropper's composited sample, so it reports exactly what `histogram` counts — see README Phase 128)

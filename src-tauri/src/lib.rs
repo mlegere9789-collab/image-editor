@@ -5926,6 +5926,31 @@ fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
     export(document, Path::new(&path))
 }
 
+/// Neural Filters > New Document output, and generally: write layer
+/// `id`'s own pixels — not the flattened composite [`export`] writes —
+/// to `path` as a new, independent PNG file, the real outcome
+/// Photoshop's own New Document output reaches for a filter's result.
+/// This app holds one document at a time, with no in-memory multi-
+/// document/tab support to open a second document into, so "new
+/// document" is honestly reduced to "a new file on disk" rather than a
+/// second open tab — a documented simplification. Kept separate from
+/// the `#[tauri::command]` wrapper below so it can be unit-tested
+/// directly, the same way `export` is.
+fn export_layer_pixels(document: &Document, id: LayerId, path: &Path) -> Result<(), String> {
+    let pixels = document.layer_pixels(id)?;
+    let bytes = png::encode_pixels(document.width(), document.height(), &pixels)?;
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+/// Reads the open document without mutating it, so there is no
+/// [`Snapshot`] to return — see [`export_layer_pixels`] for the mechanism.
+#[tauri::command]
+fn export_layer(state: State<'_, AppState>, id: LayerId, path: String) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    export_layer_pixels(document, id, Path::new(&path))
+}
+
 /// The Artboard Tool: adds a named region of the canvas.
 #[tauri::command]
 fn add_artboard(
@@ -6455,6 +6480,7 @@ pub fn run() {
             reselect,
             deselect,
             export_png,
+            export_layer,
             add_artboard,
             rename_artboard,
             delete_artboard,
@@ -6656,6 +6682,36 @@ mod tests {
         let decoded = png::read(&path).unwrap();
         assert_eq!((decoded.width, decoded.height), (2, 1));
         assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn export_layer_pixels_writes_one_layers_own_pixels_not_the_composite() {
+        // Two layers whose flattened composite differs from either
+        // layer's own pixels (the top one is at half opacity), so this
+        // test only passes if export_layer_pixels reads the bottom
+        // layer's own bytes directly rather than accidentally flattening.
+        let mut document = Document::new(1, 1).unwrap();
+        let bottom = document.add_layer("bottom", &[0, 0, 0, 255], 1, 1).unwrap();
+        document.add_layer("top", &[255, 0, 0, 128], 1, 1).unwrap();
+        assert_ne!(
+            composite::flatten(&document).pixels,
+            vec![0, 0, 0, 255],
+            "the composite must actually differ from the bottom layer for this test to mean anything"
+        );
+
+        let path = std::env::temp_dir().join("lib_rs_export_layer_ok.png");
+        export_layer_pixels(&document, bottom, &path).unwrap();
+
+        let decoded = png::read(&path).unwrap();
+        assert_eq!((decoded.width, decoded.height), (1, 1));
+        assert_eq!(decoded.pixels, vec![0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn export_layer_pixels_errors_for_an_unknown_layer() {
+        let document = Document::new(1, 1).unwrap();
+        let path = std::env::temp_dir().join("lib_rs_export_layer_missing.png");
+        assert!(export_layer_pixels(&document, 999, &path).is_err());
     }
 
     #[test]
