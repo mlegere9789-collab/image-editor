@@ -17659,6 +17659,28 @@ end, needing nothing further from this codebase to go live.
 
 **1669 Rust tests total** (1667 → 1669, 1662 lib + 7 pipeline).
 
+## Phase 297 — Don't Color Manage This Document
+
+A documentation fix, not new work, in the same vein as Select Subject —
+Device Processing: Photoshop's own Don't Color Manage This Document
+turns off automatic, implicit colour conversion during compositing,
+display, and export. Grepping `composite.rs`, `png.rs`, and `blend.rs`
+for every reference to `Document::profile` turns up none at all — this
+project's own composite/display/export pipeline never once reads the
+document's profile. Colour never moves between spaces except through
+an explicit `assign_profile`/`convert_to_profile` call the user
+themselves runs (README Phase 292). That is Don't Color Manage's own
+behaviour by construction, not merely one matching option among
+several this app happens to also support — this app is *always* in
+that mode for compositing and export, with Assign/Convert Profile as
+the one deliberate, on-demand exception.
+
+Don't Color Manage This Document flips to shipped (537/618) on the
+strength of that grep, independently re-run and confirmed against the
+three files before writing this section. No code changed and no new
+tests were needed: the shipped count moves from an existing capability
+newly recognised, not a feature newly built.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

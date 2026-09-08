@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 536.**
+**618 distinct capabilities tracked. Currently shipped: 537.**
 
 ## PART I — EVERY TOOL
 
@@ -415,7 +415,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Output Device Profile
 - [x] Document Profile (`Document::profile()`, README Phase 292: the working space currently in effect, shown by the toolbar's own Assign Profile select and travelling in `DocumentView` to the frontend)
 - [x] Assign Profile (`assign_profile(profile)`: relabels the document's own working space without touching a single pixel, exactly Photoshop's own Assign Profile — see README Phase 292)
-- [ ] Don't Color Manage This Document
+- [x] Don't Color Manage This Document (Photoshop's own option turns off automatic, implicit colour conversion during compositing, display, and export. This project's own composite/display/export pipeline — `composite.rs`, `png.rs`, `blend.rs` — never once reads `Document::profile` at all: colour never moves between spaces except through an explicit `assign_profile`/`convert_to_profile` call the user themselves runs. That is Don't Color Manage's own behaviour by construction, not merely a matching option among several — a documentation fix confirmed by grepping those three files for every reference to `profile`, not new work)
 - [x] Working RGB (the toolbar's own Assign Profile select choosing between the two real working spaces this project models, sRGB and Adobe RGB (1998) — see README Phase 292)
 - [x] Convert to Profile (`convert_to_profile(profile)`: every layer's own pixels remapped through `convert_profile_pixel`'s real, published D65 RGB↔XYZ matrices — unlike Assign Profile, an actual numeric conversion — see README Phase 292)
 - [ ] Conversion Engine
