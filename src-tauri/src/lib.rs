@@ -2198,6 +2198,20 @@ fn harmonize(state: State<'_, AppState>, id: LayerId, fade: u32) -> Result<Snaps
     edit_checkpointed(&state, |document| document.harmonize(id, fade))
 }
 
+/// Neural Filters > JPEG Artifacts Removal on layer `id`: a classic
+/// deblocking filter smoothing pixels on or next to an 8x8 JPEG block
+/// boundary.
+#[tauri::command]
+fn jpeg_artifacts_removal(
+    state: State<'_, AppState>,
+    id: LayerId,
+    strength: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.jpeg_artifacts_removal(id, strength)
+    })
+}
+
 /// Neural Filters > Color Transfer on layer `id`, Match Color's own
 /// statistical transfer under its newer name.
 #[tauri::command]
@@ -6105,6 +6119,7 @@ pub fn run() {
             auto_color,
             match_color,
             harmonize,
+            jpeg_artifacts_removal,
             color_transfer,
             maximum,
             minimum,

@@ -1204,6 +1204,8 @@ export default function App() {
   const [matchColorFade, setMatchColorFade] = useState(100);
   const [showHarmonizeDialog, setShowHarmonizeDialog] = useState(false);
   const [harmonizeFade, setHarmonizeFade] = useState(100);
+  const [showJpegArtifactsRemovalDialog, setShowJpegArtifactsRemovalDialog] = useState(false);
+  const [jpegArtifactsRemovalStrength, setJpegArtifactsRemovalStrength] = useState(100);
   const [displaceHorizontalScale, setDisplaceHorizontalScale] = useState(10);
   const [displaceVerticalScale, setDisplaceVerticalScale] = useState(10);
   const [displaceWrapAround, setDisplaceWrapAround] = useState(false);
@@ -3655,6 +3657,18 @@ export default function App() {
     await runCommand("harmonize", { id: selectedId, fade: harmonizeFade });
     setShowHarmonizeDialog(false);
   }, [runCommand, selectedId, harmonizeFade]);
+
+  // Neural Filters > JPEG Artifacts Removal: a classic deblocking filter
+  // smoothing pixels on or next to an 8x8 JPEG block boundary, the same
+  // real, non-AI technique video codecs use at their own block edges.
+  const applyJpegArtifactsRemoval = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("jpeg_artifacts_removal", {
+      id: selectedId,
+      strength: jpegArtifactsRemovalStrength,
+    });
+    setShowJpegArtifactsRemovalDialog(false);
+  }, [runCommand, selectedId, jpegArtifactsRemovalStrength]);
 
   // Neural Filters > Color Transfer: Match Color's own statistical
   // transfer under its newer name, sharing this dialog's Source Layer
@@ -6317,6 +6331,10 @@ export default function App() {
     { label: "Stroke Outline", activate: () => setShowStrokeOutlineDialog(true) },
     { label: "Skin Smoothing", activate: () => setShowSkinSmoothingDialog(true) },
     { label: "Harmonize", activate: () => setShowHarmonizeDialog(true) },
+    {
+      label: "JPEG Artifacts Removal",
+      activate: () => setShowJpegArtifactsRemovalDialog(true),
+    },
     { label: "Sumi-e", activate: () => setShowSumiEDialog(true) },
     { label: "Surface Blur", activate: () => setShowSurfaceBlurDialog(true) },
     { label: "Temperature Tint", activate: () => setShowTemperatureTintDialog(true) },
@@ -7864,6 +7882,14 @@ export default function App() {
             title="Neural Filters > Harmonize"
           >
             Harmonize…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowJpegArtifactsRemovalDialog(true)}
+            disabled={busy || !canPaint}
+            title="Neural Filters > JPEG Artifacts Removal"
+          >
+            JPEG Artifacts Removal…
           </button>
           <button
             className="button button--quiet"
@@ -10117,6 +10143,57 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={() => void applyHarmonize()} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showJpegArtifactsRemovalDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowJpegArtifactsRemovalDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="JPEG Artifacts Removal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Neural Filters &gt; JPEG Artifacts Removal</h2>
+            <p className="modal__hint">
+              Smooths pixels on or next to an 8x8 JPEG block boundary — a classic deblocking
+              filter, the same real technique video codecs use at their own block edges.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Strength
+                <span className="control__value">{jpegArtifactsRemovalStrength}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={jpegArtifactsRemovalStrength}
+                onChange={(event) =>
+                  setJpegArtifactsRemovalStrength(Number(event.target.value))
+                }
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowJpegArtifactsRemovalDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => void applyJpegArtifactsRemoval()}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>

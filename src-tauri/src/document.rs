@@ -10928,6 +10928,50 @@ impl Document {
         self.match_color_to_pixels(id, &source_pixels, fade)
     }
 
+    /// Neural Filters > JPEG Artifacts Removal on layer `id`: a classic
+    /// deblocking filter, the same real, non-AI technique video codecs use
+    /// at their own 8x8 macroblock boundaries. JPEG's own DCT compression
+    /// works in 8x8 pixel blocks, and its visible artifact is a
+    /// discontinuity right at those block edges; a pixel on or next to an
+    /// 8-pixel grid line (`row % 8` or `col % 8` is 0 or 7) is blended
+    /// toward [`box_blur_at`]'s 3x3 neighbourhood average by `strength`
+    /// percent, smoothing exactly the seams JPEG blocking produces. A
+    /// pixel in a block's interior is left completely untouched, since
+    /// blocking artifacts by definition sit on block boundaries, not in
+    /// their centres. Alpha is untouched throughout. Errors on a `strength`
+    /// over 100, a locked layer, or an unknown `id`.
+    pub fn jpeg_artifacts_removal(
+        &mut self,
+        id: LayerId,
+        strength: u32,
+    ) -> Result<Option<Rect>, String> {
+        if strength > 100 {
+            return Err("Strength must be between 0 and 100.".to_string());
+        }
+        let width = self.width as i64;
+        let height = self.height as i64;
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, |source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [
+                source[base],
+                source[base + 1],
+                source[base + 2],
+                source[base + 3],
+            ];
+            let on_block_edge = matches!(row % 8, 0 | 7) || matches!(col % 8, 0 | 7);
+            if !on_block_edge {
+                return out;
+            }
+            let smoothed = box_blur_at(source, doc_width, width, height, row, col, 1);
+            for c in 0..3 {
+                let delta = smoothed[c] as i32 - out[c] as i32;
+                out[c] = (out[c] as i32 + delta * strength as i32 / 100).clamp(0, 255) as u8;
+            }
+            out
+        })
+    }
+
     /// Neural Filters > Color Transfer: "transfers a color palette from
     /// reference imagery to another image," Photoshop's own description
     /// for its newer, AI-branded panel — but the palette transfer itself
@@ -24854,6 +24898,88 @@ mod tests {
             .add_layer("only", &solid(2, 2, [1, 2, 3, 255]), 2, 2)
             .unwrap();
         assert!(lonely.harmonize(only, 100).unwrap_err().contains("other"));
+    }
+
+    // A 9x9 layer built from the same 9-pixel row repeated on every row, so
+    // vertical clamped sampling never mixes in a different value and each
+    // column's own block-edge behaviour can be probed on an interior row
+    // (row 4: row % 8 == 4, neither 0 nor 7) without row itself ever
+    // qualifying as a block edge.
+    fn jpeg_block_row_doc() -> (Document, LayerId) {
+        let row: [[u8; 4]; 9] = [
+            [0, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [100, 0, 0, 255],
+            [200, 0, 0, 255],
+        ];
+        let pixels: Vec<u8> = row.to_vec().concat();
+        let pixels: Vec<u8> = std::iter::repeat(pixels).take(9).flatten().collect();
+        let mut doc = Document::new(9, 9).unwrap();
+        let id = doc.add_layer("rows", &pixels, 9, 9).unwrap();
+        (doc, id)
+    }
+
+    fn jpeg_pixel_at(doc: &Document, row: usize, col: usize) -> u8 {
+        doc.layers()[0].pixels[(row * 9 + col) * CHANNELS]
+    }
+
+    #[test]
+    fn jpeg_artifacts_removal_smooths_block_boundary_pixels_by_strength() {
+        let (mut doc, id) = jpeg_block_row_doc();
+        doc.jpeg_artifacts_removal(id, 100).unwrap();
+        // col 0: clamped 3x3 average of [0, 0, 100] (x3 row-repeats) = 33.
+        assert_eq!(jpeg_pixel_at(&doc, 4, 0), 33);
+        // col 7: clamped 3x3 average of [100, 100, 200] (x3 repeats) = 133.
+        assert_eq!(jpeg_pixel_at(&doc, 4, 7), 133);
+        // col 8: clamped 3x3 average of [100, 200, 200] (x3 repeats) = 166.
+        assert_eq!(jpeg_pixel_at(&doc, 4, 8), 166);
+        // Interior columns 1..=6 on the interior row are untouched.
+        for col in 1..=6 {
+            assert_eq!(jpeg_pixel_at(&doc, 4, col), 100);
+        }
+    }
+
+    #[test]
+    fn jpeg_artifacts_removal_blends_partially_by_strength() {
+        let (mut doc, id) = jpeg_block_row_doc();
+        doc.jpeg_artifacts_removal(id, 50).unwrap();
+        // col 0's smoothed average is 33 (as above); at 50% strength the
+        // blend from 0 is (33 - 0) * 50 / 100 = 16, truncating toward zero.
+        assert_eq!(jpeg_pixel_at(&doc, 4, 0), 16);
+    }
+
+    #[test]
+    fn jpeg_artifacts_removal_leaves_alpha_untouched() {
+        let (mut doc, id) = jpeg_block_row_doc();
+        doc.jpeg_artifacts_removal(id, 100).unwrap();
+        for col in 0..9 {
+            assert_eq!(doc.layers()[0].pixels[(4 * 9 + col) * CHANNELS + 3], 255);
+        }
+    }
+
+    #[test]
+    fn jpeg_artifacts_removal_is_confined_to_the_selection() {
+        let (mut doc, id) = jpeg_block_row_doc();
+        // Select only the interior row's first pixel.
+        doc.select_rectangle(0.0, 4.0, 1.0, 5.0).unwrap();
+        doc.jpeg_artifacts_removal(id, 100).unwrap();
+        assert_eq!(jpeg_pixel_at(&doc, 4, 0), 33);
+        // Column 8 is also a block-edge column but was not selected.
+        assert_eq!(jpeg_pixel_at(&doc, 4, 8), 200);
+    }
+
+    #[test]
+    fn jpeg_artifacts_removal_propagates_errors() {
+        let (mut doc, id) = jpeg_block_row_doc();
+        assert!(doc.jpeg_artifacts_removal(id, 101).is_err());
+        assert!(doc.jpeg_artifacts_removal(999, 50).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.jpeg_artifacts_removal(id, 50).is_err());
     }
 
     #[test]

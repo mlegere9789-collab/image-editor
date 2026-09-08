@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 515.**
+**618 distinct capabilities tracked. Currently shipped: 516.**
 
 ## PART I — EVERY TOOL
 
@@ -604,7 +604,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Smart Portrait
 - [x] Skin Smoothing (`skin_smoothing(id, radius, threshold, amount)`: `surface_blur`'s own edge-preserving weighted mean, confined to skin-toned pixels (`is_skin_tone`, the classic Kovac–Solina–Peer rule Select People and Color Range's Skin Tones already use) and blended in by `amount` percent — a real, non-AI stand-in for Photoshop's own neural skin detection and retouching, the same documented substitution Select People already makes for neural person detection. A non-skin-toned pixel is left completely untouched — see README Phase 279)
 - [ ] Super Zoom
-- [ ] JPEG Artifacts Removal
+- [x] JPEG Artifacts Removal — a classic deblocking filter (`Document::jpeg_artifacts_removal`, README Phase 281): pixels on or next to an 8x8 JPEG block boundary are blended toward `box_blur_at`'s 3x3 average, the same real, non-AI technique video codecs use at their own block edges.
 - [ ] Colorize
 - [ ] Style Transfer
 - [ ] Makeup Transfer

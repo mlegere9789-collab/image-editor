@@ -16802,6 +16802,49 @@ also reachable by name through Discover. `cargo fmt`,
 
 **1628 Rust tests total** (1624 → 1628, 1621 lib + 7 pipeline).
 
+## Phase 281 — JPEG Artifacts Removal
+
+A third crack in the Neural Filters wall, and the most literal one yet:
+Photoshop's own JPEG Artifacts Removal exists because JPEG's DCT
+compression works in 8x8 pixel blocks, and its visible artifact is a
+discontinuity right at those block edges — exactly the seam a classic
+deblocking filter targets, the same real, non-AI technique video codecs
+apply at their own macroblock boundaries. `jpeg_artifacts_removal(id,
+strength)` walks every pixel and, for the ones sitting on or next to an
+8-pixel grid line (`row % 8` or `col % 8` is 0 or 7), blends them toward
+[`box_blur_at`]'s existing 3x3 clamped-average neighbourhood by `strength`
+percent; a pixel in a block's interior — by definition not where blocking
+shows up — is left completely untouched. No new low-level math: this
+phase is entirely `box_blur_at`'s own averaging, aimed at the coordinates
+JPEG blocking actually lives on, reused rather than reimplemented, the
+same "reuse over duplication" shape as Skin Smoothing and Harmonize
+before it. A new "JPEG Artifacts Removal…" dialog carries a single
+Strength slider; it is also reachable through Discover search.
+
+**Verified two ways.** Five new `document.rs` tests, all built on one
+shared 9x9 fixture — the same 9-pixel row (values 0, 100 x6, 200) repeated
+on every row, so vertical clamped sampling never mixes in a different
+value and an interior row (row 4: `row % 8 == 4`) isolates column as the
+only variable in whether a pixel counts as a block edge. Hand-derived and
+independently cross-checked: column 0's clamped 3x3 average is (0 + 0 +
+100) x3 repeats / 9 = 33; column 7's is (100 + 100 + 200) x3 / 9 = 133;
+column 8's is (100 + 200 + 200) x3 / 9 = 166; columns 1 through 6 stay
+untouched at strength 100. A second test confirms partial blending at
+strength 50 truncates as Rust integer division does: (33 − 0) × 50 / 100
+= 16. A third confirms alpha is never touched. A fourth confirms
+selection confinement. A fifth exercises every error path. All five
+passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed the
+"JPEG Artifacts Removal…" dialog sends the exact `{ id, strength }` its
+Apply button should, and that the same command is also reachable by name
+through Discover. `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings`, `cargo test`, and `npm run build` are all clean.
+
+**1633 Rust tests total** (1628 → 1633, 1626 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
