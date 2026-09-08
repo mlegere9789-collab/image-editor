@@ -5863,6 +5863,18 @@ fn lens_correction(
     })
 }
 
+/// Filter > Adaptive Wide Angle on layer `id`: fits `lens_correction`'s
+/// own Distortion to `lines` (one or more user-marked lines, each two or
+/// more image-pixel points that should lie straight) and applies it.
+#[tauri::command]
+fn adaptive_wide_angle(
+    state: State<'_, AppState>,
+    id: LayerId,
+    lines: Vec<Vec<(f32, f32)>>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.adaptive_wide_angle(id, &lines))
+}
+
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
 fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
@@ -6437,6 +6449,7 @@ pub fn run() {
             targeted_adjustment,
             camera_raw_optics,
             lens_correction,
+            adaptive_wide_angle,
             rotate,
             scale,
             skew,

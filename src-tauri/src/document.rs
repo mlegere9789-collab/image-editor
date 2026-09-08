@@ -20790,6 +20790,108 @@ impl Document {
         Ok(touched)
     }
 
+    /// Filter > Adaptive Wide Angle's own fit: the integer Distortion
+    /// `-100..=100` [`Self::lens_correction`] itself already accepts,
+    /// chosen instead of by eye. `lines` is one or more marked lines —
+    /// each two or more image-pixel points the caller has marked as
+    /// points that should lie on one straight line. For a candidate
+    /// `k`, every point maps through the identical `c + (p − c) · (1 +
+    /// k/100 · r²)` scale-about-centre model `camera_raw_optics` and
+    /// `lens_correction` already use for Distortion, `r` evaluated at
+    /// the point's own position — a documented, standard first-order
+    /// treatment of the correction map (mirroring how Liquify Mesh's own
+    /// forward-run preview already stands in for the exact backward
+    /// resampling elsewhere in this file), not an exact inverse solve.
+    /// Each line's own residual is then the closed-form total
+    /// least-squares one: the smaller eigenvalue of its mapped points'
+    /// 2×2 covariance matrix, times its point count — the standard sum
+    /// of squared perpendicular distances from the best-fit line through
+    /// the centroid. The `k` minimizing the sum of every line's residual,
+    /// searched exhaustively over the exact integer range
+    /// `lens_correction` accepts, is what this returns. A numerical
+    /// optimisation problem over the existing lens model, not a task
+    /// needing facial, neural, or generative capability. Errors if
+    /// `lines` is empty or any line has fewer than two points.
+    pub fn adaptive_wide_angle_fit(&self, lines: &[Vec<(f32, f32)>]) -> Result<i32, String> {
+        if lines.is_empty() {
+            return Err("Adaptive Wide Angle needs at least one marked line.".to_string());
+        }
+        if lines.iter().any(|line| line.len() < 2) {
+            return Err("Every marked line needs at least two points.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let span = cx.max(cy).max(0.5);
+        // The exact inverse of the dest→source map `lens_correction`
+        // itself resamples through -- `source = c + (dest − c) ·
+        // scale(dest)` -- is implicit in `dest`, since `scale` depends
+        // on `dest`'s own radius. Four rounds of fixed-point
+        // substitution (`dest ≈ c + (source − c) / scale(dest)`,
+        // re-evaluating `scale` at the previous round's estimate)
+        // converges quickly for the bounded `k` and radii in play here;
+        // `scale` is floored at `0.1` to keep the division well-formed
+        // at the search's own extremes. Independently confirmed in
+        // Python: four rounds recovers an exact-integer synthetic
+        // Distortion to within the search grid's own resolution.
+        let inverse_map = |x: f32, y: f32, k: f32| -> (f32, f32) {
+            let (mut qx, mut qy) = (x, y);
+            for _ in 0..4 {
+                let (nx, ny) = ((qx - cx) / span, (qy - cy) / span);
+                let scale = (1.0 + k * (nx * nx + ny * ny)).max(0.1);
+                qx = cx + (x - cx) / scale;
+                qy = cy + (y - cy) / scale;
+            }
+            (qx, qy)
+        };
+        let residual_for = |k_pct: i32| -> f32 {
+            let k = k_pct as f32 / 100.0;
+            lines
+                .iter()
+                .map(|line| {
+                    let mapped: Vec<(f32, f32)> =
+                        line.iter().map(|&(x, y)| inverse_map(x, y, k)).collect();
+                    let n = mapped.len() as f32;
+                    let (sx, sy) = mapped
+                        .iter()
+                        .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
+                    let (mx, my) = (sx / n, sy / n);
+                    let (mut sxx, mut syy, mut sxy) = (0.0f32, 0.0f32, 0.0f32);
+                    for &(x, y) in &mapped {
+                        let (dx, dy) = (x - mx, y - my);
+                        sxx += dx * dx;
+                        syy += dy * dy;
+                        sxy += dx * dy;
+                    }
+                    let trace = sxx + syy;
+                    let disc = ((sxx - syy) * (sxx - syy) + 4.0 * sxy * sxy).sqrt();
+                    (trace - disc) / 2.0
+                })
+                .sum()
+        };
+        Ok((-100..=100)
+            .min_by(|&a, &b| residual_for(a).partial_cmp(&residual_for(b)).unwrap())
+            .unwrap())
+    }
+
+    /// Filter > Adaptive Wide Angle: fits [`Self::adaptive_wide_angle_fit`]'s
+    /// own Distortion to `lines`, then applies it exactly through
+    /// [`Self::lens_correction`] (Distortion only, Vignette and
+    /// Chromatic Aberration left neutral) — no pixel-mutating code of
+    /// its own. Straightening several lines from different parts of the
+    /// frame in one call, as Photoshop's own Constraint tool does over
+    /// several marked constraints, is exactly what passing more than one
+    /// line in `lines` already does, since the fit sums every line's own
+    /// residual before searching. Errors exactly as
+    /// `adaptive_wide_angle_fit` and `lens_correction` themselves do.
+    pub fn adaptive_wide_angle(
+        &mut self,
+        id: LayerId,
+        lines: &[Vec<(f32, f32)>],
+    ) -> Result<Option<Rect>, String> {
+        let k = self.adaptive_wide_angle_fit(lines)?;
+        self.lens_correction(id, k, 0, 0, 0)
+    }
+
     /// Edit > Transform > Rotate: rotates layer `id`'s pixels by
     /// `degrees` (positive clockwise on screen, Photoshop's own sign
     /// convention) about the canvas centre, `((width - 1) / 2,
@@ -53025,6 +53127,63 @@ mod tests {
             .contains("Blue/Yellow"));
         assert_eq!(doc.layers()[0].pixels, before);
         assert!(doc.lens_correction(999, 0, 0, 0, 0).is_err());
+    }
+
+    #[test]
+    fn adaptive_wide_angle_fit_recovers_the_distortion_that_bowed_a_marked_line() {
+        // A 21×21 canvas, centre (10, 10), span 10, same as
+        // `liquify_fixture`'s own. Three points originally straight
+        // along y = 13 -- (2, 13), (10, 13), (18, 13) -- run through
+        // camera_raw_optics/lens_correction's own scale-about-centre
+        // model at Distortion 25 (k = 0.25): centre point r² = 0.09,
+        // scale 1.0225, unmoved in x; the outer two, r² = 0.73, scale
+        // 1.1825, land at (0.54, 13.5475) and (19.46, 13.5475) --
+        // independently solved in Python against the identical
+        // formula. Fitting those three bowed points should recover
+        // Distortion 25 exactly, confirmed by an independent Python
+        // port of the same fixed-point-inverse, total-least-squares
+        // search.
+        let doc = Document::new(21, 21).unwrap();
+        let line = vec![(0.54, 13.5475), (10.0, 13.0675), (19.46, 13.5475)];
+        assert_eq!(doc.adaptive_wide_angle_fit(&[line]), Ok(25));
+    }
+
+    #[test]
+    fn adaptive_wide_angle_fit_rejects_lines_that_are_missing_or_too_short() {
+        let doc = Document::new(21, 21).unwrap();
+        assert!(doc
+            .adaptive_wide_angle_fit(&[])
+            .unwrap_err()
+            .contains("one marked line"));
+        assert!(doc
+            .adaptive_wide_angle_fit(&[vec![(1.0, 1.0)]])
+            .unwrap_err()
+            .contains("two points"));
+    }
+
+    #[test]
+    fn adaptive_wide_angle_applies_its_own_fitted_distortion_through_lens_correction() {
+        // Same fixture and marked line as the fit test above, which
+        // fits to Distortion 25. Running `adaptive_wide_angle` should
+        // touch the layer identically to calling `lens_correction`
+        // directly with that exact Distortion and nothing else.
+        let (mut doc, id) = liquify_fixture(15, 8, [10, 20, 30, 255]);
+        let mut reference = doc.clone();
+        let line = vec![(0.54, 13.5475), (10.0, 13.0675), (19.46, 13.5475)];
+        doc.adaptive_wide_angle(id, &[line]).unwrap();
+        reference.lens_correction(id, 25, 0, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, reference.layers()[0].pixels);
+    }
+
+    #[test]
+    fn adaptive_wide_angle_propagates_the_fit_and_lens_correction_errors() {
+        let (mut doc, id) = liquify_fixture(11, 11, [0, 0, 0, 255]);
+        assert!(doc
+            .adaptive_wide_angle(id, &[])
+            .unwrap_err()
+            .contains("line"));
+        let line = vec![(0.54, 13.5475), (10.0, 13.0675), (19.46, 13.5475)];
+        assert!(doc.adaptive_wide_angle(999, &[line]).is_err());
     }
 
     #[test]

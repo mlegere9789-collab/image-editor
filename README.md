@@ -17450,6 +17450,65 @@ was simply wrong.
 
 **1659 Rust tests total** (1656 → 1659, 1652 lib + 7 pipeline).
 
+## Phase 294 — Adaptive Wide Angle
+
+The second of the four items this session had briefly, wrongly, called
+permanently out of reach. Photoshop's own Adaptive Wide Angle asks the
+user to mark lines that should be straight and fits a correction to
+them — which is, in full, a numerical optimisation problem over
+`lens_correction`'s own already-shipped radial distortion model, not a
+task that needs any facial, neural, or generative capability. Calling it
+AI-dependent, as this session briefly did, was a flat misclassification.
+
+`Document::adaptive_wide_angle_fit(lines)` searches every integer
+Distortion `lens_correction` itself accepts, `-100..=100`. For a
+candidate value, each marked point maps through the exact inverse of
+`camera_raw_optics`/`lens_correction`'s own `c + (p − c) · (1 + k·r²)`
+scale-about-centre model — implicit in the unknown corrected position,
+since `r` depends on it, so solved by four rounds of fixed-point
+substitution rather than a closed-form inverse, with `scale` floored at
+`0.1` to keep the division well-formed at the search's own extremes.
+Each line's own residual is then the standard closed-form total
+least-squares one: the smaller eigenvalue of its mapped points' 2×2
+covariance matrix, times its point count — the sum of squared
+perpendicular distances from the best-fit line through the centroid.
+The Distortion minimizing the sum of every line's residual is the fit.
+`Document::adaptive_wide_angle(id, lines)` applies that fit through
+`lens_correction` itself, Vignette and Chromatic Aberration left
+neutral — no new pixel-mutating code exists in this phase, only the
+point-fitting math above. Multiple simultaneous marked lines, exactly
+like Photoshop's own multiple constraints, are already supported by
+`lines` accepting more than one — the fit sums every line's residual
+before searching.
+
+The frontend adds one marked line of three points, entered numerically,
+matching Vanishing Point's own numeric plane-corner entry rather than
+click-to-mark — a documented scope cut of Photoshop's own
+any-number-of-constraints tool.
+
+**Verified two ways.** Four new `document.rs` tests, cross-checked
+against an independent Python port of the identical fixed-point-inverse,
+total-least-squares search: three points on a canvas of centre `(10,
+10)`, span `10`, run through the exact forward model at Distortion 25
+bow to `(0.54, 13.5475)`, `(10, 13.0675)`, `(19.46, 13.5475)`; fitting
+those three bowed points recovers Distortion 25 exactly on the first
+try. A second test confirms `adaptive_wide_angle` touches a layer
+identically to calling `lens_correction` directly with that same fitted
+Distortion. Two more confirm the fit and the apply both propagate their
+own validation and layer errors. This session's own second verification
+path — a Playwright browser session against a mocked
+`__TAURI_INTERNALS__` — confirmed the dialog's own three numeric points
+produce the exact `{ id, lines: [[[0.54, 13.5475], [10, 13.0675], [19.46,
+13.5475]]] }` `adaptive_wide_angle` call. `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `cargo test`, and `npm run build` are all
+clean.
+
+Adaptive Wide Angle flips to shipped. Hair Selection and Person
+Components are next, each building on Face-Aware Liquify's own
+face-region heuristic (Phase 293).
+
+**1663 Rust tests total** (1659 → 1663, 1656 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

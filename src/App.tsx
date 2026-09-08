@@ -804,6 +804,17 @@ export default function App() {
   const [lensVignette, setLensVignette] = useState(0);
   const [lensRedCyan, setLensRedCyan] = useState(0);
   const [lensBlueYellow, setLensBlueYellow] = useState(0);
+  // Filter > Adaptive Wide Angle: one marked line, entered numerically as
+  // three points -- the same fixed-point-count numeric entry Vanishing
+  // Point's own plane corners already use, rather than click-to-mark.
+  const [showAdaptiveWideAngleDialog, setShowAdaptiveWideAngleDialog] = useState(false);
+  const [adaptiveWideAngleLine, setAdaptiveWideAngleLine] = useState<
+    [[number, number], [number, number], [number, number]]
+  >([
+    [0, 0],
+    [50, 0],
+    [100, 0],
+  ]);
   // Edit > Puppet Warp: the options bar, the pins, and the mesh preview.
   const [showPuppetDialog, setShowPuppetDialog] = useState(false);
   const [puppetOptions, setPuppetOptions] = useState<PuppetWarpOptions>({
@@ -2935,6 +2946,15 @@ export default function App() {
     });
     setShowLensCorrectionDialog(false);
   }, [runCommand, selectedId, lensDistortion, lensVignette, lensRedCyan, lensBlueYellow]);
+
+  // Filter > Adaptive Wide Angle: fits Distortion to the marked line and
+  // applies it through the already-shipped `lens_correction`, all on the
+  // Rust side -- nothing here but forwarding the marked points.
+  const applyAdaptiveWideAngle = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("adaptive_wide_angle", { id: selectedId, lines: [adaptiveWideAngleLine] });
+    setShowAdaptiveWideAngleDialog(false);
+  }, [runCommand, selectedId, adaptiveWideAngleLine]);
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -6641,6 +6661,7 @@ export default function App() {
   // a dialog whose own Apply silently does nothing.
   const DISCOVER_ACTIONS: { label: string; activate: () => void }[] = [
     { label: "Accented Edges", activate: () => setShowAccentedEdgesDialog(true) },
+    { label: "Adaptive Wide Angle", activate: () => setShowAdaptiveWideAngleDialog(true) },
     { label: "Add Noise", activate: () => setShowAddNoiseDialog(true) },
     { label: "Angled Strokes", activate: () => setShowAngledStrokesDialog(true) },
     { label: "Bas Relief", activate: () => setShowBasReliefDialog(true) },
@@ -7290,6 +7311,14 @@ export default function App() {
             title="Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration"
           >
             Lens Correction…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowAdaptiveWideAngleDialog(true)}
+            disabled={busy || !canPaint}
+            title="Filter > Adaptive Wide Angle: fit Lens Correction's own Distortion to a marked line"
+          >
+            Adaptive Wide Angle…
           </button>
           <button
             className="button button--quiet"
@@ -14850,6 +14879,75 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyLensCorrection} disabled={busy || selectedId === null} title="Apply Lens Correction">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAdaptiveWideAngleDialog && (
+        <div className="modal-overlay" onClick={() => setShowAdaptiveWideAngleDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Adaptive Wide Angle"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Adaptive Wide Angle</h2>
+            <p className="modal__hint">
+              Mark three image-pixel points, in order, along one line that should be
+              straight. Distortion is fit automatically: every candidate value of Lens
+              Correction&apos;s own Distortion (the same radial model Camera Raw&apos;s
+              Optics panel and Lens Correction already apply) is tried in turn, and the
+              one that best straightens the marked points — the smallest total
+              least-squares deviation from a single line — is applied through Lens
+              Correction itself. One marked line and a fixed three points is a documented
+              scope cut of Photoshop&apos;s own click-to-mark, any-number-of-constraints
+              tool, matching the numeric point entry Vanishing Point&apos;s own plane
+              corners already use.
+            </p>
+            {adaptiveWideAngleLine.map((point, index) => (
+              <label className="control control--row" key={index}>
+                <span className="control__label">{`Point ${index + 1} X, Y`}</span>
+                <input
+                  type="number"
+                  value={point[0]}
+                  onChange={(event) =>
+                    setAdaptiveWideAngleLine((line) => {
+                      const next = [...line] as typeof line;
+                      next[index] = [Number(event.target.value), next[index][1]];
+                      return next;
+                    })
+                  }
+                />
+                <input
+                  type="number"
+                  value={point[1]}
+                  onChange={(event) =>
+                    setAdaptiveWideAngleLine((line) => {
+                      const next = [...line] as typeof line;
+                      next[index] = [next[index][0], Number(event.target.value)];
+                      return next;
+                    })
+                  }
+                />
+              </label>
+            ))}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAdaptiveWideAngleDialog(false)}
+                title="Cancel"
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => void applyAdaptiveWideAngle()}
+                disabled={busy || selectedId === null}
+                title="Fit Distortion to the marked line and apply it"
+              >
                 OK
               </button>
             </div>
