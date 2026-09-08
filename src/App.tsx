@@ -1470,6 +1470,12 @@ export default function App() {
     }
   });
   const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
+  // Discover Panel: search this app's own Toolbox by name -- the one
+  // component of Photoshop's Discover panel that is pure search rather
+  // than authored help content (tutorials, articles, contextual help),
+  // a documented scope cut this project has no such content to ship.
+  const [showDiscoverDialog, setShowDiscoverDialog] = useState(false);
+  const [discoverQuery, setDiscoverQuery] = useState("");
   const toggleToolHidden = useCallback((id: Tool) => {
     setHiddenTools((previous) => {
       const next = new Set(previous);
@@ -6233,6 +6239,14 @@ export default function App() {
           title="Edit > Keyboard Shortcuts: rebind this app's Ctrl/Cmd shortcuts"
         >
           Keyboard Shortcuts…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowDiscoverDialog(true)}
+          disabled={busy}
+          title="Discover: search the Toolbox by name"
+        >
+          Discover…
         </button>
         <button
           className="button button--quiet"
@@ -11619,6 +11633,72 @@ export default function App() {
                   setShowKeyboardShortcutsDialog(false);
                   setRebindingAction(null);
                   setKeyBindingError(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDiscoverDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setShowDiscoverDialog(false);
+            setDiscoverQuery("");
+          }}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Discover"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Discover</h2>
+            <p className="modal__hint">
+              Search the Toolbox by name. Tutorials, help articles, and contextual help
+              — Photoshop's Discover panel's other components — are a documented scope
+              cut: this project has no authored instructional content to search.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Search</span>
+              <input
+                type="text"
+                autoFocus
+                value={discoverQuery}
+                onChange={(event) => setDiscoverQuery(event.target.value)}
+                placeholder="Tool name…"
+              />
+            </label>
+            <div className="toolbar-customize__list">
+              {ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(discoverQuery.trim().toLowerCase())).map(
+                ({ id, label }) => (
+                  <button
+                    key={id}
+                    className={`button button--quiet${tool === id ? " button--active" : ""}`}
+                    onClick={() => {
+                      setTool(id);
+                      setShowDiscoverDialog(false);
+                      setDiscoverQuery("");
+                    }}
+                  >
+                    {label}
+                  </button>
+                ),
+              )}
+              {ALL_TOOLS.every(({ label }) => !label.toLowerCase().includes(discoverQuery.trim().toLowerCase())) && (
+                <p className="modal__hint">No tool matches "{discoverQuery}".</p>
+              )}
+            </div>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setShowDiscoverDialog(false);
+                  setDiscoverQuery("");
                 }}
               >
                 Close

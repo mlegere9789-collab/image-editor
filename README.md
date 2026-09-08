@@ -16627,6 +16627,43 @@ proven code. `cargo fmt`, `clippy -D warnings`, `cargo test`, and
 additions — a pure frontend phase, like Phase 275). `cargo fmt`,
 `clippy`, and `npm run build` all clean.
 
+## Phase 277 — Discover Panel
+
+The last of this run's "39th System" items, and the smallest: Discover
+is Photoshop's integrated help/search/learning system — feature
+search, contextual help, tutorials, in-app instructional material,
+help articles. Only the first of those is pure search rather than
+authored content this project simply does not have to search; the
+rest are a documented scope cut, honestly, rather than a fabricated
+placeholder tutorial standing in for real instructional material.
+
+A new "Discover…" dialog reuses the exact same 57-entry `ALL_TOOLS`
+registry Custom Toolbar's own dialog already lists, live-filtered by a
+single search field against each tool's own name — typing "lasso"
+narrows the list to Polygonal Lasso, Lasso, Magnetic Lasso, and Object
+Lasso; clicking a match switches to that tool and closes the dialog,
+the same one line, `setTool(id)`, every one of the Toolbox's own
+buttons already calls. An empty result shows a plain "No tool matches"
+message rather than a blank list.
+
+**Verified two ways**, continuing the real second path Phases 275 and
+276 established. No new Rust tests — pure frontend again, filtering an
+existing array client-side. A Playwright session opened the dialog,
+typed "lasso," and confirmed the rendered button list was exactly
+those four tools in their Toolbox order; clicked Magnetic Lasso and
+confirmed both that the dialog closed and that the Toolbox's own
+`data-tool="magneticLasso"` button actually reports
+`aria-pressed="true"` afterward — the full search-to-tool-switch path,
+not just that the dialog renders; and typed a nonsense query to
+confirm the empty-state message appears with the exact typed text
+echoed back. All three checks passed on the first run. `cargo fmt`,
+`clippy -D warnings`, `cargo test`, and `npm run build` are all still
+clean.
+
+**1619 Rust tests total, unchanged this phase** (0 lib/pipeline
+additions — a pure frontend phase, like Phases 275 and 276). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

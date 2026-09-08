@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 511.**
+**618 distinct capabilities tracked. Currently shipped: 512.**
 
 ## PART I — EVERY TOOL
 
@@ -183,7 +183,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] AI Assisted Editor
 - [ ] AI On-Device Model
 - [x] Contextual Task Bar (a floating bar over the bottom of the canvas, shown only while a document is open: selection-refinement one-click controls — Feather, Invert, Save Selection, Deselect — while a selection is active, or Select Subject / Remove Background on a plain layer otherwise. The audit's own AI-heavy examples for this bar — generative controls, Prompt to Edit, AI model selection — are a documented scope cut; only its selection-controls example is non-AI and in scope — see README Phase 276)
-- [ ] Discover Panel
+- [x] Discover Panel (a "Discover…" dialog searching the Toolbox by name — a live-filtered list over the same 57-tool `ALL_TOOLS` registry Custom Toolbar's own dialog already uses, click a match to switch to it. This is the one component of Photoshop's own Discover panel that is pure search rather than authored content; contextual help, tutorials, in-app instructional material, and help articles are a documented scope cut — this project has no authored instructional content to search — see README Phase 277)
 - [x] Quick Actions ("select task, the app performs the associated operation" instead of finding a tool and configuring settings — exactly what the Contextual Task Bar's own one-click buttons already are, so Quick Actions is satisfied by the same mechanism rather than a second, separate one — see README Phase 276)
 - [x] Rich Tooltips (every one of the 57 Toolbox buttons `data-tool` already tags carries a `data-tooltip-name` (tool name, bold) and `data-tooltip` (its explanation), rendered as two stacked floating boxes by pure CSS on hover — no native single-line browser tooltip, no hover-delay JS to manage. Short video demonstrations, the audit's other named component, are a documented scope cut; retrofitting the same treatment onto every other button in the app (380 `title` attributes) beyond the Toolbox is a further documented scope cut — see README Phase 276)
 - [x] Custom Toolbar (Edit > Toolbar: every persistent tool-selection button — all 57 of them, matching Photoshop's own scope for Customize Toolbar, the Tools panel alone rather than every menu command — carries a `data-tool` attribute, and hidden ones are removed by a plain `[data-tool="x"]{display:none}` rule generated from a `hiddenTools` set kept in `localStorage`, a per-installation browser preference rather than document data. Reordering the toolbar and Photoshop's own tool groups/Extra Tools well are a documented scope cut — see README Phase 275)
