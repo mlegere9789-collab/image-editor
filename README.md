@@ -17903,6 +17903,39 @@ no new tests.
 
 Change materials flips to shipped (547/618).
 
+## Phase 305 — Missing Profile Warning
+
+Real work again: Photoshop's own Missing Profile Warning fires when
+opening a file with no embedded colour profile at all. This project's
+own project file is the one format it opens that can carry an embedded
+profile to be missing from (Embed Color Profile, Phase 298) — `Manifest.profile`
+becomes an `Option<ColorProfile>` rather than a plain
+`#[serde(default)]` value, so `project::decode` can tell a genuinely
+missing key (a file saved before Phase 298 existed) apart from one
+explicitly saved as sRGB, the distinction a plain default can't make. A
+new `Document::profile_was_missing` field — `pub(crate)`, set only by
+`decode`, always `false` on a fresh document — carries that fact
+through to `DocumentView` and every `Snapshot`. Open Project and Load
+from Cloud both check it right after loading and surface a real warning
+message when it fires; every other command ignores the field, so a
+stale `true` from an earlier load never resurfaces on an unrelated
+edit.
+
+**Verified two ways.** Two new `project.rs` tests, alongside the
+existing thirteen: reusing the pre-Embed-Color-Profile manifest-rewrite
+fixture (strip the `profile` key, recompute the length prefix, reload)
+now also confirms `profile_was_missing()` is `true`; a second test
+confirms a normal encode/decode round trip never sets it. This
+session's own second verification path — a Playwright browser session
+— mocked `import_project_bytes` to return `profileWasMissing: true` and
+confirmed Load from Cloud surfaces the exact warning text. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+Missing Profile Warning flips to shipped.
+
+**1676 Rust tests total** (1675 → 1676, 1669 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

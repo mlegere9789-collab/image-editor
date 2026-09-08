@@ -197,6 +197,9 @@ export type DocumentView = {
   mode: ColorMode;
   /** Edit > Assign Profile / Convert to Profile's current working space. */
   profile: ColorProfile;
+  /** Color Settings > Missing Profile Warning: whether the project file
+   * this document was just loaded from had no embedded profile of its own. */
+  profileWasMissing: boolean;
   /** How many colours Indexed Color's table holds; 0 in other modes. */
   colorTableSize: number;
   /** Duotone's inks; empty in other modes. */

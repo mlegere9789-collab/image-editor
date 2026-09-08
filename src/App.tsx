@@ -1892,6 +1892,15 @@ export default function App() {
         if (ticket !== requestId.current) return;
 
         setError(null);
+        // Color Settings > Missing Profile Warning: only meaningful right
+        // after loading a project, since `profileWasMissing` stays set to
+        // whatever the most recent load left it at otherwise.
+        if (
+          (command === "open_project" || command === "import_project_bytes") &&
+          snapshot.document.profileWasMissing
+        ) {
+          setError("This project file has no embedded colour profile — defaulting to sRGB.");
+        }
         setDocument(snapshot.document);
         setGeneration(snapshot.generation);
         setCanUndo(snapshot.canUndo);

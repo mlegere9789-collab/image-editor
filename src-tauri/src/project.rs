@@ -37,11 +37,14 @@ struct Manifest {
     /// Embed Color Profile: Assign Profile's own label (README Phase 292),
     /// carried by the project file itself so a reopened document knows
     /// what working space its numbers are in, exactly as `locked` is.
+    /// `Option` rather than a plain `ColorProfile` with `#[serde(default)]`
+    /// so `decode` can tell a genuinely missing profile (a file saved
+    /// before this existed) apart from one explicitly saved as sRGB — the
+    /// distinction Missing Profile Warning (README Phase 305) needs.
     /// `#[serde(default)]` so a project file saved before this existed
-    /// still loads, defaulting to `ColorProfile::Srgb` — this format's own
-    /// working space before Assign Profile existed at all.
+    /// still loads instead of failing to parse.
     #[serde(default)]
-    profile: ColorProfile,
+    profile: Option<ColorProfile>,
     layers: Vec<LayerManifest>,
 }
 
@@ -83,7 +86,7 @@ pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
     let manifest = Manifest {
         width: document.width(),
         height: document.height(),
-        profile: document.profile(),
+        profile: Some(document.profile()),
         layers,
     };
     let manifest_json = serde_json::to_vec(&manifest)
@@ -129,7 +132,8 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
     offset = manifest_end;
 
     let mut document = Document::new(manifest.width, manifest.height)?;
-    document.assign_profile(manifest.profile);
+    document.profile_was_missing = manifest.profile.is_none();
+    document.assign_profile(manifest.profile.unwrap_or_default());
     for layer in &manifest.layers {
         let len = layer.png_len as usize;
         let end = offset
@@ -288,6 +292,21 @@ mod tests {
 
         let reloaded = load(&path).unwrap();
         assert_eq!(reloaded.profile(), ColorProfile::Srgb);
+        // Color Settings > Missing Profile Warning: a project file with no
+        // `profile` key at all is flagged, distinct from one explicitly
+        // saved as sRGB.
+        assert!(reloaded.profile_was_missing());
+    }
+
+    #[test]
+    fn a_normal_round_trip_never_flags_a_missing_profile() {
+        let mut document = Document::new(1, 1).unwrap();
+        document
+            .add_layer("solo", &solid(1, 1, [7, 8, 9, 255]), 1, 1)
+            .unwrap();
+        let bytes = encode(&document).unwrap();
+        let reloaded = decode(&bytes).unwrap();
+        assert!(!reloaded.profile_was_missing());
     }
 
     #[test]

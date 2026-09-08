@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 547.**
+**618 distinct capabilities tracked. Currently shipped: 548.**
 
 ## PART I — EVERY TOOL
 
@@ -430,7 +430,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Profile Mismatch Warnings
 - [ ] Ask When Opening
 - [ ] Ask When Pasting
-- [ ] Missing Profile Warning
+- [x] Missing Profile Warning (`Document::profile_was_missing`: set by `project::decode` when the project file it just loaded had no `profile` key of its own — a file saved before Embed Color Profile (Phase 298) existed — distinct from one explicitly saved as sRGB, via `Manifest.profile` now an `Option<ColorProfile>` rather than a plain `#[serde(default)]` value. Open Project and Load from Cloud both surface it as a real warning message when it fires. This app's own project file is the only format it opens with an embedded profile to be missing from — see README Phase 305)
 - [x] Embed Color Profile (the project file format's own `Manifest` now carries Assign Profile's own label, set from `Document::profile()` on save and restored with `assign_profile` on load, exactly as `locked` already round-trips — a project file saved before this existed still loads, defaulting to sRGB, `#[serde(default)]` the same way — see README Phase 298. This app's own project file is its one persistence format able to carry a tag at all; a real embedded-ICC-chunk PNG/import path remains a documented scope cut)
 - [x] Proof Setup (the toolbar's Proof select, choosing which of the proofs below to view — Off, Protanopia-type, Deuteranopia-type, or Custom Paper/Ink; Proof Setup's other device-profile-driven presets (Working CMYK, Legacy Macintosh RGB, an ICC profile picked from disk, …) are a documented scope cut of this app's colour management)
 - [x] Proof Colors (the same Proof select at any setting other than Off — a live, non-destructive view through the `composite://` protocol's `proof=` query, exactly matching Photoshop's toggle)

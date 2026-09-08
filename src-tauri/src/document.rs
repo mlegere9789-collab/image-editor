@@ -168,6 +168,14 @@ pub struct Document {
     mode: ColorMode,
     /// Edit > Assign Profile / Convert to Profile — see [`ColorProfile`].
     profile: ColorProfile,
+    /// Color Settings > Missing Profile Warning: set by `project::decode`
+    /// when the project file it just loaded had no embedded profile of
+    /// its own (a file saved before Embed Color Profile existed), so the
+    /// frontend can warn the user `profile` above just defaulted to
+    /// sRGB rather than reflecting anything the file actually said.
+    /// Never persisted — a fresh `Document::new` is always `false`, and
+    /// nothing but `project::decode` ever sets it `true`.
+    pub(crate) profile_was_missing: bool,
     /// Indexed Color's colour table, empty in every other mode.
     color_table: Vec<[u8; 3]>,
     /// Duotone's inks, empty in every other mode.
@@ -3657,6 +3665,9 @@ pub struct DocumentView {
     pub mode: ColorMode,
     /// Edit > Assign Profile / Convert to Profile's current working space.
     pub profile: ColorProfile,
+    /// Color Settings > Missing Profile Warning — see
+    /// [`Document::profile_was_missing`].
+    pub profile_was_missing: bool,
     /// How many colours Indexed Color's table holds; `0` in other modes.
     pub color_table_size: usize,
     /// Duotone's inks; empty in other modes.
@@ -3702,6 +3713,7 @@ impl Document {
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             profile: ColorProfile::Srgb,
+            profile_was_missing: false,
             color_table: Vec::new(),
             duotone: Vec::new(),
             channels: Vec::new(),
@@ -3760,6 +3772,7 @@ impl Document {
                 .collect(),
             mode: self.mode,
             profile: self.profile,
+            profile_was_missing: self.profile_was_missing,
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
             has_brush_tip: self.brush_tip.is_some(),
@@ -3957,6 +3970,16 @@ impl Document {
     /// Edit > Assign Profile / Convert to Profile's current working space.
     pub fn profile(&self) -> ColorProfile {
         self.profile
+    }
+
+    /// Color Settings > Missing Profile Warning: whether the project file
+    /// this document was just loaded from had no embedded profile of its
+    /// own (a file saved before Embed Color Profile existed), so
+    /// [`Self::profile`] just defaulted to sRGB rather than reflecting
+    /// anything the file actually said. Only ever set by
+    /// `project::decode`; a fresh document is always `false`.
+    pub fn profile_was_missing(&self) -> bool {
+        self.profile_was_missing
     }
 
     /// Edit > Assign Profile: relabels the document's own working space
