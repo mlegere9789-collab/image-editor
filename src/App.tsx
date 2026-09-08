@@ -1202,6 +1202,8 @@ export default function App() {
   const [showMatchColorDialog, setShowMatchColorDialog] = useState(false);
   const [matchColorSourceLayerId, setMatchColorSourceLayerId] = useState<number | null>(null);
   const [matchColorFade, setMatchColorFade] = useState(100);
+  const [showHarmonizeDialog, setShowHarmonizeDialog] = useState(false);
+  const [harmonizeFade, setHarmonizeFade] = useState(100);
   const [displaceHorizontalScale, setDisplaceHorizontalScale] = useState(10);
   const [displaceVerticalScale, setDisplaceVerticalScale] = useState(10);
   const [displaceWrapAround, setDisplaceWrapAround] = useState(false);
@@ -3643,6 +3645,16 @@ export default function App() {
     });
     setShowMatchColorDialog(false);
   }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
+
+  // Neural Filters > Harmonize: Match Color's own statistical transfer,
+  // with the "source" computed as the flattened composite of every other
+  // visible layer -- a real, honest stand-in for automatic scene-color
+  // matching, not an AI model.
+  const applyHarmonize = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("harmonize", { id: selectedId, fade: harmonizeFade });
+    setShowHarmonizeDialog(false);
+  }, [runCommand, selectedId, harmonizeFade]);
 
   // Neural Filters > Color Transfer: Match Color's own statistical
   // transfer under its newer name, sharing this dialog's Source Layer
@@ -6304,6 +6316,7 @@ export default function App() {
     { label: "Stamp (Sketch)", activate: () => setShowStampDialog(true) },
     { label: "Stroke Outline", activate: () => setShowStrokeOutlineDialog(true) },
     { label: "Skin Smoothing", activate: () => setShowSkinSmoothingDialog(true) },
+    { label: "Harmonize", activate: () => setShowHarmonizeDialog(true) },
     { label: "Sumi-e", activate: () => setShowSumiEDialog(true) },
     { label: "Surface Blur", activate: () => setShowSurfaceBlurDialog(true) },
     { label: "Temperature Tint", activate: () => setShowTemperatureTintDialog(true) },
@@ -7843,6 +7856,14 @@ export default function App() {
             title="Image > Adjustments > Match Color"
           >
             Match Color…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowHarmonizeDialog(true)}
+            disabled={busy || !canPaint || (document?.layers.length ?? 0) < 2}
+            title="Neural Filters > Harmonize"
+          >
+            Harmonize…
           </button>
           <button
             className="button button--quiet"
@@ -10050,6 +10071,52 @@ export default function App() {
                 onClick={applyMatchColor}
                 disabled={busy || matchColorSourceLayerId === null}
               >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showHarmonizeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowHarmonizeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Harmonize"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Neural Filters &gt; Harmonize</h2>
+            <p className="modal__hint">
+              Matches this layer's colors to the flattened composite of every other visible
+              layer — Match Color's own statistical transfer, with the "source" computed
+              automatically instead of picked by hand.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Fade
+                <span className="control__value">{harmonizeFade}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={harmonizeFade}
+                onChange={(event) => setHarmonizeFade(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowHarmonizeDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={() => void applyHarmonize()} disabled={busy}>
                 Apply
               </button>
             </div>

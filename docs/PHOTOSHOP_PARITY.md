@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 514.**
+**618 distinct capabilities tracked. Currently shipped: 515.**
 
 ## PART I — EVERY TOOL
 
@@ -172,7 +172,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Generative Expand
 - [ ] Generate Background
 - [ ] Generate Similar
-- [ ] Harmonize
+- [x] Harmonize — Match Color's own statistical transfer (`Document::harmonize`, README Phase 280), with the "source" computed automatically as the flattened composite of every other visible layer instead of picked by hand, a real non-AI substitution for automatic scene-color matching.
 - [ ] Generative Upscale
 - [ ] Generate Image
 - [ ] Reference Images

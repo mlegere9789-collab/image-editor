@@ -2190,6 +2190,14 @@ fn match_color(
     })
 }
 
+/// Neural Filters > Harmonize on layer `id`: Match Color's own statistical
+/// transfer, with the "source" computed as the flattened composite of every
+/// other visible layer, standing in for automatic scene-color matching.
+#[tauri::command]
+fn harmonize(state: State<'_, AppState>, id: LayerId, fade: u32) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.harmonize(id, fade))
+}
+
 /// Neural Filters > Color Transfer on layer `id`, Match Color's own
 /// statistical transfer under its newer name.
 #[tauri::command]
@@ -6096,6 +6104,7 @@ pub fn run() {
             auto_contrast,
             auto_color,
             match_color,
+            harmonize,
             color_transfer,
             maximum,
             minimum,

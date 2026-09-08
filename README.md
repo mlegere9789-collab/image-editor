@@ -16758,6 +16758,50 @@ reachable by name through Discover. `cargo fmt`,
 **1624 Rust tests total** (1619 → 1624, 1617 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 280 — Harmonize
+
+Another crack in the Neural Filters wall, using the exact same lever as
+Color Transfer: Photoshop's Neural Filters > Harmonize automatically
+matches a layer's colors to the rest of the composite it sits in, and
+this project already had that whole mechanism — Match Color's own
+per-channel statistical transfer — it just needed its "source" computed
+instead of picked from a dropdown. `match_color` was split into a thin
+public wrapper and a new private `match_color_to_pixels(id, source_pixels,
+fade)` that does all the real work against a raw pixel buffer rather than
+a layer lookup; this refactor is behavior-preserving byte for byte
+(`match_color`'s own 12 tests and `color_transfer`'s own 6 pass unchanged
+against it). `harmonize(id, fade)` then flattens every other
+layer that `.contributes()` (visible, opacity > 0) via
+`composite::flatten_subset` and feeds that flattened composite straight
+into `match_color_to_pixels` as the source. A document with no other
+visible layer to match against returns a clear error instead of doing
+nothing quietly. A new "Harmonize…" dialog sits next to Match Color's own,
+with just a Fade slider since the source is computed rather than chosen;
+it is also reachable through Discover search.
+
+**Verified two ways.** Four new `document.rs` tests, reusing the
+project's own `two_layer_doc` fixture rather than deriving new pixel math
+from scratch, since this phase's entire point is that it reduces to
+`match_color`'s already-proven arithmetic: one test confirms `harmonize`
+and `match_color` land on byte-identical results when the source layer is
+the only other visible layer, at both fade 100 and fade 50; a second adds
+a third layer that is visually identical to the source but hidden, and
+confirms it does not shift the result at all — only `.contributes()`
+layers count; a third confirms selection confinement; a fourth exercises
+every error path, including the new "no other visible layer" case on a
+single-layer document. All four passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed the
+"Harmonize…" dialog sends the exact `{ id, fade }` its Apply button
+should, against a document with two layers, and that the same command is
+also reachable by name through Discover. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1628 Rust tests total** (1624 → 1628, 1621 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

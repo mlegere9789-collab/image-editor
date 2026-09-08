@@ -10843,10 +10843,24 @@ impl Document {
         source_layer_id: LayerId,
         fade: u32,
     ) -> Result<Option<Rect>, String> {
+        let source_pixels = self.layer(source_layer_id)?.pixels.clone();
+        self.match_color_to_pixels(id, &source_pixels, fade)
+    }
+
+    /// [`Self::match_color`]'s own statistical transfer, taking the
+    /// source's pixels directly instead of looking up a named layer —
+    /// shared with [`Self::harmonize`], whose "source" is a computed
+    /// composite rather than any one layer.
+    fn match_color_to_pixels(
+        &mut self,
+        id: LayerId,
+        source_pixels: &[u8],
+        fade: u32,
+    ) -> Result<Option<Rect>, String> {
         if fade > 100 {
             return Err("Match Color fade must be between 0 and 100.".to_string());
         }
-        let source_stats = channel_mean_std(&self.layer(source_layer_id)?.pixels);
+        let source_stats = channel_mean_std(source_pixels);
         let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let bounds = self.copy_bounds();
@@ -10878,6 +10892,40 @@ impl Document {
             }
         }
         Ok(Some(bounds))
+    }
+
+    /// Neural Filters > Harmonize: blends layer `id`'s own colour and tone
+    /// to match everything else currently showing beneath and around it —
+    /// [`Self::match_color`]'s own mean/standard-deviation statistical
+    /// transfer, with the "source" computed as the flattened composite of
+    /// every *other* contributing layer ([`Layer::contributes`]: visible
+    /// and above zero opacity) rather than one named layer, since
+    /// Harmonize has no separate reference to pick — a real, non-AI stand-
+    /// in for Photoshop's own automatic scene-matching, the same kind of
+    /// documented substitution Select People and Skin Smoothing already
+    /// make elsewhere in this project. Errors exactly as `match_color`
+    /// does, plus there being no other contributing layer to match
+    /// against, or an unknown `id`.
+    pub fn harmonize(&mut self, id: LayerId, fade: u32) -> Result<Option<Rect>, String> {
+        let target_index = self
+            .layers
+            .iter()
+            .position(|l| l.id == id)
+            .ok_or_else(|| format!("No layer with id {id}."))?;
+        let other_indices: Vec<usize> = self
+            .layers
+            .iter()
+            .enumerate()
+            .filter(|&(i, l)| i != target_index && l.contributes())
+            .map(|(i, _)| i)
+            .collect();
+        if other_indices.is_empty() {
+            return Err(
+                "Harmonize needs at least one other visible layer to match against.".to_string(),
+            );
+        }
+        let source_pixels = crate::composite::flatten_subset(self, &other_indices).pixels;
+        self.match_color_to_pixels(id, &source_pixels, fade)
     }
 
     /// Neural Filters > Color Transfer: "transfers a color palette from
@@ -24740,6 +24788,72 @@ mod tests {
             &doc.layers()[0].pixels[..],
             &[50, 0, 0, 255, 50, 0, 0, 255, 150, 0, 0, 255, 150, 0, 0, 255][..]
         );
+    }
+
+    #[test]
+    fn harmonize_matches_match_color_when_the_source_is_the_only_other_visible_layer() {
+        // two_layer_doc's own "source" layer is fully opaque and covers
+        // the whole 2x2 canvas, so flattening every layer except the
+        // target gives exactly the source layer's own pixels -- harmonize
+        // and match_color must land on the identical result.
+        let (mut harmonized, hid, _) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let (mut matched, mid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        harmonized.harmonize(hid, 100).unwrap();
+        matched.match_color(mid, sid, 100).unwrap();
+        assert_eq!(harmonized.layers()[0].pixels, matched.layers()[0].pixels);
+
+        let (mut harmonized, hid, _) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let (mut matched, mid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        harmonized.harmonize(hid, 50).unwrap();
+        matched.match_color(mid, sid, 50).unwrap();
+        assert_eq!(harmonized.layers()[0].pixels, matched.layers()[0].pixels);
+    }
+
+    #[test]
+    fn harmonize_excludes_hidden_and_zero_opacity_layers_from_its_source() {
+        // A third layer, visually identical to "source" but hidden, must
+        // not shift the statistics at all -- only the one visible other
+        // layer should count.
+        let (mut doc, target_id, source_id) =
+            two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let decoy_pixels: Vec<u8> = [255u8, 255, 255, 255]
+            .iter()
+            .copied()
+            .cycle()
+            .take(16)
+            .collect();
+        let decoy = doc.add_layer("decoy", &decoy_pixels, 2, 2).unwrap();
+        doc.set_visible(decoy, false).unwrap();
+        let mut reference = doc.clone();
+        doc.harmonize(target_id, 100).unwrap();
+        reference.match_color(target_id, source_id, 100).unwrap();
+        assert_eq!(doc.layers()[0].pixels, reference.layers()[0].pixels);
+    }
+
+    #[test]
+    fn harmonize_is_confined_to_the_selection() {
+        let (mut doc, target_id, _) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.harmonize(target_id, 100).unwrap();
+        let after = &doc.layers()[0].pixels;
+        assert_eq!(after[0], 100);
+        assert_eq!(after[4..], before[4..]); // unselected, untouched
+    }
+
+    #[test]
+    fn harmonize_propagates_errors() {
+        let (mut doc, target_id, _) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        assert!(doc.harmonize(target_id, 101).is_err());
+        assert!(doc.harmonize(999, 100).is_err());
+        doc.set_locked(target_id, true).unwrap();
+        assert!(doc.harmonize(target_id, 100).is_err());
+        // A single-layer document has no other layer to harmonize against.
+        let mut lonely = Document::new(2, 2).unwrap();
+        let only = lonely
+            .add_layer("only", &solid(2, 2, [1, 2, 3, 255]), 2, 2)
+            .unwrap();
+        assert!(lonely.harmonize(only, 100).unwrap_err().contains("other"));
     }
 
     #[test]
