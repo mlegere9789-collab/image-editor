@@ -407,6 +407,20 @@ export type LiquifyMesh = {
   deformed: [number, number][];
 };
 
+/** Mirrors `FaceLandmarks` in src-tauri/src/document.rs: Filter > Liquify
+ * > Face-Aware Liquify's own estimated landmark positions. */
+export type FaceLandmarks = {
+  leftEye: [number, number];
+  rightEye: [number, number];
+  nose: [number, number];
+  mouth: [number, number];
+  chin: [number, number];
+  forehead: [number, number];
+  leftCheek: [number, number];
+  rightCheek: [number, number];
+  radius: number;
+};
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness, Custom Paper/Ink, or Gamut Warning. */
 export type Proof = "protanopia" | "deuteranopia" | "paperink" | "gamut";

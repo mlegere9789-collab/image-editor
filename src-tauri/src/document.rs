@@ -943,6 +943,22 @@ pub struct LiquifyMesh {
     pub deformed: Vec<[f32; 2]>,
 }
 
+/// Filter > Liquify > Face-Aware Liquify's own estimated landmark
+/// positions and shared brush `radius` — see [`Document::face_landmarks`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FaceLandmarks {
+    pub left_eye: (f32, f32),
+    pub right_eye: (f32, f32),
+    pub nose: (f32, f32),
+    pub mouth: (f32, f32),
+    pub chin: (f32, f32),
+    pub forehead: (f32, f32),
+    pub left_cheek: (f32, f32),
+    pub right_cheek: (f32, f32),
+    pub radius: f32,
+}
+
 /// Where Puppet Warp's pins send the point `v`: moving-least-squares
 /// deformation (Schaefer, McPhail & Warren 2006) weighting each pin by
 /// the inverse square of its distance. About the weighted centroids
@@ -7953,6 +7969,72 @@ impl Document {
         let bits = self.people_bits_at(id, index)?;
         let (width, height) = (self.width, self.height);
         self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
+    /// Filter > Liquify > Face-Aware Liquify's own face finder: the
+    /// bounding box of the largest of [`Self::people_components`] on
+    /// layer `id` — the same finder Select People already uses, standing
+    /// in for Photoshop's own neural face detection under the same
+    /// assumption Select People already makes: the largest connected
+    /// skin-toned region in a portrait-style photo is the face itself. A
+    /// real, stated limitation, not a hidden one — this project has no
+    /// way to tell a face apart from the rest of a person's visible skin
+    /// (an arm, a neck) the way real face detection would. Errors when
+    /// no skin-toned region is found, or the layer is unknown.
+    pub fn face_bbox(&self, id: LayerId) -> Result<Rect, String> {
+        let components = self.people_components(id)?;
+        let largest = components
+            .first()
+            .filter(|c| !c.is_empty())
+            .ok_or_else(|| "No face was found on the layer.".to_string())?;
+        let w = self.width as usize;
+        let mut rect = Rect {
+            x0: u32::MAX,
+            y0: u32::MAX,
+            x1: 0,
+            y1: 0,
+        };
+        for &idx in largest {
+            let (x, y) = ((idx % w) as u32, (idx / w) as u32);
+            rect.x0 = rect.x0.min(x);
+            rect.y0 = rect.y0.min(y);
+            rect.x1 = rect.x1.max(x + 1);
+            rect.y1 = rect.y1.max(y + 1);
+        }
+        Ok(rect)
+    }
+
+    /// Face-Aware Liquify's own estimated landmark positions: classical
+    /// frontal-face anthropometric proportions (fixed fractions of
+    /// [`Self::face_bbox`]'s own width and height) — the same kind of
+    /// real, deterministic technique face-alignment work used before
+    /// neural landmark detection existed, standing in for Photoshop's
+    /// own neural landmarks the same way Select People's skin-tone rule
+    /// already stands in for neural person detection. Not exact for any
+    /// one photo — a real, documented approximation, not a fake gesture.
+    /// Every named point and `radius` (a brush size scaled to the face's
+    /// own size in the photo, so sliders behave sensibly regardless of
+    /// how large the face is in frame) is meant to be fed straight into
+    /// [`Self::liquify_radial`] or [`Self::liquify_forward_warp`] —
+    /// Face-Aware Liquify's own sliders are exactly those tools, aimed
+    /// at these points, and need no pixel-level code of their own.
+    /// Errors exactly as `face_bbox` does.
+    pub fn face_landmarks(&self, id: LayerId) -> Result<FaceLandmarks, String> {
+        let b = self.face_bbox(id)?;
+        let (x0, y0) = (b.x0 as f32, b.y0 as f32);
+        let (w, h) = ((b.x1 - b.x0) as f32, (b.y1 - b.y0) as f32);
+        let at = |fx: f32, fy: f32| (x0 + fx * w, y0 + fy * h);
+        Ok(FaceLandmarks {
+            left_eye: at(0.30, 0.38),
+            right_eye: at(0.70, 0.38),
+            nose: at(0.50, 0.55),
+            mouth: at(0.50, 0.75),
+            chin: at(0.50, 0.95),
+            forehead: at(0.50, 0.10),
+            left_cheek: at(0.08, 0.55),
+            right_cheek: at(0.92, 0.55),
+            radius: (w.min(h) * 0.22).max(1.0),
+        })
     }
 
     /// Object Selection's Object Finder: every object the finder can see
@@ -52707,6 +52789,59 @@ mod tests {
         assert!(doc.people_bits_at(id, 1).unwrap_err().contains("1 person"));
         assert!(doc.people_bits_at(999, 0).is_err());
         assert!(doc.people_count(999).is_err());
+    }
+
+    #[test]
+    fn face_bbox_is_the_largest_skin_toned_components_own_box() {
+        let skin = [200, 150, 120, 255];
+        let bg = [50, 80, 200, 255];
+        // A 10x20 skin-toned block, a background row to keep it isolated,
+        // and a small 2-pixel skin speck below that -- face_bbox must
+        // pick the block, not the speck, exactly as Select People's own
+        // finder does.
+        let mut rows: Vec<Vec<[u8; 4]>> = (0..20).map(|_| vec![skin; 10]).collect();
+        rows.push(vec![bg; 10]);
+        rows.push([vec![skin; 2], vec![bg; 8]].concat());
+        let (doc, id) = row_doc(&rows);
+        assert_eq!(
+            doc.face_bbox(id).unwrap(),
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 10,
+                y1: 20
+            }
+        );
+    }
+
+    #[test]
+    fn face_landmarks_are_fixed_fractions_of_the_face_bbox() {
+        let skin = [200, 150, 120, 255];
+        let rows: Vec<Vec<[u8; 4]>> = (0..20).map(|_| vec![skin; 10]).collect();
+        let (doc, id) = row_doc(&rows);
+        let lm = doc.face_landmarks(id).unwrap();
+        let close = |(ax, ay): (f32, f32), (bx, by): (f32, f32)| {
+            (ax - bx).abs() < 1e-3 && (ay - by).abs() < 1e-3
+        };
+        assert!(close(lm.left_eye, (3.0, 7.6)));
+        assert!(close(lm.right_eye, (7.0, 7.6)));
+        assert!(close(lm.nose, (5.0, 11.0)));
+        assert!(close(lm.mouth, (5.0, 15.0)));
+        assert!(close(lm.chin, (5.0, 19.0)));
+        assert!(close(lm.forehead, (5.0, 2.0)));
+        assert!(close(lm.left_cheek, (0.8, 11.0)));
+        assert!(close(lm.right_cheek, (9.2, 11.0)));
+        assert!((lm.radius - 2.2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn face_bbox_and_landmarks_error_when_no_skin_is_found_or_the_layer_is_unknown() {
+        let bg = [50, 80, 200, 255];
+        let (doc, id) = row_doc(&[vec![bg, bg]]);
+        assert!(doc.face_bbox(id).unwrap_err().contains("face"));
+        assert!(doc.face_landmarks(id).unwrap_err().contains("face"));
+        assert!(doc.face_bbox(999).is_err());
+        assert!(doc.face_landmarks(999).is_err());
     }
 
     /// A `21x21` grey canvas with a coloured marker pixel at `(x, y)`.

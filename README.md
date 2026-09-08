@@ -17391,6 +17391,65 @@ claimed here.
 
 **1656 Rust tests total** (1651 → 1656, 1649 lib + 7 pipeline).
 
+## Phase 293 — Face-Aware Liquify
+
+The first of four items this session had briefly, wrongly, called
+permanently out of reach — corrected on reconsideration: Face-Aware
+Liquify, Hair Selection, Person Components, and Adaptive Wide Angle all
+reduce to real, honest classical techniques already established
+elsewhere in this project, the same pattern `is_skin_tone` set for
+Select People and Skin Smoothing.
+
+`Document::face_bbox(id)` reuses the private `people_components` skin-tone
+connected-component finder Select People already built, and returns the
+bounding box of the *largest* component on the layer — an honest,
+documented limitation: it finds the largest skin-toned region, not
+specifically a face, so a hand or an arm in frame can win over a face
+that happens to be smaller in the source image. `Document::face_landmarks(id)`
+turns that box into eight points — left/right eye, nose, mouth, chin,
+forehead, left/right cheek — at fixed fractions of the box's own width
+and height, a real pre-deep-learning anthropometric-proportion technique,
+not a neural landmark model standing in for one. A `radius`, `0.22` of
+the box's shorter side, comes along for every slider below to scale its
+brush by.
+
+The frontend adds ten named sliders — Eye Size, Eye Width, Nose Width,
+Nose Height, Mouth Width, Mouth Smile, Forehead, Jawline, Chin Height,
+Face Width — each running one of the two Liquify commands Phase 266/268
+already shipped: a nonzero slider is either `liquify_radial` (Bloat when
+positive, Pucker when negative) centred on the relevant landmark, or
+`liquify_forward_warp` pushing that landmark along one axis, radius
+scaled by `face_landmarks`' own `radius`. No new pixel-mutating code
+exists anywhere in this phase — only landmark-point computation and
+command composition over tools this project already tested at the pixel
+level in Phases 266–270.
+
+**Verified two ways.** Three new `document.rs` tests: `face_bbox` picks
+the larger of two skin-toned regions over the smaller isolated one;
+`face_landmarks` returns all eight points and the radius at their exact
+hand-verified fractional positions of a known bounding box; both error
+correctly on a layer with no skin-toned pixels at all and on an unknown
+layer id. This session's own second verification path — a Playwright
+browser session against a mocked `__TAURI_INTERNALS__` — opened the
+dialog, confirmed `face_landmarks` was called with the selected layer's
+id, drove the Eye Size and Mouth Smile sliders, clicked Apply, and
+confirmed the exact `liquify_radial` (`tool: "bloat"`, both eye centres,
+`radius: 1.1`, `strength: 40`) and `liquify_forward_warp`
+(`cx: 5, cy: 7.5, radius: 0.88, dx: 0, dy: 9`) calls that came out the
+other end. `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test`, and `npm run build` are all clean.
+
+Face-Aware Liquify flips to shipped. Hair Selection, Person Components,
+and Adaptive Wide Angle are next, each building on what this phase or an
+earlier one already shipped: Hair Selection and Person Components on the
+face-region heuristic above, Adaptive Wide Angle by fitting
+`lens_correction`'s own radial distortion coefficient to a set of
+user-marked lines with least squares — a numerical optimisation problem,
+not an AI-dependent one, and this session's own earlier claim otherwise
+was simply wrong.
+
+**1659 Rust tests total** (1656 → 1659, 1652 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

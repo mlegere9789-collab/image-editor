@@ -23,6 +23,7 @@ import type {
   ColorSample,
   ContentAwareScaleOptions,
   DocumentView,
+  FaceLandmarks,
   Fill,
   GuideOrientation,
   HistoryState,
@@ -782,6 +783,21 @@ export default function App() {
   // like `liquifyOriginal` and passed into every other Liquify tool to
   // protect frozen pixels from it.
   const liquifyMask = useRef<number[] | null>(null);
+  // Filter > Liquify > Face-Aware Liquify: named sliders aimed at the face's
+  // own estimated landmark points (see `face_landmarks`), each reusing an
+  // already-shipped Liquify tool -- no pixel-level code of its own.
+  const [showFaceLiquifyDialog, setShowFaceLiquifyDialog] = useState(false);
+  const [faceLandmarks, setFaceLandmarks] = useState<FaceLandmarks | null>(null);
+  const [faceEyeSize, setFaceEyeSize] = useState(0);
+  const [faceEyeWidth, setFaceEyeWidth] = useState(0);
+  const [faceNoseWidth, setFaceNoseWidth] = useState(0);
+  const [faceNoseHeight, setFaceNoseHeight] = useState(0);
+  const [faceMouthWidth, setFaceMouthWidth] = useState(0);
+  const [faceMouthSmile, setFaceMouthSmile] = useState(0);
+  const [faceForehead, setFaceForehead] = useState(0);
+  const [faceJawline, setFaceJawline] = useState(0);
+  const [faceChinHeight, setFaceChinHeight] = useState(0);
+  const [faceWidth, setFaceWidth] = useState(0);
   // Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration.
   const [showLensCorrectionDialog, setShowLensCorrectionDialog] = useState(false);
   const [lensDistortion, setLensDistortion] = useState(0);
@@ -2810,6 +2826,80 @@ export default function App() {
     liquifyRadius,
     liquifyPush,
     liquifyStrength,
+  ]);
+
+  const openFaceLiquifyDialog = useCallback(async () => {
+    if (selectedId === null) return;
+    setShowFaceLiquifyDialog(true);
+    setFaceEyeSize(0);
+    setFaceEyeWidth(0);
+    setFaceNoseWidth(0);
+    setFaceNoseHeight(0);
+    setFaceMouthWidth(0);
+    setFaceMouthSmile(0);
+    setFaceForehead(0);
+    setFaceJawline(0);
+    setFaceChinHeight(0);
+    setFaceWidth(0);
+    try {
+      setFaceLandmarks(await invoke<FaceLandmarks>("face_landmarks", { id: selectedId }));
+    } catch {
+      setFaceLandmarks(null);
+    }
+  }, [selectedId]);
+
+  // Filter > Liquify > Face-Aware Liquify: every slider below is a Bloat/
+  // Pucker (`liquify_radial`) or a directional push (`liquify_forward_warp`)
+  // aimed at `face_landmarks`' own estimated points and scaled by its
+  // radius -- the same tools Liquify's own dialog already ships, run
+  // automatically at face-shaped positions instead of by hand.
+  const applyFaceAwareLiquify = useCallback(async () => {
+    if (selectedId === null || !faceLandmarks) return;
+    const r = faceLandmarks.radius;
+    const radial = (strength: number, [cx, cy]: [number, number], radiusScale: number) => {
+      if (strength === 0) return Promise.resolve();
+      return runCommand("liquify_radial", {
+        id: selectedId,
+        tool: strength > 0 ? "bloat" : "pucker",
+        cx,
+        cy,
+        radius: r * radiusScale,
+        strength: Math.abs(strength),
+      }).then(() => undefined);
+    };
+    const push = (dx: number, dy: number, [cx, cy]: [number, number], radiusScale: number) => {
+      if (dx === 0 && dy === 0) return Promise.resolve();
+      return runCommand("liquify_forward_warp", { id: selectedId, cx, cy, radius: r * radiusScale, dx, dy }).then(
+        () => undefined,
+      );
+    };
+    await radial(faceEyeSize, faceLandmarks.leftEye, 0.5);
+    await radial(faceEyeSize, faceLandmarks.rightEye, 0.5);
+    await push(-faceEyeWidth * 0.3, 0, faceLandmarks.leftEye, 0.4);
+    await push(faceEyeWidth * 0.3, 0, faceLandmarks.rightEye, 0.4);
+    await radial(faceNoseWidth, faceLandmarks.nose, 0.35);
+    await push(0, -faceNoseHeight * 0.3, faceLandmarks.nose, 0.3);
+    await radial(faceMouthWidth, faceLandmarks.mouth, 0.4);
+    await push(0, -faceMouthSmile * 0.3, faceLandmarks.mouth, 0.4);
+    await push(0, -faceForehead * 0.3, faceLandmarks.forehead, 0.5);
+    await radial(faceJawline, faceLandmarks.chin, 0.6);
+    await push(0, faceChinHeight * 0.3, faceLandmarks.chin, 0.3);
+    await push(-faceWidth * 0.3, 0, faceLandmarks.leftCheek, 0.5);
+    await push(faceWidth * 0.3, 0, faceLandmarks.rightCheek, 0.5);
+  }, [
+    runCommand,
+    selectedId,
+    faceLandmarks,
+    faceEyeSize,
+    faceEyeWidth,
+    faceNoseWidth,
+    faceNoseHeight,
+    faceMouthWidth,
+    faceMouthSmile,
+    faceForehead,
+    faceJawline,
+    faceChinHeight,
+    faceWidth,
   ]);
 
   // Filter > Vanishing Point > Stamp: clones source to target through the
@@ -7176,6 +7266,14 @@ export default function App() {
             title="Filter > Liquify: Twirl, Pucker, Bloat, Forward Warp, and Reconstruct over a circular brush"
           >
             Liquify…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void openFaceLiquifyDialog()}
+            disabled={busy || !canPaint}
+            title="Filter > Liquify > Face-Aware Liquify: named sliders aimed at the face's own estimated landmark points"
+          >
+            Face-Aware Liquify…
           </button>
           <button
             className="button button--quiet"
@@ -14502,6 +14600,74 @@ export default function App() {
                 Close
               </button>
               <button className="button" onClick={applyLiquify} disabled={busy || selectedId === null} title="Apply once at this centre">
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFaceLiquifyDialog && (
+        <div className="modal-overlay" onClick={() => setShowFaceLiquifyDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Face-Aware Liquify"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Filter &gt; Liquify &gt; Face-Aware Liquify</h2>
+            <p className="modal__hint">
+              Estimates eight landmark points from the selected layer&apos;s own largest
+              skin-toned region (the same region Select People finds) at fixed
+              anthropometric proportions of its bounding box — a classical,
+              pre-deep-learning substitute for neural landmark detection, not landmark
+              detection itself. Every slider below is Liquify&apos;s own Bloat/Pucker or
+              Forward Warp, aimed automatically at one of those points and scaled by the
+              estimated face radius, run instead of by hand. Works best on a single,
+              mostly frontal, well-lit face; anything else — profile views, multiple
+              faces, unusual lighting — the landmark estimate degrades gracefully but is
+              not corrected for.
+            </p>
+            {!faceLandmarks && (
+              <p className="modal__hint">No face-shaped (skin-toned) region was found on this layer.</p>
+            )}
+            {faceLandmarks &&
+              (
+                [
+                  ["Eye Size", faceEyeSize, setFaceEyeSize],
+                  ["Eye Width", faceEyeWidth, setFaceEyeWidth],
+                  ["Nose Width", faceNoseWidth, setFaceNoseWidth],
+                  ["Nose Height", faceNoseHeight, setFaceNoseHeight],
+                  ["Mouth Width", faceMouthWidth, setFaceMouthWidth],
+                  ["Mouth Smile", faceMouthSmile, setFaceMouthSmile],
+                  ["Forehead", faceForehead, setFaceForehead],
+                  ["Jawline", faceJawline, setFaceJawline],
+                  ["Chin Height", faceChinHeight, setFaceChinHeight],
+                  ["Face Width", faceWidth, setFaceWidth],
+                ] as const
+              ).map(([label, value, setValue]) => (
+                <label className="control control--row" key={label}>
+                  <span className="control__label">{label}</span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={value}
+                    onChange={(event) => setValue(Number(event.target.value))}
+                  />
+                  <span className="control__value">{value}</span>
+                </label>
+              ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFaceLiquifyDialog(false)} title="Close">
+                Close
+              </button>
+              <button
+                className="button"
+                onClick={() => void applyFaceAwareLiquify()}
+                disabled={busy || selectedId === null || !faceLandmarks}
+                title="Apply every nonzero slider"
+              >
                 Apply
               </button>
             </div>

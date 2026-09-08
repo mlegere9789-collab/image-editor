@@ -1658,6 +1658,19 @@ fn liquify_mesh(
     document.liquify_mesh(tool, cx, cy, radius, dx, dy, strength, spacing)
 }
 
+/// Filter > Liquify > Face-Aware Liquify's own estimated landmark
+/// positions on layer `id`, for its sliders to aim the already-shipped
+/// `liquify_radial`/`liquify_forward_warp` commands at. Read-only.
+#[tauri::command]
+fn face_landmarks(
+    state: State<'_, AppState>,
+    id: LayerId,
+) -> Result<document::FaceLandmarks, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.face_landmarks(id)
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -6193,6 +6206,7 @@ pub fn run() {
             puppet_warp,
             puppet_mesh,
             liquify_mesh,
+            face_landmarks,
             convert_to_indexed,
             assign_profile,
             convert_to_profile,
