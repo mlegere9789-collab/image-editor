@@ -393,6 +393,14 @@ export type PuppetMesh = {
   triangles: [number, number, number][];
 };
 
+/** Mirrors `LiquifyMesh` in src-tauri/src/document.rs: Filter > Liquify's
+ * Show Mesh, a row-major preview grid over the whole canvas. */
+export type LiquifyMesh = {
+  cols: number;
+  rows: number;
+  deformed: [number, number][];
+};
+
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
  * Color Blindness, Custom Paper/Ink, or Gamut Warning. */
 export type Proof = "protanopia" | "deuteranopia" | "paperink" | "gamut";

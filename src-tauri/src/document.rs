@@ -820,6 +820,18 @@ pub struct PuppetMesh {
     pub triangles: Vec<[usize; 3]>,
 }
 
+/// Filter > Liquify's Show Mesh: a preview grid spanning the whole
+/// canvas, row-major (`rows` rows of `cols` vertices apiece, `deformed`
+/// the same length), each vertex shown at its own post-warp position —
+/// see [`Document::liquify_mesh`].
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LiquifyMesh {
+    pub cols: usize,
+    pub rows: usize,
+    pub deformed: Vec<[f32; 2]>,
+}
+
 /// Where Puppet Warp's pins send the point `v`: moving-least-squares
 /// deformation (Schaefer, McPhail & Warren 2006) weighting each pin by
 /// the inverse square of its distance. About the weighted centroids
@@ -919,18 +931,23 @@ fn puppet_deform(v: [f32; 2], pins: &[PuppetPin], mode: PuppetMode) -> [f32; 2] 
     ]
 }
 
+/// One axis of a spaced preview grid: a tick every `spacing` pixels from
+/// `from` plus `to` itself, even when `spacing` does not divide the span
+/// evenly. Shared by [`puppet_grid`] (Puppet Warp's own mesh) and
+/// [`Document::liquify_mesh`] (Liquify's).
+fn grid_ticks(from: u32, to: u32, spacing: u32) -> Vec<u32> {
+    let mut ticks: Vec<u32> = (from..to).step_by(spacing as usize).collect();
+    if ticks.last() != Some(&to) {
+        ticks.push(to);
+    }
+    ticks
+}
+
 /// Puppet Warp's grid over `bounds`: a vertex every `spacing` pixels from
 /// the top-left plus the far edge, each cell split into two triangles.
 fn puppet_grid(bounds: Rect, spacing: u32) -> (Vec<[f32; 2]>, Vec<[usize; 3]>) {
-    let axis = |from: u32, to: u32| -> Vec<u32> {
-        let mut ticks: Vec<u32> = (from..to).step_by(spacing as usize).collect();
-        if ticks.last() != Some(&to) {
-            ticks.push(to);
-        }
-        ticks
-    };
-    let xs = axis(bounds.x0, bounds.x1 - 1);
-    let ys = axis(bounds.y0, bounds.y1 - 1);
+    let xs = grid_ticks(bounds.x0, bounds.x1 - 1, spacing);
+    let ys = grid_ticks(bounds.y0, bounds.y1 - 1, spacing);
     let vertices: Vec<[f32; 2]> = ys
         .iter()
         .flat_map(|&y| xs.iter().map(move |&x| [x as f32, y as f32]))
@@ -21612,6 +21629,41 @@ impl Document {
         })
     }
 
+    /// Filter > Liquify's own per-point transform, shared by
+    /// [`Document::liquify_radial_with`] (which calls this once per
+    /// destination pixel to find its source, `(dx, dy)` the pixel's own
+    /// offset from the tool's centre) and [`Document::liquify_mesh`]
+    /// (which calls it, on a grid vertex's own offset, to preview the
+    /// tool's exact functional inverse). Twirl rotates `(dx, dy)` by
+    /// `-strength° · falloff` (negative here because the pixel caller
+    /// wants a *backward* offset — Mesh negates `strength` itself to get
+    /// the matching *forward* rotation instead, since a rotation's own
+    /// inverse is just the negated angle); Pucker and Bloat rescale it by
+    /// `1 ± (strength / 100) · falloff`.
+    fn liquify_radial_offset(
+        tool: LiquifyTool,
+        dx: f32,
+        dy: f32,
+        falloff: f32,
+        strength: f32,
+    ) -> (f32, f32) {
+        match tool {
+            LiquifyTool::Twirl => {
+                let angle = -(strength.to_radians()) * falloff;
+                let (sin, cos) = angle.sin_cos();
+                (dx * cos - dy * sin, dx * sin + dy * cos)
+            }
+            LiquifyTool::Pucker => {
+                let scale = 1.0 + (strength / 100.0) * falloff;
+                (dx * scale, dy * scale)
+            }
+            LiquifyTool::Bloat => {
+                let scale = 1.0 - (strength / 100.0) * falloff;
+                (dx * scale, dy * scale)
+            }
+        }
+    }
+
     /// [`Self::liquify_radial_with`] with no freeze mask — see there for
     /// the full mechanism.
     pub fn liquify_radial(
@@ -21670,10 +21722,10 @@ impl Document {
     /// frozen pixels outright. Errors for a non-positive or non-finite
     /// radius, a non-finite centre, strength outside `-180..=180` for
     /// Twirl or `0..=100` for Pucker/Bloat, a locked layer, or a `mask`
-    /// whose length is not `width × height`. Liquify Mesh and Face-Aware
-    /// Liquify remain documented scope cuts: they need real face landmark
-    /// detection, or an interactive mesh view, that a per-application
-    /// pixel tool does not.
+    /// whose length is not `width × height`. Face-Aware Liquify remains a
+    /// documented scope cut: it needs real face landmark detection this
+    /// project has no honest substitute for. Liquify Mesh — a preview
+    /// grid of this same transform, run forward — is [`Self::liquify_mesh`].
     #[allow(clippy::too_many_arguments)]
     fn liquify_radial_with(
         &mut self,
@@ -21717,21 +21769,7 @@ impl Document {
                 (col as i64, row as i64)
             } else {
                 let falloff = 1.0 - (d / radius) * (d / radius);
-                let (ox, oy) = match tool {
-                    LiquifyTool::Twirl => {
-                        let angle = -(strength.to_radians()) * falloff;
-                        let (sin, cos) = angle.sin_cos();
-                        (dx * cos - dy * sin, dx * sin + dy * cos)
-                    }
-                    LiquifyTool::Pucker => {
-                        let scale = 1.0 + (strength / 100.0) * falloff;
-                        (dx * scale, dy * scale)
-                    }
-                    LiquifyTool::Bloat => {
-                        let scale = 1.0 - (strength / 100.0) * falloff;
-                        (dx * scale, dy * scale)
-                    }
-                };
+                let (ox, oy) = Self::liquify_radial_offset(tool, dx, dy, falloff, strength);
                 ((cx + ox).round() as i64, (cy + oy).round() as i64)
             };
             let mut out = if sx < 0 || sy < 0 || sx >= width || sy >= height {
@@ -22075,6 +22113,94 @@ impl Document {
                 *slot = (current + (target - current) * t).round().clamp(0.0, 255.0) as u8;
             }
             out
+        })
+    }
+
+    /// Filter > Liquify's Show Mesh: a preview grid over the whole canvas
+    /// — the same spaced, edge-snapped construction [`puppet_grid`]
+    /// already uses for Puppet Warp's own mesh, via the shared
+    /// [`grid_ticks`] — each vertex displaced by the *pending* tool's own
+    /// transform, run forward instead of backward. Forward Warp's own
+    /// push (`tool: None`) previews exactly, `(dx, dy) · f(d)` added
+    /// straight to the vertex, the same falloff `f(d) = 1 − (d / radius)²`
+    /// every Liquify tool shares. A radial tool (`tool: Some(_)`) previews
+    /// the exact functional inverse of [`Self::liquify_radial_offset`],
+    /// the same offset `liquify_radial_with` uses per pixel, evaluated at
+    /// the vertex's own original distance from `(cx, cy)` rather than
+    /// solving for its post-warp distance exactly: exact for Twirl (a
+    /// rotation does not change distance from centre, so the two
+    /// falloffs agree everywhere — negating `strength` undoes exactly the
+    /// rotation `liquify_radial_offset` applies) and a close, honestly
+    /// approximate preview for Pucker and Bloat wherever the displacement
+    /// is small next to `radius`, exactly the regime a preview like this
+    /// is drawn in. Bloat's scale is floored at `0.05` before dividing,
+    /// so a vertex at the very centre under maximum Bloat strength
+    /// previews at a large but finite position rather than `NaN`. Purely
+    /// illustrative: no pixel-producing command reads this grid. Errors
+    /// for a non-positive or non-finite radius, a non-finite centre, or a
+    /// `spacing` of zero.
+    #[allow(clippy::too_many_arguments)]
+    pub fn liquify_mesh(
+        &self,
+        tool: Option<LiquifyTool>,
+        cx: f32,
+        cy: f32,
+        radius: f32,
+        dx: f32,
+        dy: f32,
+        strength: f32,
+        spacing: u32,
+    ) -> Result<LiquifyMesh, String> {
+        if !(radius.is_finite() && radius > 0.0) {
+            return Err("Radius must be a positive number.".to_string());
+        }
+        if !(cx.is_finite() && cy.is_finite()) {
+            return Err("The centre must be finite coordinates.".to_string());
+        }
+        if spacing == 0 {
+            return Err("Spacing must be at least 1 pixel.".to_string());
+        }
+        let xs = grid_ticks(0, self.width.saturating_sub(1), spacing);
+        let ys = grid_ticks(0, self.height.saturating_sub(1), spacing);
+        let deformed: Vec<[f32; 2]> = ys
+            .iter()
+            .flat_map(|&y| {
+                xs.iter().map(move |&x| {
+                    let (px, py) = (x as f32, y as f32);
+                    let (rdx, rdy) = (px - cx, py - cy);
+                    let d = (rdx * rdx + rdy * rdy).sqrt();
+                    if d >= radius {
+                        return [px, py];
+                    }
+                    let falloff = 1.0 - (d / radius) * (d / radius);
+                    match tool {
+                        None => [px + dx * falloff, py + dy * falloff],
+                        Some(LiquifyTool::Twirl) => {
+                            let (ox, oy) = Self::liquify_radial_offset(
+                                LiquifyTool::Twirl,
+                                rdx,
+                                rdy,
+                                falloff,
+                                -strength,
+                            );
+                            [cx + ox, cy + oy]
+                        }
+                        Some(LiquifyTool::Pucker) => {
+                            let scale = 1.0 + (strength / 100.0) * falloff;
+                            [cx + rdx / scale, cy + rdy / scale]
+                        }
+                        Some(LiquifyTool::Bloat) => {
+                            let scale = (1.0 - (strength / 100.0) * falloff).max(0.05);
+                            [cx + rdx / scale, cy + rdy / scale]
+                        }
+                    }
+                })
+            })
+            .collect();
+        Ok(LiquifyMesh {
+            cols: xs.len(),
+            rows: ys.len(),
+            deformed,
         })
     }
 
@@ -52354,6 +52480,139 @@ mod tests {
         assert!(doc
             .liquify_reconstruct(999, 10.0, 10.0, 10.0, 50.0, &original)
             .is_err());
+    }
+
+    #[test]
+    fn liquify_mesh_grids_the_whole_canvas_with_edge_snapping() {
+        // 0..20 with spacing 10 gives ticks 0, 10, then the far edge 20
+        // (which spacing alone would miss) snapped in, on both axes.
+        let doc = Document::new(21, 21).unwrap();
+        let mesh = doc
+            .liquify_mesh(None, -100.0, -100.0, 1.0, 0.0, 0.0, 0.0, 10)
+            .unwrap();
+        assert_eq!((mesh.cols, mesh.rows), (3, 3));
+        assert_eq!(mesh.deformed.len(), 9);
+        // The centre is so far outside the (tiny) radius that every
+        // vertex previews untouched, at its own original grid position.
+        assert_eq!(
+            mesh.deformed,
+            vec![
+                [0.0, 0.0],
+                [10.0, 0.0],
+                [20.0, 0.0],
+                [0.0, 10.0],
+                [10.0, 10.0],
+                [20.0, 10.0],
+                [0.0, 20.0],
+                [10.0, 20.0],
+                [20.0, 20.0],
+            ]
+        );
+    }
+
+    #[test]
+    fn liquify_mesh_previews_forward_warps_push_scaled_by_falloff() {
+        // 3x3 grid (ticks 0, 10, 20 on both axes), centred on its own
+        // middle vertex (10, 10), radius 15 so every vertex is in reach
+        // (the farthest, a corner, is sqrt(200) =~ 14.142 < 15).
+        let doc = Document::new(21, 21).unwrap();
+        let mesh = doc
+            .liquify_mesh(None, 10.0, 10.0, 15.0, 6.0, -4.0, 0.0, 10)
+            .unwrap();
+        let close =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
+        // Vertex (0, 0): d^2 = 200, falloff = 1 - 200/225 = 1/9 exactly.
+        // Preview = (0, 0) + (6, -4) * 1/9 = (2/3, -4/9).
+        assert!(close(mesh.deformed[0], [2.0 / 3.0, -4.0 / 9.0]));
+        // Vertex (10, 0): d = 10, falloff = 1 - 100/225 = 5/9.
+        // Preview = (10, 0) + (6, -4) * 5/9 = (10 + 10/3, -20/9).
+        assert!(close(mesh.deformed[1], [10.0 + 10.0 / 3.0, -20.0 / 9.0]));
+        // The exact centre vertex (10, 10): falloff = 1, full push.
+        assert!(close(mesh.deformed[4], [16.0, 6.0]));
+    }
+
+    #[test]
+    fn liquify_mesh_previews_twirl_as_the_exact_functional_inverse_of_its_own_pixel_offset() {
+        let doc = Document::new(21, 21).unwrap();
+        let (cx, cy, radius, strength) = (10.0, 10.0, 15.0, 37.0);
+        let mesh = doc
+            .liquify_mesh(
+                Some(LiquifyTool::Twirl),
+                cx,
+                cy,
+                radius,
+                0.0,
+                0.0,
+                strength,
+                10,
+            )
+            .unwrap();
+        // Twirl's mesh preview is the exact functional inverse of the
+        // same per-pixel offset liquify_radial_with itself uses for
+        // resampling -- a rotation never changes distance from centre,
+        // so the two falloffs agree everywhere, and feeding the deformed
+        // point's own offset from centre back through
+        // liquify_radial_offset at that (identical) falloff must land
+        // exactly back on the original vertex, (0, 0).
+        let [dx, dy] = mesh.deformed[0];
+        let (rdx, rdy) = (dx - cx, dy - cy);
+        let d = (rdx * rdx + rdy * rdy).sqrt();
+        let falloff = 1.0 - (d / radius) * (d / radius);
+        let (ox, oy) =
+            Document::liquify_radial_offset(LiquifyTool::Twirl, rdx, rdy, falloff, strength);
+        assert!((cx + ox).abs() < 1e-3);
+        assert!((cy + oy).abs() < 1e-3);
+    }
+
+    #[test]
+    fn liquify_mesh_previews_pucker_and_bloat_by_dividing_the_offset_by_scale() {
+        // A single row, ticks 0, 5, 10, centred on the middle vertex
+        // (5, 0), radius 10: the outer vertices sit at d = 5, so
+        // falloff = 1 - 25/100 = 0.75.
+        let doc = Document::new(11, 1).unwrap();
+        let bloat = doc
+            .liquify_mesh(Some(LiquifyTool::Bloat), 5.0, 0.0, 10.0, 0.0, 0.0, 100.0, 5)
+            .unwrap();
+        assert_eq!(bloat.deformed.len(), 3);
+        // scale = 1 - 1.0 * 0.75 = 0.25; preview = centre + offset / 0.25.
+        assert_eq!(bloat.deformed[0], [-15.0, 0.0]);
+        assert_eq!(bloat.deformed[1], [5.0, 0.0]); // the centre stays put
+        assert_eq!(bloat.deformed[2], [25.0, 0.0]);
+
+        let pucker = doc
+            .liquify_mesh(
+                Some(LiquifyTool::Pucker),
+                5.0,
+                0.0,
+                10.0,
+                0.0,
+                0.0,
+                100.0,
+                5,
+            )
+            .unwrap();
+        // scale = 1 + 1.0 * 0.75 = 1.75; preview = centre + offset / 1.75.
+        let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+        assert!(close(pucker.deformed[0][0], 5.0 - 20.0 / 7.0));
+        assert_eq!(pucker.deformed[1], [5.0, 0.0]);
+        assert!(close(pucker.deformed[2][0], 5.0 + 20.0 / 7.0));
+    }
+
+    #[test]
+    fn liquify_mesh_validates_its_arguments() {
+        let doc = Document::new(21, 21).unwrap();
+        assert!(doc
+            .liquify_mesh(None, 10.0, 10.0, 0.0, 1.0, 1.0, 0.0, 10)
+            .unwrap_err()
+            .contains("Radius"));
+        assert!(doc
+            .liquify_mesh(None, f32::NAN, 10.0, 10.0, 1.0, 1.0, 0.0, 10)
+            .unwrap_err()
+            .contains("centre"));
+        assert!(doc
+            .liquify_mesh(None, 10.0, 10.0, 10.0, 1.0, 1.0, 0.0, 0)
+            .unwrap_err()
+            .contains("Spacing"));
     }
 
     #[test]

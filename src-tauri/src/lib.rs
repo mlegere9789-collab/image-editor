@@ -1622,6 +1622,26 @@ fn puppet_mesh(
     document.puppet_mesh(id, &options)
 }
 
+/// Filter > Liquify's Show Mesh: a preview grid over the whole canvas,
+/// each vertex displaced by the currently pending tool's own transform.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn liquify_mesh(
+    state: State<'_, AppState>,
+    tool: Option<document::LiquifyTool>,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    dx: f32,
+    dy: f32,
+    strength: f32,
+    spacing: u32,
+) -> Result<document::LiquifyMesh, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.liquify_mesh(tool, cx, cy, radius, dx, dy, strength, spacing)
+}
+
 /// Show Transform Controls: put layer `id`'s opaque bounds onto the
 /// rectangle a handle drag ended on.
 #[tauri::command]
@@ -6079,6 +6099,7 @@ pub fn run() {
             liquify_paint_mask,
             puppet_warp,
             puppet_mesh,
+            liquify_mesh,
             convert_to_indexed,
             convert_to_duotone,
             rename_channel,

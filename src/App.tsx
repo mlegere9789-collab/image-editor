@@ -28,6 +28,7 @@ import type {
   Ink,
   LevelsChannel,
   LiquifyTool,
+  LiquifyMesh,
   Measurement,
   MoveDirection,
   Palette,
@@ -732,6 +733,11 @@ export default function App() {
   const [liquifyStrength, setLiquifyStrength] = useState(50);
   const [liquifyPush, setLiquifyPush] = useState<[number, number]>([20, 0]);
   const [liquifyAmount, setLiquifyAmount] = useState(50);
+  // Filter > Liquify > Show Mesh: a preview grid, recomputed from the
+  // pending tool's own parameters -- meaningful only for Twirl, Pucker,
+  // Bloat, and Forward Warp, which are the tools liquify_mesh previews.
+  const [liquifyShowMesh, setLiquifyShowMesh] = useState(false);
+  const [liquifyMesh, setLiquifyMesh] = useState<LiquifyMesh | null>(null);
   // Reconstruct's "original": the layer's pixels captured with layer_pixels
   // before any Liquify tool has run, so Reconstruct has something to blend
   // back toward.
@@ -2536,6 +2542,7 @@ export default function App() {
     // The Freeze Mask starts fully thawed every time the dialog opens,
     // the same session-scoped lifetime as `liquifyOriginal`.
     liquifyMask.current = document ? new Array(document.width * document.height).fill(0) : null;
+    setLiquifyMesh(null);
   }, [document, selectedId]);
 
   const applyLiquify = useCallback(async () => {
@@ -2596,6 +2603,45 @@ export default function App() {
     liquifyStrength,
     liquifyPush,
     liquifyAmount,
+  ]);
+
+  // Filter > Liquify > Show Mesh: re-read the preview grid whenever a
+  // parameter it depends on changes, for whichever tool it can preview
+  // (Twirl, Pucker, Bloat, or Forward Warp -- Reconstruct, Freeze Mask,
+  // and Thaw Mask are not spatial warps, so there is nothing to preview).
+  useEffect(() => {
+    if (!showLiquifyDialog || !liquifyShowMesh) return;
+    const previewable =
+      liquifyTool === "twirl" ||
+      liquifyTool === "pucker" ||
+      liquifyTool === "bloat" ||
+      liquifyTool === "forward";
+    if (!previewable) {
+      setLiquifyMesh(null);
+      return;
+    }
+    const [cx, cy] = liquifyCenter;
+    const [dx, dy] = liquifyPush;
+    invoke<LiquifyMesh>("liquify_mesh", {
+      tool: liquifyTool === "forward" ? null : liquifyTool,
+      cx,
+      cy,
+      radius: liquifyRadius,
+      dx: liquifyTool === "forward" ? dx : 0,
+      dy: liquifyTool === "forward" ? dy : 0,
+      strength: liquifyTool === "forward" ? 0 : liquifyStrength,
+      spacing: Math.max(1, Math.round(liquifyRadius / 4)),
+    })
+      .then(setLiquifyMesh)
+      .catch(() => setLiquifyMesh(null));
+  }, [
+    showLiquifyDialog,
+    liquifyShowMesh,
+    liquifyTool,
+    liquifyCenter,
+    liquifyRadius,
+    liquifyPush,
+    liquifyStrength,
   ]);
 
   const applyLensCorrection = useCallback(async () => {
@@ -13938,8 +13984,10 @@ export default function App() {
               Freeze Mask and Thaw Mask instead raise or lower a freeze mask by Amount, held
               for as long as this dialog stays open: every other tool above scales its effect
               down over frozen pixels instead of touching them outright. Apply repeatedly at
-              different centres to build up an effect; Liquify Mesh and Face-Aware Liquify
-              are documented scope cuts.
+              different centres to build up an effect. Show Mesh previews Twirl, Pucker,
+              Bloat, and Forward Warp's own pending distortion as a grid, run forward instead
+              of the exact backward offset resampling uses; Face-Aware Liquify remains a
+              documented scope cut.
             </p>
             <label className="control control--row">
               <span className="control__label">Tool</span>
@@ -14022,6 +14070,44 @@ export default function App() {
                 />
                 <span className="control__value">{liquifyStrength}</span>
               </label>
+            )}
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={liquifyShowMesh}
+                onChange={(event) => setLiquifyShowMesh(event.target.checked)}
+              />
+              <span className="control__label">Show Mesh</span>
+            </label>
+            {liquifyShowMesh && liquifyMesh && document && (
+              <svg
+                className="warp-mesh"
+                viewBox={`${-document.width / 4} ${-document.height / 4} ${document.width * 1.5} ${document.height * 1.5}`}
+              >
+                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                {Array.from({ length: liquifyMesh.rows }, (_, row) => (
+                  <polyline
+                    className="warp-mesh__curve"
+                    key={`row-${row}`}
+                    points={liquifyMesh.deformed
+                      .slice(row * liquifyMesh.cols, row * liquifyMesh.cols + liquifyMesh.cols)
+                      .map(([x, y]) => `${x},${y}`)
+                      .join(" ")}
+                  />
+                ))}
+                {Array.from({ length: liquifyMesh.cols }, (_, col) => (
+                  <polyline
+                    className="warp-mesh__curve"
+                    key={`col-${col}`}
+                    points={Array.from(
+                      { length: liquifyMesh.rows },
+                      (_, row) => liquifyMesh.deformed[row * liquifyMesh.cols + col],
+                    )
+                      .map(([x, y]) => `${x},${y}`)
+                      .join(" ")}
+                  />
+                ))}
+              </svg>
             )}
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowLiquifyDialog(false)} title="Close">

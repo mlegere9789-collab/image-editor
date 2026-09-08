@@ -16981,6 +16981,79 @@ for the same reason as every phase since 52. `cargo fmt`,
 **1636 Rust tests total** (unchanged — this phase is pure frontend
 composition of already-tested commands).
 
+## Phase 285 — Liquify Mesh
+
+A second look at an earlier session's own "documented scope cut" found it
+did not need to stay one: Liquify Mesh only looked like it needed real
+interactivity because Photoshop's own version is a live overlay on a
+mouse drag. This project's own Puppet Warp already proved a *static*
+preview of the pending deformation is a real, honest version of a mesh
+overlay — its own "Show Mesh" checkbox draws exactly that, recomputed
+whenever the pins move. Liquify Mesh reuses the identical idea for
+Liquify's own tools instead of pins.
+
+Two small refactors came first, both re-running their own existing tests
+to confirm zero behaviour change: `puppet_grid`'s tick-generation closure
+became a shared free function, `grid_ticks`, so `liquify_mesh`'s own grid
+uses the identical spaced, edge-snapped construction (`puppet_mesh`'s own
+test still passes unchanged); and `liquify_radial_with`'s inline
+Twirl/Pucker/Bloat offset math became `liquify_radial_offset`, a small
+associated function the per-pixel resampling code now calls instead of
+inlining (all 24 pre-existing Liquify tests still pass unchanged).
+
+`liquify_mesh(tool, cx, cy, radius, dx, dy, strength, spacing)` then
+grids the whole canvas and displaces every vertex by the *pending* tool's
+transform, run forward instead of backward. Forward Warp previews
+exactly — `(dx, dy) · f(d)` added straight to the vertex, the same
+falloff `f(d) = 1 − (d / radius)²` every Liquify tool shares. A radial
+tool previews the exact functional inverse of `liquify_radial_offset`,
+evaluated at the vertex's own original distance from centre rather than
+solving for its post-warp distance exactly: **exact** for Twirl (negating
+`strength` undoes precisely the rotation `liquify_radial_offset` applies,
+since a rotation never changes distance from centre — the two falloffs
+agree everywhere) and a close, honestly-documented **approximation** for
+Pucker and Bloat wherever the displacement is small next to `radius`,
+exactly the regime a preview is drawn in. Bloat's scale is floored at
+`0.05` before dividing, so a vertex under maximum Bloat strength at the
+very centre previews at a large but finite position instead of `NaN`.
+Reconstruct, Freeze Mask, and Thaw Mask have no spatial warp to preview,
+so the frontend's own "Show Mesh" checkbox simply has nothing to draw
+for them. A new checkbox in the Liquify dialog re-fetches the grid on
+every parameter change and renders it as an SVG of row and column
+polylines, reusing Puppet Warp's own `.warp-mesh`/`.warp-mesh__curve`
+styling rather than inventing new CSS.
+
+**Verified two ways.** Five new `document.rs` tests. One confirms the
+grid's own edge-snapping (a 21×21 canvas at spacing 10 yields exactly the
+nine vertices `[0, 10, 20] × [0, 10, 20]`) with the centre placed far
+outside a tiny radius, so every vertex previews untouched. A second
+hand-derives Forward Warp's push at three vertices of that same grid: at
+the far corner `(0, 0)`, `d² = 200` and `radius² = 225` are both exact
+integers, so `falloff = 1 − 200/225 = 1/9` exactly, landing the preview
+on the clean fraction `(2/3, -4/9)`; the exact centre vertex previews at
+the full, unscaled push. A third proves Twirl's preview is the *exact*
+functional inverse of its own already-tested pixel offset by feeding the
+previewed point back through `liquify_radial_offset` at the identical
+falloff and confirming it lands back on the original vertex to within
+`1e-3` — no fresh trigonometry to derive or verify by hand. A fourth
+hand-derives Pucker and Bloat on a one-row grid at `d = 5`, `radius = 10`
+(`falloff = 0.75` exactly): Bloat's `scale = 1 − 0.75 = 0.25` gives the
+clean division `5 / 0.25 = 20`; Pucker's `scale = 1.75` gives the exact
+fraction `5 / 1.75 = 20/7`, checked to `1e-4`. A fifth exercises every
+error path. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed
+checking "Show Mesh" sends the exact `{ tool, cx, cy, radius, dx, dy,
+strength, spacing }` the currently selected tool implies, that the SVG
+renders exactly `rows + cols` polylines for the mocked grid's shape, and
+that changing Radius re-fetches the mesh. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1641 Rust tests total** (1636 → 1641, 1634 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

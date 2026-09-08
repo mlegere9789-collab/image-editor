@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 521.**
+**618 distinct capabilities tracked. Currently shipped: 522.**
 
 ## PART I — EVERY TOOL
 
@@ -537,7 +537,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Reconstruct Tool (`liquify_reconstruct(id, cx, cy, radius, amount, original)` / `layer_pixels`: the layer's own pixels, captured with `layer_pixels` when the Liquify dialog opens, blended back in by `amount` percent scaled by the shared falloff — Amount 100 at the very centre restores the original outright. `original` is a frontend-held snapshot rather than document-side session state, a documented simplification — see README Phase 269)
 - [x] Freeze Mask Tool (`liquify_paint_mask(mask, width, height, cx, cy, radius, amount, freeze: true)`: a pure, document-independent byte buffer — 0 fully thawed, 255 fully frozen — raised by `(amount/100)·(1 − (d/radius)²)·255` over the same circular brush every other Liquify tool shares, clamped to `0..=255`. Held by the frontend for the life of the Liquify dialog, exactly as Reconstruct's `original` snapshot already is — see README Phase 270)
 - [x] Thaw Mask Tool (the same `liquify_paint_mask` with `freeze: false`, lowering the mask instead — see README Phase 270)
-- [ ] Liquify Mesh
+- [x] Liquify Mesh (`liquify_mesh` returns a preview grid — the same spaced, edge-snapped construction Puppet Warp's own mesh uses, via a newly shared `grid_ticks` — each vertex displaced by the pending tool's own transform run forward instead of backward: the exact functional inverse of `liquify_radial_offset` (also newly extracted, shared with the per-pixel resampling it already powered) for Twirl, Pucker, and Bloat, or Forward Warp's own push scaled by the same falloff. Exact for Twirl (a rotation does not change distance from centre); a close, honestly-documented approximation for Pucker, Bloat, and Forward Warp otherwise. A new "Show Mesh" checkbox in the Liquify dialog renders it as an SVG grid, reusing Puppet Warp's own `.warp-mesh` styling — see README Phase 285)
 - [ ] Face-Aware Liquify
 - [x] Lens Correction (`lens_correction(id, distortion, vignette, red_cyan, blue_yellow)`: Remove Distortion and Vignette Amount exactly as `camera_raw_optics` already applies them, plus Chromatic Aberration's Fix Red/Cyan Fringe and Fix Blue/Yellow Fringe — Red and Blue each independently resampled through their own radial scale about the canvas centre, Green and Alpha left at the destination's own position. Auto lens-profile correction (Photoshop's built-in and online lens databases) is a documented scope cut, the same one `camera_raw_optics` already names — see README Phase 267)
 - [ ] Adaptive Wide Angle
