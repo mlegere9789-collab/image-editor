@@ -2840,6 +2840,21 @@ fn surface_blur(
     })
 }
 
+/// Neural Filters > Skin Smoothing on layer `id`: Surface Blur confined
+/// to skin-toned pixels and blended in by `amount` percent.
+#[tauri::command]
+fn skin_smoothing(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    threshold: u8,
+    amount: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.skin_smoothing(id, radius, threshold, amount)
+    })
+}
+
 /// Filter > Stylize > Diffuse on layer `id`. The frontend sends a fresh
 /// `seed` on every apply so repeated applications differ, as in Photoshop.
 #[tauri::command]
@@ -6094,6 +6109,7 @@ pub fn run() {
             gaussian_blur,
             diffuse,
             surface_blur,
+            skin_smoothing,
             glowing_edges,
             mosaic,
             fragment,

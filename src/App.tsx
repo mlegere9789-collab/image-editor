@@ -1129,6 +1129,12 @@ export default function App() {
   const [showSurfaceBlurDialog, setShowSurfaceBlurDialog] = useState(false);
   const [surfaceBlurRadius, setSurfaceBlurRadius] = useState(5);
   const [surfaceBlurThreshold, setSurfaceBlurThreshold] = useState(15);
+  // Neural Filters > Skin Smoothing: Surface Blur's own radius/threshold,
+  // confined to skin-toned pixels, plus how strongly to blend it in.
+  const [showSkinSmoothingDialog, setShowSkinSmoothingDialog] = useState(false);
+  const [skinSmoothingRadius, setSkinSmoothingRadius] = useState(5);
+  const [skinSmoothingThreshold, setSkinSmoothingThreshold] = useState(15);
+  const [skinSmoothingAmount, setSkinSmoothingAmount] = useState(50);
   const [showGlowingEdgesDialog, setShowGlowingEdgesDialog] = useState(false);
   const [glowEdgeWidth, setGlowEdgeWidth] = useState(2);
   const [glowEdgeBrightness, setGlowEdgeBrightness] = useState(6);
@@ -3483,6 +3489,17 @@ export default function App() {
     });
     setShowSurfaceBlurDialog(false);
   }, [runCommand, selectedId, surfaceBlurRadius, surfaceBlurThreshold]);
+
+  const applySkinSmoothing = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("skin_smoothing", {
+      id: selectedId,
+      radius: skinSmoothingRadius,
+      threshold: skinSmoothingThreshold,
+      amount: skinSmoothingAmount,
+    });
+    setShowSkinSmoothingDialog(false);
+  }, [runCommand, selectedId, skinSmoothingRadius, skinSmoothingThreshold, skinSmoothingAmount]);
 
   const applyGlowingEdges = useCallback(async () => {
     if (selectedId === null) return;
@@ -6286,6 +6303,7 @@ export default function App() {
     { label: "Stained Glass", activate: () => setShowStainedGlassDialog(true) },
     { label: "Stamp (Sketch)", activate: () => setShowStampDialog(true) },
     { label: "Stroke Outline", activate: () => setShowStrokeOutlineDialog(true) },
+    { label: "Skin Smoothing", activate: () => setShowSkinSmoothingDialog(true) },
     { label: "Sumi-e", activate: () => setShowSumiEDialog(true) },
     { label: "Surface Blur", activate: () => setShowSurfaceBlurDialog(true) },
     { label: "Temperature Tint", activate: () => setShowTemperatureTintDialog(true) },
@@ -8147,6 +8165,14 @@ export default function App() {
             title="Filter > Blur > Surface Blur"
           >
             Surface Blur…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowSkinSmoothingDialog(true)}
+            disabled={busy || !canPaint}
+            title="Neural Filters > Skin Smoothing: Surface Blur confined to skin-toned pixels, this project's own non-AI stand-in for neural skin detection"
+          >
+            Skin Smoothing…
           </button>
           <button
             className="button button--quiet"
@@ -17671,6 +17697,79 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applySurfaceBlur} disabled={busy}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSkinSmoothingDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSkinSmoothingDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Skin Smoothing"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Neural Filters &gt; Skin Smoothing</h2>
+            <p className="modal__hint">
+              Surface Blur, confined to skin-toned pixels (the same rule Select People
+              and Color Range's Skin Tones already use) and blended in by Amount — this
+              project's own non-AI stand-in for Photoshop's neural skin detection.
+              Non-skin-toned pixels are never touched.
+            </p>
+            <label className="control">
+              <span className="control__label">
+                Radius
+                <span className="control__value">{skinSmoothingRadius}px</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={16}
+                value={skinSmoothingRadius}
+                onChange={(event) => setSkinSmoothingRadius(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Threshold
+                <span className="control__value">{skinSmoothingThreshold} levels</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={255}
+                value={skinSmoothingThreshold}
+                onChange={(event) => setSkinSmoothingThreshold(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Amount
+                <span className="control__value">{skinSmoothingAmount}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={skinSmoothingAmount}
+                onChange={(event) => setSkinSmoothingAmount(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSkinSmoothingDialog(false)}
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applySkinSmoothing} disabled={busy}>
                 Apply
               </button>
             </div>

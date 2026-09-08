@@ -2469,6 +2469,38 @@ fn shrink_rect(bounds: Rect, width: u32) -> Option<Rect> {
     })
 }
 
+/// Surface Blur's own edge-preserving weighted mean at `(row, col)`, for
+/// one `channel` of `source`: neighbours within `radius` are averaged,
+/// each weighted `(threshold − |neighbour − own|).max(0)`, so a
+/// neighbour at least `threshold` away contributes nothing and the
+/// centre pixel (weight `threshold` always, since it differs from
+/// itself by `0`) keeps the sum from ever reaching zero. Shared by
+/// [`Document::surface_blur`] and [`Document::skin_smoothing`].
+fn surface_blur_channel_at(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (row, col): (u32, u32),
+    channel: usize,
+    radius: i64,
+    threshold: i64,
+) -> u8 {
+    let centre = (row as usize * doc_width + col as usize) * CHANNELS;
+    let own = source[centre + channel] as i64;
+    let (mut weighted, mut weights) = (0i64, 0i64);
+    for dy in -radius..=radius {
+        let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+        for dx in -radius..=radius {
+            let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+            let v = source[(sy * doc_width + sx) * CHANNELS + channel] as i64;
+            let w = (threshold - (v - own).abs()).max(0);
+            weighted += w * v;
+            weights += w;
+        }
+    }
+    ((weighted + weights / 2) / weights) as u8
+}
+
 /// The flat average of every channel of `source` (a document-sized RGBA8
 /// buffer, `doc_width` pixels wide) in a `(2*radius+1)`-square window
 /// centred on `(col, row)`, clamped to `width`x`height` — sampling past an
@@ -11404,19 +11436,74 @@ impl Document {
             let mut out = [0u8; CHANNELS];
             out[3] = source[centre + 3];
             for (c, slot) in out.iter_mut().enumerate().take(3) {
-                let own = source[centre + c] as i64;
-                let (mut weighted, mut weights) = (0i64, 0i64);
-                for dy in -r..=r {
-                    let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
-                    for dx in -r..=r {
-                        let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
-                        let v = source[(sy * doc_width + sx) * CHANNELS + c] as i64;
-                        let w = (threshold - (v - own).abs()).max(0);
-                        weighted += w * v;
-                        weights += w;
-                    }
-                }
-                *slot = ((weighted + weights / 2) / weights) as u8;
+                *slot = surface_blur_channel_at(
+                    source,
+                    doc_width,
+                    (width, height),
+                    (row, col),
+                    c,
+                    r,
+                    threshold,
+                );
+            }
+            out
+        })
+    }
+
+    /// Neural Filters > Skin Smoothing: [`Self::surface_blur`]'s own
+    /// edge-preserving weighted mean, confined to skin-toned pixels
+    /// ([`is_skin_tone`], the classic Kovac–Solina–Peer rule Select
+    /// People and Color Range's Skin Tones already use) and blended in
+    /// by `amount` percent rather than applied outright — a real,
+    /// non-AI stand-in for Photoshop's own neural skin detection and
+    /// retouching, the same documented substitution this project's own
+    /// Select People already makes for neural person detection. A pixel
+    /// that is not skin-toned is left completely untouched, exactly as
+    /// it would be outside Photoshop's own neural mask. Errors on a
+    /// zero radius or threshold, an amount outside `0..=100`, or a
+    /// locked/unknown layer.
+    pub fn skin_smoothing(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        threshold: u8,
+        amount: u32,
+    ) -> Result<Option<Rect>, String> {
+        if radius == 0 {
+            return Err("Skin Smoothing radius must be at least 1 pixel.".to_string());
+        }
+        if threshold == 0 {
+            return Err("Skin Smoothing threshold must be at least 1.".to_string());
+        }
+        if amount > 100 {
+            return Err("Skin Smoothing amount must be 0..=100.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let r = radius as i64;
+        let threshold_i = threshold as i64;
+        let amount_unit = amount as f32 / 100.0;
+        self.filter_pixels(id, move |source, row, col| {
+            let centre = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&source[centre..centre + CHANNELS]);
+            if !is_skin_tone([source[centre], source[centre + 1], source[centre + 2]]) {
+                return out;
+            }
+            for (c, slot) in out.iter_mut().enumerate().take(3) {
+                let smoothed = surface_blur_channel_at(
+                    source,
+                    doc_width,
+                    (width, height),
+                    (row, col),
+                    c,
+                    r,
+                    threshold_i,
+                ) as f32;
+                let current = *slot as f32;
+                *slot = (current + (smoothed - current) * amount_unit)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
             }
             out
         })
@@ -25339,6 +25426,91 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.surface_blur(999, 1, 25).is_err());
+    }
+
+    /// `ramped_3x3`'s own R ramp (10, 20, ..., 90), shifted into skin-tone
+    /// range: R = 100, 110, ..., 180, G flat at 50, B flat at 30. Every
+    /// pixel passes `is_skin_tone` (R > 95, G > 40, B > 20, spread > 15,
+    /// R − G > 15, R > G, R > B) since only R varies and it is always at
+    /// least 100. The R channel's own weighted-mean math is therefore
+    /// identical to `ramped_3x3`'s own, just shifted by a constant 90 —
+    /// weights depend only on differences between samples, which an
+    /// additive shift does not change.
+    fn skin_ramped_3x3() -> (Document, LayerId) {
+        let mut doc = Document::new(3, 3).unwrap();
+        #[rustfmt::skip]
+        let pixels = [
+            100, 50, 30, 255,  110, 50, 30, 255,  120, 50, 30, 255,
+            130, 50, 30, 255,  140, 50, 30, 255,  150, 50, 30, 255,
+            160, 50, 30, 255,  170, 50, 30, 255,  180, 50, 30, 255,
+        ];
+        let id = doc.add_layer("base", &pixels, 3, 3).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn skin_smoothing_blends_toward_the_edge_preserving_mean_by_amount() {
+        // Top-left corner (0, 0): `surface_blur_averages_only_within_the_
+        // threshold` already derives its own R weighted mean by hand as 12
+        // (radius 1, threshold 25) for the unshifted ramp, so this fixture's
+        // own mean is 12 + 90 = 102. Blending 50% from the current 100
+        // toward 102 lands exactly on 101, no rounding ambiguity —
+        // independently confirmed in Python emulating Rust f32 arithmetic.
+        // G and B are already flat, so their own means equal their current
+        // bytes and blending changes nothing, at any amount.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = skin_ramped_3x3();
+        doc.skin_smoothing(id, 1, 25, 50).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], &[101, 50, 30, 255]);
+    }
+
+    #[test]
+    fn skin_smoothing_leaves_non_skin_toned_pixels_completely_untouched() {
+        // ramped_3x3's own R-only ramp (G = B = 0) never passes
+        // is_skin_tone (G > 40 fails everywhere), so even at Amount 100
+        // nothing moves at all.
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.skin_smoothing(id, 1, 25, 100).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn skin_smoothing_at_full_amount_matches_surface_blur_when_every_pixel_is_skin_toned() {
+        let (mut smoothing, sid) = skin_ramped_3x3();
+        let (mut blur, bid) = skin_ramped_3x3();
+        smoothing.skin_smoothing(sid, 1, 25, 100).unwrap();
+        blur.surface_blur(bid, 1, 25).unwrap();
+        assert_eq!(smoothing.layers()[0].pixels, blur.layers()[0].pixels);
+    }
+
+    #[test]
+    fn skin_smoothing_is_confined_to_the_selection() {
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = skin_ramped_3x3();
+        // A selection that excludes (0, 0) leaves it untouched even though
+        // it is skin-toned and would otherwise smooth.
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.skin_smoothing(id, 1, 25, 100).unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(0, 0)..idx(0, 0) + 4],
+            &[100, 50, 30, 255]
+        );
+    }
+
+    #[test]
+    fn skin_smoothing_propagates_errors() {
+        let (mut doc, id) = skin_ramped_3x3();
+        assert!(doc.skin_smoothing(id, 0, 25, 50).is_err());
+        assert!(doc.skin_smoothing(id, 1, 0, 50).is_err());
+        assert!(doc.skin_smoothing(id, 1, 25, 101).is_err());
+        let before = doc.layers()[0].pixels.clone();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.skin_smoothing(id, 1, 25, 50).is_err());
+        assert_eq!(doc.layers()[0].pixels, before);
+        let mut empty = Document::new(2, 2).unwrap();
+        assert!(empty.skin_smoothing(999, 1, 25, 50).is_err());
     }
 
     #[test]

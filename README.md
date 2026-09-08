@@ -16705,6 +16705,59 @@ still clean.
 **1619 Rust tests total, unchanged this phase** (0 lib/pipeline
 additions). `cargo fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 279 — Skin Smoothing
+
+The first genuine crack in the Neural Filters wall, found the same way
+Select People already stood in for neural person detection: Photoshop's
+own Skin Smoothing is a masked, edge-preserving smoothing pass over
+skin-toned regions, and this project already had every piece of that
+except the mask. `skin_smoothing(id, radius, threshold, amount)` is
+`surface_blur`'s own edge-preserving weighted mean — extracted into a
+shared free function, `surface_blur_channel_at`, so `surface_blur`
+itself is unchanged byte for byte (its own four tests still pass
+unmodified) — confined to pixels `is_skin_tone` accepts, the identical
+Kovac–Solina–Peer rule Select People and Color Range's Skin Tones
+already use, and blended toward the smoothed value by `amount` percent
+rather than applied outright. A non-skin-toned pixel is left completely
+untouched, exactly as it would sit outside Photoshop's own neural mask.
+This is a real, honest non-AI substitution, not a disguised no-op:
+Filter > Blur > Surface Blur already ships, Select People's skin-tone
+rule already ships, and this phase is the one line connecting them that
+had not been drawn yet. A new "Skin Smoothing…" dialog sits next to
+Surface Blur's own, sharing its Radius/Threshold controls plus a new
+Amount slider; it is also reachable through Phase 278's Discover search.
+
+**Verified two ways.** Five new `document.rs` tests. A dedicated
+`skin_ramped_3x3` fixture shifts `ramped_3x3`'s own R ramp (10, 20, ...,
+90) into skin-tone range (100, 110, ..., 180) with G and B held flat —
+since Surface Blur's weights depend only on differences between
+samples, an additive shift changes nothing about the math, so the
+already-hand-derived corner value from `surface_blur_averages_only_
+within_the_threshold` (12) carries over unchanged, shifted: blending
+the corner 50% from 100 toward 102 lands exactly on 101, no rounding
+ambiguity — independently confirmed in Python emulating Rust f32
+arithmetic. A second test confirms the *unshifted* `ramped_3x3` (G = 0
+fails `is_skin_tone` everywhere) is left completely byte-for-byte
+untouched even at Amount 100. A third confirms Amount 100 over an
+all-skin-toned layer matches `surface_blur` exactly — no fresh
+derivation needed for that equivalence, since `surface_blur`'s own
+weighted mean already has its own tests deriving those values by hand,
+the same reasoning several earlier phases already used for this kind of
+check. A fourth confirms selection confinement; a fifth exercises every
+error path. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed
+the "Skin Smoothing…" dialog sends the exact `{ id, radius, threshold,
+amount }` its Apply button should, and that the same command is also
+reachable by name through Discover. `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `cargo test`, and
+`npm run build` are all clean.
+
+**1624 Rust tests total** (1619 → 1624, 1617 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
