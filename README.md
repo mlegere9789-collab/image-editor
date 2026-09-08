@@ -17681,6 +17681,37 @@ three files before writing this section. No code changed and no new
 tests were needed: the shipped count moves from an existing capability
 newly recognised, not a feature newly built.
 
+## Phase 298 — Embed Color Profile
+
+A real gap found while looking for the next one: `project.rs`'s own
+`Manifest` — the project file format's header, saved and reloaded by
+Save Project/Open Project and now also Cloud Documents (Phase 296) —
+never once mentioned `profile`, so a document's own Assign Profile
+label (README Phase 292) silently reset to sRGB on every reopen. Embed
+Color Profile is exactly the fix: `Manifest` gains a `profile: ColorProfile`
+field, written from `Document::profile()` in `encode` and restored with
+`assign_profile` right after `Document::new` in `decode` — the same
+place `locked` already round-trips, and `#[serde(default)]` the same
+way, so a project file saved before this existed still loads, defaulting
+to sRGB rather than failing to parse.
+
+**Verified two ways.** Two new `project.rs` tests, alongside the ten
+already covering `save`/`load`/`encode`/`decode`, all still passing
+unchanged: assigning Adobe RGB (1998), encoding, and decoding recovers
+that exact profile; and the same before-the-field-existed rewrite
+trick `locked`'s own test already established (strip the key from a
+saved manifest's JSON, recompute the length prefix, reload) confirms
+the default lands on sRGB. `cargo fmt`, `cargo clippy --all-targets --
+-D warnings`, `cargo test`, and `npm run build` are all clean.
+
+Embed Color Profile flips to shipped. This app's own project file is
+the only persistence format it has able to carry a tag at all — a real
+embedded-ICC-chunk PNG import/export path remains a documented scope
+cut, since Export PNG only ever writes the flattened composite and
+this project's PNG codec doesn't read or write ICC chunks.
+
+**1671 Rust tests total** (1669 → 1671, 1664 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

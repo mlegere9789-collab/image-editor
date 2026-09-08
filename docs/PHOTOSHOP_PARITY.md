@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 537.**
+**618 distinct capabilities tracked. Currently shipped: 538.**
 
 ## PART I — EVERY TOOL
 
@@ -431,7 +431,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Ask When Opening
 - [ ] Ask When Pasting
 - [ ] Missing Profile Warning
-- [ ] Embed Color Profile
+- [x] Embed Color Profile (the project file format's own `Manifest` now carries Assign Profile's own label, set from `Document::profile()` on save and restored with `assign_profile` on load, exactly as `locked` already round-trips — a project file saved before this existed still loads, defaulting to sRGB, `#[serde(default)]` the same way — see README Phase 298. This app's own project file is its one persistence format able to carry a tag at all; a real embedded-ICC-chunk PNG/import path remains a documented scope cut)
 - [x] Proof Setup (the toolbar's Proof select, choosing which of the proofs below to view — Off, Protanopia-type, Deuteranopia-type, or Custom Paper/Ink; Proof Setup's other device-profile-driven presets (Working CMYK, Legacy Macintosh RGB, an ICC profile picked from disk, …) are a documented scope cut of this app's colour management)
 - [x] Proof Colors (the same Proof select at any setting other than Off — a live, non-destructive view through the `composite://` protocol's `proof=` query, exactly matching Photoshop's toggle)
 - [x] Gamut Warning — a new `Proof::GamutWarning` view (README Phase 282), sharing the existing View > Proof Colors `composite://` proof architecture: flags any pixel whose naive `cmyk_of` ink split exceeds this app's own reachable 250% Total Ink Limit and paints it a flat warning colour, non-destructively.

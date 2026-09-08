@@ -25,7 +25,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
-use crate::document::Document;
+use crate::document::{ColorProfile, Document};
 use crate::png;
 
 const MAGIC: &[u8; 5] = b"IEDP1";
@@ -34,6 +34,14 @@ const MAGIC: &[u8; 5] = b"IEDP1";
 struct Manifest {
     width: u32,
     height: u32,
+    /// Embed Color Profile: Assign Profile's own label (README Phase 292),
+    /// carried by the project file itself so a reopened document knows
+    /// what working space its numbers are in, exactly as `locked` is.
+    /// `#[serde(default)]` so a project file saved before this existed
+    /// still loads, defaulting to `ColorProfile::Srgb` — this format's own
+    /// working space before Assign Profile existed at all.
+    #[serde(default)]
+    profile: ColorProfile,
     layers: Vec<LayerManifest>,
 }
 
@@ -75,6 +83,7 @@ pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
     let manifest = Manifest {
         width: document.width(),
         height: document.height(),
+        profile: document.profile(),
         layers,
     };
     let manifest_json = serde_json::to_vec(&manifest)
@@ -120,6 +129,7 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
     offset = manifest_end;
 
     let mut document = Document::new(manifest.width, manifest.height)?;
+    document.assign_profile(manifest.profile);
     for layer in &manifest.layers {
         let len = layer.png_len as usize;
         let end = offset
@@ -231,6 +241,53 @@ mod tests {
         assert_eq!((reloaded.width(), reloaded.height()), (2, 1));
         assert_eq!(reloaded.layers()[0].name, "only");
         assert_eq!(reloaded.layers()[0].pixels, solid(2, 1, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn a_round_trip_preserves_the_assigned_colour_profile() {
+        let mut document = Document::new(1, 1).unwrap();
+        document
+            .add_layer("solo", &solid(1, 1, [1, 2, 3, 255]), 1, 1)
+            .unwrap();
+        document.assign_profile(ColorProfile::AdobeRgb1998);
+        let bytes = encode(&document).unwrap();
+        let reloaded = decode(&bytes).unwrap();
+        assert_eq!(reloaded.profile(), ColorProfile::AdobeRgb1998);
+    }
+
+    #[test]
+    fn a_manifest_from_before_embed_color_profile_existed_defaults_to_srgb() {
+        // Same rewrite-the-manifest trick as the pre-Lock test below,
+        // proving `#[serde(default)]` on `profile` loads a project file
+        // saved before Embed Color Profile existed, defaulting to this
+        // format's own original working space, sRGB.
+        let mut document = Document::new(1, 1).unwrap();
+        document
+            .add_layer("solo", &solid(1, 1, [4, 5, 6, 255]), 1, 1)
+            .unwrap();
+        document.assign_profile(ColorProfile::AdobeRgb1998);
+        let path = temp_path("project_rs_pre_profile_format.iep");
+        save(&document, &path).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let manifest_start = MAGIC.len() + 4;
+        let manifest_len =
+            u32::from_le_bytes(bytes[MAGIC.len()..manifest_start].try_into().unwrap()) as usize;
+        let manifest_end = manifest_start + manifest_len;
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&bytes[manifest_start..manifest_end]).unwrap();
+        manifest.as_object_mut().unwrap().remove("profile");
+        let rewritten_manifest = serde_json::to_vec(&manifest).unwrap();
+
+        let mut rewritten_file = Vec::new();
+        rewritten_file.extend_from_slice(&bytes[..MAGIC.len()]);
+        rewritten_file.extend_from_slice(&(rewritten_manifest.len() as u32).to_le_bytes());
+        rewritten_file.extend_from_slice(&rewritten_manifest);
+        rewritten_file.extend_from_slice(&bytes[manifest_end..]);
+        std::fs::write(&path, rewritten_file).unwrap();
+
+        let reloaded = load(&path).unwrap();
+        assert_eq!(reloaded.profile(), ColorProfile::Srgb);
     }
 
     #[test]
