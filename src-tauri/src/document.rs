@@ -558,7 +558,17 @@ pub enum Proof {
     Protanopia,
     Deuteranopia,
     PaperInk { paper: [u8; 3], ink: [u8; 3] },
+    GamutWarning { warning_color: [u8; 3] },
 }
+
+/// View > Gamut Warning's own Total Ink Limit, in percent of `cmyk_of`'s
+/// four naive ink channels summed. This app's naive under-colour-removal
+/// CMYK split keeps any single pixel strictly under 300% total (it
+/// approaches but never reaches that figure, even at the darkest,
+/// single-channel-saturated corner colours), so 250% is picked as this
+/// project's own reachable threshold rather than reusing the 300-400%
+/// figures real ICC press profiles allow.
+const GAMUT_WARNING_INK_LIMIT_PERCENT: u32 = 250;
 
 /// An sRGB pixel as a protanope or deuteranope would see it: linearised,
 /// put through the Viénot–Brettel–Mollon (1999) reduction matrix for that
@@ -588,7 +598,7 @@ pub fn simulate_color_blindness([r, g, b]: [u8; 3], proof: Proof) -> [u8; 3] {
             [0.0, 0.24167, 0.75833],
         ],
         Proof::Deuteranopia => [[0.625, 0.375, 0.0], [0.7, 0.3, 0.0], [0.0, 0.3, 0.7]],
-        Proof::PaperInk { .. } => {
+        Proof::PaperInk { .. } | Proof::GamutWarning { .. } => {
             unreachable!("simulate_color_blindness is only called for a dichromacy proof")
         }
     };
@@ -4202,10 +4212,17 @@ impl Document {
     }
 
     /// The composite as `proof` would show it — View > Proof Colors: a
-    /// Color Blindness proof through [`simulate_color_blindness`], or a
+    /// Color Blindness proof through [`simulate_color_blindness`], a
     /// Custom proof's Simulate Paper Color / Simulate Black Ink through
-    /// [`simulate_paper_ink`]; alpha kept either way. A view: nothing
-    /// changes.
+    /// [`simulate_paper_ink`], or View > Gamut Warning flatly painting
+    /// `warning_color` over any pixel whose naive [`cmyk_of`] ink split
+    /// exceeds [`GAMUT_WARNING_INK_LIMIT_PERCENT`] total coverage — the
+    /// same Total Ink Limit idea real prepress uses to flag a colour a
+    /// CMYK press cannot actually lay down, applied here to this app's
+    /// own already-documented naive CMYK split (whose built-in
+    /// under-colour removal keeps any single pixel's total strictly under
+    /// 300%, unlike an ICC press profile) rather than an ICC press
+    /// profile; alpha kept either way. A view: nothing changes.
     pub fn proof_image(&self, proof: Proof) -> Vec<u8> {
         let mut pixels = crate::composite::flatten(self).pixels;
         for px in pixels.chunks_exact_mut(CHANNELS) {
@@ -4215,6 +4232,15 @@ impl Document {
                 }
                 Proof::PaperInk { paper, ink } => {
                     simulate_paper_ink([px[0], px[1], px[2]], paper, ink)
+                }
+                Proof::GamutWarning { warning_color } => {
+                    let ink = cmyk_of([px[0], px[1], px[2]]);
+                    let total_percent: u32 = ink.iter().map(|&v| (v as u32 * 100) / 255).sum();
+                    if total_percent > GAMUT_WARNING_INK_LIMIT_PERCENT {
+                        warning_color
+                    } else {
+                        [px[0], px[1], px[2]]
+                    }
                 }
             };
             px[0] = r;
@@ -51892,6 +51918,39 @@ mod tests {
             doc.layers()[0].pixels,
             vec![128, 128, 128, 255, 0, 0, 0, 128]
         );
+    }
+
+    #[test]
+    fn gamut_warning_flags_a_near_black_saturated_pixel_over_the_ink_limit() {
+        // [10, 0, 0]'s naive cmyk_of split is [0, 255, 255, 245]: 0% + 100%
+        // + 100% + 96% (245 * 100 / 255, truncated) = 296%, over the 250%
+        // limit, so it is painted the warning colour.
+        let mut doc = Document::new(2, 1).unwrap();
+        doc.add_layer("l", &[10, 0, 0, 255, 128, 128, 128, 255], 2, 1)
+            .unwrap();
+        let proof = Proof::GamutWarning {
+            warning_color: [255, 0, 255],
+        };
+        assert_eq!(
+            doc.proof_image(proof),
+            vec![255, 0, 255, 255, 128, 128, 128, 255]
+        );
+        // A view: the layer itself is untouched.
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![10, 0, 0, 255, 128, 128, 128, 255]
+        );
+    }
+
+    #[test]
+    fn gamut_warning_leaves_in_gamut_pixels_untouched() {
+        // Mid-grey's total ink is far under the limit (~49%).
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[128, 128, 128, 200], 1, 1).unwrap();
+        let proof = Proof::GamutWarning {
+            warning_color: [255, 0, 255],
+        };
+        assert_eq!(doc.proof_image(proof), vec![128, 128, 128, 200]);
     }
 
     #[test]

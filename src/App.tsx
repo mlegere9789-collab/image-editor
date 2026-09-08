@@ -663,6 +663,8 @@ export default function App() {
   // Proof Setup > Custom's Simulate Paper Color / Simulate Black Ink.
   const [proofPaperColor, setProofPaperColor] = useState("#faf0e6");
   const [proofInkColor, setProofInkColor] = useState("#14100a");
+  // View > Gamut Warning: the flat colour painted over out-of-gamut pixels.
+  const [gamutWarningColor, setGamutWarningColor] = useState("#ff00ff");
   // Load Channel: which alpha channel to load as the selection.
   const [showLoadChannelDialog, setShowLoadChannelDialog] = useState(false);
   const [loadChannelName, setLoadChannelName] = useState("");
@@ -6201,7 +6203,9 @@ export default function App() {
       ? ""
       : proof === "paperink"
         ? `&proof=paperink:${proofPaperColor.slice(1)}-${proofInkColor.slice(1)}`
-        : `&proof=${proof}`;
+        : proof === "gamut"
+          ? `&proof=gamut:${gamutWarningColor.slice(1)}`
+          : `&proof=${proof}`;
   const compositeSrc =
     generation !== null
       ? `composite://composite.png?g=${generation}${
@@ -6587,6 +6591,7 @@ export default function App() {
               <option value="protanopia">Protanopia-type</option>
               <option value="deuteranopia">Deuteranopia-type</option>
               <option value="paperink">Custom: Paper/Ink</option>
+              <option value="gamut">Gamut Warning</option>
             </select>
           </label>
           {proof === "paperink" && (
@@ -6595,6 +6600,19 @@ export default function App() {
               <input type="color" value={proofPaperColor} onChange={(event) => setProofPaperColor(event.target.value)} />
               Ink
               <input type="color" value={proofInkColor} onChange={(event) => setProofInkColor(event.target.value)} />
+            </label>
+          )}
+          {proof === "gamut" && (
+            <label
+              className="tools__slider"
+              title="View > Gamut Warning: flags any pixel whose naive CMYK ink split exceeds this app's own reachable Total Ink Limit"
+            >
+              Warning Color
+              <input
+                type="color"
+                value={gamutWarningColor}
+                onChange={(event) => setGamutWarningColor(event.target.value)}
+              />
             </label>
           )}
           <button

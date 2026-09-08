@@ -316,9 +316,9 @@ fn parse_hex_rgb(hex: &str) -> Option<[u8; 3]> {
 }
 
 /// Decodes the `proof=` query value of a `composite://` request:
-/// `protanopia`, `deuteranopia`, or `paperink:<paper hex>-<ink hex>`
-/// (each a bare `RRGGBB` triple) for Simulate Paper Color / Simulate
-/// Black Ink.
+/// `protanopia`, `deuteranopia`, `paperink:<paper hex>-<ink hex>` (each a
+/// bare `RRGGBB` triple) for Simulate Paper Color / Simulate Black Ink,
+/// or `gamut:<warning colour hex>` for View > Gamut Warning.
 fn proof_of(query: Option<&str>) -> Option<document::Proof> {
     let value = query?
         .split('&')
@@ -327,6 +327,11 @@ fn proof_of(query: Option<&str>) -> Option<document::Proof> {
         "protanopia" => Some(document::Proof::Protanopia),
         "deuteranopia" => Some(document::Proof::Deuteranopia),
         _ => {
+            if let Some(hex) = value.strip_prefix("gamut:") {
+                return Some(document::Proof::GamutWarning {
+                    warning_color: parse_hex_rgb(hex)?,
+                });
+            }
             let rest = value.strip_prefix("paperink:")?;
             let (paper_hex, ink_hex) = rest.split_once('-')?;
             Some(document::Proof::PaperInk {
@@ -6856,6 +6861,18 @@ mod tests {
         assert_eq!(proof_of(Some("proof=paperink:GGGGGG-000000")), None);
         assert_eq!(proof_of(Some("proof=paperink:FFF-000000")), None);
         assert_eq!(proof_of(Some("proof=nonsense")), None);
+    }
+
+    #[test]
+    fn proof_of_parses_and_rejects_gamut_warning_values() {
+        assert_eq!(
+            proof_of(Some("proof=gamut:FF00FF")),
+            Some(document::Proof::GamutWarning {
+                warning_color: [0xff, 0x00, 0xff],
+            })
+        );
+        assert_eq!(proof_of(Some("proof=gamut:GGGGGG")), None);
+        assert_eq!(proof_of(Some("proof=gamut:FFF")), None);
     }
 
     #[test]

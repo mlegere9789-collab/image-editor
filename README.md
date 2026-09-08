@@ -16845,6 +16845,53 @@ warnings`, `cargo test`, and `npm run build` are all clean.
 
 **1633 Rust tests total** (1628 → 1633, 1626 lib + 7 pipeline).
 
+## Phase 282 — Gamut Warning
+
+View > Gamut Warning slots straight into the same architecture Phase
+70-ish's own View > Proof Colors already built: a new `Proof::
+GamutWarning { warning_color }` variant, decoded from the identical
+`composite://` `proof=` query the Color Blindness and Custom Paper/Ink
+proofs already use (`gamut:<hex>`), served live and non-destructively —
+nothing about the document itself changes, exactly like Photoshop's own
+toggle. Its actual gamut test reuses `cmyk_of`, the naive, profile-free
+CMYK ink split already shipped and documented for the Channels panel's
+CMYK view: a pixel is flagged when its four ink channels' percentages sum
+past a Total Ink Limit, the same prepress concept Photoshop's own Gamut
+Warning is tied to. `cmyk_of`'s built-in under-colour removal keeps any
+single pixel's total strictly under 300% (provably — the sum's
+continuous supremum is exactly 300%, approached but never reached, since
+one of the two non-dominant ink channels always trades off against the
+dominant channel's own zero ink), so this project picks its own
+reachable threshold, 250%, rather than reusing a real ICC profile's
+300-400% figures this app's colour management has never modeled. A
+flagged pixel is painted flatly with a user-chosen warning colour (a new
+"Warning Color" swatch next to the existing Proof Setup controls),
+matching Photoshop's own Preferences > Transparency & Gamut colour
+picker.
+
+**Verified two ways.** Two new `document.rs` tests plus one new `lib.rs`
+query-parsing test. The first hand-derives `[10, 0, 0]`'s naive CMYK
+split exactly: `k = 1 − 10/255 = 245/255`, so `ink(g) = ink(b) = ((1 −
+0) − k) / (1 − k) = 1` exactly (255 after rounding), landing on `[0, 255,
+255, 245]`; summed as truncated percentages that is `0 + 100 + 100 + 96 =
+296`, over the 250% limit, so the pixel is replaced with the warning
+colour while a neighbouring mid-grey pixel (≈49% ink) is left alone in
+the same assertion. A second confirms mid-grey alone stays untouched. A
+third (`lib.rs`) confirms `proof_of` parses `gamut:FF00FF` into the right
+`Proof` value and rejects a malformed hex. All three passed on the first
+run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed
+selecting "Gamut Warning" from the Proof dropdown sends
+`composite://composite.png?...&proof=gamut:ff00ff`, that the new Warning
+Color swatch appears only in that mode, and that changing its colour
+updates the live query string. `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings`, `cargo test`, and `npm run build` are all clean.
+
+**1636 Rust tests total** (1633 → 1636, 1629 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

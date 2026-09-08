@@ -394,8 +394,8 @@ export type PuppetMesh = {
 };
 
 /** Mirrors `Proof` in src-tauri/src/document.rs: View > Proof Setup >
- * Color Blindness. */
-export type Proof = "protanopia" | "deuteranopia" | "paperink";
+ * Color Blindness, Custom Paper/Ink, or Gamut Warning. */
+export type Proof = "protanopia" | "deuteranopia" | "paperink" | "gamut";
 
 /** Mirrors `ChannelView` in src-tauri/src/document.rs (serde tagged by
  * `kind`): what the canvas shows — the composite, one colour channel as a
