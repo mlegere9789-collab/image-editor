@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 512.**
+**618 distinct capabilities tracked. Currently shipped: 513.**
 
 ## PART I — EVERY TOOL
 
@@ -610,7 +610,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Makeup Transfer
 - [ ] Photo Restoration
 - [ ] Landscape Mixer
-- [ ] Depth Blur
+- [x] Depth Blur (Adobe's own description: "depth-dependent blur," AI-estimated depth map — the identical mechanism `lens_blur` already ships, an alpha-channel depth proxy standing in for the depth map instead of an AI-estimated one, the exact "duplicate of X, already shipped" pattern already used for Select Subject, Color & Vibrance, and Proof Setup/Colors elsewhere in this checklist. Automatic AI depth estimation from a flat photo (as opposed to a user-supplied alpha channel) remains the one real scope cut — see README Phase 125)
 - [x] Color Transfer (`color_transfer(id, source_layer_id, fade)`: despite living under Neural Filters in Photoshop's own menu, this is the same classic per-channel mean/standard-deviation statistical transfer already shipped as `match_color` — a preset over it under Color Transfer's own name, the same way `camera_raw_saturation` already is one over `vibrance`; `source_layer_id` stands in for Photoshop's separate reference image, since any reference can already be placed as a layer. Photoshop's separate Brightness/Saturation/Luminance/Color toggles are a documented scope cut, folded into the one `fade` control Match Color already has — see README Phase 272)
 - [ ] Current Layer — Neural Filter Output
 - [ ] New Layer — Neural Filter Output
