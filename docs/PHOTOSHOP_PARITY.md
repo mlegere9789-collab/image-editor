@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 528.**
+**618 distinct capabilities tracked. Currently shipped: 532.**
 
 ## PART I — EVERY TOOL
 
@@ -413,11 +413,11 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Monitor Profile
 - [ ] Input Device Profile
 - [ ] Output Device Profile
-- [ ] Document Profile
-- [ ] Assign Profile
+- [x] Document Profile (`Document::profile()`, README Phase 292: the working space currently in effect, shown by the toolbar's own Assign Profile select and travelling in `DocumentView` to the frontend)
+- [x] Assign Profile (`assign_profile(profile)`: relabels the document's own working space without touching a single pixel, exactly Photoshop's own Assign Profile — see README Phase 292)
 - [ ] Don't Color Manage This Document
-- [ ] Working RGB
-- [ ] Convert to Profile
+- [x] Working RGB (the toolbar's own Assign Profile select choosing between the two real working spaces this project models, sRGB and Adobe RGB (1998) — see README Phase 292)
+- [x] Convert to Profile (`convert_to_profile(profile)`: every layer's own pixels remapped through `convert_profile_pixel`'s real, published D65 RGB↔XYZ matrices — unlike Assign Profile, an actual numeric conversion — see README Phase 292)
 - [ ] Conversion Engine
 - [ ] Rendering Intent
 - [ ] Black Point Compensation

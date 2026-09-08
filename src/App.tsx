@@ -17,6 +17,7 @@ import type {
   CalcSource,
   ChannelView,
   ColorMode,
+  ColorProfile,
   ColorRange,
   ColorRangePreset,
   ColorSample,
@@ -6916,6 +6917,34 @@ export default function App() {
               8 Bits/Channel
             </span>
           </label>
+          <label
+            className="tools__slider"
+            title="Edit > Assign Profile: relabels the working space without touching a pixel"
+          >
+            Assign Profile
+            <select
+              value={document?.profile ?? "srgb"}
+              disabled={busy || !hasDocument}
+              onChange={(event) =>
+                void runCommand("assign_profile", { profile: event.target.value as ColorProfile })
+              }
+            >
+              <option value="srgb">sRGB</option>
+              <option value="adobeRgb1998">Adobe RGB (1998)</option>
+            </select>
+          </label>
+          <button
+            className="button button--quiet"
+            onClick={() =>
+              void runCommand("convert_to_profile", {
+                profile: document?.profile === "srgb" ? "adobeRgb1998" : "srgb",
+              })
+            }
+            disabled={busy || !hasDocument}
+            title="Edit > Convert to Profile: remaps every layer's own pixels into the other working space, unlike Assign Profile"
+          >
+            Convert to {document?.profile === "srgb" ? "Adobe RGB (1998)" : "sRGB"}…
+          </button>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select

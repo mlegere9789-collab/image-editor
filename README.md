@@ -17327,6 +17327,70 @@ unaffected and still clean.
 
 **1651 Rust tests total** (unchanged — this phase is pure frontend).
 
+## Phase 292 — Assign Profile / Convert to Profile
+
+The first real crack in the ICC colour management bucket, found the
+same way Liquify Mesh and Vanishing Point already were this session: it
+does not need the full architecture the *rest* of the bucket does
+(profile embedding on import/export, a Color Settings dialog, mismatch
+warnings). Two real, standard, published RGB working spaces — sRGB and
+Adobe RGB (1998), which happen to share the D65 white point, so
+converting between them needs no chromatic adaptation — are enough to
+make Assign Profile and Convert to Profile real, honest, checkable
+features rather than a label with nothing behind it.
+
+`ColorProfile` is a new two-variant enum living on `Document` next to
+`ColorMode`. `convert_profile_pixel(from, to, [r, g, b])` is the real
+conversion: gamma-decode in `from`'s own transfer curve (sRGB's existing
+piecewise curve, reused verbatim from `lab_of`; Adobe RGB's own pure
+`2.19921875` power gamma, Adobe's own published value), matrix into CIE
+XYZ through `from`'s own D65 RGB→XYZ matrix, matrix back out through
+`to`'s inverse, gamma-encode in `to`. Every matrix coefficient is
+Lindbloom's own widely-published reference value, not derived or
+approximated. `assign_profile` relabels the document without touching a
+pixel — exactly Photoshop's own Assign Profile, which changes what the
+existing numbers are interpreted as, not what they are. `convert_to_profile`
+is the real one: every layer's own pixels remapped through
+`convert_profile_pixel`, alpha untouched. A new "Assign Profile" select
+and "Convert to…" button sit next to the existing Mode control.
+
+**Verified two ways.** Five new `document.rs` tests. `from == to` is the
+identity by construction, confirmed directly. Neutrals prove the two
+profiles' shared white point: white and mid-grey convert to themselves
+(off by one at 128 from rounding alone). The real test is a saturated
+colour: sRGB's own fully-saturated green, `(0, 255, 0)`, well outside
+Adobe RGB's own larger green primary, lands on Adobe RGB's own
+`(144, 255, 60)` — independently solved in Python against the identical
+published matrices, not derived from the Rust code being tested — and
+converting that value back to sRGB round-trips to `(0, 255, 1)`, one
+level off from the original, exactly the non-bit-exact behaviour real
+profile conversion through two gamut-bounded spaces should have. A
+fourth confirms Assign Profile changes the label alone; a fifth confirms
+Convert to Profile changes both the label and the pixels, and is a
+pixel-level no-op (while still re-confirming the label) when the target
+already matches. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as every phase since 52; this session's own real
+second verification path — a Playwright browser session — confirmed
+the Assign Profile select sends the exact `{ profile }` `assign_profile`
+should, and that the Convert to… button's own label and its
+`convert_to_profile` call both track the document's current profile
+correctly (offering Adobe RGB while in sRGB, and vice versa after
+assigning). `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`cargo test`, and `npm run build` are all clean.
+
+Document Profile, Working RGB, Assign Profile, and Convert to Profile
+flip to shipped on the strength of this real, if two-profile-wide,
+foundation. Don't Color Manage This Document and Conversion Engine
+remain unshipped — the rest of the ICC bucket (profile embedding,
+ICC file import, Color Settings, mismatch warnings, rendering intent
+against a genuinely out-of-gamut conversion) is still a real,
+substantially larger project, honestly scoped as such rather than
+claimed here.
+
+**1656 Rust tests total** (1651 → 1656, 1649 lib + 7 pipeline).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

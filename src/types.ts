@@ -195,6 +195,8 @@ export type DocumentView = {
   channels: string[];
   /** Image > Mode. */
   mode: ColorMode;
+  /** Edit > Assign Profile / Convert to Profile's current working space. */
+  profile: ColorProfile;
   /** How many colours Indexed Color's table holds; 0 in other modes. */
   colorTableSize: number;
   /** Duotone's inks; empty in other modes. */
@@ -266,6 +268,10 @@ export type ColorMode =
   | "multichannel";
 export type Palette = { kind: "exact" } | { kind: "uniform" } | { kind: "adaptive"; colors: number };
 export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
+
+/** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
+ * Profile / Convert to Profile's real, minimal working spaces. */
+export type ColorProfile = "srgb" | "adobeRgb1998";
 
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */

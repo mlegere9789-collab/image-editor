@@ -166,6 +166,8 @@ pub struct Document {
     saved_selections: Vec<(String, Selection)>,
     /// Image > Mode — see [`ColorMode`].
     mode: ColorMode,
+    /// Edit > Assign Profile / Convert to Profile — see [`ColorProfile`].
+    profile: ColorProfile,
     /// Indexed Color's colour table, empty in every other mode.
     color_table: Vec<[u8; 3]>,
     /// Duotone's inks, empty in every other mode.
@@ -435,6 +437,115 @@ pub enum ColorMode {
     Lab,
     /// The composite split into Cyan, Magenta, and Yellow alpha channels.
     Multichannel,
+}
+
+/// Edit > Assign Profile / Convert to Profile: a real, minimal RGB
+/// working space — standard, published primaries and white point (both
+/// sRGB and Adobe RGB (1998) share the D65 white point, so converting
+/// between them needs no chromatic adaptation) define its own RGB↔XYZ
+/// matrix, and a real transfer curve (sRGB's own piecewise curve, or
+/// Adobe RGB's pure `2.19921875` power gamma) encodes and decodes it —
+/// see [`convert_profile_pixel`]. A working space needing chromatic
+/// adaptation between white points, such as ProPhoto RGB's own D50, is a
+/// documented scope cut: this project's own profile conversion only
+/// spans profiles sharing a white point so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ColorProfile {
+    #[default]
+    Srgb,
+    AdobeRgb1998,
+}
+
+/// One channel's sRGB gamma decode: the standard piecewise curve — a
+/// linear toe below `0.04045`, a power law above it — the same curve
+/// [`lab_of`] and [`simulate_color_blindness`] already use for D65 XYZ.
+fn srgb_linearize(v: u8) -> f64 {
+    let c = v as f64 / 255.0;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// The inverse of [`srgb_linearize`]: one linear channel back to an sRGB
+/// byte.
+fn srgb_encode(c: f64) -> u8 {
+    let c = c.clamp(0.0, 1.0);
+    let v = if c <= 0.0031308 {
+        12.92 * c
+    } else {
+        1.055 * c.powf(1.0 / 2.4) - 0.055
+    };
+    (v * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
+/// Adobe RGB (1998)'s own pure power-law gamma, `2.19921875` — Adobe's
+/// own published value, no piecewise toe.
+const ADOBE_RGB_GAMMA: f64 = 2.19921875;
+
+fn adobe_rgb_linearize(v: u8) -> f64 {
+    (v as f64 / 255.0).powf(ADOBE_RGB_GAMMA)
+}
+
+fn adobe_rgb_encode(c: f64) -> u8 {
+    (c.clamp(0.0, 1.0).powf(1.0 / ADOBE_RGB_GAMMA) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+/// Edit > Convert to Profile: one pixel's RGB converted from `from`'s own
+/// working space to `to`'s, through their real, standard, published D65
+/// RGB↔XYZ matrices (Lindbloom's own reference values) — gamma-decode in
+/// `from`, matrix into CIE XYZ, matrix out of XYZ into `to`'s own linear
+/// RGB, gamma-encode in `to`. Identity (returns the pixel unchanged) when
+/// `from == to`, matching Photoshop's own no-op there. Alpha is not
+/// touched by any caller of this — it is a pure RGB function.
+pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u8; 3]) -> [u8; 3] {
+    if from == to {
+        return [r, g, b];
+    }
+    let (lr, lg, lb) = match from {
+        ColorProfile::Srgb => (srgb_linearize(r), srgb_linearize(g), srgb_linearize(b)),
+        ColorProfile::AdobeRgb1998 => (
+            adobe_rgb_linearize(r),
+            adobe_rgb_linearize(g),
+            adobe_rgb_linearize(b),
+        ),
+    };
+    let (x, y, z) = match from {
+        ColorProfile::Srgb => (
+            0.4124564 * lr + 0.3575761 * lg + 0.1804375 * lb,
+            0.2126729 * lr + 0.7151522 * lg + 0.0721750 * lb,
+            0.0193339 * lr + 0.1191920 * lg + 0.9503041 * lb,
+        ),
+        ColorProfile::AdobeRgb1998 => (
+            0.5767309 * lr + 0.1855540 * lg + 0.1881852 * lb,
+            0.2973769 * lr + 0.6273491 * lg + 0.0752741 * lb,
+            0.0270343 * lr + 0.0706872 * lg + 0.9911085 * lb,
+        ),
+    };
+    let (lr2, lg2, lb2) = match to {
+        ColorProfile::Srgb => (
+            3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
+            -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
+            0.0556434 * x - 0.2040259 * y + 1.0572252 * z,
+        ),
+        ColorProfile::AdobeRgb1998 => (
+            2.0413690 * x - 0.5649464 * y - 0.3446944 * z,
+            -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
+            0.0134474 * x - 0.1183897 * y + 1.0154096 * z,
+        ),
+    };
+    match to {
+        ColorProfile::Srgb => [srgb_encode(lr2), srgb_encode(lg2), srgb_encode(lb2)],
+        ColorProfile::AdobeRgb1998 => [
+            adobe_rgb_encode(lr2),
+            adobe_rgb_encode(lg2),
+            adobe_rgb_encode(lb2),
+        ],
+    }
 }
 
 /// A 3D colour lookup table — Image > Adjustments > Color Lookup's `.cube`
@@ -3478,6 +3589,8 @@ pub struct DocumentView {
     pub spots: Vec<SpotChannelView>,
     /// Image > Mode.
     pub mode: ColorMode,
+    /// Edit > Assign Profile / Convert to Profile's current working space.
+    pub profile: ColorProfile,
     /// How many colours Indexed Color's table holds; `0` in other modes.
     pub color_table_size: usize,
     /// Duotone's inks; empty in other modes.
@@ -3522,6 +3635,7 @@ impl Document {
             tool_presets: Vec::new(),
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
+            profile: ColorProfile::Srgb,
             color_table: Vec::new(),
             duotone: Vec::new(),
             channels: Vec::new(),
@@ -3579,6 +3693,7 @@ impl Document {
                 })
                 .collect(),
             mode: self.mode,
+            profile: self.profile,
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
             has_brush_tip: self.brush_tip.is_some(),
@@ -3771,6 +3886,47 @@ impl Document {
     /// Image > Mode: the document's colour mode.
     pub fn mode(&self) -> ColorMode {
         self.mode
+    }
+
+    /// Edit > Assign Profile / Convert to Profile's current working space.
+    pub fn profile(&self) -> ColorProfile {
+        self.profile
+    }
+
+    /// Edit > Assign Profile: relabels the document's own working space
+    /// without touching a single pixel — exactly Photoshop's own Assign
+    /// Profile, which changes what the existing numbers are *interpreted
+    /// as* rather than converting them. [`Self::convert_to_profile`] is
+    /// the one that actually remaps pixel values.
+    pub fn assign_profile(&mut self, profile: ColorProfile) {
+        self.profile = profile;
+    }
+
+    /// Edit > Convert to Profile: every layer's own pixels remapped from
+    /// the document's current working space to `profile` through
+    /// [`convert_profile_pixel`], and the document's own working space
+    /// updated to match — unlike Assign Profile, this is a real,
+    /// numeric conversion, not just a relabel. A no-op, still updating
+    /// the label, when `profile` already matches. Alpha is untouched.
+    pub fn convert_to_profile(&mut self, profile: ColorProfile) -> Option<Rect> {
+        if profile != self.profile {
+            let from = self.profile;
+            for layer in &mut self.layers {
+                for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                    let [r, g, b] = convert_profile_pixel(from, profile, [px[0], px[1], px[2]]);
+                    px[0] = r;
+                    px[1] = g;
+                    px[2] = b;
+                }
+            }
+        }
+        self.profile = profile;
+        Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: self.width,
+            y1: self.height,
+        })
     }
 
     /// A colour as the mode allows it to be painted: unchanged in RGB, its
@@ -46651,6 +46807,90 @@ mod tests {
         assert!(doc
             .vanishing_point_clone(id, plane, [10.0, 2.0], [10.0, 8.0], 1.0)
             .is_err());
+    }
+
+    #[test]
+    fn convert_profile_pixel_is_the_identity_when_the_profiles_match() {
+        assert_eq!(
+            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30]),
+            [10, 20, 30]
+        );
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::AdobeRgb1998,
+                ColorProfile::AdobeRgb1998,
+                [10, 20, 30]
+            ),
+            [10, 20, 30]
+        );
+    }
+
+    #[test]
+    fn convert_profile_pixel_keeps_white_and_grey_neutral() {
+        // Neutrals sit on the white-point axis in both profiles (they
+        // share the D65 white point), so they must convert exactly.
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [255, 255, 255]
+            ),
+            [255, 255, 255]
+        );
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [128, 128, 128]
+            ),
+            [127, 127, 127]
+        );
+    }
+
+    #[test]
+    fn convert_profile_pixel_moves_a_saturated_colour_by_the_independently_solved_amount() {
+        // Independently solved in Python (the identical D65 sRGB and
+        // Adobe RGB (1998) matrices from Lindbloom's own reference,
+        // applied in the same order this function applies them): sRGB's
+        // fully saturated green (0, 255, 0) -- well outside Adobe RGB's
+        // own, larger green primary -- lands on Adobe RGB's own
+        // (144, 255, 60).
+        assert_eq!(
+            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [0, 255, 0]),
+            [144, 255, 60]
+        );
+        // Converting that value back to sRGB round-trips to within one
+        // level per channel of the original -- real profile conversion
+        // through two gamut-bounded working spaces is not bit-exact.
+        let back = convert_profile_pixel(
+            ColorProfile::AdobeRgb1998,
+            ColorProfile::Srgb,
+            [144, 255, 60],
+        );
+        assert_eq!(back, [0, 255, 1]);
+    }
+
+    #[test]
+    fn assign_profile_relabels_without_touching_a_single_pixel() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        assert_eq!(doc.profile(), ColorProfile::Srgb);
+        doc.assign_profile(ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn convert_to_profile_remaps_every_layers_own_pixels_and_updates_the_label() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
+        doc.convert_to_profile(ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
+        // Converting to the profile already in effect is a documented
+        // no-op on the pixels, even though it still re-confirms the label.
+        doc.convert_to_profile(ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
     }
 
     #[test]

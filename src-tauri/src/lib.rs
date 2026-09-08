@@ -1714,6 +1714,29 @@ fn convert_mode(
     })
 }
 
+/// Edit > Assign Profile: relabels the document's own working space
+/// without touching a single pixel.
+#[tauri::command]
+fn assign_profile(
+    state: State<'_, AppState>,
+    profile: document::ColorProfile,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.assign_profile(profile);
+        Ok(None)
+    })
+}
+
+/// Edit > Convert to Profile: every layer's own pixels remapped from the
+/// document's current working space to `profile`.
+#[tauri::command]
+fn convert_to_profile(
+    state: State<'_, AppState>,
+    profile: document::ColorProfile,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| Ok(document.convert_to_profile(profile)))
+}
+
 /// Image > Mode > Indexed Color with the dialog's `palette`.
 #[tauri::command]
 fn convert_to_indexed(
@@ -6171,6 +6194,8 @@ pub fn run() {
             puppet_mesh,
             liquify_mesh,
             convert_to_indexed,
+            assign_profile,
+            convert_to_profile,
             convert_to_duotone,
             rename_channel,
             move_channel,
