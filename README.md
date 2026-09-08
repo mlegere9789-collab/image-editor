@@ -16491,6 +16491,73 @@ green.
 **1619 Rust tests total** (1614 → 1619, 1612 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 275 — Custom Toolbar and Keyboard Shortcuts customization
+
+Two of the "39th System" bucket's app-chrome items that turned out to
+be genuinely buildable without a dockable-panel rewrite, because
+neither actually needs one: both are per-installation preferences
+about *this app's own* fixed toolbar and its own fixed shortcut list,
+not about rearranging windows.
+
+**Custom Toolbar** scopes to exactly what Photoshop's own Customize
+Toolbar scopes to — the Tools panel, not every menu command or filter
+dialog. All 57 of this app's persistent tool-selection buttons (Brush,
+Eraser, every selection/paint/shape/retouch tool) now carry a
+`data-tool="<id>"` attribute; a `hiddenTools` set, kept in
+`localStorage` rather than the document (a UI preference, not
+document data — it should not travel through Save/Open Project or
+undo/redo), drives one generated `<style>` rule per hidden tool,
+`[data-tool="x"]{display:none!important}`, rather than threading a
+visibility check through every button's own JSX. A new "Customize
+Toolbar…" dialog lists all 57 with a checkbox each, plus Show All.
+Reordering the toolbar and Photoshop's own tool groups are a
+documented scope cut — this reaches show/hide, not rearrangement.
+
+**Keyboard Shortcuts customization** turns this app's twelve
+Ctrl/Cmd-modified shortcuts (Undo, Redo, Deselect, Reselect, Select
+All, Invert Selection, Copy, Copy Merged, Cut, Paste, Layer via Copy,
+Layer via Cut) from a hard-coded `if (key === "z") ...` chain into a
+data-driven lookup against a `keyBindings` record, each entry a
+`{key, shift}` pair, also kept in `localStorage`. A new "Keyboard
+Shortcuts…" dialog lists all twelve with their current binding and a
+Change button; pressing Change arms a one-shot capture listener (in
+the bubble phase, so it runs before and swallows the normal shortcut
+handler) that takes the next keypress as the new binding, rejecting it
+outright with a named error if it collides with a different action's
+own binding, so two commands can never silently share one shortcut.
+Redo's fixed "Y" alternate (Photoshop's own Ctrl+Y, alongside whatever
+key Redo itself is rebound to) and arrow-key selection/layer nudging —
+a directional convention tied to the physical arrow keys, not a named
+command in Photoshop's own Keyboard Shortcuts panel either — are
+documented scope cuts.
+
+**Verified two ways** — for the first time genuinely two, rather than
+one hand-review standing in for a broken second one. Both features are
+pure frontend state with no `document.rs` surface, so there are no new
+Rust tests this phase; the existing 1619 stay green unchanged. In their
+place, a real Playwright session (Chromium, with a small hand-built
+`window.__TAURI_INTERNALS__` mock standing in for the real Tauri
+runtime this app needs to boot at all) drove the built frontend
+directly: hid the Brush tool through the new dialog and confirmed its
+toolbar button disappeared, reloaded the page and confirmed the hidden
+state survived through `localStorage`, then Show All restored it;
+rebound Select All from Ctrl+A to Ctrl+Shift+K and confirmed the
+dialog's own display text updated to match; attempted to rebind Copy
+to that same now-taken combination and confirmed it was refused with
+the expected named-conflict message; and Reset to Defaults restored
+Select All to Ctrl+A. Every one of those checks passed on the first
+run. This is real interactive verification, not a substitute for the
+Xvfb path this project's own `xdotool` control test found broken back
+in Phase 52 — that limitation is specific to driving the actual Tauri
+webview under Xvfb, not to testing this app's frontend logic at all,
+and a plain browser session was enough to exercise both features end
+to end. `cargo fmt`, `clippy -D warnings`, `cargo test`, and
+`npm run build` are all still clean.
+
+**1619 Rust tests total, unchanged this phase** (0 lib/pipeline
+additions — a pure frontend phase). `cargo fmt`, `clippy`, and
+`npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

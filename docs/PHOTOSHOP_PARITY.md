@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 506.**
+**618 distinct capabilities tracked. Currently shipped: 508.**
 
 ## PART I — EVERY TOOL
 
@@ -186,7 +186,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Discover Panel
 - [ ] Quick Actions
 - [ ] Rich Tooltips
-- [ ] Custom Toolbar
+- [x] Custom Toolbar (Edit > Toolbar: every persistent tool-selection button — all 57 of them, matching Photoshop's own scope for Customize Toolbar, the Tools panel alone rather than every menu command — carries a `data-tool` attribute, and hidden ones are removed by a plain `[data-tool="x"]{display:none}` rule generated from a `hiddenTools` set kept in `localStorage`, a per-installation browser preference rather than document data. Reordering the toolbar and Photoshop's own tool groups/Extra Tools well are a documented scope cut — see README Phase 275)
 - [x] Tool Presets (`ToolPreset { name, tool, params }`, `save_tool_preset`/`delete_tool_preset`: a named snapshot of the active tool plus an opaque `params` blob Rust never interprets, only the frontend does — the same "app-level preset kept on the document" simplification Gradient/Pattern/Adjustment/Custom Shape Presets already make. Scoped to this project's own shared brush parameters (size, opacity, colour, and the Gradient tool's end colour); Mixer Brush's Wet/Load/Mix, Art History's own controls, and shape tools' fill/stroke are a documented scope cut — see README Phase 273)
 - [x] Preset Manager (`rename_gradient_preset`/`rename_pattern_preset`/`rename_adjustment_preset`/`rename_custom_shape_preset`/`rename_tool_preset`: renaming by name, in place, alongside each preset kind's existing save/delete/list, in the consolidated Presets dialog. Pattern and Custom Shape presets are the real driver — the frontend never sees a pattern's own pixels or a custom shape's own Bézier anchors, only their names, so rename is the only lossless way to retitle either at all; the other three could otherwise be renamed by delete-and-resave with data the frontend already has. A single cross-type panel with drag-to-reorder and import/export is a documented scope cut — see README Phase 274)
 - [x] Adjustment Presets (`save_adjustment_preset`/`delete_adjustment_preset`/`apply_adjustment_preset`, a named `Adjustment` saved on the document — overwritten in place when the name repeats, validated before saving — and applied by adding a new adjustment layer set to it; see README Phase 260)
@@ -202,7 +202,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] New Guide (`add_guide` / `remove_guide` / `clear_guides`, horizontal or vertical guides on pixel boundaries kept on the document, drawn over the canvas, turned by document rotation and carried through a crop; a click on a guide removes it; snapping is a documented scope cut — see README Phase 212)
 - [ ] Lock Workspace
 - [ ] Custom Menus
-- [ ] Keyboard Shortcuts customization
+- [x] Keyboard Shortcuts customization (Edit > Keyboard Shortcuts: every one of this app's Ctrl/Cmd-modified shortcuts — Undo, Redo, Deselect, Reselect, Select All, Invert Selection, Copy, Copy Merged, Cut, Paste, Layer via Copy, Layer via Cut — is now a rebindable `{key, shift}` pair kept in `localStorage`, with the keydown handler doing a data-driven lookup instead of a hard-coded key check, and a rebind rejected outright when it collides with another action's own binding. Arrow-key selection/layer nudging is a fixed directional convention, not a named rebindable command, a documented scope cut — see README Phase 275)
 - [ ] Workspaces
 - [ ] Panel Docking
 - [ ] Panel Groups

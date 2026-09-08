@@ -602,6 +602,18 @@ body {
   color: var(--muted);
 }
 
+.modal__hint--error {
+  color: var(--danger);
+}
+
+.toolbar-customize__list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 16px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
 .modal--wide {
   width: 360px;
   max-height: 90vh;

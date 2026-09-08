@@ -64,6 +64,153 @@ const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 const PROJECT_FILTER = [{ name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] }];
 const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
+/** Edit > Toolbar (Customize Toolbar): every persistent tool-selection
+ * button in the toolbar, in the order it appears there — the same scope
+ * Photoshop's own Customize Toolbar has (the Tools panel alone, not
+ * every menu command or filter dialog). Each one carries a matching
+ * `data-tool` attribute on its actual toolbar button for
+ * `hiddenToolsStyle` below to hide by a plain CSS selector. */
+const ALL_TOOLS: { id: Tool; label: string }[] = [
+  { id: "selectRect", label: "Rect Select" },
+  { id: "selectEllipse", label: "Ellipse Select" },
+  { id: "magicWand", label: "Magic Wand" },
+  { id: "selectRow", label: "Single Row" },
+  { id: "selectColumn", label: "Single Column" },
+  { id: "brush", label: "Brush" },
+  { id: "eraser", label: "Eraser" },
+  { id: "magicEraser", label: "Magic Eraser" },
+  { id: "backgroundEraser", label: "Background Eraser" },
+  { id: "dodge", label: "Dodge" },
+  { id: "burn", label: "Burn" },
+  { id: "sponge", label: "Sponge" },
+  { id: "blur", label: "Blur" },
+  { id: "sharpen", label: "Sharpen" },
+  { id: "smudge", label: "Smudge" },
+  { id: "colorReplace", label: "Color Replacement" },
+  { id: "redEye", label: "Red Eye" },
+  { id: "ruler", label: "Ruler" },
+  { id: "colorSampler", label: "Color Sampler" },
+  { id: "count", label: "Count" },
+  { id: "note", label: "Note" },
+  { id: "move", label: "Move" },
+  { id: "polygonLasso", label: "Polygonal Lasso" },
+  { id: "lasso", label: "Lasso" },
+  { id: "magneticLasso", label: "Magnetic Lasso" },
+  { id: "pen", label: "Pen" },
+  { id: "freeformPen", label: "Freeform Pen" },
+  { id: "curvaturePen", label: "Curvature Pen" },
+  { id: "addAnchorPoint", label: "Add Anchor Point" },
+  { id: "deleteAnchorPoint", label: "Delete Anchor Point" },
+  { id: "convertPoint", label: "Convert Point" },
+  { id: "pathSelection", label: "Path Selection" },
+  { id: "directSelection", label: "Direct Selection" },
+  { id: "objectSelect", label: "Object Select" },
+  { id: "objectSelectLasso", label: "Object Lasso" },
+  { id: "vectorMask", label: "Vector Mask" },
+  { id: "selectionBrush", label: "Selection Brush" },
+  { id: "quickSelection", label: "Quick Selection" },
+  { id: "patternStamp", label: "Pattern Stamp" },
+  { id: "cloneStamp", label: "Clone Stamp" },
+  { id: "healingBrush", label: "Healing Brush" },
+  { id: "spotHealingBrush", label: "Spot Healing" },
+  { id: "remove", label: "Remove" },
+  { id: "patch", label: "Patch" },
+  { id: "contentAwareMove", label: "Content-Aware Move" },
+  { id: "historyBrush", label: "History Brush" },
+  { id: "mixerBrush", label: "Mixer Brush" },
+  { id: "artHistoryBrush", label: "Art History Brush" },
+  { id: "rectangle", label: "Rectangle" },
+  { id: "ellipse", label: "Ellipse" },
+  { id: "line", label: "Line" },
+  { id: "polygon", label: "Polygon" },
+  { id: "star", label: "Star" },
+  { id: "triangle", label: "Triangle" },
+  { id: "eyedropper", label: "Eyedropper" },
+  { id: "paintBucket", label: "Paint Bucket" },
+  { id: "gradient", label: "Gradient" },
+];
+
+/** LegeLabs local-storage keys — per-installation UI preferences, never
+ * document data, so they live in the browser, not on the document. */
+const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
+const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
+
+/** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
+ * already had hard-coded, now rebindable. Arrow-key selection/layer
+ * nudging is a documented scope cut — it is a directional convention
+ * tied to the physical arrow keys, not a named command Photoshop's own
+ * Keyboard Shortcuts panel exposes for rebinding either. */
+type ShortcutAction =
+  | "undo"
+  | "redo"
+  | "deselect"
+  | "reselect"
+  | "selectAll"
+  | "invertSelection"
+  | "copy"
+  | "copyMerged"
+  | "cut"
+  | "paste"
+  | "layerViaCopy"
+  | "layerViaCut";
+
+/** A shortcut's own key and whether Shift is held, always alongside
+ * Ctrl (Windows/Linux) or Cmd (macOS) — every one of this app's
+ * shortcuts is modified that way, so the modifier itself is not part of
+ * the rebindable binding. */
+type KeyBinding = { key: string; shift: boolean };
+
+const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
+  undo: "Undo",
+  redo: "Redo",
+  deselect: "Deselect",
+  reselect: "Reselect",
+  selectAll: "Select All",
+  invertSelection: "Invert Selection",
+  copy: "Copy",
+  copyMerged: "Copy Merged",
+  cut: "Cut",
+  paste: "Paste",
+  layerViaCopy: "Layer via Copy",
+  layerViaCut: "Layer via Cut",
+};
+
+const SHORTCUT_ORDER: ShortcutAction[] = [
+  "undo",
+  "redo",
+  "deselect",
+  "reselect",
+  "selectAll",
+  "invertSelection",
+  "copy",
+  "copyMerged",
+  "cut",
+  "paste",
+  "layerViaCopy",
+  "layerViaCut",
+];
+
+const DEFAULT_KEY_BINDINGS: Record<ShortcutAction, KeyBinding> = {
+  undo: { key: "z", shift: false },
+  redo: { key: "z", shift: true },
+  deselect: { key: "d", shift: false },
+  reselect: { key: "d", shift: true },
+  selectAll: { key: "a", shift: false },
+  invertSelection: { key: "i", shift: true },
+  copy: { key: "c", shift: false },
+  copyMerged: { key: "c", shift: true },
+  cut: { key: "x", shift: false },
+  paste: { key: "v", shift: false },
+  layerViaCopy: { key: "j", shift: false },
+  layerViaCut: { key: "j", shift: true },
+};
+
+/** `binding` as the toolbar and dialog display it, e.g. "Ctrl/Cmd+Shift+D". */
+function formatKeyBinding(binding: KeyBinding): string {
+  const key = binding.key.length === 1 ? binding.key.toUpperCase() : binding.key;
+  return `Ctrl/Cmd+${binding.shift ? "Shift+" : ""}${key}`;
+}
+
 /** One row per output channel (R, G, B); each row is
  * [rCoeff, gCoeff, bCoeff, constant]. This is the no-op matrix. */
 const IDENTITY_KERNEL = Array.from({ length: 25 }, (_, i) => (i === 12 ? "1" : "0"));
@@ -1312,6 +1459,74 @@ export default function App() {
   const [offsetY, setOffsetY] = useState(0);
 
   const [tool, setTool] = useState<Tool>("brush");
+  // Edit > Toolbar (Customize Toolbar): tools hidden from the toolbar, a
+  // per-installation preference kept in the browser, not the document.
+  const [hiddenTools, setHiddenTools] = useState<Set<Tool>>(() => {
+    try {
+      const saved = localStorage.getItem(HIDDEN_TOOLS_STORAGE_KEY);
+      return saved ? new Set(JSON.parse(saved) as Tool[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+  const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
+  const toggleToolHidden = useCallback((id: Tool) => {
+    setHiddenTools((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify([...next]));
+      } catch {
+        // Storage unavailable (private browsing, quota) -- the toggle
+        // still applies for this session, just does not persist.
+      }
+      return next;
+    });
+  }, []);
+  const resetHiddenTools = useCallback(() => {
+    setHiddenTools(new Set());
+    try {
+      localStorage.removeItem(HIDDEN_TOOLS_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
+  // Edit > Keyboard Shortcuts: this app's Ctrl/Cmd shortcuts, rebindable
+  // and kept in the browser like hiddenTools above.
+  const [keyBindings, setKeyBindings] = useState<Record<ShortcutAction, KeyBinding>>(() => {
+    try {
+      const saved = localStorage.getItem(KEY_BINDINGS_STORAGE_KEY);
+      return saved
+        ? { ...DEFAULT_KEY_BINDINGS, ...(JSON.parse(saved) as Partial<Record<ShortcutAction, KeyBinding>>) }
+        : { ...DEFAULT_KEY_BINDINGS };
+    } catch {
+      return { ...DEFAULT_KEY_BINDINGS };
+    }
+  });
+  const [showKeyboardShortcutsDialog, setShowKeyboardShortcutsDialog] = useState(false);
+  const [rebindingAction, setRebindingAction] = useState<ShortcutAction | null>(null);
+  const [keyBindingError, setKeyBindingError] = useState<string | null>(null);
+  const setKeyBinding = useCallback((action: ShortcutAction, binding: KeyBinding) => {
+    setKeyBindings((previous) => {
+      const next = { ...previous, [action]: binding };
+      try {
+        localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+  const resetKeyBindings = useCallback(() => {
+    setKeyBindings({ ...DEFAULT_KEY_BINDINGS });
+    setKeyBindingError(null);
+    try {
+      localStorage.removeItem(KEY_BINDINGS_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }, []);
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
@@ -4439,42 +4654,48 @@ export default function App() {
       }
       if (isTypingTarget(event.target)) return;
       const key = event.key.toLowerCase();
-      if (key === "z" && !event.shiftKey) {
+      const matches = (action: ShortcutAction) => {
+        const binding = keyBindings[action];
+        return binding.key === key && binding.shift === event.shiftKey;
+      };
+      if (matches("undo")) {
         event.preventDefault();
         if (canUndo && !busy) undo();
-      } else if ((key === "z" && event.shiftKey) || key === "y") {
+      } else if (matches("redo") || key === "y") {
+        // "y" is a fixed alternate for Redo alongside whatever key Redo
+        // is rebound to, the same Ctrl+Y Photoshop itself always accepts.
         event.preventDefault();
         if (canRedo && !busy) redo();
-      } else if (key === "d" && !event.shiftKey) {
+      } else if (matches("deselect")) {
         event.preventDefault();
         if (hasSelection && !busy) deselect();
-      } else if (key === "d" && event.shiftKey) {
+      } else if (matches("reselect")) {
         event.preventDefault();
         if (canReselect && !busy) reselect();
-      } else if (key === "a") {
+      } else if (matches("selectAll")) {
         event.preventDefault();
         if (document !== null && !busy) selectAll();
-      } else if (key === "i" && event.shiftKey) {
+      } else if (matches("invertSelection")) {
         event.preventDefault();
         if (hasSelection && !busy) invertSelection();
-      } else if (key === "c" && !event.shiftKey) {
+      } else if (matches("copy")) {
         event.preventDefault();
         if (selectedId !== null && !busy) void copySelection();
-      } else if (key === "c" && event.shiftKey) {
+      } else if (matches("copyMerged")) {
         event.preventDefault();
         if (document !== null && !busy) void copyMerged();
-      } else if (key === "x") {
+      } else if (matches("cut")) {
         event.preventDefault();
         if (selectedId !== null && !busy) void cutSelection();
-      } else if (key === "v") {
+      } else if (matches("paste")) {
         event.preventDefault();
         if (document !== null && canPaste && !busy) void pasteClipboard();
-      } else if (key === "j" && !event.shiftKey) {
+      } else if (matches("layerViaCopy")) {
         event.preventDefault();
         if (selectedId !== null && !busy) {
           void runCommand("new_layer_via_copy", { id: selectedId }, "top");
         }
-      } else if (key === "j" && event.shiftKey) {
+      } else if (matches("layerViaCut")) {
         event.preventDefault();
         if (selectedId !== null && !busy) {
           void runCommand("new_layer_via_cut", { id: selectedId }, "top");
@@ -4504,7 +4725,41 @@ export default function App() {
     pasteClipboard,
     runCommand,
     tool,
+    keyBindings,
   ]);
+
+  // Edit > Keyboard Shortcuts: while rebindingAction is set, the very next
+  // keypress becomes that action's new binding instead of running as a
+  // shortcut itself (captured in the bubble phase so this runs before the
+  // handler above, and swallowed so it never also fires as one).
+  useEffect(() => {
+    if (rebindingAction === null) return;
+    const captureKey = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.key === "Escape") {
+        setRebindingAction(null);
+        return;
+      }
+      if (["Shift", "Control", "Meta", "Alt"].includes(event.key)) return;
+      const binding: KeyBinding = { key: event.key.toLowerCase(), shift: event.shiftKey };
+      const conflict = SHORTCUT_ORDER.find(
+        (other) =>
+          other !== rebindingAction &&
+          keyBindings[other].key === binding.key &&
+          keyBindings[other].shift === binding.shift,
+      );
+      if (conflict) {
+        setKeyBindingError(`${SHORTCUT_LABELS[conflict]} already uses ${formatKeyBinding(binding)}.`);
+        return;
+      }
+      setKeyBindingError(null);
+      setKeyBinding(rebindingAction, binding);
+      setRebindingAction(null);
+    };
+    window.addEventListener("keydown", captureKey, true);
+    return () => window.removeEventListener("keydown", captureKey, true);
+  }, [rebindingAction, keyBindings, setKeyBinding]);
 
   useEffect(() => {
     invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
@@ -5907,6 +6162,11 @@ export default function App() {
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
+      {hiddenTools.size > 0 && (
+        <style>
+          {[...hiddenTools].map((id) => `[data-tool="${id}"]{display:none!important}`).join("")}
+        </style>
+      )}
       <header className="toolbar">
         <h1 className="toolbar__title">LegeLabs: Photo Editing Suite</h1>
         <button
@@ -5957,6 +6217,22 @@ export default function App() {
           title="Edit > Presets: save and reuse Gradient, Pattern, Adjustment, Custom Shape, and Tool presets by name"
         >
           Presets…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowCustomizeToolbarDialog(true)}
+          disabled={busy}
+          title="Edit > Toolbar: show or hide individual tools"
+        >
+          Customize Toolbar…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowKeyboardShortcutsDialog(true)}
+          disabled={busy}
+          title="Edit > Keyboard Shortcuts: rebind this app's Ctrl/Cmd shortcuts"
+        >
+          Keyboard Shortcuts…
         </button>
         <button
           className="button button--quiet"
@@ -6348,6 +6624,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "selectRect"}
             onClick={() => setTool("selectRect")}
+            data-tool="selectRect"
           >
             Rect Select
           </button>
@@ -6356,6 +6633,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "selectEllipse"}
             onClick={() => setTool("selectEllipse")}
+            data-tool="selectEllipse"
           >
             Ellipse Select
           </button>
@@ -6364,6 +6642,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "magicWand"}
             onClick={() => setTool("magicWand")}
+            data-tool="magicWand"
             title="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
           >
             Magic Wand
@@ -6437,6 +6716,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "selectRow"}
             onClick={() => setTool("selectRow")}
+            data-tool="selectRow"
             title="Single Row Marquee: selects one full-width, 1px-tall row"
           >
             Single Row
@@ -6446,6 +6726,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "selectColumn"}
             onClick={() => setTool("selectColumn")}
+            data-tool="selectColumn"
             title="Single Column Marquee: selects one full-height, 1px-wide column"
           >
             Single Column
@@ -6538,6 +6819,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "brush"}
             onClick={() => setTool("brush")}
+            data-tool="brush"
           >
             Brush
           </button>
@@ -6546,6 +6828,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "eraser"}
             onClick={() => setTool("eraser")}
+            data-tool="eraser"
           >
             Eraser
           </button>
@@ -6554,6 +6837,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "magicEraser"}
             onClick={() => setTool("magicEraser")}
+            data-tool="magicEraser"
             title="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
           >
             Magic Eraser
@@ -6563,6 +6847,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "backgroundEraser"}
             onClick={() => setTool("backgroundEraser")}
+            data-tool="backgroundEraser"
             title="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
           >
             Background Eraser
@@ -6572,6 +6857,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "dodge"}
             onClick={() => setTool("dodge")}
+            data-tool="dodge"
             title="Dodge: paint to lighten toward white (Flow sets the Exposure)"
           >
             Dodge
@@ -6581,6 +6867,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "burn"}
             onClick={() => setTool("burn")}
+            data-tool="burn"
             title="Burn: paint to darken toward black (Flow sets the Exposure)"
           >
             Burn
@@ -6590,6 +6877,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "sponge"}
             onClick={() => setTool("sponge")}
+            data-tool="sponge"
             title="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
           >
             Sponge
@@ -6599,6 +6887,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "blur"}
             onClick={() => setTool("blur")}
+            data-tool="blur"
             title="Blur: paint to soften (Flow sets the Strength)"
           >
             Blur
@@ -6608,6 +6897,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "sharpen"}
             onClick={() => setTool("sharpen")}
+            data-tool="sharpen"
             title="Sharpen: paint to sharpen (Flow sets the Strength)"
           >
             Sharpen
@@ -6617,6 +6907,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "smudge"}
             onClick={() => setTool("smudge")}
+            data-tool="smudge"
             title="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
           >
             Smudge
@@ -6626,6 +6917,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "colorReplace"}
             onClick={() => setTool("colorReplace")}
+            data-tool="colorReplace"
             title="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
           >
             Color Replacement
@@ -6635,6 +6927,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "redEye"}
             onClick={() => setTool("redEye")}
+            data-tool="redEye"
             title="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
           >
             Red Eye
@@ -6644,6 +6937,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "ruler"}
             onClick={() => setTool("ruler")}
+            data-tool="ruler"
             title="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
           >
             Ruler
@@ -6653,6 +6947,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "colorSampler"}
             onClick={() => setTool("colorSampler")}
+            data-tool="colorSampler"
             title="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
           >
             Color Sampler
@@ -6662,6 +6957,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "count"}
             onClick={() => setTool("count")}
+            data-tool="count"
             title="Count: click to place numbered marks; the running total shows in the status bar"
           >
             Count
@@ -6671,6 +6967,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "note"}
             onClick={() => setTool("note")}
+            data-tool="note"
             title="Note: click to pin a text note; click a note's badge to edit or delete it"
           >
             Note
@@ -6680,6 +6977,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "move"}
             onClick={() => setTool("move")}
+            data-tool="move"
             title="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
           >
             Move
@@ -6689,6 +6987,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "polygonLasso"}
             onClick={() => setTool("polygonLasso")}
+            data-tool="polygonLasso"
             title="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
           >
             Polygonal Lasso
@@ -6698,6 +6997,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "lasso"}
             onClick={() => setTool("lasso")}
+            data-tool="lasso"
             title="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
           >
             Lasso
@@ -6707,6 +7007,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "magneticLasso"}
             onClick={() => setTool("magneticLasso")}
+            data-tool="magneticLasso"
             title="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
           >
             Magnetic Lasso
@@ -6716,6 +7017,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isPen}
             onClick={() => setTool("pen")}
+            data-tool="pen"
             title="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
           >
             Pen
@@ -6725,6 +7027,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isFreeformPen}
             onClick={() => setTool("freeformPen")}
+            data-tool="freeformPen"
             title="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
           >
             Freeform Pen
@@ -6734,6 +7037,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isCurvaturePen}
             onClick={() => setTool("curvaturePen")}
+            data-tool="curvaturePen"
             title="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
           >
             Curvature Pen
@@ -6743,6 +7047,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isAddAnchorPoint}
             onClick={() => setTool("addAnchorPoint")}
+            data-tool="addAnchorPoint"
             title="Add Anchor Point: click near the path to insert a new anchor there"
           >
             Add Anchor Point
@@ -6752,6 +7057,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isDeleteAnchorPoint}
             onClick={() => setTool("deleteAnchorPoint")}
+            data-tool="deleteAnchorPoint"
             title="Delete Anchor Point: click an anchor to remove it"
           >
             Delete Anchor Point
@@ -6761,6 +7067,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isConvertPoint}
             onClick={() => setTool("convertPoint")}
+            data-tool="convertPoint"
             title="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
           >
             Convert Point
@@ -6770,6 +7077,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isPathSelection}
             onClick={() => setTool("pathSelection")}
+            data-tool="pathSelection"
             title="Path Selection: drag anywhere to move the whole current path"
           >
             Path Selection
@@ -6779,6 +7087,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={isDirectSelection}
             onClick={() => setTool("directSelection")}
+            data-tool="directSelection"
             title="Direct Selection: drag an anchor to move just that point"
           >
             Direct Selection
@@ -6796,6 +7105,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "objectSelect"}
             onClick={() => setTool("objectSelect")}
+            data-tool="objectSelect"
             title="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
           >
             Object Select
@@ -6805,6 +7115,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "objectSelectLasso"}
             onClick={() => setTool("objectSelectLasso")}
+            data-tool="objectSelectLasso"
             title="Object Selection, Lasso mode: draw a rough outline around an object to select it"
           >
             Object Lasso
@@ -6982,6 +7293,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "vectorMask"}
             onClick={() => setTool("vectorMask")}
+            data-tool="vectorMask"
             title="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
           >
             Vector Mask
@@ -7039,6 +7351,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "selectionBrush"}
             onClick={() => setTool("selectionBrush")}
+            data-tool="selectionBrush"
             title="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
           >
             Selection Brush
@@ -7048,6 +7361,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "quickSelection"}
             onClick={() => setTool("quickSelection")}
+            data-tool="quickSelection"
             title="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
           >
             Quick Selection
@@ -7057,6 +7371,7 @@ export default function App() {
             disabled={!canPaint || !(document?.hasPattern ?? false)}
             aria-pressed={tool === "patternStamp"}
             onClick={() => setTool("patternStamp")}
+            data-tool="patternStamp"
             title="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
           >
             Pattern Stamp
@@ -7066,6 +7381,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "cloneStamp"}
             onClick={() => setTool("cloneStamp")}
+            data-tool="cloneStamp"
             title="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
           >
             Clone Stamp
@@ -7075,6 +7391,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "healingBrush"}
             onClick={() => setTool("healingBrush")}
+            data-tool="healingBrush"
             title="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
           >
             Healing Brush
@@ -7084,6 +7401,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "spotHealingBrush"}
             onClick={() => setTool("spotHealingBrush")}
+            data-tool="spotHealingBrush"
             title="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
           >
             Spot Healing
@@ -7093,6 +7411,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "remove"}
             onClick={() => setTool("remove")}
+            data-tool="remove"
             title="Remove: brush over an object to fill it from the surroundings outside the brushed area"
           >
             Remove
@@ -7102,6 +7421,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "patch"}
             onClick={() => setTool("patch")}
+            data-tool="patch"
             title="Patch: select the area to repair, then drag it onto the area to sample from"
           >
             Patch
@@ -7111,6 +7431,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "contentAwareMove"}
             onClick={() => setTool("contentAwareMove")}
+            data-tool="contentAwareMove"
             title="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
           >
             Content-Aware Move
@@ -7120,6 +7441,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "historyBrush"}
             onClick={() => setTool("historyBrush")}
+            data-tool="historyBrush"
             title="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
           >
             History Brush
@@ -7129,6 +7451,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "mixerBrush"}
             onClick={() => setTool("mixerBrush")}
+            data-tool="mixerBrush"
             title="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
           >
             Mixer Brush
@@ -7138,6 +7461,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "artHistoryBrush"}
             onClick={() => setTool("artHistoryBrush")}
+            data-tool="artHistoryBrush"
             title="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
           >
             Art History Brush
@@ -7147,6 +7471,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "rectangle"}
             onClick={() => setTool("rectangle")}
+            data-tool="rectangle"
             title="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
           >
             Rectangle
@@ -7156,6 +7481,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "ellipse"}
             onClick={() => setTool("ellipse")}
+            data-tool="ellipse"
             title="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
           >
             Ellipse
@@ -7165,6 +7491,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "line"}
             onClick={() => setTool("line")}
+            data-tool="line"
             title="Line: drag to paint a straight line of the chosen weight in the brush colour"
           >
             Line
@@ -7174,6 +7501,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "polygon"}
             onClick={() => setTool("polygon")}
+            data-tool="polygon"
             title="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
           >
             Polygon
@@ -7183,6 +7511,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "star"}
             onClick={() => setTool("star")}
+            data-tool="star"
             title="Star: drag from the centre to the first point to paint a star in the brush colour"
           >
             Star
@@ -7192,6 +7521,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "triangle"}
             onClick={() => setTool("triangle")}
+            data-tool="triangle"
             title="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
           >
             Triangle
@@ -7201,6 +7531,7 @@ export default function App() {
             disabled={!hasDocument}
             aria-pressed={tool === "eyedropper"}
             onClick={() => setTool("eyedropper")}
+            data-tool="eyedropper"
             title="Eyedropper: click the canvas to pick up its color"
           >
             Eyedropper
@@ -7210,6 +7541,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "paintBucket"}
             onClick={() => setTool("paintBucket")}
+            data-tool="paintBucket"
             title="Paint Bucket: click to fill the connected region under the pointer"
           >
             Paint Bucket
@@ -7219,6 +7551,7 @@ export default function App() {
             disabled={!canPaint}
             aria-pressed={tool === "gradient"}
             onClick={() => setTool("gradient")}
+            data-tool="gradient"
             title="Gradient: drag to blend from color to end color along that line"
           >
             Gradient
@@ -11126,6 +11459,107 @@ export default function App() {
 
             <div className="modal__actions">
               <button className="button button--quiet" onClick={() => setShowPresetsDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCustomizeToolbarDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCustomizeToolbarDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Customize Toolbar"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Toolbar</h2>
+            <p className="modal__hint">
+              Uncheck a tool to hide its button from the toolbar. This is a browser
+              preference, not document data — it stays the same across every document.
+              Reordering the toolbar and Photoshop's own tool groups are a documented
+              scope cut.
+            </p>
+            <div className="toolbar-customize__list">
+              {ALL_TOOLS.map(({ id, label }) => (
+                <label className="control control--row" key={id}>
+                  <input
+                    type="checkbox"
+                    checked={!hiddenTools.has(id)}
+                    onChange={() => toggleToolHidden(id)}
+                  />
+                  <span className="control__label">{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={resetHiddenTools} disabled={hiddenTools.size === 0}>
+                Show All
+              </button>
+              <button className="button" onClick={() => setShowCustomizeToolbarDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showKeyboardShortcutsDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => {
+            setShowKeyboardShortcutsDialog(false);
+            setRebindingAction(null);
+            setKeyBindingError(null);
+          }}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Keyboard Shortcuts"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Keyboard Shortcuts</h2>
+            <p className="modal__hint">
+              Press Change, then press the new key (held with Ctrl on Windows/Linux or
+              Cmd on macOS) — Escape cancels. Arrow-key selection and layer nudging are
+              a fixed convention, not rebindable here, a documented scope cut.
+            </p>
+            {keyBindingError && <p className="modal__hint modal__hint--error">{keyBindingError}</p>}
+            {SHORTCUT_ORDER.map((action) => (
+              <div className="control control--row" key={action}>
+                <span className="control__label">{SHORTCUT_LABELS[action]}</span>
+                <span className="control__value">{formatKeyBinding(keyBindings[action])}</span>
+                <button
+                  className="button button--quiet"
+                  onClick={() => {
+                    setKeyBindingError(null);
+                    setRebindingAction(action);
+                  }}
+                  disabled={rebindingAction !== null}
+                >
+                  {rebindingAction === action ? "Press a key…" : "Change"}
+                </button>
+              </div>
+            ))}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={resetKeyBindings}>
+                Reset to Defaults
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  setShowKeyboardShortcutsDialog(false);
+                  setRebindingAction(null);
+                  setKeyBindingError(null);
+                }}
+              >
                 Close
               </button>
             </div>
