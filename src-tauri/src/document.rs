@@ -10644,6 +10644,31 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Neural Filters > Color Transfer: "transfers a color palette from
+    /// reference imagery to another image," Photoshop's own description
+    /// for its newer, AI-branded panel — but the palette transfer itself
+    /// is the same classic per-channel mean/standard-deviation statistical
+    /// technique this project already ships as [`Self::match_color`], not
+    /// something that needs a model. `color_transfer(id, source_layer_id,
+    /// fade)` is that exact function under Color Transfer's own name, a
+    /// preset the same way [`Self::camera_raw_saturation`] already is one
+    /// over [`Self::vibrance`]: `source_layer_id` stands in for
+    /// Photoshop's separate reference image, since any reference can
+    /// already be placed as a layer in this document. Photoshop's own
+    /// separate Brightness/Saturation/Luminance/Color toggles are a
+    /// documented scope cut, folded into the one `fade` control
+    /// `match_color` already has — the identical scope cut Match Color
+    /// itself already makes for its own Luminance/Color Intensity
+    /// sliders. Errors exactly as `match_color` does.
+    pub fn color_transfer(
+        &mut self,
+        id: LayerId,
+        source_layer_id: LayerId,
+        fade: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.match_color(id, source_layer_id, fade)
+    }
+
     /// Filter > Other > Maximum: every channel of each selected pixel
     /// becomes the largest value of that channel within `radius` — the
     /// morphological dilate, which spreads light areas into dark ones
@@ -24424,6 +24449,61 @@ mod tests {
             &doc.layers()[0].pixels[..],
             &[50, 0, 0, 255, 50, 0, 0, 255, 150, 0, 0, 255, 150, 0, 0, 255][..]
         );
+    }
+
+    #[test]
+    fn color_transfer_matches_match_color_at_full_fade() {
+        let (mut transfer, tid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let mut matched = transfer.clone();
+        transfer.color_transfer(tid, sid, 100).unwrap();
+        matched.match_color(tid, sid, 100).unwrap();
+        assert_eq!(transfer.layers()[0].pixels, matched.layers()[0].pixels);
+        assert_eq!(&transfer.layers()[0].pixels[..4], &[100, 0, 0, 255]);
+    }
+
+    #[test]
+    fn color_transfer_matches_match_color_at_partial_fade() {
+        let (mut transfer, tid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let mut matched = transfer.clone();
+        transfer.color_transfer(tid, sid, 50).unwrap();
+        matched.match_color(tid, sid, 50).unwrap();
+        assert_eq!(transfer.layers()[0].pixels, matched.layers()[0].pixels);
+    }
+
+    #[test]
+    fn color_transfer_matches_match_color_at_zero_fade() {
+        let (mut transfer, tid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        let before = transfer.layers()[0].pixels.clone();
+        transfer.color_transfer(tid, sid, 0).unwrap();
+        assert_eq!(transfer.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn color_transfer_is_confined_to_the_selection_like_match_color() {
+        let (mut transfer, tid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        transfer.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let dirty = transfer.color_transfer(tid, sid, 100).unwrap();
+        assert_eq!(transfer.layers()[0].pixels[0], 100);
+        assert_eq!(transfer.layers()[0].pixels[4], 50);
+        assert_eq!(
+            dirty,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 1
+            })
+        );
+    }
+
+    #[test]
+    fn color_transfer_propagates_errors_like_match_color() {
+        let (mut doc, tid, sid) = two_layer_doc([50, 50, 150, 150], [100, 100, 200, 200]);
+        assert!(doc.color_transfer(tid, sid, 101).is_err());
+        assert!(doc.color_transfer(tid, 999, 100).is_err());
+        assert!(doc.color_transfer(999, sid, 100).is_err());
+        doc.set_locked(tid, true).unwrap();
+        assert!(doc.color_transfer(tid, sid, 100).is_err());
     }
 
     // Filter > Other, on the ramped 3x3 layer whose radius-1 windows are

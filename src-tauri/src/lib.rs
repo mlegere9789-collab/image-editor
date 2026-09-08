@@ -2190,6 +2190,20 @@ fn match_color(
     })
 }
 
+/// Neural Filters > Color Transfer on layer `id`, Match Color's own
+/// statistical transfer under its newer name.
+#[tauri::command]
+fn color_transfer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    source_layer_id: LayerId,
+    fade: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.color_transfer(id, source_layer_id, fade)
+    })
+}
+
 /// Filter > Other > Maximum on layer `id`.
 #[tauri::command]
 fn maximum(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Snapshot, String> {
@@ -5971,6 +5985,7 @@ pub fn run() {
             auto_contrast,
             auto_color,
             match_color,
+            color_transfer,
             maximum,
             minimum,
             high_pass,

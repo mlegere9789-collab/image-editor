@@ -3406,6 +3406,19 @@ export default function App() {
     setShowMatchColorDialog(false);
   }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
 
+  // Neural Filters > Color Transfer: Match Color's own statistical
+  // transfer under its newer name, sharing this dialog's Source Layer
+  // and Fade controls.
+  const applyColorTransfer = useCallback(async () => {
+    if (selectedId === null || matchColorSourceLayerId === null) return;
+    await runCommand("color_transfer", {
+      id: selectedId,
+      sourceLayerId: matchColorSourceLayerId,
+      fade: matchColorFade,
+    });
+    setShowMatchColorDialog(false);
+  }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
+
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("color_halftone", { id: selectedId, maxRadius: colorHalftoneRadius });
@@ -9411,6 +9424,11 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Image &gt; Adjustments &gt; Match Color</h2>
+            <p className="modal__hint">
+              Neural Filters &gt; Color Transfer is this same statistical transfer under its
+              newer name — Apply as Color Transfer runs the identical Source Layer and Fade
+              below through that command instead.
+            </p>
             <label className="control control--row">
               <span className="control__label">Source Layer</span>
               <select
@@ -9445,6 +9463,14 @@ export default function App() {
                 onClick={() => setShowMatchColorDialog(false)}
               >
                 Cancel
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => void applyColorTransfer()}
+                disabled={busy || matchColorSourceLayerId === null}
+                title="Neural Filters > Color Transfer: the same transfer under its own name"
+              >
+                Apply as Color Transfer
               </button>
               <button
                 className="button"

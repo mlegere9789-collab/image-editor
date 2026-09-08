@@ -16322,6 +16322,55 @@ green.
 **1604 Rust tests total** (1599 → 1604, 1597 lib + 7 pipeline). `cargo
 fmt`, `clippy`, and `npm run build` all clean.
 
+## Phase 272 — Color Transfer
+
+Photoshop files this one under Neural Filters — "transfers a color
+palette from reference imagery to another image" — but the transfer
+itself is the same textbook per-channel mean/standard-deviation
+statistical technique this project already shipped as Image >
+Adjustments > Match Color: no model needed, only a second layer to read
+statistics from. `color_transfer(id, source_layer_id, fade)` is
+`match_color` under Color Transfer's own name, a preset exactly the way
+`camera_raw_saturation` is already one over `vibrance` — `source_layer_id`
+stands in for Photoshop's separate reference image, since any reference
+can already be placed as a layer in this same document. Photoshop's own
+separate Brightness/Saturation/Luminance/Color toggles are a documented
+scope cut, folded into the one `fade` control Match Color already has —
+the identical scope cut Match Color itself already makes for its own
+Luminance and Color Intensity sliders. The Match Color dialog gained a
+second action, "Apply as Color Transfer," sharing its existing Source
+Layer and Fade controls rather than duplicating the dialog.
+
+**Verified two ways.** Five new `document.rs` tests, reusing
+`match_color`'s own `two_layer_doc` fixture. Three confirm
+`color_transfer` produces byte-identical pixels to a fresh clone running
+`match_color` with the same arguments, at fade 100, fade 50, and fade 0
+(where fade 0 additionally confirms the layer is left completely
+untouched) — no new floating-point derivation needed for that
+equivalence, since `match_color`'s own mean/standard-deviation arithmetic
+already has five tests of its own deriving those exact values by hand,
+the same reasoning Phase 267's Lens Correction used comparing its
+Distortion and Vignette output byte for byte against `camera_raw_optics`.
+A fourth confirms selection confinement matches `match_color`'s own
+behaviour pixel for pixel. A fifth exercises every error path
+`match_color` itself has: a fade over 100, an unknown source or target
+layer, and a locked target. All five passed on the first run.
+
+Live interactive verification under Xvfb was not attempted this phase,
+for the same reason as the previous two hundred and nineteen: this
+session's Xvfb instance was already confirmed, through a control test
+and a full Xvfb-and-application restart in Phase 52, to have stopped
+delivering synthetic `xdotool` pointer clicks to the webview entirely,
+and re-running that diagnostic again was judged unlikely to produce new
+information. The Match Color dialog's new "Apply as Color Transfer"
+button was reviewed by hand instead. Every other layer of this project's
+quality bar (hand-verified Rust tests, `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build`) is fully
+green.
+
+**1609 Rust tests total** (1604 → 1609, 1602 lib + 7 pipeline). `cargo
+fmt`, `clippy`, and `npm run build` all clean.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
