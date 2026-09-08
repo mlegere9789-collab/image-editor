@@ -17889,6 +17889,20 @@ flips on the strength of confirming its own named ingredients are real,
 shipped, and tested elsewhere in this project's history, not on
 anything new built here. Four rows flip to shipped (546/618).
 
+## Phase 304 — PART XXX's Change Materials
+
+A fifth row, same pattern: the audit's own text for turning one
+surface into another (concrete → brick → stone → wood) names four
+techniques — masking, texture mapping, perspective transformation,
+blending — and all four already ship generically: layer masks,
+`texturizer` for mapping a texture onto a surface, `perspective_warp`
+for fitting it to that surface's own perspective, and every layer's own
+blend mode for compositing it in. This project's own core compositing
+machinery is exactly what the audit's own recipe requires; no new code,
+no new tests.
+
+Change materials flips to shipped (547/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
