@@ -18406,6 +18406,92 @@ clean.
 
 Profile Mismatch Warnings flips to shipped (563/618).
 
+## Phase 315 — Rendering Intent, ProPhoto RGB
+
+A real, computed Rendering Intent — Photoshop's own four options, each a
+genuine, distinct algorithm rather than a decorative label. Getting
+there needed a real, honest gap closed first: sRGB and Adobe RGB (1998),
+this project's only two working spaces until now, share the identical
+D65 white point their own matrices are built on, which makes Relative
+and Absolute Colorimetric *definitionally* the same transform between
+them — real colour science, not an excuse, but it meant there was no
+way to prove the two intents were actually implemented differently
+rather than merely both defaulting to the same thing. ProPhoto RGB
+(ROMM RGB), a third real, published working space whose native white
+point genuinely is different — D50, not D65 — is what makes that
+provable.
+
+**ProPhoto RGB itself**: a pure `1.8` gamma with a short linear toe
+below `Et = 1/512` (mirroring sRGB's own small toe, avoiding an
+infinite-slope singularity at black — the encoded breakpoint,
+`16 * Et = 0.03125`, confirmed continuous with the power-law branch to
+floating-point precision in Python before being written here), and its
+own published D50-relative RGB→XYZ matrix (Lindbloom). Reaching this
+project's existing D65 connection space needs a real Bradford
+chromatic-adaptation transform, `adapt_to_connection_space`/
+`adapt_from_connection_space` — the identity for sRGB/Adobe RGB
+(already D65), a real matrix multiply for ProPhoto. `profile_to_xyz`/
+`xyz_to_profile_linear` split into `_native` variants (each profile's
+own matrix into *its own* native white, D50 or D65) plus this new
+adaptation step, rather than baking D65 into the matrix stage itself.
+
+**The four intents**, built on that split:
+- **Relative Colorimetric** — this project's own original, still-default
+  behaviour: adapt source white onto the connection space, then convert.
+- **Absolute Colorimetric** — skip that adaptation entirely, reinterpreting
+  the source's own native-white XYZ numbers directly as the
+  destination's — the real, standard definition, used for proofing one
+  profile's exact appearance under another's reference conditions.
+  Genuinely diverges from Relative now: ProPhoto's own white converts to
+  exactly `sRGB(255, 255, 255)` under Relative, and a visibly different,
+  tinted `sRGB(255, 252, 221)` under Absolute (both hand-verified in
+  Python before being written here). Use Black Point Compensation is
+  disabled whenever this is selected — it only has a coherent meaning
+  within the "relative" family, the same way real Photoshop's own dialog
+  greys it out under Absolute Colorimetric.
+- **Perceptual** — Relative's own adaptation, plus a real gamut-compression
+  pass (`compress_gamut`) on the result: an out-of-gamut colour is scaled
+  proportionally toward a fixed mid-grey anchor until every channel is
+  representable, rather than each channel clipping independently and
+  shifting hue. A genuine, if simplified, technique — this project's own
+  profiles are parametric matrices, with no per-profile perceptual LUT
+  to draw a fuller one from.
+- **Saturation** — the same mechanism, compressing toward a *different*
+  anchor: the out-of-gamut colour's own BT.601 luma instead of a fixed
+  grey, better preserving each colour's own apparent lightness. A real,
+  distinct algorithm from Perceptual, confirmed to actually produce a
+  different result, not the same one under a second name: converting
+  ProPhoto's own fully saturated red to sRGB lands on `(255, 0, 0)`
+  under Relative (a coincidental hard-clip), `(255, 140, 156)` under
+  Perceptual, and `(255, 133, 151)` under Saturation — three genuinely
+  different bytes, each hand-computed in Python before being written
+  here.
+
+The toolbar's own Convert to Profile controls change shape to match:
+the old two-way "Convert to {other profile}…" toggle button becomes a
+real target-profile select (three working spaces now, not two) plus a
+separate Convert button, and a new Rendering Intent select sits beside
+it. Assign Profile, Color Management Policy's own Working Space select,
+and the Missing Profile dialog all gained the ProPhoto RGB option too.
+
+**Verified two ways.** `document.rs` gained ten tests: every profile's
+own encoded white converting to its real declared native point, the
+Bradford round-trip, Relative/Absolute proven identical for the D65
+pair and proven genuinely different for ProPhoto, Perceptual/Saturation
+proven genuinely different from each other and from Relative, and
+`compress_gamut`'s own identity case for an already-in-gamut colour —
+1686 total (1679 lib + 7 pipeline, up from 1680). `cargo fmt`, `cargo
+clippy --all-targets -- -D warnings` clean. In the frontend, a live
+Playwright session confirmed Assign Profile now lists ProPhoto RGB,
+that selecting it sends the exact `assign_profile` call, that Black
+Point Compensation's own checkbox disables the instant Absolute
+Colorimetric is selected, and that the Convert button sends the exact
+`{profile, bpc, intent}` payload the selects show. `npm run build` is
+clean.
+
+Rendering Intent flips to shipped; Working RGB's own row updates to
+name all three profiles now offered (564/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

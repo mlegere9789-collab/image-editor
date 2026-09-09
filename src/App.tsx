@@ -58,6 +58,7 @@ import type {
   Proof,
   ReferencePoint,
   RefineEdge,
+  RenderingIntent,
   SelectAndMaskOutput,
   SelectionMode,
   SelectionShape,
@@ -173,6 +174,7 @@ const PANEL_STACK_HEIGHTS_STORAGE_KEY = "legelabs.panelStackHeights";
 const PROFILE_LABELS: Record<ColorProfile, string> = {
   srgb: "sRGB",
   adobeRgb1998: "Adobe RGB (1998)",
+  proPhotoRgb: "ProPhoto RGB",
 };
 // Color Settings > Color Management Policies: what happens when a project
 // is opened with an embedded profile that differs from
@@ -667,6 +669,14 @@ export default function App() {
   // no-op for both profiles this project currently models (both have a
   // black point of exactly XYZ (0, 0, 0)).
   const [useBlackPointCompensation, setUseBlackPointCompensation] = useState(false);
+  // Edit > Convert to Profile: which profile the button converts into --
+  // a real select now that there are three working spaces (ProPhoto RGB
+  // joined sRGB/Adobe RGB (1998)), not a two-way toggle.
+  const [convertToProfileTarget, setConvertToProfileTarget] = useState<ColorProfile>("adobeRgb1998");
+  // Edit > Convert to Profile > Rendering Intent: see RenderingIntent's
+  // own doc comment in document.rs for what each of the four options
+  // actually computes.
+  const [renderingIntent, setRenderingIntent] = useState<RenderingIntent>("relativeColorimetric");
   // Color Settings > Color Management Policies > Convert to Working
   // Space: a real, persisted alternative to the app's original
   // always-Preserve behavior -- see the storage keys' own doc comment
@@ -2184,14 +2194,20 @@ export default function App() {
             // Edit > Convert to Profile itself does -- selectAfter
             // carried through so the usual "select the top layer after a
             // load" still applies to this, the snapshot the UI actually
-            // ends up showing. Always bpc: false here -- this is an
-            // automatic background conversion, not the explicit Convert
-            // to Profile button, so it deliberately does not inherit
+            // ends up showing. Always bpc: false and intent:
+            // relativeColorimetric here -- this is an automatic
+            // background conversion, not the explicit Convert to
+            // Profile button, so it deliberately does not inherit
             // whatever that toolbar's own Use Black Point Compensation
-            // checkbox happens to be set to at the moment a file is opened.
+            // checkbox or Rendering Intent select happen to be set to at
+            // the moment a file is opened.
             void runCommand(
               "convert_to_profile",
-              { profile: defaultWorkingSpaceRef.current, bpc: false },
+              {
+                profile: defaultWorkingSpaceRef.current,
+                bpc: false,
+                intent: "relativeColorimetric" satisfies RenderingIntent,
+              },
               selectAfter,
             );
           } else {
@@ -7726,27 +7742,63 @@ export default function App() {
             >
               <option value="srgb">sRGB</option>
               <option value="adobeRgb1998">Adobe RGB (1998)</option>
+              <option value="proPhotoRgb">ProPhoto RGB</option>
+            </select>
+          </label>
+          <label
+            className="tools__slider"
+            title="Edit > Convert to Profile: the profile the button below remaps every layer's own pixels into, unlike Assign Profile"
+          >
+            Convert to
+            <select
+              value={convertToProfileTarget}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setConvertToProfileTarget(event.target.value as ColorProfile)}
+            >
+              <option value="srgb">sRGB</option>
+              <option value="adobeRgb1998">Adobe RGB (1998)</option>
+              <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
           <button
             className="button button--quiet"
             onClick={() => {
-              const profile = document?.profile === "srgb" ? "adobeRgb1998" : "srgb";
               if (useDitherForProfile) {
                 void runCommand("convert_to_profile_dithered", {
-                  profile,
+                  profile: convertToProfileTarget,
                   seed: Math.floor(Math.random() * 0xffffffff),
                   bpc: useBlackPointCompensation,
+                  intent: renderingIntent,
                 });
               } else {
-                void runCommand("convert_to_profile", { profile, bpc: useBlackPointCompensation });
+                void runCommand("convert_to_profile", {
+                  profile: convertToProfileTarget,
+                  bpc: useBlackPointCompensation,
+                  intent: renderingIntent,
+                });
               }
             }}
             disabled={busy || !hasDocument}
-            title="Edit > Convert to Profile: remaps every layer's own pixels into the other working space, unlike Assign Profile"
+            title="Edit > Convert to Profile: remaps every layer's own pixels into the selected working space above"
           >
-            Convert to {document?.profile === "srgb" ? "Adobe RGB (1998)" : "sRGB"}…
+            Convert…
           </button>
+          <label
+            className="tools__slider"
+            title="Edit > Convert to Profile > Rendering Intent: Relative Colorimetric adapts the source's own white onto the destination's before converting (this app's original, still-default behavior); Absolute Colorimetric skips that adaptation, preserving the real colorimetric relationship instead -- a visible tint whenever the two profiles' own native white points genuinely differ (only ProPhoto RGB's D50 does, against sRGB/Adobe RGB's shared D65); Perceptual and Saturation each compress an out-of-gamut colour toward a real anchor (a fixed mid-grey, or the colour's own luma) instead of clipping each channel independently."
+          >
+            Rendering Intent
+            <select
+              value={renderingIntent}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setRenderingIntent(event.target.value as RenderingIntent)}
+            >
+              <option value="relativeColorimetric">Relative Colorimetric</option>
+              <option value="absoluteColorimetric">Absolute Colorimetric</option>
+              <option value="perceptual">Perceptual</option>
+              <option value="saturation">Saturation</option>
+            </select>
+          </label>
           <label
             className="tools__slider"
             title="Edit > Convert to Profile > Use Dither: perturbs each channel's own rounding to break up gradient banding"
@@ -7761,12 +7813,16 @@ export default function App() {
           </label>
           <label
             className="tools__slider"
-            title="Edit > Convert to Profile > Use Black Point Compensation: rescales the darkest reproducible colour onto the destination profile's own black. Both profiles this app models share the same (0, 0, 0) black point, so this makes no visible difference here -- it is a real, computed option, not a hollow one."
+            title={
+              renderingIntent === "absoluteColorimetric"
+                ? "Black Point Compensation only has a coherent meaning within the Relative family of intents -- Absolute Colorimetric exists specifically to preserve the real colorimetric numbers rather than rescale anything, so this has no effect while it is selected, the same way real Photoshop's own dialog greys this checkbox out under Absolute Colorimetric."
+                : "Edit > Convert to Profile > Use Black Point Compensation: rescales the darkest reproducible colour onto the destination profile's own black. A real, computed option -- genuinely a no-op between sRGB/Adobe RGB (1998) (both have a black point of exactly XYZ (0, 0, 0)), but not against a profile with a real, non-zero black point."
+            }
           >
             <input
               type="checkbox"
               checked={useBlackPointCompensation}
-              disabled={busy || !hasDocument}
+              disabled={busy || !hasDocument || renderingIntent === "absoluteColorimetric"}
               onChange={(event) => setUseBlackPointCompensation(event.target.checked)}
             />
             Black Point Compensation
@@ -7799,6 +7855,7 @@ export default function App() {
             >
               <option value="srgb">sRGB</option>
               <option value="adobeRgb1998">Adobe RGB (1998)</option>
+              <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
@@ -16008,6 +16065,7 @@ export default function App() {
               >
                 <option value="srgb">sRGB</option>
                 <option value="adobeRgb1998">Adobe RGB (1998)</option>
+                <option value="proPhotoRgb">ProPhoto RGB</option>
               </select>
             </label>
             <div className="modal__actions">

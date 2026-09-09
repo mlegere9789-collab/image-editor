@@ -1761,15 +1761,16 @@ fn assign_profile(
 
 /// Edit > Convert to Profile: every layer's own pixels remapped from the
 /// document's current working space to `profile`. `bpc` is Use Black
-/// Point Compensation.
+/// Point Compensation. `intent` is Rendering Intent.
 #[tauri::command]
 fn convert_to_profile(
     state: State<'_, AppState>,
     profile: document::ColorProfile,
     bpc: bool,
+    intent: document::RenderingIntent,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        Ok(document.convert_to_profile(profile, bpc))
+        Ok(document.convert_to_profile(profile, bpc, intent))
     })
 }
 
@@ -1782,9 +1783,10 @@ fn convert_to_profile_dithered(
     profile: document::ColorProfile,
     seed: u32,
     bpc: bool,
+    intent: document::RenderingIntent,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        Ok(document.convert_to_profile_dithered(profile, seed, bpc))
+        Ok(document.convert_to_profile_dithered(profile, seed, bpc, intent))
     })
 }
 

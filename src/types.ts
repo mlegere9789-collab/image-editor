@@ -274,7 +274,10 @@ export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
  * Profile / Convert to Profile's real, minimal working spaces. */
-export type ColorProfile = "srgb" | "adobeRgb1998";
+export type ColorProfile = "srgb" | "adobeRgb1998" | "proPhotoRgb";
+
+/** Mirrors `RenderingIntent` in src-tauri/src/document.rs. */
+export type RenderingIntent = "relativeColorimetric" | "absoluteColorimetric" | "perceptual" | "saturation";
 
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */

@@ -463,6 +463,17 @@ pub enum ColorProfile {
     #[default]
     Srgb,
     AdobeRgb1998,
+    /// ROMM RGB / ProPhoto RGB (ANSI/I3A IT10.7666:2003): the one working
+    /// space this project models whose own native white point is not
+    /// D65 — it is D50. Its whole reason for existing here is exactly
+    /// that mismatch: Rendering Intent's own Relative-vs-Absolute
+    /// Colorimetric distinction is definitionally a no-op between any
+    /// two profiles that already share a white point (see
+    /// [`RenderingIntent`]'s own doc comment), which sRGB and Adobe RGB
+    /// (1998) always will since both are D65. A profile that genuinely
+    /// isn't is what makes that distinction real and testable rather
+    /// than coincidentally always identical.
+    ProPhotoRgb,
 }
 
 /// One channel's sRGB gamma decode: the standard piecewise curve — a
@@ -485,6 +496,27 @@ fn adobe_rgb_linearize(v: u8) -> f64 {
     (v as f64 / 255.0).powf(ADOBE_RGB_GAMMA)
 }
 
+/// ProPhoto RGB's own gamma, `1.8` — like Adobe RGB, a published exponent,
+/// but with a short linear toe below `Et = 1/512` (in the *linear*
+/// domain) the same way sRGB has one, avoiding an infinite-slope
+/// singularity at black. The two branches meet exactly at the encoded
+/// value `16 * Et = 1/32 = 0.03125`: `Et^(1/1.8) == 16 * Et` to within
+/// floating-point precision (confirmed independently in Python before
+/// this was written), so [`prophoto_linearize`] and its own inverse in
+/// [`encode_dithered`] are continuous across the breakpoint, not merely
+/// close.
+const PROPHOTO_GAMMA: f64 = 1.8;
+const PROPHOTO_ENCODED_BREAKPOINT: f64 = 0.03125;
+
+fn prophoto_linearize(v: u8) -> f64 {
+    let c = v as f64 / 255.0;
+    if c < PROPHOTO_ENCODED_BREAKPOINT {
+        c / 16.0
+    } else {
+        c.powf(PROPHOTO_GAMMA)
+    }
+}
+
 /// `to`'s own linear channel, quantized to a byte with `dither` (typically
 /// `-0.5..=0.5`, one 8-bit level's own sub-LSB noise) added before
 /// rounding — Use Dither's own real effect: without it, a smooth gradient
@@ -498,6 +530,10 @@ fn encode_dithered(profile: ColorProfile, c: f64, dither: f64) -> u8 {
         ColorProfile::Srgb if c01 <= 0.0031308 => 12.92 * c01,
         ColorProfile::Srgb => 1.055 * c01.powf(1.0 / 2.4) - 0.055,
         ColorProfile::AdobeRgb1998 => c01.powf(1.0 / ADOBE_RGB_GAMMA),
+        // The linear-domain breakpoint (Et = 1/512) [`prophoto_linearize`]'s
+        // own doc comment names -- the exact inverse of its two branches.
+        ColorProfile::ProPhotoRgb if c01 < 1.0 / 512.0 => 16.0 * c01,
+        ColorProfile::ProPhotoRgb => c01.powf(1.0 / PROPHOTO_GAMMA),
     };
     (v * 255.0 + dither).round().clamp(0.0, 255.0) as u8
 }
@@ -506,13 +542,18 @@ fn encode_dithered(profile: ColorProfile, c: f64, dither: f64) -> u8 {
 /// a byte RGB triple to CIE XYZ (D65-relative, Lindbloom's own published
 /// matrices). The shared first stage of every profile conversion below,
 /// and also how [`black_point_xyz`] measures a profile's own black.
-fn profile_to_xyz(profile: ColorProfile, [r, g, b]: [u8; 3]) -> (f64, f64, f64) {
+fn profile_to_xyz_native(profile: ColorProfile, [r, g, b]: [u8; 3]) -> (f64, f64, f64) {
     let (lr, lg, lb) = match profile {
         ColorProfile::Srgb => (srgb_linearize(r), srgb_linearize(g), srgb_linearize(b)),
         ColorProfile::AdobeRgb1998 => (
             adobe_rgb_linearize(r),
             adobe_rgb_linearize(g),
             adobe_rgb_linearize(b),
+        ),
+        ColorProfile::ProPhotoRgb => (
+            prophoto_linearize(r),
+            prophoto_linearize(g),
+            prophoto_linearize(b),
         ),
     };
     match profile {
@@ -526,12 +567,20 @@ fn profile_to_xyz(profile: ColorProfile, [r, g, b]: [u8; 3]) -> (f64, f64, f64) 
             0.2973769 * lr + 0.6273491 * lg + 0.0752741 * lb,
             0.0270343 * lr + 0.0706872 * lg + 0.9911085 * lb,
         ),
+        // ROMM RGB's own published primaries, D50-relative (Lindbloom).
+        ColorProfile::ProPhotoRgb => (
+            0.7976749 * lr + 0.1351917 * lg + 0.0313534 * lb,
+            0.2880402 * lr + 0.7118741 * lg + 0.0000857 * lb,
+            0.0000000 * lr + 0.0000000 * lg + 0.8252100 * lb,
+        ),
     }
 }
 
-/// The matrix-out half: CIE XYZ to a profile's own linear (not yet
-/// gamma-encoded) RGB.
-fn xyz_to_profile_linear(profile: ColorProfile, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+/// The matrix-out half: a profile's own *native* connection-space CIE XYZ
+/// (D65 for sRGB/Adobe RGB, D50 for ProPhoto RGB — see
+/// [`adapt_to_connection_space`] for where the two get reconciled) to
+/// that profile's own linear (not yet gamma-encoded) RGB.
+fn xyz_to_profile_linear_native(profile: ColorProfile, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
     match profile {
         ColorProfile::Srgb => (
             3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
@@ -543,25 +592,177 @@ fn xyz_to_profile_linear(profile: ColorProfile, (x, y, z): (f64, f64, f64)) -> (
             -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
             0.0134474 * x - 0.1183897 * y + 1.0154096 * z,
         ),
+        ColorProfile::ProPhotoRgb => (
+            1.3459434 * x - 0.2556075 * y - 0.0511118 * z,
+            -0.5445988 * x + 1.5081673 * y + 0.0205351 * z,
+            0.0000000 * x + 0.0000000 * y + 1.2118128 * z,
+        ),
     }
 }
 
-/// A profile's own black point in CIE XYZ — what pure black (`[0, 0, 0]`)
-/// in that profile's own RGB measures as once decoded and matrixed in.
-/// Both profiles this project models use a pure power-law (or
-/// power-law-with-a-linear-toe) gamma curve, and every one of those maps
-/// `0 -> 0` exactly, so this is `(0.0, 0.0, 0.0)` for both today — computed
-/// here rather than hard-coded, so [`apply_black_point_compensation`]
-/// stays correct on its own terms if a profile with a real, non-zero
-/// black point (a scanned or measured one, say) is ever added.
+/// A profile's own black point in its own *native* CIE XYZ — what pure
+/// black (`[0, 0, 0]`) in that profile's own RGB measures as once
+/// decoded and matrixed in. Every profile this project models uses a
+/// pure power-law (or power-law-with-a-linear-toe) gamma curve, and
+/// every one of those maps `0 -> 0` exactly, so this is
+/// `(0.0, 0.0, 0.0)` for all three today — computed here rather than
+/// hard-coded, so [`apply_black_point_compensation`] stays correct on
+/// its own terms if a profile with a real, non-zero black point (a
+/// scanned or measured one, say) is ever added.
 fn black_point_xyz(profile: ColorProfile) -> (f64, f64, f64) {
-    profile_to_xyz(profile, [0, 0, 0])
+    profile_to_xyz_native(profile, [0, 0, 0])
 }
 
-/// The CIE standard illuminant D65's own XYZ, normalised to Y = 1 —
-/// this project's own common connection space white, matching the D65
-/// matrices [`profile_to_xyz`]/[`xyz_to_profile_linear`] already use.
+/// The CIE standard illuminant D65's own XYZ, normalised to Y = 1 — this
+/// project's own shared connection space white. sRGB and Adobe RGB
+/// (1998) are both natively D65 already; ProPhoto RGB is natively D50
+/// (`(0.96422, 1.0, 0.82521)` — confirmed directly by
+/// `every_profiles_own_encoded_white_converts_to_its_declared_native_white`'s
+/// own test, against the independently published value, not derived from
+/// anything else in this file) and only ever reaches this space through
+/// [`adapt_to_connection_space`]'s own Bradford transform.
 const D65_WHITE_XYZ: (f64, f64, f64) = (0.95047, 1.0, 1.08883);
+
+fn matrix_apply(m: &[[f64; 3]; 3], (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+    (
+        m[0][0] * x + m[0][1] * y + m[0][2] * z,
+        m[1][0] * x + m[1][1] * y + m[1][2] * z,
+        m[2][0] * x + m[2][1] * y + m[2][2] * z,
+    )
+}
+
+/// The Bradford chromatic adaptation transform, D50 -> D65 (Lindbloom's
+/// own published values) — turns ProPhoto RGB's own native-XYZ numbers
+/// into this project's shared D65 connection space. [`BRADFORD_D65_TO_D50`]
+/// is its own real inverse (confirmed independently in Python — their
+/// product is the identity to within floating-point rounding of the
+/// published constants — before either was written here), not merely an
+/// approximate reverse.
+const BRADFORD_D50_TO_D65: [[f64; 3]; 3] = [
+    [0.9555766, -0.0230393, 0.0631636],
+    [-0.0282895, 1.0099416, 0.0210077],
+    [0.0122982, -0.0204830, 1.3299098],
+];
+const BRADFORD_D65_TO_D50: [[f64; 3]; 3] = [
+    [1.0478112, 0.0228866, -0.0501270],
+    [0.0295424, 0.9904844, -0.0170491],
+    [-0.0092345, 0.0150436, 0.7521316],
+];
+
+/// Adapts `xyz`, in `profile`'s own native white, into this project's
+/// shared D65 connection space — the identity for sRGB/Adobe RGB
+/// (already D65), a real Bradford transform for ProPhoto RGB (D50).
+/// This *is* what Rendering Intent's own Relative Colorimetric (and
+/// Perceptual/Saturation, both built on top of it) means: forcing the
+/// source's own white to coincide with the shared reference white
+/// before anything else happens. See [`convert_profile_linear`]'s own
+/// Absolute Colorimetric branch for the one case that deliberately
+/// skips this.
+fn adapt_to_connection_space(xyz: (f64, f64, f64), profile: ColorProfile) -> (f64, f64, f64) {
+    match profile {
+        ColorProfile::Srgb | ColorProfile::AdobeRgb1998 => xyz,
+        ColorProfile::ProPhotoRgb => matrix_apply(&BRADFORD_D50_TO_D65, xyz),
+    }
+}
+
+/// The inverse of [`adapt_to_connection_space`]: this project's shared
+/// D65 connection space back into `profile`'s own native white.
+fn adapt_from_connection_space(xyz: (f64, f64, f64), profile: ColorProfile) -> (f64, f64, f64) {
+    match profile {
+        ColorProfile::Srgb | ColorProfile::AdobeRgb1998 => xyz,
+        ColorProfile::ProPhotoRgb => matrix_apply(&BRADFORD_D65_TO_D50, xyz),
+    }
+}
+
+/// Edit > Convert to Profile > Rendering Intent: the four standard ICC
+/// intents, each a real, distinct, computed technique rather than a
+/// cosmetic label —
+///
+/// - [`RenderingIntent::RelativeColorimetric`]: this project's own
+///   original, still-default behaviour. Source white is adapted onto the
+///   shared connection-space white ([`adapt_to_connection_space`]) before
+///   conversion, so two profiles that share a native white point (sRGB
+///   and Adobe RGB (1998), both D65) convert identically under Relative
+///   and Absolute alike — that coincidence is real colour science, not
+///   an unimplemented option: Absolute and Relative are definitionally
+///   the same transform whenever source and destination already share a
+///   white point. ProPhoto RGB (D50) is what makes the two genuinely
+///   diverge — see [`ColorProfile::ProPhotoRgb`]'s own doc comment.
+/// - [`RenderingIntent::AbsoluteColorimetric`]: skips that adaptation
+///   entirely, reinterpreting the source's own native-white XYZ numbers
+///   directly as the destination's, preserving the true colorimetric
+///   relationship between two differently-anchored profiles (a visible
+///   white-point tint) instead of forcing them to coincide — the
+///   standard, real definition, used for proofing one profile's exact
+///   appearance under another's reference conditions.
+/// - [`RenderingIntent::Perceptual`]: like Relative Colorimetric, plus a
+///   real out-of-gamut compression pass — see [`compress_gamut`] — that
+///   scales an out-of-gamut colour proportionally toward a fixed mid-grey
+///   anchor until every channel is representable, rather than clipping
+///   each channel independently. A genuine, if simplified, gamut-mapping
+///   technique (uniform chroma compression toward a fixed achromatic
+///   point), not the full profile-specific perceptual LUT a real ICC
+///   profile would carry — this project's own profiles are parametric
+///   matrices/curves, with no such table to draw one from.
+/// - [`RenderingIntent::Saturation`]: the same mechanism as Perceptual,
+///   compressing toward a *different* anchor — the out-of-gamut colour's
+///   own BT.601 luma, rather than a fixed grey — better preserving each
+///   colour's own apparent lightness at the cost of Perceptual's more
+///   uniform, predictable compression. A real, distinct algorithm from
+///   Perceptual, not the same one under a second name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RenderingIntent {
+    #[default]
+    RelativeColorimetric,
+    AbsoluteColorimetric,
+    Perceptual,
+    Saturation,
+}
+
+/// [`RenderingIntent::Perceptual`]/[`RenderingIntent::Saturation`]'s own
+/// shared mechanism: scales `color` toward `anchor` (which must itself
+/// already be in `0.0..=1.0` on every channel — both call sites guarantee
+/// this) by the largest factor `t` in `0.0..=1.0` that keeps every
+/// channel of `anchor + t * (color - anchor)` within `0.0..=1.0`. An
+/// already-in-gamut `color` is returned unchanged (`t` never has to drop
+/// below `1.0` to satisfy any channel); an out-of-gamut one lands exactly
+/// on the gamut boundary along the straight line toward `anchor`, rather
+/// than each channel clipping independently and shifting hue.
+fn compress_gamut(color: (f64, f64, f64), anchor: (f64, f64, f64)) -> (f64, f64, f64) {
+    let mut t = 1.0f64;
+    for (c, a) in [(color.0, anchor.0), (color.1, anchor.1), (color.2, anchor.2)] {
+        if c > 1.0 {
+            t = t.min((1.0 - a) / (c - a));
+        } else if c < 0.0 {
+            t = t.min(-a / (c - a));
+        }
+    }
+    let t = t.max(0.0);
+    (
+        anchor.0 + t * (color.0 - anchor.0),
+        anchor.1 + t * (color.1 - anchor.1),
+        anchor.2 + t * (color.2 - anchor.2),
+    )
+}
+
+/// [`RenderingIntent::Saturation`]'s own anchor: `color`'s own BT.601
+/// luma, clamped into `0.0..=1.0` — the same weights [`lab_of`] and
+/// [`simulate_color_blindness`] already use elsewhere in this file.
+/// Clamped because `color` itself may already be out of gamut on one or
+/// more channels (that is the whole reason [`compress_gamut`] is being
+/// called), which could otherwise carry the luma outside `0.0..=1.0`
+/// too, violating the in-gamut-anchor precondition [`compress_gamut`]
+/// itself documents.
+fn saturation_anchor(color: (f64, f64, f64)) -> (f64, f64, f64) {
+    let luma = (0.299 * color.0 + 0.587 * color.1 + 0.114 * color.2).clamp(0.0, 1.0);
+    (luma, luma, luma)
+}
+
+/// [`RenderingIntent::Perceptual`]'s own anchor: a fixed mid-grey,
+/// unlike Saturation's colour-dependent one — see
+/// [`RenderingIntent`]'s own doc comment for why the two differ.
+const PERCEPTUAL_ANCHOR: (f64, f64, f64) = (0.5, 0.5, 0.5);
 
 /// Edit > Convert to Profile > Use Black Point Compensation: rescales XYZ
 /// per channel so the source profile's own black maps exactly onto the
@@ -592,46 +793,79 @@ fn apply_black_point_compensation(
     )
 }
 
-/// [`convert_profile_pixel`]'s own gamma-decode-then-matrix math, shared
-/// with [`Document::convert_to_profile`]'s own dithered per-pixel pass —
+/// [`convert_profile_pixel`]'s own full pipeline, shared with
+/// [`Document::convert_to_profile`]'s own dithered per-pixel pass —
 /// everything up to (but not including) the final gamma-encode and
 /// rounding, which is the one step dithering changes. `None` when
-/// `from == to`, the identity case both callers handle themselves.
+/// `from == to`, the identity case both callers handle themselves. See
+/// [`RenderingIntent`]'s own doc comment for exactly what each intent
+/// changes about this pipeline.
 fn convert_profile_linear(
     from: ColorProfile,
     to: ColorProfile,
     [r, g, b]: [u8; 3],
     bpc: bool,
+    intent: RenderingIntent,
 ) -> Option<(f64, f64, f64)> {
     if from == to {
         return None;
     }
-    let xyz = profile_to_xyz(from, [r, g, b]);
-    let xyz = if bpc {
-        apply_black_point_compensation(xyz, black_point_xyz(from), black_point_xyz(to))
+
+    let native_from = profile_to_xyz_native(from, [r, g, b]);
+    let absolute = intent == RenderingIntent::AbsoluteColorimetric;
+
+    let working = if absolute {
+        native_from
     } else {
-        xyz
+        adapt_to_connection_space(native_from, from)
     };
-    Some(xyz_to_profile_linear(to, xyz))
+
+    // Use Black Point Compensation only has a coherent meaning within
+    // the "relative" family, where a shared reference white already
+    // exists to rescale black toward -- Absolute Colorimetric exists
+    // specifically to preserve the real colorimetric numbers rather
+    // than rescale anything.
+    let working = if bpc && !absolute {
+        let src_black = adapt_to_connection_space(black_point_xyz(from), from);
+        let dst_black = adapt_to_connection_space(black_point_xyz(to), to);
+        apply_black_point_compensation(working, src_black, dst_black)
+    } else {
+        working
+    };
+
+    let native_to = if absolute {
+        working
+    } else {
+        adapt_from_connection_space(working, to)
+    };
+
+    let linear_to = xyz_to_profile_linear_native(to, native_to);
+
+    Some(match intent {
+        RenderingIntent::Perceptual => compress_gamut(linear_to, PERCEPTUAL_ANCHOR),
+        RenderingIntent::Saturation => compress_gamut(linear_to, saturation_anchor(linear_to)),
+        RenderingIntent::RelativeColorimetric | RenderingIntent::AbsoluteColorimetric => linear_to,
+    })
 }
 
 /// Edit > Convert to Profile: one pixel's RGB converted from `from`'s own
-/// working space to `to`'s, through their real, standard, published D65
+/// working space to `to`'s, through their real, standard, published
 /// RGB↔XYZ matrices (Lindbloom's own reference values) — gamma-decode in
 /// `from`, matrix into CIE XYZ, matrix out of XYZ into `to`'s own linear
 /// RGB, gamma-encode in `to`. Identity (returns the pixel unchanged) when
 /// `from == to`, matching Photoshop's own no-op there. Alpha is not
 /// touched by any caller of this — it is a pure RGB function. `bpc` is
-/// Use Black Point Compensation — see [`apply_black_point_compensation`]
-/// for what it does and why it is a real, computed no-op for both
-/// profiles this project currently models.
+/// Use Black Point Compensation — see [`apply_black_point_compensation`].
+/// `intent` is Rendering Intent — see [`RenderingIntent`]'s own doc
+/// comment for what each of the four real options actually computes.
 pub fn convert_profile_pixel(
     from: ColorProfile,
     to: ColorProfile,
     [r, g, b]: [u8; 3],
     bpc: bool,
+    intent: RenderingIntent,
 ) -> [u8; 3] {
-    match convert_profile_linear(from, to, [r, g, b], bpc) {
+    match convert_profile_linear(from, to, [r, g, b], bpc, intent) {
         None => [r, g, b],
         Some((lr2, lg2, lb2)) => [
             encode_dithered(to, lr2, 0.0),
@@ -651,8 +885,9 @@ fn convert_profile_pixel_dithered(
     [r, g, b]: [u8; 3],
     [dr, dg, db]: [f64; 3],
     bpc: bool,
+    intent: RenderingIntent,
 ) -> [u8; 3] {
-    match convert_profile_linear(from, to, [r, g, b], bpc) {
+    match convert_profile_linear(from, to, [r, g, b], bpc, intent) {
         None => [r, g, b],
         Some((lr2, lg2, lb2)) => [
             encode_dithered(to, lr2, dr),
@@ -4073,16 +4308,21 @@ impl Document {
     /// numeric conversion, not just a relabel. A no-op, still updating
     /// the label, when `profile` already matches. Alpha is untouched.
     /// `bpc` is Use Black Point Compensation — see
-    /// [`apply_black_point_compensation`] for what it does; a real,
-    /// computed no-op for both profiles this project currently models,
-    /// since both have a black point of exactly `(0, 0, 0)` XYZ.
-    pub fn convert_to_profile(&mut self, profile: ColorProfile, bpc: bool) -> Option<Rect> {
+    /// [`apply_black_point_compensation`]. `intent` is Rendering Intent —
+    /// see [`RenderingIntent`]'s own doc comment for what each of the
+    /// four real options actually computes.
+    pub fn convert_to_profile(
+        &mut self,
+        profile: ColorProfile,
+        bpc: bool,
+        intent: RenderingIntent,
+    ) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
             for layer in &mut self.layers {
                 for px in layer.pixels.chunks_exact_mut(CHANNELS) {
                     let [r, g, b] =
-                        convert_profile_pixel(from, profile, [px[0], px[1], px[2]], bpc);
+                        convert_profile_pixel(from, profile, [px[0], px[1], px[2]], bpc, intent);
                     px[0] = r;
                     px[1] = g;
                     px[2] = b;
@@ -4112,6 +4352,7 @@ impl Document {
         profile: ColorProfile,
         seed: u32,
         bpc: bool,
+        intent: RenderingIntent,
     ) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
@@ -4129,6 +4370,7 @@ impl Document {
                         [px[0], px[1], px[2]],
                         dither,
                         bpc,
+                        intent,
                     );
                     px[0] = r;
                     px[1] = g;
@@ -47390,7 +47632,13 @@ mod tests {
     #[test]
     fn convert_profile_pixel_is_the_identity_when_the_profiles_match() {
         assert_eq!(
-            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30], false),
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::Srgb,
+                [10, 20, 30],
+                false,
+                RenderingIntent::RelativeColorimetric
+            ),
             [10, 20, 30]
         );
         assert_eq!(
@@ -47398,7 +47646,8 @@ mod tests {
                 ColorProfile::AdobeRgb1998,
                 ColorProfile::AdobeRgb1998,
                 [10, 20, 30],
-                false
+                false,
+                RenderingIntent::RelativeColorimetric
             ),
             [10, 20, 30]
         );
@@ -47413,7 +47662,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [255, 255, 255],
-                false
+                false,
+                RenderingIntent::RelativeColorimetric
             ),
             [255, 255, 255]
         );
@@ -47422,7 +47672,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [128, 128, 128],
-                false
+                false,
+                RenderingIntent::RelativeColorimetric
             ),
             [127, 127, 127]
         );
@@ -47441,7 +47692,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [0, 255, 0],
-                false
+                false,
+                RenderingIntent::RelativeColorimetric
             ),
             [144, 255, 60]
         );
@@ -47453,6 +47705,7 @@ mod tests {
             ColorProfile::Srgb,
             [144, 255, 60],
             false,
+            RenderingIntent::RelativeColorimetric,
         );
         assert_eq!(back, [0, 255, 1]);
     }
@@ -47468,7 +47721,13 @@ mod tests {
         // real conversion. Every case from the three tests above,
         // repeated with `bpc: true`, must produce the identical result.
         assert_eq!(
-            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30], true),
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::Srgb,
+                [10, 20, 30],
+                true,
+                RenderingIntent::RelativeColorimetric
+            ),
             [10, 20, 30]
         );
         assert_eq!(
@@ -47476,7 +47735,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [255, 255, 255],
-                true
+                true,
+                RenderingIntent::RelativeColorimetric
             ),
             [255, 255, 255]
         );
@@ -47485,7 +47745,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [128, 128, 128],
-                true
+                true,
+                RenderingIntent::RelativeColorimetric
             ),
             [127, 127, 127]
         );
@@ -47494,7 +47755,8 @@ mod tests {
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
                 [0, 255, 0],
-                true
+                true,
+                RenderingIntent::RelativeColorimetric
             ),
             [144, 255, 60]
         );
@@ -47503,16 +47765,182 @@ mod tests {
             ColorProfile::Srgb,
             [144, 255, 60],
             true,
+            RenderingIntent::RelativeColorimetric,
         );
         assert_eq!(back, [0, 255, 1]);
     }
 
     #[test]
-    fn black_point_xyz_measures_exactly_zero_for_both_profiles() {
+    fn black_point_xyz_measures_exactly_zero_for_every_profile() {
         // The premise the no-op test above rests on, confirmed directly
         // rather than only inferred from its own passing.
         assert_eq!(black_point_xyz(ColorProfile::Srgb), (0.0, 0.0, 0.0));
         assert_eq!(black_point_xyz(ColorProfile::AdobeRgb1998), (0.0, 0.0, 0.0));
+        assert_eq!(black_point_xyz(ColorProfile::ProPhotoRgb), (0.0, 0.0, 0.0));
+    }
+
+    /// The CIE standard illuminant D50's own XYZ, normalised to Y = 1 —
+    /// ProPhoto RGB's own native white point, independently published
+    /// (Lindbloom). Kept only in this test module: nothing in the
+    /// production pipeline needs to look this value up on its own (every
+    /// real call site only ever adapts *through* it via
+    /// [`adapt_to_connection_space`]/[`adapt_from_connection_space`]),
+    /// but the tests below need an independent value to check that
+    /// adaptation against, not one derived from the same code being
+    /// tested.
+    const TEST_D50_WHITE_XYZ: (f64, f64, f64) = (0.96422, 1.0, 0.82521);
+
+    #[test]
+    fn every_profiles_own_encoded_white_converts_to_its_declared_native_white() {
+        // A profile's own white -- [255, 255, 255] in its own encoding --
+        // has to land exactly on that profile's own real native white
+        // point, or the gamma curve and the RGB->XYZ matrix constants for
+        // that profile were transcribed inconsistently with each other.
+        // This is the whole premise adapt_to_connection_space/
+        // adapt_from_connection_space rest on: that ProPhoto RGB's own
+        // white really is D50, not merely labelled as such.
+        for (profile, declared) in [
+            (ColorProfile::Srgb, D65_WHITE_XYZ),
+            (ColorProfile::AdobeRgb1998, D65_WHITE_XYZ),
+            (ColorProfile::ProPhotoRgb, TEST_D50_WHITE_XYZ),
+        ] {
+            let white = profile_to_xyz_native(profile, [255, 255, 255]);
+            assert!((white.0 - declared.0).abs() < 1e-6, "{profile:?} X");
+            assert!((white.1 - declared.1).abs() < 1e-6, "{profile:?} Y");
+            assert!((white.2 - declared.2).abs() < 1e-6, "{profile:?} Z");
+        }
+    }
+
+    #[test]
+    fn bradford_adaptation_round_trips_prophotos_own_white_onto_d65() {
+        // Independently confirmed in Python before this was written (see
+        // ColorProfile::ProPhotoRgb's own doc comment): ProPhoto RGB's
+        // native D50 white, adapted to the shared connection space, lands
+        // on exactly D65_WHITE_XYZ -- and adapting back reproduces the
+        // original D50 white exactly, round-tripping through both
+        // Bradford matrices.
+        let adapted = adapt_to_connection_space(TEST_D50_WHITE_XYZ, ColorProfile::ProPhotoRgb);
+        assert!((adapted.0 - D65_WHITE_XYZ.0).abs() < 1e-6);
+        assert!((adapted.1 - D65_WHITE_XYZ.1).abs() < 1e-6);
+        assert!((adapted.2 - D65_WHITE_XYZ.2).abs() < 1e-6);
+
+        let back = adapt_from_connection_space(adapted, ColorProfile::ProPhotoRgb);
+        assert!((back.0 - TEST_D50_WHITE_XYZ.0).abs() < 1e-6);
+        assert!((back.1 - TEST_D50_WHITE_XYZ.1).abs() < 1e-6);
+        assert!((back.2 - TEST_D50_WHITE_XYZ.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn relative_and_absolute_colorimetric_are_identical_for_two_d65_profiles() {
+        // sRGB and Adobe RGB (1998) share the identical D65 white point
+        // this project's own matrices are built on -- RenderingIntent's
+        // own doc comment names this as real colour science, not an
+        // unimplemented option, and this confirms it directly: every
+        // one of the earlier convert_profile_pixel test cases, re-run
+        // under Absolute Colorimetric, lands on the exact same bytes
+        // Relative already does.
+        for &(from, to, rgb, bpc) in &[
+            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [255u8, 255, 255], false),
+            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [128, 128, 128], false),
+            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [0, 255, 0], false),
+            (ColorProfile::AdobeRgb1998, ColorProfile::Srgb, [144, 255, 60], true),
+        ] {
+            let relative = convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::RelativeColorimetric);
+            let absolute = convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::AbsoluteColorimetric);
+            assert_eq!(relative, absolute, "{from:?} -> {to:?} {rgb:?}");
+        }
+    }
+
+    #[test]
+    fn relative_and_absolute_colorimetric_genuinely_diverge_for_prophoto() {
+        // ProPhoto RGB's own native D50 white is exactly the case
+        // Relative and Absolute Colorimetric are supposed to treat
+        // differently: Relative adapts it onto the destination's own
+        // white (a pure white in, a pure white out); Absolute preserves
+        // the real colorimetric relationship instead, showing the actual
+        // white-point mismatch as a visible tint. Independently confirmed
+        // in Python before this was written: Relative lands on exactly
+        // sRGB (255, 255, 255); Absolute lands on (255, 252, 221), a
+        // warm tint -- not a coincidence, not a rounding artifact, and
+        // not equal to Relative's own result.
+        let relative = convert_profile_pixel(
+            ColorProfile::ProPhotoRgb,
+            ColorProfile::Srgb,
+            [255, 255, 255],
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
+        assert_eq!(relative, [255, 255, 255]);
+
+        let absolute = convert_profile_pixel(
+            ColorProfile::ProPhotoRgb,
+            ColorProfile::Srgb,
+            [255, 255, 255],
+            false,
+            RenderingIntent::AbsoluteColorimetric,
+        );
+        assert_eq!(absolute, [255, 252, 221]);
+        assert_ne!(relative, absolute);
+    }
+
+    #[test]
+    fn perceptual_and_saturation_intent_compress_an_out_of_gamut_colour_differently() {
+        // ProPhoto RGB's own fully saturated red (255, 0, 0) sits well
+        // outside sRGB's own, much smaller red gamut -- its pre-clip
+        // linear sRGB value (independently computed in Python before
+        // this was written) is approximately (2.034, -0.229, -0.009),
+        // out of range on every channel. The three intents that reach
+        // this point treat it three different, real ways:
+        //
+        // - Relative Colorimetric clips each channel independently,
+        //   which for this particular colour happens to land back on
+        //   pure red -- (255, 0, 0) -- since every channel clips toward
+        //   its own nearest bound.
+        // - Perceptual compresses the whole colour proportionally toward
+        //   a fixed mid-grey until every channel is in range, landing on
+        //   (255, 140, 156): desaturated, but still visibly red-leaning.
+        // - Saturation compresses toward the colour's own luma (~0.473)
+        //   instead of a fixed grey, landing on a different point,
+        //   (255, 133, 151) -- close to Perceptual's own result (both
+        //   are gamut-compression techniques) but not identical to it,
+        //   confirming the two really are separate algorithms rather
+        //   than the same one under two names.
+        let relative = convert_profile_pixel(
+            ColorProfile::ProPhotoRgb,
+            ColorProfile::Srgb,
+            [255, 0, 0],
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
+        assert_eq!(relative, [255, 0, 0]);
+
+        let perceptual = convert_profile_pixel(
+            ColorProfile::ProPhotoRgb,
+            ColorProfile::Srgb,
+            [255, 0, 0],
+            false,
+            RenderingIntent::Perceptual,
+        );
+        assert_eq!(perceptual, [255, 140, 156]);
+
+        let saturation = convert_profile_pixel(
+            ColorProfile::ProPhotoRgb,
+            ColorProfile::Srgb,
+            [255, 0, 0],
+            false,
+            RenderingIntent::Saturation,
+        );
+        assert_eq!(saturation, [255, 133, 151]);
+
+        assert_ne!(perceptual, relative);
+        assert_ne!(saturation, relative);
+        assert_ne!(perceptual, saturation);
+    }
+
+    #[test]
+    fn compress_gamut_is_the_identity_for_an_already_in_gamut_colour() {
+        let color = (0.3, 0.6, 0.9);
+        assert_eq!(compress_gamut(color, (0.5, 0.5, 0.5)), color);
     }
 
     #[test]
@@ -47572,12 +48000,20 @@ mod tests {
     fn convert_to_profile_remaps_every_layers_own_pixels_and_updates_the_label() {
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
-        doc.convert_to_profile(ColorProfile::AdobeRgb1998, false);
+        doc.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
         // Converting to the profile already in effect is a documented
         // no-op on the pixels, even though it still re-confirms the label.
-        doc.convert_to_profile(ColorProfile::AdobeRgb1998, false);
+        doc.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
     }
 
@@ -47589,7 +48025,11 @@ mod tests {
         // black_point_compensation_is_a_pixel_no_op_... does.
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
-        doc.convert_to_profile(ColorProfile::AdobeRgb1998, true);
+        doc.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            true,
+            RenderingIntent::RelativeColorimetric,
+        );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
     }
@@ -47607,7 +48047,12 @@ mod tests {
         // byte the undithered conversion already does.
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
-        doc.convert_to_profile_dithered(ColorProfile::AdobeRgb1998, 2, false);
+        doc.convert_to_profile_dithered(
+            ColorProfile::AdobeRgb1998,
+            2,
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 59, 255]);
     }
@@ -47616,7 +48061,12 @@ mod tests {
     fn convert_to_profile_dithered_is_a_pixel_no_op_when_the_profile_already_matches() {
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
-        doc.convert_to_profile_dithered(ColorProfile::Srgb, 2, false);
+        doc.convert_to_profile_dithered(
+            ColorProfile::Srgb,
+            2,
+            false,
+            RenderingIntent::RelativeColorimetric,
+        );
         assert_eq!(doc.profile(), ColorProfile::Srgb);
         assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
     }
