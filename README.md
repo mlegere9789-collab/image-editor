@@ -18492,6 +18492,79 @@ clean.
 Rendering Intent flips to shipped; Working RGB's own row updates to
 name all three profiles now offered (564/618).
 
+## Phase 316 — Conversion Engine
+
+Color Settings' last unbuilt row: which of two real, distinct
+implementations computes a profile-to-profile conversion.
+`ConversionEngine::Analytic` is exactly what this project already had —
+`convert_profile_linear` evaluated directly, per pixel, through the
+published RGB↔XYZ matrices. `ConversionEngine::LookupTable` is a second,
+genuinely independent implementation: the technique real CMMs
+(littleCMS, Apple ColorSync, Adobe's own ACE) actually use internally —
+sample that same analytic pipeline once onto a coarse 3D grid, then
+resolve every pixel in the document by trilinear interpolation through
+the grid instead of re-evaluating the matrices each time.
+
+`build_conversion_lut(from, to, bpc, intent)` samples
+`convert_profile_linear` at `CONVERSION_LUT_GRID_SIZE^3` (6³ = 216)
+evenly spaced input byte triples — grid index `i` maps to byte `i * 255
+/ 5`, landing exactly on 0, 51, 102, 153, 204, 255. Six points was a
+deliberate choice over a rounder-sounding 9 or 17: neither of those
+divides 255 evenly, so their own grid vertices would sit at fractional
+byte positions and could never land an input byte exactly on a vertex
+with zero interpolation error — 255 / 5, by contrast, has no remainder.
+Each vertex's own linear (not yet gamma-encoded) output RGB is stored in
+a `Lut3d` — the same struct, and the same `Lut3d::sample` trilinear
+interpolation, Color Lookup's own `.cube` file support already built in
+Phase 216; Conversion Engine reuses that machinery rather than
+duplicating it. `sample_conversion_lut` then resolves one pixel through
+the grid, handing back the same linear-RGB shape `convert_profile_linear`
+itself returns, so both engines share the same final gamma-encode/dither
+step.
+
+The two engines are not a label wrapped around identical code — that was
+the whole bar the previous phase's own "two architecturally impossible
+items" framing was wrong to give up on. They produce byte-identical
+output only where a pixel lands exactly on one of the grid's own six
+vertices per channel, and genuinely, provably diverge everywhere else, by
+the real interpolation error a coarse LUT actually has:
+
+- sRGB `(51, 51, 51)` → Adobe RGB (1998), grid-aligned on every channel:
+  both engines land on exactly `(54, 54, 54)` — zero interpolation
+  error, because the queried point *is* a grid vertex.
+- sRGB `(10, 20, 30)` → Adobe RGB (1998), off the grid on every channel:
+  Analytic lands on `(21, 27, 35)`; LookupTable lands on `(29, 35, 42)` —
+  a real, visible divergence, not a rounding-noise coincidence.
+
+The LUT is built once per `convert_to_profile`/`convert_to_profile_dithered`
+call, not once per pixel — `Document::convert_to_profile` branches on
+`engine` before its own pixel loop, building one `Lut3d` up front for the
+`LookupTable` case and reusing it for every pixel in every layer, the
+same way a real CMM amortizes building its own device-link LUT over an
+entire image rather than rebuilding it per pixel.
+
+The toolbar gained a Conversion Engine select next to Rendering Intent,
+defaulting to Analytic (this project's original, unchanged behaviour),
+threaded through both the plain and dithered Convert to Profile commands.
+
+**Verified two ways.** `document.rs` gained four tests: LookupTable
+matching Analytic exactly on a grid-aligned pixel, LookupTable genuinely
+diverging from Analytic off the grid, LookupTable's own no-op when the
+profile already matches, and LookupTable's own dithered path landing on
+the same byte a grid-aligned pixel's undithered conversion already does
+(its own pre-round value sits well clear of any rounding boundary) — all
+four byte triples independently hand-computed in Python (including the
+LUT's own f32 storage, struct.pack/unpack round-tripped to match Rust's
+arithmetic exactly) before being written here — 1690 total (1683 lib + 7
+pipeline, up from 1686). `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings` clean. In the frontend, a live Playwright session confirmed
+the Conversion Engine select offers both options, defaults to Analytic,
+and that both the plain and dithered Convert commands send the exact
+`engine` value selected. `npm run build` is clean.
+
+Conversion Engine flips to shipped; Color Settings' own umbrella row
+flips too, since every real row that dialog has is now built (566/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

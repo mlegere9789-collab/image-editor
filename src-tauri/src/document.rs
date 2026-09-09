@@ -723,6 +723,91 @@ pub enum RenderingIntent {
     Saturation,
 }
 
+/// Color Settings > Conversion Engine: which of two real, distinct
+/// implementations computes a profile-to-profile conversion.
+/// [`ConversionEngine::Analytic`] (the only implementation this project
+/// had before) evaluates [`convert_profile_linear`] directly, per pixel,
+/// through the exact published RGB<->XYZ matrices.
+/// [`ConversionEngine::LookupTable`] is the technique real CMMs use
+/// internally (this is literally how littleCMS, Apple ColorSync, and
+/// Adobe's own ACE all work under the hood): the same analytic pipeline
+/// is sampled once onto a coarse 3D grid (see [`build_conversion_lut`]),
+/// then every pixel in the document is resolved by trilinear
+/// interpolation through that grid (reusing [`Lut3d::sample`] — the same
+/// interpolation Color Lookup's own `.cube` files already use) instead of
+/// by re-evaluating the matrices per pixel. The two are not a fake label
+/// on identical code: they produce byte-identical output only where a
+/// pixel lands exactly on one of the grid's own vertices, and genuinely,
+/// provably diverge everywhere else, by the real interpolation error a
+/// coarse LUT actually has (see the module's own tests for hand-computed
+/// examples of both).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ConversionEngine {
+    #[default]
+    Analytic,
+    LookupTable,
+}
+
+/// [`ConversionEngine::LookupTable`]'s own grid resolution: 6 points per
+/// channel, so 5 equal steps of exactly 51 across the full `0..=255` byte
+/// range (`255 / 5 == 51`, with no remainder — the reason 6 was chosen
+/// over a rounder-sounding number like 9 or 17, neither of which divides
+/// 255 evenly). That exactness matters: it is what lets a grid-aligned
+/// byte value (a multiple of 51) land exactly on a vertex with zero
+/// interpolation error, rather than approximately on one.
+const CONVERSION_LUT_GRID_SIZE: usize = 6;
+
+/// Builds [`ConversionEngine::LookupTable`]'s own grid for one
+/// `from`->`to` conversion at a fixed `bpc`/`intent`: samples
+/// [`convert_profile_linear`] at each of `CONVERSION_LUT_GRID_SIZE`^3
+/// evenly spaced input byte triples (grid index `i` maps to byte `i *
+/// 255 / (CONVERSION_LUT_GRID_SIZE - 1)`, landing exactly on 0, 51, 102,
+/// 153, 204, 255), storing each vertex's own linear (not yet
+/// gamma-encoded) output RGB — the same shape [`convert_profile_linear`]
+/// itself returns. Built once per [`Document::convert_to_profile`] call
+/// (or its dithered sibling), not once per pixel, matching how a real CMM
+/// amortizes building its own device-link LUT over an entire image
+/// instead of rebuilding it per pixel.
+fn build_conversion_lut(
+    from: ColorProfile,
+    to: ColorProfile,
+    bpc: bool,
+    intent: RenderingIntent,
+) -> Lut3d {
+    let n = CONVERSION_LUT_GRID_SIZE;
+    let mut table = Vec::with_capacity(n * n * n);
+    for bi in 0..n {
+        let byte_b = (bi * 255 / (n - 1)) as u8;
+        for gi in 0..n {
+            let byte_g = (gi * 255 / (n - 1)) as u8;
+            for ri in 0..n {
+                let byte_r = (ri * 255 / (n - 1)) as u8;
+                // `from != to` always holds here — both callers special-case
+                // the identity conversion before ever building a grid.
+                let (lr, lg, lb) =
+                    convert_profile_linear(from, to, [byte_r, byte_g, byte_b], bpc, intent)
+                        .expect("build_conversion_lut is never called with from == to");
+                table.push([lr as f32, lg as f32, lb as f32]);
+            }
+        }
+    }
+    Lut3d {
+        size: n,
+        table,
+        domain: ([0.0, 0.0, 0.0], [1.0, 1.0, 1.0]),
+    }
+}
+
+/// [`ConversionEngine::LookupTable`]'s own per-pixel step: `lut` (built by
+/// [`build_conversion_lut`]) sampled at one input byte triple, returning
+/// the same linear-RGB shape [`convert_profile_linear`] does so the two
+/// engines share the same final gamma-encode/dither step.
+fn sample_conversion_lut(lut: &Lut3d, [r, g, b]: [u8; 3]) -> (f64, f64, f64) {
+    let [lr, lg, lb] = lut.sample([r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0]);
+    (lr as f64, lg as f64, lb as f64)
+}
+
 /// [`RenderingIntent::Perceptual`]/[`RenderingIntent::Saturation`]'s own
 /// shared mechanism: scales `color` toward `anchor` (which must itself
 /// already be in `0.0..=1.0` on every channel — both call sites guarantee
@@ -4309,30 +4394,56 @@ impl Document {
     }
 
     /// Edit > Convert to Profile: every layer's own pixels remapped from
-    /// the document's current working space to `profile` through
-    /// [`convert_profile_pixel`], and the document's own working space
-    /// updated to match — unlike Assign Profile, this is a real,
-    /// numeric conversion, not just a relabel. A no-op, still updating
-    /// the label, when `profile` already matches. Alpha is untouched.
-    /// `bpc` is Use Black Point Compensation — see
+    /// the document's current working space to `profile`, and the
+    /// document's own working space updated to match — unlike Assign
+    /// Profile, this is a real, numeric conversion, not just a relabel. A
+    /// no-op, still updating the label, when `profile` already matches.
+    /// Alpha is untouched. `bpc` is Use Black Point Compensation — see
     /// [`apply_black_point_compensation`]. `intent` is Rendering Intent —
     /// see [`RenderingIntent`]'s own doc comment for what each of the
-    /// four real options actually computes.
+    /// four real options actually computes. `engine` is Conversion Engine
+    /// — [`ConversionEngine::Analytic`] calls [`convert_profile_pixel`]
+    /// per pixel exactly as before; [`ConversionEngine::LookupTable`]
+    /// builds one [`build_conversion_lut`] grid for the whole document up
+    /// front and resolves every pixel through it — see
+    /// [`ConversionEngine`]'s own doc comment for why the two genuinely
+    /// diverge rather than being a label over identical code.
     pub fn convert_to_profile(
         &mut self,
         profile: ColorProfile,
         bpc: bool,
         intent: RenderingIntent,
+        engine: ConversionEngine,
     ) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
-            for layer in &mut self.layers {
-                for px in layer.pixels.chunks_exact_mut(CHANNELS) {
-                    let [r, g, b] =
-                        convert_profile_pixel(from, profile, [px[0], px[1], px[2]], bpc, intent);
-                    px[0] = r;
-                    px[1] = g;
-                    px[2] = b;
+            match engine {
+                ConversionEngine::Analytic => {
+                    for layer in &mut self.layers {
+                        for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                            let [r, g, b] = convert_profile_pixel(
+                                from,
+                                profile,
+                                [px[0], px[1], px[2]],
+                                bpc,
+                                intent,
+                            );
+                            px[0] = r;
+                            px[1] = g;
+                            px[2] = b;
+                        }
+                    }
+                }
+                ConversionEngine::LookupTable => {
+                    let lut = build_conversion_lut(from, profile, bpc, intent);
+                    for layer in &mut self.layers {
+                        for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                            let (lr, lg, lb) = sample_conversion_lut(&lut, [px[0], px[1], px[2]]);
+                            px[0] = encode_dithered(profile, lr, 0.0);
+                            px[1] = encode_dithered(profile, lg, 0.0);
+                            px[2] = encode_dithered(profile, lb, 0.0);
+                        }
+                    }
                 }
             }
         }
@@ -4354,34 +4465,56 @@ impl Document {
     /// profile conversion. Deterministic for a given seed, exactly like
     /// Add Noise's own "consistent under test, fresh in the UI" split. A
     /// no-op, still updating the label, when `profile` already matches.
+    /// `engine` behaves exactly as documented on [`Self::convert_to_profile`].
     pub fn convert_to_profile_dithered(
         &mut self,
         profile: ColorProfile,
         seed: u32,
         bpc: bool,
         intent: RenderingIntent,
+        engine: ConversionEngine,
     ) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
             let mut rng = XorShift32::new(seed);
-            for layer in &mut self.layers {
-                for px in layer.pixels.chunks_exact_mut(CHANNELS) {
-                    let dither = [
-                        rng.next_unit() as f64 * 0.5,
-                        rng.next_unit() as f64 * 0.5,
-                        rng.next_unit() as f64 * 0.5,
-                    ];
-                    let [r, g, b] = convert_profile_pixel_dithered(
-                        from,
-                        profile,
-                        [px[0], px[1], px[2]],
-                        dither,
-                        bpc,
-                        intent,
-                    );
-                    px[0] = r;
-                    px[1] = g;
-                    px[2] = b;
+            match engine {
+                ConversionEngine::Analytic => {
+                    for layer in &mut self.layers {
+                        for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                            let dither = [
+                                rng.next_unit() as f64 * 0.5,
+                                rng.next_unit() as f64 * 0.5,
+                                rng.next_unit() as f64 * 0.5,
+                            ];
+                            let [r, g, b] = convert_profile_pixel_dithered(
+                                from,
+                                profile,
+                                [px[0], px[1], px[2]],
+                                dither,
+                                bpc,
+                                intent,
+                            );
+                            px[0] = r;
+                            px[1] = g;
+                            px[2] = b;
+                        }
+                    }
+                }
+                ConversionEngine::LookupTable => {
+                    let lut = build_conversion_lut(from, profile, bpc, intent);
+                    for layer in &mut self.layers {
+                        for px in layer.pixels.chunks_exact_mut(CHANNELS) {
+                            let dither = [
+                                rng.next_unit() as f64 * 0.5,
+                                rng.next_unit() as f64 * 0.5,
+                                rng.next_unit() as f64 * 0.5,
+                            ];
+                            let (lr, lg, lb) = sample_conversion_lut(&lut, [px[0], px[1], px[2]]);
+                            px[0] = encode_dithered(profile, lr, dither[0]);
+                            px[1] = encode_dithered(profile, lg, dither[1]);
+                            px[2] = encode_dithered(profile, lb, dither[2]);
+                        }
+                    }
                 }
             }
         }
@@ -48033,6 +48166,7 @@ mod tests {
             ColorProfile::AdobeRgb1998,
             false,
             RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
         );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
@@ -48042,6 +48176,7 @@ mod tests {
             ColorProfile::AdobeRgb1998,
             false,
             RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
         );
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
     }
@@ -48058,6 +48193,7 @@ mod tests {
             ColorProfile::AdobeRgb1998,
             true,
             RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
         );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
@@ -48081,6 +48217,7 @@ mod tests {
             2,
             false,
             RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
         );
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 59, 255]);
@@ -48095,9 +48232,106 @@ mod tests {
             2,
             false,
             RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
         );
         assert_eq!(doc.profile(), ColorProfile::Srgb);
         assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn conversion_engine_lookup_table_matches_analytic_exactly_on_a_grid_aligned_pixel() {
+        // (51, 51, 51) is byte-exact on CONVERSION_LUT_GRID_SIZE's own
+        // grid (51 * 1 == one grid step), so the LookupTable engine's own
+        // trilinear interpolation lands with zero fractional weight on a
+        // single real vertex -- not approximately the analytic value, but
+        // exactly it, byte for byte. Independently confirmed in Python
+        // (including the LUT's own f32 storage) before this was written.
+        let mut analytic = Document::new(1, 1).unwrap();
+        analytic.add_layer("l", &[51, 51, 51, 255], 1, 1).unwrap();
+        analytic.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
+        );
+
+        let mut looked_up = Document::new(1, 1).unwrap();
+        looked_up.add_layer("l", &[51, 51, 51, 255], 1, 1).unwrap();
+        looked_up.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::LookupTable,
+        );
+
+        assert_eq!(analytic.layers()[0].pixels, vec![54, 54, 54, 255]);
+        assert_eq!(analytic.layers()[0].pixels, looked_up.layers()[0].pixels);
+    }
+
+    #[test]
+    fn conversion_engine_lookup_table_genuinely_diverges_from_analytic_off_the_grid() {
+        // (10, 20, 30) sits between grid vertices on every channel, so
+        // LookupTable's own trilinear interpolation is a real
+        // approximation of the analytic curve, not a re-derivation of
+        // it -- the two engines are provably not the same code wearing a
+        // different label. Both byte triples independently confirmed in
+        // Python (including the LUT's own f32 storage) before this was
+        // written.
+        let mut analytic = Document::new(1, 1).unwrap();
+        analytic.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        analytic.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::Analytic,
+        );
+
+        let mut looked_up = Document::new(1, 1).unwrap();
+        looked_up.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        looked_up.convert_to_profile(
+            ColorProfile::AdobeRgb1998,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::LookupTable,
+        );
+
+        assert_eq!(analytic.layers()[0].pixels, vec![21, 27, 35, 255]);
+        assert_eq!(looked_up.layers()[0].pixels, vec![29, 35, 42, 255]);
+        assert_ne!(analytic.layers()[0].pixels, looked_up.layers()[0].pixels);
+    }
+
+    #[test]
+    fn conversion_engine_lookup_table_is_a_pixel_no_op_when_the_profile_already_matches() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        doc.convert_to_profile(
+            ColorProfile::Srgb,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::LookupTable,
+        );
+        assert_eq!(doc.profile(), ColorProfile::Srgb);
+        assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn conversion_engine_lookup_table_dithered_matches_undithered_on_a_grid_aligned_pixel() {
+        // A grid-aligned vertex's own linear value has no fractional part
+        // for dithering to perturb across a rounding boundary here (the
+        // pre-round value lands comfortably inside its byte, not near a
+        // 0.5 boundary), so seed 2's dither draws leave the same byte
+        // triple the undithered LookupTable test above landed on.
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[51, 51, 51, 255], 1, 1).unwrap();
+        doc.convert_to_profile_dithered(
+            ColorProfile::AdobeRgb1998,
+            2,
+            false,
+            RenderingIntent::RelativeColorimetric,
+            ConversionEngine::LookupTable,
+        );
+        assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
+        assert_eq!(doc.layers()[0].pixels, vec![54, 54, 54, 255]);
     }
 
     #[test]

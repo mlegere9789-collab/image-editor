@@ -279,6 +279,10 @@ export type ColorProfile = "srgb" | "adobeRgb1998" | "proPhotoRgb";
 /** Mirrors `RenderingIntent` in src-tauri/src/document.rs. */
 export type RenderingIntent = "relativeColorimetric" | "absoluteColorimetric" | "perceptual" | "saturation";
 
+/** Mirrors `ConversionEngine` in src-tauri/src/document.rs: Color Settings
+ * > Conversion Engine. */
+export type ConversionEngine = "analytic" | "lookupTable";
+
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */
 export type ColorSample = { color: [number, number, number]; position: [number, number] | null };

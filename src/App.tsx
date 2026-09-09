@@ -25,6 +25,7 @@ import type {
   ColorRangePreset,
   ColorSample,
   ContentAwareScaleOptions,
+  ConversionEngine,
   DocumentView,
   FaceLandmarks,
   Fill,
@@ -677,6 +678,10 @@ export default function App() {
   // own doc comment in document.rs for what each of the four options
   // actually computes.
   const [renderingIntent, setRenderingIntent] = useState<RenderingIntent>("relativeColorimetric");
+  // Color Settings > Conversion Engine: see ConversionEngine's own doc
+  // comment in document.rs for how LookupTable genuinely differs from
+  // Analytic rather than being a label over identical code.
+  const [conversionEngine, setConversionEngine] = useState<ConversionEngine>("analytic");
   // Color Settings > Color Management Policies > Convert to Working
   // Space: a real, persisted alternative to the app's original
   // always-Preserve behavior -- see the storage keys' own doc comment
@@ -2194,19 +2199,21 @@ export default function App() {
             // Edit > Convert to Profile itself does -- selectAfter
             // carried through so the usual "select the top layer after a
             // load" still applies to this, the snapshot the UI actually
-            // ends up showing. Always bpc: false and intent:
-            // relativeColorimetric here -- this is an automatic
-            // background conversion, not the explicit Convert to
-            // Profile button, so it deliberately does not inherit
-            // whatever that toolbar's own Use Black Point Compensation
-            // checkbox or Rendering Intent select happen to be set to at
-            // the moment a file is opened.
+            // ends up showing. Always bpc: false, intent:
+            // relativeColorimetric, and engine: analytic here -- this is
+            // an automatic background conversion, not the explicit
+            // Convert to Profile button, so it deliberately does not
+            // inherit whatever that toolbar's own Use Black Point
+            // Compensation checkbox, Rendering Intent select, or
+            // Conversion Engine select happen to be set to at the moment
+            // a file is opened.
             void runCommand(
               "convert_to_profile",
               {
                 profile: defaultWorkingSpaceRef.current,
                 bpc: false,
                 intent: "relativeColorimetric" satisfies RenderingIntent,
+                engine: "analytic" satisfies ConversionEngine,
               },
               selectAfter,
             );
@@ -7769,12 +7776,14 @@ export default function App() {
                   seed: Math.floor(Math.random() * 0xffffffff),
                   bpc: useBlackPointCompensation,
                   intent: renderingIntent,
+                  engine: conversionEngine,
                 });
               } else {
                 void runCommand("convert_to_profile", {
                   profile: convertToProfileTarget,
                   bpc: useBlackPointCompensation,
                   intent: renderingIntent,
+                  engine: conversionEngine,
                 });
               }
             }}
@@ -7797,6 +7806,20 @@ export default function App() {
               <option value="absoluteColorimetric">Absolute Colorimetric</option>
               <option value="perceptual">Perceptual</option>
               <option value="saturation">Saturation</option>
+            </select>
+          </label>
+          <label
+            className="tools__slider"
+            title="Color Settings > Conversion Engine: which of two real implementations computes the conversion above. Analytic evaluates the exact published RGB<->XYZ matrices per pixel (this app's original, still-default behavior). Look Up Table is the technique real CMMs (littleCMS, Apple ColorSync, Adobe's own ACE) use internally: the same analytic pipeline is sampled once onto a coarse 3D grid, then every pixel is resolved by trilinear interpolation through that grid instead -- byte-identical to Analytic only where a pixel lands exactly on one of the grid's own vertices, and genuinely, visibly different everywhere else."
+          >
+            Conversion Engine
+            <select
+              value={conversionEngine}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setConversionEngine(event.target.value as ConversionEngine)}
+            >
+              <option value="analytic">Analytic</option>
+              <option value="lookupTable">Look Up Table</option>
             </select>
           </label>
           <label
