@@ -297,6 +297,15 @@ export interface IccProfile {
   bluePrimary: [number, number, number] | null;
 }
 
+/** Mirrors `OcioConfigSummary` in src-tauri/src/lib.rs: Color Settings >
+ * OpenColorIO Configuration — a real, parsed `.ocio` file's own colour
+ * space names and roles. */
+export interface OcioConfigSummary {
+  ocioProfileVersion: number | null;
+  colorspaceNames: string[];
+  roles: Record<string, string>;
+}
+
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */
 export type ColorSample = { color: [number, number, number]; position: [number, number] | null };

@@ -38,6 +38,7 @@ import type {
   LiquifyMesh,
   Measurement,
   MoveDirection,
+  OcioConfigSummary,
   Palette,
   PersonComponent,
   PerspectiveAuto,
@@ -199,6 +200,7 @@ const MONITOR_PROFILE_PATH_STORAGE_KEY = "legelabs.monitorProfilePath";
 const INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.inputDeviceProfilePath";
 const OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.outputDeviceProfilePath";
 const ICC_PROFILE_FILTER = [{ name: "ICC Profile (.icc, .icm)", extensions: ["icc", "icm", "ICC", "ICM"] }];
+const OCIO_CONFIG_FILTER = [{ name: "OpenColorIO Configuration (.ocio)", extensions: ["ocio"] }];
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -814,6 +816,31 @@ export default function App() {
     void restore(MONITOR_PROFILE_PATH_STORAGE_KEY, setMonitorProfile);
     void restore(INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setInputDeviceProfile);
     void restore(OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setOutputDeviceProfile);
+  }, []);
+  // Color Settings > OpenColorIO Configuration / OCIO Input Color Space
+  // Assignment: a real, parsed .ocio config (icc.rs's own IccProfile
+  // sibling, ocio.rs's own OcioConfigSummary) kept only in this session's
+  // memory -- unlike the three device profiles above, OCIO's own real
+  // config is typically project-specific, not a launch-to-launch app
+  // preference, so this one is not persisted to localStorage.
+  const [ocioConfig, setOcioConfig] = useState<OcioConfigSummary | null>(null);
+  const [ocioFromColorSpace, setOcioFromColorSpace] = useState("");
+  const [ocioToColorSpace, setOcioToColorSpace] = useState("");
+  const loadOcioConfig = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: OCIO_CONFIG_FILTER });
+    if (typeof selected !== "string") return;
+    setBusy(true);
+    try {
+      const summary = await invoke<OcioConfigSummary>("load_ocio_config", { path: selected });
+      setOcioConfig(summary);
+      setOcioFromColorSpace(summary.colorspaceNames[0] ?? "");
+      setOcioToColorSpace(summary.colorspaceNames[1] ?? summary.colorspaceNames[0] ?? "");
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
   }, []);
   // runCommand below is a useCallback with a deliberately empty dependency
   // array (its identity has to stay stable -- it is called from all over
@@ -8029,6 +8056,22 @@ export default function App() {
                 : "None"}
             </span>
           </label>
+          <label
+            className="tools__slider"
+            title={`Color Settings > OpenColorIO Configuration: a real, parsed .ocio config file -- its own real colour spaces become available below as OCIO Input Color Space Assignment's From/To choices.${ocioConfig ? ` Loaded: ${ocioConfig.colorspaceNames.length} colour space(s)${ocioConfig.ocioProfileVersion !== null ? `, profile version ${ocioConfig.ocioProfileVersion}` : ""}.` : " None loaded."}`}
+          >
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => void loadOcioConfig()}
+              disabled={busy}
+            >
+              Load OCIO Configuration…
+            </button>
+            <span className="tools__profileLabel">
+              {ocioConfig ? `${ocioConfig.colorspaceNames.length} colour spaces` : "None"}
+            </span>
+          </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select
@@ -9959,6 +10002,56 @@ export default function App() {
           >
             Color Lookup…
           </button>
+          {ocioConfig && (
+            <>
+              <label
+                className="tools__slider"
+                title="Color Settings > OCIO Input Color Space Assignment: reassign the selected layer's own pixels from this real colour space into the one below, through the loaded OpenColorIO configuration's own transform chain"
+              >
+                OCIO From
+                <select
+                  value={ocioFromColorSpace}
+                  disabled={busy}
+                  onChange={(event) => setOcioFromColorSpace(event.target.value)}
+                >
+                  {ocioConfig.colorspaceNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="tools__slider" title="The real colour space OCIO Input Color Space Assignment converts into">
+                OCIO To
+                <select
+                  value={ocioToColorSpace}
+                  disabled={busy}
+                  onChange={(event) => setOcioToColorSpace(event.target.value)}
+                >
+                  {ocioConfig.colorspaceNames.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  selectedId !== null &&
+                  void runCommand("ocio_convert_input_colorspace", {
+                    id: selectedId,
+                    from: ocioFromColorSpace,
+                    to: ocioToColorSpace,
+                  })
+                }
+                disabled={busy || !canPaint || !ocioFromColorSpace || !ocioToColorSpace}
+                title="Color Settings > OCIO Input Color Space Assignment: apply the conversion above to the selected layer"
+              >
+                OCIO Convert…
+              </button>
+            </>
+          )}
           <button
             className="button button--quiet"
             onClick={() => setShowMaximumDialog(true)}

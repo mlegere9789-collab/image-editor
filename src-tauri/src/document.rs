@@ -16258,6 +16258,40 @@ impl Document {
         })
     }
 
+    /// Color Settings > OCIO Input Color Space Assignment: every selected
+    /// pixel's colour reassigned from real OCIO colour space `from` into
+    /// `to`, through `config`'s own real transform chain (see
+    /// [`crate::ocio::convert`]). Confined to the selection and blocked by
+    /// a locked layer like every adjustment. Validates the `from`/`to`
+    /// pairing once, before the per-pixel loop -- an unknown colour-space
+    /// name or a colour space missing its own real `from_reference` fails
+    /// identically for every pixel, since neither depends on any one
+    /// pixel's own data.
+    pub fn ocio_convert(
+        &mut self,
+        id: LayerId,
+        config: &crate::ocio::Config,
+        from: &str,
+        to: &str,
+    ) -> Result<Option<Rect>, String> {
+        crate::ocio::convert(config, from, to, [0.0, 0.0, 0.0])?;
+        self.adjust_layer_pixels(id, |[r, g, b, a]| {
+            let [nr, ng, nb] = crate::ocio::convert(
+                config,
+                from,
+                to,
+                [to_unit(r) as f64, to_unit(g) as f64, to_unit(b) as f64],
+            )
+            .unwrap_or([to_unit(r) as f64, to_unit(g) as f64, to_unit(b) as f64]);
+            [
+                to_byte(nr as f32),
+                to_byte(ng as f32),
+                to_byte(nb as f32),
+                a,
+            ]
+        })
+    }
+
     /// One of the [`Adjustment`]s applied destructively to layer `id`'s own
     /// pixels — the shared body of the four destructive commands.
     fn adjust_with(&mut self, id: LayerId, adjustment: Adjustment) -> Result<Option<Rect>, String> {
@@ -46426,6 +46460,72 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.color_lookup(id, &lut).is_err());
         assert!(doc.color_lookup(999, &lut).is_err());
+    }
+
+    /// A minimal, real, hand-verifiable two-colour-space OCIO config
+    /// shared by the `ocio_convert` tests below: "linear" is the
+    /// reference space itself (no `to_reference` of its own, the real
+    /// OCIO convention), "display" reaches it through a real 2.2/1÷2.2
+    /// gamma pair both directions.
+    fn linear_display_ocio_config() -> crate::ocio::Config {
+        let text = r#"
+colorspaces:
+  - !<ColorSpace>
+    name: linear
+  - !<ColorSpace>
+    name: display
+    to_reference: !<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}
+    from_reference: !<ExponentTransform> {value: [0.45454545454545453, 0.45454545454545453, 0.45454545454545453, 1]}
+"#;
+        crate::ocio::parse(text).unwrap()
+    }
+
+    #[test]
+    fn ocio_convert_remaps_pixels_through_a_real_configs_transform_chain() {
+        // Bytes 128/100/200, "linear" -> "display" -- each hand-computed
+        // in Python emulating Rust's own f32 to_unit/to_byte round-trip
+        // exactly (struct.pack/unpack), landing on 186/167/228.
+        let config = linear_display_ocio_config();
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "l",
+                &[128, 128, 128, 255, 100, 100, 100, 255, 200, 200, 200, 255],
+                3,
+                1,
+            )
+            .unwrap();
+        doc.ocio_convert(id, &config, "linear", "display").unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [186, 186, 186, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [167, 167, 167, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [228, 228, 228, 255]);
+    }
+
+    #[test]
+    fn ocio_convert_respects_the_selection_and_the_lock() {
+        let config = linear_display_ocio_config();
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[128, 128, 128, 255, 128, 128, 128, 255], 2, 1)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        doc.ocio_convert(id, &config, "linear", "display").unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [186, 186, 186, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.ocio_convert(id, &config, "linear", "display").is_err());
+        assert!(doc.ocio_convert(999, &config, "linear", "display").is_err());
+    }
+
+    #[test]
+    fn ocio_convert_rejects_an_unknown_colour_space_before_touching_any_pixel() {
+        let config = linear_display_ocio_config();
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[128, 128, 128, 255], 1, 1).unwrap();
+        assert!(doc.ocio_convert(id, &config, "linear", "nope").is_err());
+        // The pre-validation failed before the per-pixel loop ran -- the
+        // pixel is untouched, not partially converted.
+        assert_eq!(pixel(&doc, id, 0, 0), [128, 128, 128, 255]);
     }
 
     #[test]

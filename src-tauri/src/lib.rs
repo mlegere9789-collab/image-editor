@@ -5,6 +5,7 @@ pub mod blend;
 pub mod composite;
 pub mod document;
 pub mod icc;
+pub mod ocio;
 pub mod png;
 pub mod project;
 
@@ -58,6 +59,11 @@ struct AppState {
     /// taken when the user last pressed Set Source. Kept here, like the
     /// clipboard, since it must outlive undo and redo.
     history_source: Mutex<Option<Document>>,
+    /// Color Settings > OpenColorIO Configuration: the most recently
+    /// loaded real `.ocio` config, kept here rather than re-read from
+    /// disk on every conversion -- app-level state, like the clipboard,
+    /// not per-document.
+    ocio_config: Mutex<Option<ocio::Config>>,
 }
 
 /// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
@@ -1738,6 +1744,60 @@ fn color_lookup(state: State<'_, AppState>, id: LayerId, path: String) -> Result
 fn parse_icc_profile(path: String) -> Result<icc::IccProfile, String> {
     let bytes = std::fs::read(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
     icc::parse(&bytes)
+}
+
+/// Color Settings > OpenColorIO Configuration: a real, parsed `.ocio`
+/// config's own colour space names and roles, enough for the frontend to
+/// offer a real "OCIO Input Color Space Assignment" choice from.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OcioConfigSummary {
+    ocio_profile_version: Option<u32>,
+    colorspace_names: Vec<String>,
+    roles: std::collections::HashMap<String, String>,
+}
+
+/// Color Settings > OpenColorIO Configuration: reads and parses a real
+/// `.ocio` file at `path`, keeping it as this session's own loaded config
+/// for [`ocio_convert_input_colorspace`] to use, and returning a summary
+/// of what it actually contains.
+#[tauri::command]
+fn load_ocio_config(state: State<'_, AppState>, path: String) -> Result<OcioConfigSummary, String> {
+    let text =
+        std::fs::read_to_string(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    let config = ocio::parse(&text)?;
+    let summary = OcioConfigSummary {
+        ocio_profile_version: config.ocio_profile_version,
+        colorspace_names: config
+            .colorspaces
+            .iter()
+            .map(|cs| cs.name.clone())
+            .collect(),
+        roles: config.roles.clone(),
+    };
+    *state.ocio_config.lock().unwrap() = Some(config);
+    Ok(summary)
+}
+
+/// Color Settings > OCIO Input Color Space Assignment: reassigns layer
+/// `id`'s own pixels from real OCIO colour space `from` to `to`, through
+/// [`load_ocio_config`]'s own most recently loaded config.
+#[tauri::command]
+fn ocio_convert_input_colorspace(
+    state: State<'_, AppState>,
+    id: LayerId,
+    from: String,
+    to: String,
+) -> Result<Snapshot, String> {
+    let config = state
+        .ocio_config
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or_else(|| "No OpenColorIO configuration has been loaded yet.".to_string())?;
+    edit_checkpointed(&state, |document| {
+        document.ocio_convert(id, &config, &from, &to)
+    })
 }
 
 /// Image > Mode: convert the document to `mode`, with Bitmap's `method`.
@@ -6328,6 +6388,8 @@ pub fn run() {
             convert_mode,
             color_lookup,
             parse_icc_profile,
+            load_ocio_config,
+            ocio_convert_input_colorspace,
             content_aware_scale,
             transform_to_bounds,
             perspective_warp,

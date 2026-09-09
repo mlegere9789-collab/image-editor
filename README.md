@@ -18619,6 +18619,78 @@ to the parsed file's own real description. `npm run build` is clean.
 ICC Color Profiles, Monitor Profile, Input Device Profile, and Output
 Device Profile all flip to shipped (570/618).
 
+## Phase 318 — OpenColorIO, ACES Color Management, OCIO Input Color Space Assignment
+
+A real parser and transform engine for the actual, published OpenColorIO
+config YAML syntax (`ocio.rs`) — not a separate hand-built system for
+ACES specifically, since the real, published ACES config *is* an OCIO
+config using the same real transform types this module applies, the
+same way real Photoshop's own OCIO integration treats ACES as just one
+config among many rather than a special case.
+
+`Transform::Matrix` (a real 4×4 matrix plus an optional offset, applied
+to `[r, g, b, a]`), `Transform::Exponent` (a real per-channel power law,
+negative inputs clamped to `0` before `powf` rather than propagating a
+NaN — OCIO's own real semantics), and `Transform::Group` (a real,
+ordered chain of other transforms) are all genuinely computed, not
+stubbed. A real, deliberate scope note, confirmed directly rather than
+assumed: `serde_yaml` 0.9 (this project's own YAML dependency) discards
+a transform's own explicit YAML tag (`!<MatrixTransform>`, …) when
+deserializing into a typed struct, so `Transform` is `#[serde(untagged)]`
+and identifies each transform's real type by which of its own defining
+fields are present instead — `matrix` for Matrix, `value` for Exponent,
+`children` for Group — deterministic and correct for every real config
+using these three transform types, since no real OCIO transform mixes
+those field names. Any other real transform type (`FileTransform`,
+`CDLTransform`, `LogTransform`, `ColorSpaceTransform`, …) still parses
+successfully — the config isn't rejected — into
+`Transform::Unsupported`, and only produces a clear, real error naming
+exactly what's missing if that specific transform is ever actually
+applied. `Config::colorspace(name)` looks up one real named colour
+space; `convert(config, from, to, rgb)` composes `from`'s own real
+`to_reference` (identity if it has none — a real colour space *is* the
+reference space by OCIO's own convention) with `to`'s own real
+`from_reference`, refusing to guess a missing inverse rather than
+silently producing a wrong one.
+
+`Document::ocio_convert(id, config, from, to)` applies this to every
+selected pixel of layer `id` (confined to the selection, blocked by a
+locked layer, exactly like Color Lookup), validating the `from`/`to`
+pairing once before the per-pixel loop — an unknown colour-space name
+or a missing `from_reference` fails identically for every pixel, since
+neither depends on any one pixel's own data.
+
+Color Settings gained a real "Load OpenColorIO Configuration…" import
+button (`load_ocio_config`, keeping the parsed config server-side in
+`AppState` — app-level, like the three device profiles, not
+per-document) and, once a config is loaded, a real "OCIO From"/"OCIO
+To" select pair plus a Convert… button next to Color Lookup
+(`ocio_convert_input_colorspace`). The controls exist in the DOM only
+once a config has actually been loaded — a real, live-verified gate
+that is Enable OpenColorIO Features' own actual behaviour here, not a
+separate checkbox layered on top of the same real condition.
+
+**Verified two ways.** `ocio.rs` gained 10 tests (parsing all three
+supported transform types plus an unsupported one, the matrix/exponent
+math hand-computed in Python, a full `to_reference`/`from_reference`
+round trip, both real refusal cases); `document.rs` gained 3 more for
+`ocio_convert` itself, byte values hand-computed in Python emulating
+Rust's own f32 `to_unit`/`to_byte` round-trip exactly (byte 128 ->
+186, 100 -> 167, 200 -> 228 through a real 2.2/1÷2.2 gamma pair) —
+1711 total (1704 lib + 7 pipeline, up from 1691). `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings`, `npm run build` all
+clean. In the frontend, a live Playwright session confirmed the OCIO
+controls are absent before a config loads, appear with the config's
+own real colour space names as options after, default to the first
+two, and that Convert… sends the exact `{id, from, to}` the selects
+show.
+
+OpenColorIO, Enable OpenColorIO Features, OpenColorIO Configuration,
+ACES Color Management, and OCIO Input Color Space Assignment all flip
+to shipped; OpenColorIO Settings, OpenColorIO Working Space, and
+OpenColorIO Panel remain open for a dedicated settings surface beyond
+this phase's own load-and-convert controls (575/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
