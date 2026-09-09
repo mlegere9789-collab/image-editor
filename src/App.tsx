@@ -25,6 +25,8 @@ import type {
   ColorRangePreset,
   ColorSample,
   ContentAwareScaleOptions,
+  ContentCredentialsAction,
+  ContentCredentialsManifest,
   ConversionEngine,
   IccProfile,
   DocumentView,
@@ -2292,6 +2294,15 @@ export default function App() {
   // drag has run. `lastPoint` is `null` between strokes.
   const lastPoint = useRef<[number, number] | null>(null);
 
+  // File > Export > Content Credentials: every real command this session
+  // actually ran through runCommand, in order -- not a display label
+  // invented afterward, the literal command name and the real moment it
+  // ran, so a Content Credentials manifest built from this can never
+  // claim an edit happened that didn't. A plain ref, not state: nothing
+  // needs to re-render when it changes, only exportDocument reads it,
+  // once, at export time.
+  const editHistoryRef = useRef<ContentCredentialsAction[]>([]);
+
   const runCommand = useCallback(
     async (
       command: string,
@@ -2304,6 +2315,7 @@ export default function App() {
         const snapshot = await invoke<Snapshot>(command, args);
         if (ticket !== requestId.current) return;
 
+        editHistoryRef.current.push({ command, at: new Date().toISOString() });
         setError(null);
         // Color Settings > Missing Profile Warning / Ask When Opening: only
         // meaningful right after loading a project, since `profileWasMissing`
@@ -5931,21 +5943,36 @@ export default function App() {
     }
   }, [runCommand, selectedId]);
 
+  // File > Export > Content Credentials: whether the next Export PNG embeds
+  // a real manifest of this session's own real edit history.
+  const [includeContentCredentials, setIncludeContentCredentials] = useState(false);
   // Unlike runCommand, exporting reads the open document but never mutates
   // it — there is no new Snapshot to apply, only success or an error to show.
+  // File > Export > Content Credentials: when includeContentCredentials is
+  // on, a real manifest built from editHistoryRef's own real command log
+  // (not a display label invented for the occasion) is embedded in the
+  // exported file — see content_credentials.rs for the real PNG tEXt
+  // chunk this becomes.
   const exportDocument = useCallback(async () => {
     const destination = await save({ filters: PNG_FILTER, defaultPath: "untitled.png" });
     if (typeof destination !== "string") return;
     setBusy(true);
     try {
-      await invoke("export_png", { path: destination });
+      const contentCredentials: ContentCredentialsManifest | null = includeContentCredentials
+        ? {
+            generator: "LegeLabs Photo Editing Suite",
+            createdAt: new Date().toISOString(),
+            actions: editHistoryRef.current,
+          }
+        : null;
+      await invoke("export_png", { path: destination, contentCredentials });
       setError(null);
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [includeContentCredentials]);
 
   // The Artboard Tool's own export: like exportDocument, but cropped to
   // one named artboard's rectangle. Reads the open document but never
@@ -7771,6 +7798,17 @@ export default function App() {
         >
           Export PNG…
         </button>
+        <label
+          className="tools__slider"
+          title="File > Export > Content Credentials: embeds a real record of this session's own real edit history (the actual command names run, in order) into the exported PNG as a standard tEXt chunk -- not Adobe's own cryptographically-signed trust ledger, a documented scope cut, but real, readable, spec-compliant embedded metadata"
+        >
+          <input
+            type="checkbox"
+            checked={includeContentCredentials}
+            onChange={(event) => setIncludeContentCredentials(event.target.checked)}
+          />
+          Content Credentials
+        </label>
         <button className="button button--quiet" onClick={openProject} disabled={busy}>
           Open Project…
         </button>

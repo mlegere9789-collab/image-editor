@@ -1489,6 +1489,7 @@ dependencies = [
 name = "image-editor"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
  "image",
  "serde",
  "serde_json",

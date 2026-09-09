@@ -3,6 +3,7 @@
 
 pub mod blend;
 pub mod composite;
+pub mod content_credentials;
 pub mod document;
 pub mod icc;
 pub mod ocio;
@@ -257,9 +258,19 @@ fn encode_with_spots(
 
 /// Flatten `document` and write the result to `path` as PNG. Kept separate
 /// from the `#[tauri::command]` wrapper below so it can be unit-tested
-/// directly, the same way [`snapshot`] is.
-fn export(document: &Document, path: &Path) -> Result<(), String> {
+/// directly, the same way [`snapshot`] is. `content_credentials`, when
+/// given, is embedded as a real PNG `tEXt` chunk (see
+/// [`content_credentials::embed`]) before the file is written.
+fn export(
+    document: &Document,
+    path: &Path,
+    content_credentials: Option<&content_credentials::Manifest>,
+) -> Result<(), String> {
     let bytes = png::encode(&composite::flatten(document))?;
+    let bytes = match content_credentials {
+        Some(manifest) => content_credentials::embed(&bytes, manifest)?,
+        None => bytes,
+    };
     std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
 }
 
@@ -6166,11 +6177,30 @@ fn add_pattern_layer(state: State<'_, AppState>) -> Result<Snapshot, String> {
 /// Flatten the open document and write it to `path` as a new PNG file. The
 /// open document itself is untouched — this reads it, it does not mutate it —
 /// so unlike every other command here there is no [`Snapshot`] to return.
+/// File > Export > Content Credentials: `content_credentials`, when given
+/// (the frontend's own real record of the commands it actually ran this
+/// session — see [`content_credentials::Manifest`]), is embedded in the
+/// exported file as a real PNG `tEXt` chunk.
 #[tauri::command]
-fn export_png(state: State<'_, AppState>, path: String) -> Result<(), String> {
+fn export_png(
+    state: State<'_, AppState>,
+    path: String,
+    content_credentials: Option<content_credentials::Manifest>,
+) -> Result<(), String> {
     let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
     let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
-    export(document, Path::new(&path))
+    export(document, Path::new(&path), content_credentials.as_ref())
+}
+
+/// File > Export > Content Credentials' own real inverse: reads a PNG
+/// file at `path` and returns the real manifest embedded in it, if any
+/// — `Ok(None)` for a real PNG with no Content Credentials chunk, `Err`
+/// only when `path` itself can't be read (a missing file, a directory,
+/// permissions), not for a file that simply has no manifest.
+#[tauri::command]
+fn read_content_credentials(path: String) -> Result<Option<content_credentials::Manifest>, String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    Ok(content_credentials::read(&bytes))
 }
 
 /// Neural Filters > New Document output, and generally: write layer
@@ -6763,6 +6793,7 @@ pub fn run() {
             reselect,
             deselect,
             export_png,
+            read_content_credentials,
             export_layer,
             add_artboard,
             rename_artboard,
@@ -6962,10 +6993,33 @@ mod tests {
             .unwrap();
 
         let path = std::env::temp_dir().join("lib_rs_export_ok.png");
-        export(&document, &path).unwrap();
+        export(&document, &path, None).unwrap();
 
         let decoded = png::read(&path).unwrap();
         assert_eq!((decoded.width, decoded.height), (2, 1));
+        assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn export_embeds_content_credentials_when_given_a_manifest() {
+        let mut document = Document::new(1, 1).unwrap();
+        document.add_layer("l", &[9, 8, 7, 255], 1, 1).unwrap();
+        let manifest = content_credentials::Manifest {
+            generator: "LegeLabs Photo Editing Suite".to_string(),
+            created_at: "2026-09-09T21:00:00Z".to_string(),
+            actions: vec![content_credentials::ManifestAction {
+                command: "spin_blur".to_string(),
+                at: "2026-09-09T20:59:00Z".to_string(),
+            }],
+        };
+
+        let path = std::env::temp_dir().join("lib_rs_export_with_credentials_ok.png");
+        export(&document, &path, Some(&manifest)).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(content_credentials::read(&bytes), Some(manifest));
+        // Still a real, decodable PNG -- embedding didn't corrupt it.
+        let decoded = png::read(&path).unwrap();
         assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
     }
 
@@ -7049,7 +7103,7 @@ mod tests {
         let path = std::env::temp_dir()
             .join("lib_rs_export_missing_dir_that_does_not_exist")
             .join("out.png");
-        let err = export(&document, &path).unwrap_err();
+        let err = export(&document, &path, None).unwrap_err();
         assert!(err.contains("Could not write"), "{err}");
     }
 

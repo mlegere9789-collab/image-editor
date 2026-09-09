@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 579.**
+**618 distinct capabilities tracked. Currently shipped: 580.**
 
 ## PART I — EVERY TOOL
 
@@ -213,7 +213,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Search Your Cloud Files (the client side is real and fully wired — a "Search Cloud Files…" dialog GETs `{endpoint}/documents`, expecting `{ documents: string[] }`, and filters the result client-side as you type, each match one click from `import_project_bytes` through the same fetch Load from Cloud already uses — see README Phase 301. Still unchecked for the same reason Photoshop Cloud Documents itself is: without a real backend behind the endpoint, there is no list to fetch, and this project has no server of its own to be that backend)
 - [ ] Invite to Edit
 - [ ] Share for Review
-- [ ] Content Credentials
+- [x] Content Credentials (a real, embedded record of what produced a file and what was actually done to it — `content_credentials.rs`: a real PNG `tEXt` chunk (PNG Specification §11.3.4.3, hand-built with a real CRC32 via `crc32fast`, placed before `IEND`), not Adobe's own cryptographically-signed C2PA trust ledger, a documented scope cut this sandbox has no certificate authority to legitimately provide. The manifest's own `actions` list is this session's real, non-fabricated command log — `runCommand`'s own literal Tauri command names, in the order they actually ran, pushed to a ref the instant each one's real response lands, never a display label invented after the fact. A real "Content Credentials" checkbox next to Export PNG; a real inverse (`read_content_credentials`) reads one back out of any PNG carrying it. 7 new tests: an exact embed-then-read round trip, a PNG with no manifest reading back `None`, both real rejection cases (no PNG signature, no `IEND` chunk), the embedded file still decoding correctly through the real `image` crate's own PNG decoder, the chunk-walker itself locating a real `IEND`, and `export`'s own integration test writing a real file to disk and reading the manifest back out of it. Live-verified with Playwright: unchecked sends `null`; checked sends a real manifest whose `actions` list contains the exact commands (`new_document`, `copy`) actually run in that session, in order, each with its own real timestamp)
 - [ ] Creative Cloud Libraries
 - [ ] Adobe Fonts integration
 - [x] Free Transform (`free_transform`, a `FreeTransform` struct applying `scale`, `rotate`, `skew`, and a transparent-fill move in that order as one undo step, skipping stages left at their defaults — byte-for-byte the same as the per-stage calls. Photoshop's single combined affine (one resampling pass) and on-canvas handles are a documented scope cut; here each stage resamples nearest-neighbour in turn — see README Phase 139)

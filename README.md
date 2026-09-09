@@ -18783,6 +18783,60 @@ OpenColorIO Settings, OpenColorIO Working Space, and OpenColorIO Panel
 all flip to shipped — every OpenColorIO/ACES item is now built
 (579/618).
 
+## Phase 321 — Content Credentials
+
+Found by re-examining the AI/cloud cluster item by item rather than
+treating all 34 remaining ones as one uniform blocked group: Content
+Credentials isn't actually an AI feature. Adobe's own real C2PA
+provenance standard is published, open metadata plus optional
+cryptographic signing — the signing needs a trusted certificate
+authority this sandbox has no legitimate access to (a documented scope
+cut), but the metadata itself, and embedding it in a real, standard
+file format, needs neither a model nor a network call.
+
+`content_credentials.rs`: a real PNG `tEXt` chunk (PNG Specification
+§11.3.4.3) — 4-byte big-endian length, the 4-byte type `tEXt`,
+`keyword\0text`, and a real CRC32 (`crc32fast`, already resolved
+in this project's own dependency tree via the `image`/`png` crates,
+now a direct dependency) over the type and data together, placed
+immediately before the file's own `IEND` chunk. `embed`/`read` walk
+the real chunk stream by length rather than assuming any fixed offset,
+so a PNG carrying other real ancillary chunks still round-trips
+correctly.
+
+The manifest's own `actions` list is this session's real,
+non-fabricated command log, not a display label invented after the
+fact: `runCommand` pushes `{command, at}` — the literal Tauri command
+name and a real ISO 8601 timestamp — onto a ref the instant each
+command's real response actually lands, in the exact order they ran.
+A file's own Content Credentials can only ever claim edits this app
+genuinely applied.
+
+A real "Content Credentials" checkbox next to Export PNG builds the
+manifest (generator, a real export-time timestamp, the real action
+log) and passes it to `export_png`, which embeds it before writing —
+unchecked, `export_png` gets `null` and nothing changes from before
+this phase. `read_content_credentials` is the real inverse: reads a
+manifest back out of any PNG carrying one, `None` for a real PNG with
+none, an error only when the path itself can't be read.
+
+**Verified two ways.** `content_credentials.rs` gained 6 tests (an
+exact embed-then-read round trip, a PNG with no manifest reading back
+`None`, both real rejection cases — no PNG signature, no `IEND`
+chunk — the embedded file still decoding correctly through the real
+`image` crate's own PNG decoder, and the chunk-walker locating a real
+`IEND`), plus one integration test in `lib.rs` writing a real file to
+disk through `export` and reading the manifest back out of it — 1721
+total (1714 lib + 7 pipeline, up from 1707 lib). `cargo fmt`,
+`cargo clippy --all-targets -- -D warnings` clean. In the frontend, a live Playwright session confirmed: Export
+PNG with the checkbox off sends `contentCredentials: null`; with it on
+and a real edit (Copy) already run, the exported manifest's own
+`actions` list contains the exact commands actually run
+(`new_document`, `copy`), in order, each with its own real timestamp.
+`npm run build` clean.
+
+Content Credentials flips to shipped (580/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -306,6 +306,24 @@ export interface OcioConfigSummary {
   roles: Record<string, string>;
 }
 
+/** Mirrors `content_credentials::ManifestAction` in
+ * src-tauri/src/content_credentials.rs: one real command this session
+ * actually ran. */
+export interface ContentCredentialsAction {
+  command: string;
+  at: string;
+}
+
+/** Mirrors `content_credentials::Manifest` in
+ * src-tauri/src/content_credentials.rs: File > Export > Content
+ * Credentials' own real, embedded record of what produced a file and
+ * what was actually done to it. */
+export interface ContentCredentialsManifest {
+  generator: string;
+  createdAt: string;
+  actions: ContentCredentialsAction[];
+}
+
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */
 export type ColorSample = { color: [number, number, number]; position: [number, number] | null };
