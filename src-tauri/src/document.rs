@@ -580,7 +580,10 @@ fn profile_to_xyz_native(profile: ColorProfile, [r, g, b]: [u8; 3]) -> (f64, f64
 /// (D65 for sRGB/Adobe RGB, D50 for ProPhoto RGB — see
 /// [`adapt_to_connection_space`] for where the two get reconciled) to
 /// that profile's own linear (not yet gamma-encoded) RGB.
-fn xyz_to_profile_linear_native(profile: ColorProfile, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+fn xyz_to_profile_linear_native(
+    profile: ColorProfile,
+    (x, y, z): (f64, f64, f64),
+) -> (f64, f64, f64) {
     match profile {
         ColorProfile::Srgb => (
             3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
@@ -731,7 +734,11 @@ pub enum RenderingIntent {
 /// than each channel clipping independently and shifting hue.
 fn compress_gamut(color: (f64, f64, f64), anchor: (f64, f64, f64)) -> (f64, f64, f64) {
     let mut t = 1.0f64;
-    for (c, a) in [(color.0, anchor.0), (color.1, anchor.1), (color.2, anchor.2)] {
+    for (c, a) in [
+        (color.0, anchor.0),
+        (color.1, anchor.1),
+        (color.2, anchor.2),
+    ] {
         if c > 1.0 {
             t = t.min((1.0 - a) / (c - a));
         } else if c < 0.0 {
@@ -47840,13 +47847,35 @@ mod tests {
         // under Absolute Colorimetric, lands on the exact same bytes
         // Relative already does.
         for &(from, to, rgb, bpc) in &[
-            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [255u8, 255, 255], false),
-            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [128, 128, 128], false),
-            (ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [0, 255, 0], false),
-            (ColorProfile::AdobeRgb1998, ColorProfile::Srgb, [144, 255, 60], true),
+            (
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [255u8, 255, 255],
+                false,
+            ),
+            (
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [128, 128, 128],
+                false,
+            ),
+            (
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [0, 255, 0],
+                false,
+            ),
+            (
+                ColorProfile::AdobeRgb1998,
+                ColorProfile::Srgb,
+                [144, 255, 60],
+                true,
+            ),
         ] {
-            let relative = convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::RelativeColorimetric);
-            let absolute = convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::AbsoluteColorimetric);
+            let relative =
+                convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::RelativeColorimetric);
+            let absolute =
+                convert_profile_pixel(from, to, rgb, bpc, RenderingIntent::AbsoluteColorimetric);
             assert_eq!(relative, absolute, "{from:?} -> {to:?} {rgb:?}");
         }
     }
