@@ -6,6 +6,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import LayerPanel from "./LayerPanel";
 import ChannelPanel, { channelQuery, type ChannelThumbs } from "./ChannelPanel";
 import DockablePanel, { type PanelPlacement } from "./DockablePanel";
+import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import type {
   Adjustment,
   ApplyBlend,
@@ -156,6 +157,10 @@ const DEFAULT_PANEL_LAYOUT: Record<string, PanelPlacement> = {
   layers: { zone: "right" },
   channels: { zone: "right" },
 };
+// Window > Panel Groups: which panel (if any) each panel is tabbed
+// together with -- `{ follower: leader }`, so the leader's own
+// PANEL_LAYOUT entry is what actually places the shared frame.
+const PANEL_GROUPS_STORAGE_KEY = "legelabs.panelGroups";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -1695,6 +1700,77 @@ export default function App() {
     },
     [lockWorkspace],
   );
+  // Window > Panel Groups: which panel is tabbed under which other one.
+  const [panelGroupOf, setPanelGroupOf] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem(PANEL_GROUPS_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const groupPanelWith = useCallback(
+    (draggedId: string, targetId: string) => {
+      if (lockWorkspace || draggedId === targetId) return;
+      setPanelGroupOf((current) => {
+        // Resolve the target's own leader first, so grouping onto a
+        // follower joins that follower's whole group instead of nesting
+        // one group inside another; and never let a panel become its
+        // own leader through the chain it is about to join.
+        let leader = targetId;
+        const seen = new Set<string>();
+        while (current[leader] && !seen.has(leader)) {
+          seen.add(leader);
+          leader = current[leader];
+        }
+        if (leader === draggedId) return current;
+        const next = { ...current, [draggedId]: leader };
+        try {
+          localStorage.setItem(PANEL_GROUPS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
+  const ungroupPanel = useCallback(
+    (id: string) => {
+      if (lockWorkspace) return;
+      setPanelGroupOf((current) => {
+        const next = { ...current };
+        if (id in next) {
+          // A follower: just pop it out on its own.
+          delete next[id];
+        } else {
+          // TabbedPanelGroup's own ungroup button always targets whichever
+          // tab is currently active, leader included -- the leader itself
+          // never has an entry here (it's the value every follower points
+          // at, never a key), so there is nothing to `delete`. Promote the
+          // first remaining follower to take over as leader for the rest,
+          // and pop `id` itself out standalone. A no-op when `id` has no
+          // followers either (not actually grouped, e.g. a stale id from
+          // a panel that no longer exists).
+          const followers = Object.keys(next).filter((key) => next[key] === id);
+          if (followers.length > 0) {
+            const [newLeader, ...rest] = followers;
+            delete next[newLeader];
+            for (const follower of rest) {
+              next[follower] = newLeader;
+            }
+          }
+        }
+        try {
+          localStorage.setItem(PANEL_GROUPS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   // Discover Panel: search this app's own Toolbox by name -- the one
   // component of Photoshop's Discover panel that is pure search rather
   // than authored help content (tutorials, articles, contextual help),
@@ -1806,8 +1882,11 @@ export default function App() {
     }
   }, [lockWorkspace]);
   // Window > Workspace: named, saved combinations of hiddenTools and
-  // keyBindings above -- this app's own analogue of a saved panel
-  // layout, since it has no dockable panels to lay out.
+  // keyBindings above. Predates Panel Docking (Phase 307) -- panelLayout
+  // and panelGroupOf are deliberately not part of a saved workspace here,
+  // the same way this app's Lock Workspace already treats panel
+  // placement as a persistent, cross-workspace setting rather than
+  // something a workspace switch should ever move underneath you.
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
     try {
       const saved = localStorage.getItem(WORKSPACES_STORAGE_KEY);
@@ -7023,116 +7102,143 @@ export default function App() {
     { label: "Wind", activate: () => setShowWindDialog(true) },
     { label: "ZigZag", activate: () => setShowZigZagDialog(true) },  ];
 
-  // Window > Panel Docking: Layers and Channels, this app's own two
-  // non-modal panels, each wrapped in a DockablePanel so they can be
-  // dragged to either edge of the window or floated -- computed once
-  // here so the same node can be placed into whichever dock zone (or
-  // the floating layer) its own saved placement calls for below.
-  const layersPanelNode = (
-    <DockablePanel
-      key="layers"
-      id="layers"
-      title="Layers"
-      placement={panelLayout.layers ?? DEFAULT_PANEL_LAYOUT.layers}
-      onPlacementChange={setPanelPlacement}
-    >
-      <LayerPanel
-        layers={layers}
-        selectedId={selectedId}
-        blendModes={blendModes}
+  // Window > Panel Docking / Panel Groups: Layers and Channels, this
+  // app's own two non-modal panels, as a data-driven list of members so
+  // any of them can be tabbed together under `panelGroupOf` -- a follower
+  // renders nothing of its own; its content joins its leader's own
+  // TabbedPanelGroup instead. A follower whose own leader isn't
+  // currently available (Channels grouped, then the document that made
+  // it render at all closes) reverts to standalone rather than vanishing.
+  const layersContent = (
+    <LayerPanel
+      layers={layers}
+      selectedId={selectedId}
+      blendModes={blendModes}
+      disabled={busy}
+      onSelect={setSelectedId}
+      onToggleVisible={(id, visible) => void runCommand("set_layer_visible", { id, visible })}
+      onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
+      onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
+      onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
+      groups={document?.groups ?? []}
+      onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
+      onUngroup={(index) => void runCommand("ungroup", { index })}
+      onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
+      onOpacityDragStart={checkpoint}
+      onBlendMode={(id, blendMode: BlendMode) => void runCommand("set_layer_blend_mode", { id, blendMode })}
+      onMove={(id, direction: MoveDirection) => void runCommand("move_layer", { id, direction })}
+      onRemove={(id) => void runCommand("remove_layer", { id })}
+      onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
+      onMergeVisible={() => void runCommand("merge_visible")}
+      onFlattenImage={() => void runCommand("flatten_image")}
+      onMergeDown={(id) => void runCommand("merge_down", { id })}
+      onRasterize={(id) => void runCommand("rasterize_layer", { id })}
+      onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
+      onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
+      onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
+    />
+  );
+  const channelsContent = hasDocument ? (
+    <aside className="panel">
+      <ChannelPanel
+        generation={generation}
+        channels={document?.channels ?? []}
+        spots={document?.spots ?? []}
+        view={shownChannel}
+        mode={document?.mode ?? "rgb"}
+        thumbs={channelThumbs}
         disabled={busy}
-        onSelect={setSelectedId}
-        onToggleVisible={(id, visible) => void runCommand("set_layer_visible", { id, visible })}
-        onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
-        onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
-        onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
-        groups={document?.groups ?? []}
-        onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
-        onUngroup={(index) => void runCommand("ungroup", { index })}
-        onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
-        onOpacityDragStart={checkpoint}
-        onBlendMode={(id, blendMode: BlendMode) => void runCommand("set_layer_blend_mode", { id, blendMode })}
-        onMove={(id, direction: MoveDirection) => void runCommand("move_layer", { id, direction })}
-        onRemove={(id) => void runCommand("remove_layer", { id })}
-        onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
-        onMergeVisible={() => void runCommand("merge_visible")}
-        onFlattenImage={() => void runCommand("flatten_image")}
-        onMergeDown={(id) => void runCommand("merge_down", { id })}
-        onRasterize={(id) => void runCommand("rasterize_layer", { id })}
-        onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
-        onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
-        onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
+        onSelect={setChannelView}
+        onThumbs={setChannelThumbs}
+        onAdd={() => void runCommand("add_channel", { name: "" })}
+        onRename={(old, next) => {
+          void runCommand("rename_channel", { old, new: next }).then(() => {
+            setChannelView((current) =>
+              current.kind === "alpha" && current.name === old
+                ? { kind: "alpha", name: next.trim() }
+                : current,
+            );
+          });
+        }}
+        onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
+        onDelete={(name) => void runCommand("delete_channel", { name })}
+        onLoad={(name) => void runCommand("load_channel", { name })}
+        onNewSpot={() => openSpotDialog({ mode: "new" })}
+        onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
+        onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
+        onDeleteSpot={(name) => {
+          void runCommand("delete_spot_channel", { name }).then(() => {
+            setChannelView((current) =>
+              current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+            );
+          });
+        }}
+        onMergeSpot={(name) => {
+          void runCommand("merge_spot_channel", { name }).then(() => {
+            setChannelView((current) =>
+              current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+            );
+          });
+        }}
+        onConvertToSpot={(name) => openSpotDialog({ mode: "convert", name })}
       />
-    </DockablePanel>
-  );
-  const channelsPanelNode = hasDocument && (
-    <DockablePanel
-      key="channels"
-      id="channels"
-      title="Channels"
-      placement={panelLayout.channels ?? DEFAULT_PANEL_LAYOUT.channels}
-      onPlacementChange={setPanelPlacement}
-    >
-      <aside className="panel">
-        <ChannelPanel
-          generation={generation}
-          channels={document?.channels ?? []}
-          spots={document?.spots ?? []}
-          view={shownChannel}
-          mode={document?.mode ?? "rgb"}
-          thumbs={channelThumbs}
-          disabled={busy}
-          onSelect={setChannelView}
-          onThumbs={setChannelThumbs}
-          onAdd={() => void runCommand("add_channel", { name: "" })}
-          onRename={(old, next) => {
-            void runCommand("rename_channel", { old, new: next }).then(() => {
-              setChannelView((current) =>
-                current.kind === "alpha" && current.name === old
-                  ? { kind: "alpha", name: next.trim() }
-                  : current,
-              );
-            });
-          }}
-          onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
-          onDelete={(name) => void runCommand("delete_channel", { name })}
-          onLoad={(name) => void runCommand("load_channel", { name })}
-          onNewSpot={() => openSpotDialog({ mode: "new" })}
-          onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
-          onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
-          onDeleteSpot={(name) => {
-            void runCommand("delete_spot_channel", { name }).then(() => {
-              setChannelView((current) =>
-                current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
-              );
-            });
-          }}
-          onMergeSpot={(name) => {
-            void runCommand("merge_spot_channel", { name }).then(() => {
-              setChannelView((current) =>
-                current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
-              );
-            });
-          }}
-          onConvertToSpot={(name) => openSpotDialog({ mode: "convert", name })}
+    </aside>
+  ) : null;
+
+  const panelDefs: PanelGroupMember[] = [
+    { id: "layers", title: "Layers", content: layersContent },
+    ...(channelsContent ? [{ id: "channels", title: "Channels", content: channelsContent }] : []),
+  ];
+  const availablePanelIds = new Set(panelDefs.map((def) => def.id));
+  const leaderOf = (panelId: string): string => {
+    let current = panelId;
+    const seen = new Set<string>();
+    while (panelGroupOf[current] && !seen.has(current)) {
+      seen.add(current);
+      current = panelGroupOf[current];
+    }
+    return availablePanelIds.has(current) ? current : panelId;
+  };
+  const groupsByLeader = new Map<string, PanelGroupMember[]>();
+  for (const def of panelDefs) {
+    const leader = leaderOf(def.id);
+    const members = groupsByLeader.get(leader) ?? [];
+    if (def.id === leader) members.unshift(def);
+    else members.push(def);
+    groupsByLeader.set(leader, members);
+  }
+
+  const leftDockedPanels: React.ReactNode[] = [];
+  const rightDockedPanels: React.ReactNode[] = [];
+  const floatingPanels: React.ReactNode[] = [];
+  for (const [leaderId, members] of groupsByLeader) {
+    const placement = panelLayout[leaderId] ?? DEFAULT_PANEL_LAYOUT[leaderId] ?? { zone: "right" };
+    const node =
+      members.length > 1 ? (
+        <TabbedPanelGroup
+          key={leaderId}
+          members={members}
+          placement={placement}
+          onPlacementChange={setPanelPlacement}
+          onDropOnPanel={groupPanelWith}
+          onUngroup={ungroupPanel}
         />
-      </aside>
-    </DockablePanel>
-  );
-  const layersZone = panelLayout.layers?.zone ?? DEFAULT_PANEL_LAYOUT.layers.zone;
-  const channelsZone = panelLayout.channels?.zone ?? DEFAULT_PANEL_LAYOUT.channels.zone;
-  const leftDockedPanels = [
-    layersZone === "left" && layersPanelNode,
-    channelsZone === "left" && channelsPanelNode,
-  ].filter(Boolean);
-  const rightDockedPanels = [
-    layersZone === "right" && layersPanelNode,
-    channelsZone === "right" && channelsPanelNode,
-  ].filter(Boolean);
-  const floatingPanels = [
-    layersZone === "float" && layersPanelNode,
-    channelsZone === "float" && channelsPanelNode,
-  ].filter(Boolean);
+      ) : (
+        <DockablePanel
+          key={leaderId}
+          id={leaderId}
+          title={members[0].title}
+          placement={placement}
+          onPlacementChange={setPanelPlacement}
+          onDropOnPanel={groupPanelWith}
+        >
+          {members[0].content}
+        </DockablePanel>
+      );
+    if (placement.zone === "left") leftDockedPanels.push(node);
+    else if (placement.zone === "right") rightDockedPanels.push(node);
+    else floatingPanels.push(node);
+  }
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>

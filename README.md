@@ -18044,6 +18044,88 @@ no Rust changed.
 
 Collapsed Icon Panels flips to shipped (552/618).
 
+## Phase 309 — Panel Groups
+
+The last piece of Photoshop's own panel-docking model this app hadn't
+built: tabbing several panels into one shared frame, switched between
+by a tab strip rather than each panel taking its own slice of the dock
+column. A new `TabbedPanelGroup` component wraps two or more panels'
+own content, rendering only the active one at a time behind a row of
+`⟨title⟩` tab buttons; it is itself wrapped in the same `DockablePanel`
+every standalone panel already uses, so a group drags, docks, floats,
+and collapses exactly like a single panel always has.
+
+Grouping itself reuses `DockablePanel`'s existing drag handle rather
+than adding a second gesture: `onDropOnPanel`, a new optional prop,
+fires from the grip's own `pointerup` handler when `document.elementFromPoint`
+at the release coordinates lands inside a *different* panel's own
+`data-panel-id` element (a new attribute every `DockablePanel` now
+carries) instead of the usual dock-zone/float logic. The dropped-onto
+panel becomes the group's own leader; the dragged one joins as a
+follower. `panelGroupOf` (`{ follower: leader }`, `localStorage` under
+`legelabs.panelGroups`, the same per-installation-preference pattern
+`panelLayout`/`hiddenTools` already use) is the only new state —
+`leaderOf()` walks it with cycle protection to resolve any panel to its
+real leader, falling back to standalone if that leader is not currently
+available (Channels grouped, then the document that made it render at
+all closes — the follower reverts rather than vanishing). The leader's
+own `panelLayout` entry, not the follower's, is what actually places
+the shared frame, matching the doc comment on `PANEL_GROUPS_STORAGE_KEY`.
+Lock Workspace (Phase 291) guards grouping and ungrouping exactly as it
+already guards docking and collapsing.
+
+Two real bugs caught by this phase's own live verification, both fixed
+before landing:
+
+1. **The ungroup button (`⤢`) was unreachable from the group's own
+   leader tab.** `TabbedPanelGroup`'s ungroup button always targets
+   whichever tab is currently active — but `panelGroupOf` only ever
+   holds *follower* keys; the leader itself is a value other entries
+   point at, never a key of its own. `ungroupPanel`'s original
+   `delete next[id]` is a silent no-op when `id` is the leader, so
+   clicking Ungroup while looking at the leader's own tab did nothing
+   at all, with no error to say why. Fixed by handling both cases:
+   deleting a follower's entry as before, or — when `id` isn't a key —
+   finding every follower currently pointing at it, promoting the first
+   one to take over as the new leader for the rest, and popping `id`
+   itself out standalone.
+2. **The ungroup button was covered by the collapse toggle and could
+   not be clicked at all**, regardless of which tab was active. Its
+   original CSS (`margin-left: auto` inside the tab row's own flex
+   layout, with the row's `padding-right` sized for the grip button
+   alone) placed it at the same `right: 26px`–`46px` band
+   `.dockable-panel__collapse` already occupies, since `DockablePanel`
+   overlays that button on every panel — grouped or not — independent
+   of the tab row underneath it. Fixed by taking the ungroup button out
+   of the tab row's own flow entirely: absolutely positioned against
+   `.dockable-panel` (the same anchor the grip and collapse buttons
+   already use) at `right: 50px`, the next free slot in that same
+   right-to-left run, with the tab row's own padding widened to clear
+   all three.
+
+**Verified two ways.** No new Rust surface — this is pure frontend
+state with no `document.rs` involvement, so the existing 1676 tests
+stay green unchanged. In their place, a real Playwright browser session
+(Chromium, against a mocked `__TAURI_INTERNALS__` — `mockIPC`'s own
+shape, `invoke("new_document" | "blend_modes")` answered directly
+rather than needing a real Rust process) opened a document, dragged the
+Layers panel's own grip onto the Channels panel's body, and confirmed
+the two collapsed into one frame with a two-tab strip reading exactly
+`["Channels", "Layers"]` — Channels first, since it was the drop target
+and so the group's own leader. Clicking the Channels tab showed
+Channels' own content and hid Layers' (`Opacity`, a Layers-panel-only
+control, absent from the DOM while that tab was inactive); this is
+where the first bug above was actually caught — Ungroup did nothing
+while Channels' own tab, the leader's, was active. After the fix,
+clicking Ungroup from the leader's own tab correctly dissolved the
+group back into two independent panels, tab strip gone. The overlap bug
+was caught the same live run, before the logic bug was even reached —
+Playwright's own click reported the collapse button intercepting the
+pointer event at the ungroup button's coordinates. `npm run build` is
+clean.
+
+Panel Groups flips to shipped (553/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

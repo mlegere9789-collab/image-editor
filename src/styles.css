@@ -40,6 +40,8 @@ body {
 .workspace {
   display: flex;
   align-items: stretch;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -139,6 +141,59 @@ body {
   white-space: nowrap;
 }
 
+/* Window > Panel Groups: the tab strip a TabbedPanelGroup renders above
+ * whichever member panel is currently active. Right padding clears the
+ * three-button cluster (grip, collapse, ungroup) that DockablePanel
+ * overlays on this same panel's top-right corner -- see .panel-group__ungroup
+ * below for why that cluster is 74px wide, not the 28px a single grip
+ * button alone would need. */
+.panel-group__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 74px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-group__tab {
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.panel-group__tab--active {
+  color: var(--text, #eee);
+  border-bottom-color: var(--accent);
+}
+/* Absolutely positioned against .dockable-panel (the nearest `position:
+ * relative` ancestor -- same one .dockable-panel__grip/__collapse below
+ * already anchor to), immediately left of those two, rather than a flex
+ * child riding this row's own padding: margin-left:auto here previously
+ * placed it at right:28px, squarely inside the 26px-46px band
+ * .dockable-panel__collapse already occupies -- the collapse button sat
+ * on top of it and silently ate every click. right:50px is the next free
+ * 20px slot in that same right-to-left button run (grip at 2-22,
+ * collapse at 26-46, this at 50-70), confirmed with a live drag-drop-
+ * ungroup Playwright pass after the original overlap was caught the same
+ * way. */
+.panel-group__ungroup {
+  position: absolute;
+  top: 2px;
+  right: 50px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
 .app--dropping .stage {
   outline: 2px dashed var(--accent);
   outline-offset: -10px;
@@ -222,6 +277,7 @@ body {
 .stage {
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   overflow: auto;
   padding: 24px;
