@@ -18317,6 +18317,64 @@ clean.
 
 Black Point Compensation flips to shipped (559/618).
 
+## Phase 313 — Color Management Policies, Convert to Working Space
+
+Color Settings' last real gap: opening a project with an embedded
+profile that differs from the working space always, unconditionally,
+Preserved that file's own profile — there was no second policy to pick,
+only Ask When Opening's own separate dialog for the one other real case
+this project can detect, a project missing a profile outright. A new
+`colorManagementPolicy` (`localStorage`, the same per-installation
+pattern every other panel/profile preference already uses) is a real
+second choice: Convert to Working Space, which fires a genuine,
+automatic `convert_to_profile` call — the exact same command Edit >
+Convert to Profile itself calls, not a parallel code path — immediately
+after a project with a real, differing profile finishes loading. A
+second new setting, `defaultWorkingSpace`, is what it converts *into*;
+both get their own controls in a new Color Settings row of the toolbar,
+next to Use Black Point Compensation.
+
+The one real engineering trap: `runCommand`, where this had to hook in
+(right where Missing Profile Warning/Ask When Opening already inspect a
+freshly-loaded snapshot), is a `useCallback` with a deliberately empty
+dependency array — its identity has to stay stable, since it is called
+from all over this component — so it cannot read `colorManagementPolicy`/
+`defaultWorkingSpace` directly without freezing them at whatever they
+were the instant the component first mounted, the exact stale-closure
+trap Window > Panel Docking's own pointerup already hit once (Phase
+307). Fixed the same way that one was: two refs, `colorManagementPolicyRef`/
+`defaultWorkingSpaceRef`, kept current by a small `useEffect` each,
+read instead of the state directly.
+
+The automatic conversion deliberately always passes `bpc: false` rather
+than inheriting whatever the toolbar's own Use Black Point Compensation
+checkbox happens to be set to — this is a background policy firing on
+its own, not the explicit Convert to Profile button, and coupling it to
+an unrelated dialog's transient checkbox state would be surprising, not
+useful.
+
+**Verified two ways.** No new Rust surface — this reuses `convert_to_profile`
+outright, so the existing 1680 tests stay green unchanged. In their
+place, a live Playwright session (the same mocked `__TAURI_INTERNALS__`
+approach every recent frontend-only phase has used, this time logging
+every `invoke` call by name) opened an Adobe RGB (1998) project twice:
+once under the default Preserve policy, confirming no `convert_to_profile`
+call ever fired and the project's own profile stayed untouched; once
+after switching to Convert to Working Space, confirming `open_project`
+was immediately followed by `convert_to_profile({ profile: "srgb",
+bpc: false })`, that the toolbar's own Assign Profile select ended up
+showing `srgb` (proving the UI actually reflects the converted
+document, not just that the right command fired), and that the policy
+choice itself survived being read back from `localStorage`. `npm run
+build` is clean.
+
+Color Management Policies and Convert to Working Space flip to shipped,
+and Working Spaces' own umbrella flips alongside them — this project
+models exactly one working-space type, RGB, and RGB's own working space
+is now fully covered between the existing toolbar select (the
+*document's* current one) and this phase's own new one (the *preferred*
+one a mismatched project converts into) (562/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

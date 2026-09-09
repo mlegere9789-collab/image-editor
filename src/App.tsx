@@ -167,6 +167,17 @@ const PANEL_GROUPS_STORAGE_KEY = "legelabs.panelGroups";
 // panels above the last one in a zone ever get an entry here; the last
 // always fills whatever space is left (see the dock-zone assembly below).
 const PANEL_STACK_HEIGHTS_STORAGE_KEY = "legelabs.panelStackHeights";
+// Color Settings > Color Management Policies: what happens when a project
+// is opened with an embedded profile that differs from
+// COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY's own value below --
+// "preserve" (the app's original, still-default behavior: keep the
+// file's own profile, exactly Preserve Embedded Profiles) or "convert"
+// (Convert to Working Space: remap the file's own pixels into the
+// preferred working space right after it loads). Missing Profile's own
+// case -- a project with no embedded profile at all -- is Ask When
+// Opening's own, separately-scoped dialog, not this policy.
+const COLOR_MANAGEMENT_POLICY_STORAGE_KEY = "legelabs.colorManagementPolicy";
+const COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY = "legelabs.defaultWorkingSpace";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -649,6 +660,59 @@ export default function App() {
   // no-op for both profiles this project currently models (both have a
   // black point of exactly XYZ (0, 0, 0)).
   const [useBlackPointCompensation, setUseBlackPointCompensation] = useState(false);
+  // Color Settings > Color Management Policies > Convert to Working
+  // Space: a real, persisted alternative to the app's original
+  // always-Preserve behavior -- see the storage keys' own doc comment
+  // above for the exact scope.
+  const [colorManagementPolicy, setColorManagementPolicy] = useState<"preserve" | "convert">(() => {
+    try {
+      return localStorage.getItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY) === "convert"
+        ? "convert"
+        : "preserve";
+    } catch {
+      return "preserve";
+    }
+  });
+  const [defaultWorkingSpace, setDefaultWorkingSpaceState] = useState<ColorProfile>(() => {
+    try {
+      const saved = localStorage.getItem(COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY);
+      return saved === "adobeRgb1998" ? "adobeRgb1998" : "srgb";
+    } catch {
+      return "srgb";
+    }
+  });
+  const setColorManagementPolicyPersisted = useCallback((policy: "preserve" | "convert") => {
+    setColorManagementPolicy(policy);
+    try {
+      localStorage.setItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY, policy);
+    } catch {
+      // ignore
+    }
+  }, []);
+  const setDefaultWorkingSpace = useCallback((profile: ColorProfile) => {
+    setDefaultWorkingSpaceState(profile);
+    try {
+      localStorage.setItem(COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY, profile);
+    } catch {
+      // ignore
+    }
+  }, []);
+  // runCommand below is a useCallback with a deliberately empty dependency
+  // array (its identity has to stay stable -- it is called from all over
+  // this component), so it cannot read colorManagementPolicy/
+  // defaultWorkingSpace directly without freezing them at whatever they
+  // were on mount, the same stale-closure trap Window > Panel Docking's
+  // own pointerup already hit once (its own fix is this exact ref
+  // pattern). These two refs are always current the instant runCommand's
+  // own async work actually runs, no matter how long ago it captured them.
+  const colorManagementPolicyRef = useRef(colorManagementPolicy);
+  useEffect(() => {
+    colorManagementPolicyRef.current = colorManagementPolicy;
+  }, [colorManagementPolicy]);
+  const defaultWorkingSpaceRef = useRef(defaultWorkingSpace);
+  useEffect(() => {
+    defaultWorkingSpaceRef.current = defaultWorkingSpace;
+  }, [defaultWorkingSpace]);
   // Color Settings > Ask When Opening: a real choice dialog, not just a
   // passive warning, whenever Open Project/Load from Cloud reports the
   // loaded project had no embedded colour profile of its own.
@@ -2054,10 +2118,8 @@ export default function App() {
         // Color Settings > Missing Profile Warning / Ask When Opening: only
         // meaningful right after loading a project, since `profileWasMissing`
         // stays set to whatever the most recent load left it at otherwise.
-        if (
-          (command === "open_project" || command === "import_project_bytes") &&
-          snapshot.document.profileWasMissing
-        ) {
+        const justLoadedAProject = command === "open_project" || command === "import_project_bytes";
+        if (justLoadedAProject && snapshot.document.profileWasMissing) {
           setMissingProfileChoice("srgb");
           setShowMissingProfileDialog(true);
         }
@@ -2080,6 +2142,34 @@ export default function App() {
           if (current !== null && layers.some((layer) => layer.id === current)) return current;
           return layers[layers.length - 1]?.id ?? null;
         });
+
+        // Color Settings > Color Management Policies > Convert to Working
+        // Space: a project whose own embedded profile is real (not the
+        // Missing Profile case just above, Ask When Opening's own separate
+        // concern) but differs from the preferred working space gets
+        // remapped into it right after loading, when that policy is on.
+        // A genuine second command, not folded into the load itself, so
+        // it goes through the exact same convert_to_profile path Edit >
+        // Convert to Profile itself does -- selectAfter carried through so
+        // the usual "select the top layer after a load" still applies to
+        // this, the snapshot the UI actually ends up showing. Always
+        // bpc: false here -- this is an automatic background conversion,
+        // not the explicit Convert to Profile button, so it deliberately
+        // does not inherit whatever that toolbar's own Use Black Point
+        // Compensation checkbox happens to be set to at the moment a file
+        // is opened.
+        if (
+          justLoadedAProject &&
+          !snapshot.document.profileWasMissing &&
+          colorManagementPolicyRef.current === "convert" &&
+          snapshot.document.profile !== defaultWorkingSpaceRef.current
+        ) {
+          void runCommand(
+            "convert_to_profile",
+            { profile: defaultWorkingSpaceRef.current, bpc: false },
+            selectAfter,
+          );
+        }
       } catch (err) {
         if (ticket !== requestId.current) return;
         setError(String(err));
@@ -7650,6 +7740,36 @@ export default function App() {
               onChange={(event) => setUseBlackPointCompensation(event.target.checked)}
             />
             Black Point Compensation
+          </label>
+          <label
+            className="tools__slider"
+            title="Color Settings > Color Management Policies: what happens when a project is opened with an embedded profile that differs from the working space below. Preserve keeps the file's own profile untouched (this app's original behavior); Convert to Working Space remaps it right after loading. A project missing a profile outright is Ask When Opening's own, separately-scoped dialog, not this."
+          >
+            Color Management Policy
+            <select
+              value={colorManagementPolicy}
+              disabled={busy}
+              onChange={(event) =>
+                setColorManagementPolicyPersisted(event.target.value as "preserve" | "convert")
+              }
+            >
+              <option value="preserve">Preserve Embedded Profiles</option>
+              <option value="convert">Convert to Working Space</option>
+            </select>
+          </label>
+          <label
+            className="tools__slider"
+            title="The working space Color Management Policy's own Convert to Working Space option converts an opened project into."
+          >
+            Working Space
+            <select
+              value={defaultWorkingSpace}
+              disabled={busy || colorManagementPolicy !== "convert"}
+              onChange={(event) => setDefaultWorkingSpace(event.target.value as ColorProfile)}
+            >
+              <option value="srgb">sRGB</option>
+              <option value="adobeRgb1998">Adobe RGB (1998)</option>
+            </select>
           </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
