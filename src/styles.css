@@ -290,6 +290,31 @@ body {
   cursor: pointer;
 }
 
+/* Color Settings > OpenColorIO Panel: a real, expandable listing of the
+ * loaded config's own colour spaces and role mappings -- same slim strip
+ * shape as .color-mismatch-banner, but its own content can run longer
+ * than one line, so it wraps instead of staying single-line. */
+.ocio-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+.ocio-panel__section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.ocio-panel__label {
+  font-weight: 600;
+  color: var(--text);
+}
+
 .tools {
   display: flex;
   align-items: center;

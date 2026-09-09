@@ -826,6 +826,29 @@ export default function App() {
   const [ocioConfig, setOcioConfig] = useState<OcioConfigSummary | null>(null);
   const [ocioFromColorSpace, setOcioFromColorSpace] = useState("");
   const [ocioToColorSpace, setOcioToColorSpace] = useState("");
+  // Color Settings > OpenColorIO Working Space: which of the loaded
+  // config's own real roles (default/scene_linear/reference/...) OCIO
+  // Input Color Space Assignment's own "To" target follows -- a real
+  // functional effect, not a decorative label: picking a role here
+  // re-points ocioToColorSpace at that role's own real colour space
+  // (config.roles[role]), the same way this app's ICC Working Space
+  // select feeds Color Management Policy's Convert to Working Space.
+  const [ocioWorkingSpaceRole, setOcioWorkingSpaceRole] = useState("");
+  // Color Settings > OpenColorIO Panel: a real, expandable listing of the
+  // loaded config's own colour spaces and role mappings -- not a
+  // separate data source from OcioConfigSummary, just a fuller view of
+  // the exact same real data already parsed by load_ocio_config.
+  const [showOcioPanel, setShowOcioPanel] = useState(false);
+  const applyOcioWorkingSpaceRole = useCallback(
+    (role: string, config: OcioConfigSummary) => {
+      setOcioWorkingSpaceRole(role);
+      const target = config.roles[role];
+      if (target && config.colorspaceNames.includes(target)) {
+        setOcioToColorSpace(target);
+      }
+    },
+    [],
+  );
   const loadOcioConfig = useCallback(async () => {
     const selected = await open({ multiple: false, directory: false, filters: OCIO_CONFIG_FILTER });
     if (typeof selected !== "string") return;
@@ -835,13 +858,19 @@ export default function App() {
       setOcioConfig(summary);
       setOcioFromColorSpace(summary.colorspaceNames[0] ?? "");
       setOcioToColorSpace(summary.colorspaceNames[1] ?? summary.colorspaceNames[0] ?? "");
+      const firstRole = Object.keys(summary.roles)[0] ?? "";
+      if (firstRole) {
+        applyOcioWorkingSpaceRole(firstRole, summary);
+      } else {
+        setOcioWorkingSpaceRole("");
+      }
       setError(null);
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [applyOcioWorkingSpaceRole]);
   // runCommand below is a useCallback with a deliberately empty dependency
   // array (its identity has to stay stable -- it is called from all over
   // this component), so it cannot read colorManagementPolicy/
@@ -8090,6 +8119,35 @@ export default function App() {
               {ocioConfig ? `${ocioConfig.colorspaceNames.length} colour spaces` : "None"}
             </span>
           </label>
+          {ocioConfig && Object.keys(ocioConfig.roles).length > 0 && (
+            <label
+              className="tools__slider"
+              title="Color Settings > OpenColorIO Working Space: the loaded config's own real role this document treats as its OCIO working space -- picking one re-points OCIO Input Color Space Assignment's own To select at that role's real colour space"
+            >
+              OCIO Working Space
+              <select
+                value={ocioWorkingSpaceRole}
+                disabled={busy}
+                onChange={(event) => applyOcioWorkingSpaceRole(event.target.value, ocioConfig)}
+              >
+                {Object.entries(ocioConfig.roles).map(([role, colorSpace]) => (
+                  <option key={role} value={role}>
+                    {role} → {colorSpace}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {ocioConfig && (
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => setShowOcioPanel((shown) => !shown)}
+              title="Color Settings > OpenColorIO Panel: show or hide the loaded config's own real colour space and role listing"
+            >
+              {showOcioPanel ? "Hide OCIO Panel" : "Show OCIO Panel"}
+            </button>
+          )}
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select
@@ -11364,6 +11422,25 @@ export default function App() {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {showOcioPanel && ocioConfig && (
+        <div className="ocio-panel" role="region" aria-label="OpenColorIO Panel">
+          <div className="ocio-panel__section">
+            <span className="ocio-panel__label">Colour spaces:</span>
+            <span>{ocioConfig.colorspaceNames.join(", ")}</span>
+          </div>
+          {Object.keys(ocioConfig.roles).length > 0 && (
+            <div className="ocio-panel__section">
+              <span className="ocio-panel__label">Roles:</span>
+              <span>
+                {Object.entries(ocioConfig.roles)
+                  .map(([role, colorSpace]) => `${role} → ${colorSpace}`)
+                  .join(", ")}
+              </span>
+            </div>
+          )}
         </div>
       )}
 

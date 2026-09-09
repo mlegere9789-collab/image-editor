@@ -18739,6 +18739,50 @@ should — verified separately for both.
 
 Ask When Pasting flips to shipped (576/618).
 
+## Phase 320 — OpenColorIO Settings, Working Space, Panel
+
+The last three OpenColorIO items, built on the real engine and the
+`OcioConfigSummary` Phase 318 already parses — no new backend code, a
+real frontend surface over data already available.
+
+**OpenColorIO Working Space**: a real select, shown once a config is
+loaded and it defines at least one real role, listing the loaded
+config's own `role → colour space` pairs (`scene_linear → linear`,
+`default → display`, …). Not decorative — picking a role re-points OCIO
+Input Color Space Assignment's own "To" target at that role's real
+colour space (`applyOcioWorkingSpaceRole`), the same way this app's ICC
+Working Space select already feeds Color Management Policy's Convert
+to Working Space. A role whose own mapped colour space isn't actually
+in the config's `colorspaceNames` list is left alone rather than
+pointing "To" at a name that doesn't exist — a real, if unlikely,
+malformed-config case this project isn't going to guess past.
+
+**OpenColorIO Panel**: a real "Show/Hide OCIO Panel" toggle revealing
+a slim strip (mirroring Profile Mismatch Warnings' own banner shape)
+listing the loaded config's own colour space names and role mappings
+in full — not a second data source, the exact same `OcioConfigSummary`
+`load_ocio_config` already returns, just shown completely instead of
+only as a count.
+
+**OpenColorIO Settings**: the umbrella flips now that every real row
+under it — Configuration, Working Space, Panel, and Input Color Space
+Assignment — is built, the same "flips once its own real rows are all
+built" precedent Color Settings' own umbrella row already used.
+
+**Verified two ways.** No Rust changed this phase, so no new Rust
+tests — everything here is real frontend logic over already-parsed,
+already-tested backend data. A live Playwright session confirmed: the
+Working Space select and Panel toggle don't exist before a config
+loads; the select defaults to the config's own first role and
+immediately re-points OCIO To at that role's colour space; switching
+roles moves OCIO To to the new role's own colour space; and the Panel,
+once shown, displays the exact real colour space list and role
+mappings the loaded config carries. `npm run build` clean.
+
+OpenColorIO Settings, OpenColorIO Working Space, and OpenColorIO Panel
+all flip to shipped — every OpenColorIO/ACES item is now built
+(579/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
