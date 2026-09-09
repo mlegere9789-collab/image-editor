@@ -18126,6 +18126,70 @@ clean.
 
 Panel Groups flips to shipped (553/618).
 
+## Phase 310 — Panel Stacking
+
+The last real gap in this app's own panel-docking family: two panels
+sharing one dock zone (Layers and Channels, by far the common case,
+since they both default to the same "right" zone) had no way to trade
+height between them — each just rendered at its own natural content
+size, one under the other, with `.dock-zone`'s own `overflow-y: auto`
+quietly scrolling the whole column once both together ran long. A new
+`DockZoneSplitter` component sits between every consecutive pair of
+panels in a zone: drag it and the panel above grows or shrinks to an
+explicit pixel height, read fresh off that panel's own real rendered
+height at the start of each drag (not off whatever height was last
+saved, which is unset on the very first resize a zone ever gets — the
+same reasoning `DockablePanel`'s own grip already applies to *its* drag
+origin). The last panel in a zone is never given an explicit height of
+its own; it always takes `flex: 1 1 0` and absorbs whatever space is
+left, the standard "last pane fills the rest" convention every
+resizable-splitter layout uses. Explicit heights persist to
+`localStorage` (`legelabs.panelStackHeights`), the same
+per-installation-preference pattern every other panel setting already
+uses, and Lock Workspace (Phase 291) guards resizing exactly as it
+already guards dragging, grouping, and collapsing. A zone with only one
+panel in it — increasingly the common case once Panel Groups lets
+Layers and Channels combine into one — renders with none of this at
+all: no splitter, no forced flex, identical to Panel Docking's original
+single-panel behavior.
+
+One real bug caught by this phase's own live verification, fixed before
+landing: the very first version gave every non-last panel's own
+`.dockable-panel` a flat `height: 100%` so its content could stretch and
+`.panel`'s existing `overflow-y: auto` would do the scrolling. That
+works once a panel has an explicit, definite height — but *before* any
+drag, an untouched panel's own dock-zone slot is sized by
+`flex-basis: auto`, meaning its height is itself derived from its
+content's natural size. `height: 100%` against a parent whose height
+in turn depends on that same child is circular, and every engine
+resolves it by collapsing to the content's own reportable minimum —
+which, for a scrollable list under `overflow-y: auto`, is close to
+nothing. The Layers panel rendered as a 28px sliver instead of its real
+~540px of content the instant this phase's own CSS landed, caught by
+literally the first live measurement taken before ever attempting a
+drag. Fixed by only ever applying the stretch-to-fill treatment
+(`.dock-zone__slot--fill`) to a slot that already has a *definite*
+size — explicitly dragged/saved, or the always-fill last slot — leaving
+an untouched, auto-sized slot exactly the plain content-sized box Panel
+Docking always rendered.
+
+**Verified two ways.** No new Rust surface — pure frontend state, so
+the existing 1676 tests stay green unchanged. In their place, a live
+Playwright session (Chromium, against the same mocked
+`__TAURI_INTERNALS__` Panel Groups' own verification used) opened a
+document, measured the Layers panel's own real height before touching
+anything (538px, matching its actual content — this is where the
+height-collapse bug above was first caught, on a completely untouched
+page), confirmed it carried no `--fill` class yet, confirmed the
+Channels panel — the always-fill last slot — rendered at a reasonable
+476px rather than being starved, then dragged the splitter down 100px
+and confirmed the Layers panel grew to 638px, confirmed the exact
+`{"layers":638}` landed in `localStorage`, and — reloading the page and
+recreating a document from scratch — confirmed the same 638px height
+survived the reload. `npm run build` is clean.
+
+Panel Stacking flips to shipped (554/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

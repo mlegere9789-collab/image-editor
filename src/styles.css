@@ -67,6 +67,59 @@ body {
   border-left: 1px solid var(--border);
 }
 
+/* Window > Panel Stacking: only present when a dock zone holds two or
+ * more panels (a lone panel per zone -- the common case, especially once
+ * Panel Groups lets Layers and Channels combine into one -- renders with
+ * none of this, identical to Panel Docking's original behavior). Each
+ * slot gets the explicit height App.tsx computes (a live drag, a saved
+ * one, or content-sized until either exists); the panel inside stretches
+ * to fill it so its own `.panel`'s existing `overflow-y: auto` does the
+ * scrolling, rather than the slot clipping it or leaving dead space.
+ * Excluded while collapsed to an icon strip -- Collapsed Icon Panels
+ * already gives that its own fixed 32px width and full content height
+ * meaning, which stretching to fill an unrelated stack slot would fight. */
+.dock-zone__slot {
+  overflow: hidden;
+  min-height: 0;
+}
+/* Only a slot with a *definite* size -- the last one in a zone (fills
+ * whatever height is left) or one with its own explicit dragged/saved
+ * height -- stretches its panel to fill it. An auto-sized slot (nothing
+ * dragged yet) carries no `--fill` class at all and stays exactly the
+ * plain, content-sized box Panel Docking always used. */
+.dock-zone__slot--fill > .dockable-panel:not(.dockable-panel--collapsed) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.dock-zone__slot--fill > .dockable-panel:not(.dockable-panel--collapsed) > .panel {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.dock-zone__splitter {
+  flex: 0 0 auto;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+  touch-action: none;
+  position: relative;
+  z-index: 4;
+}
+.dock-zone__splitter::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+.dock-zone__splitter:hover::after,
+.dock-zone__splitter:active::after {
+  background: var(--accent);
+}
+
 /* Window > Panel Docking / Floating Panels: the drag handle every
  * dockable panel gets, and the floating variant's own window chrome. */
 .dockable-panel {

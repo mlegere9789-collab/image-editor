@@ -7,6 +7,7 @@ import LayerPanel from "./LayerPanel";
 import ChannelPanel, { channelQuery, type ChannelThumbs } from "./ChannelPanel";
 import DockablePanel, { type PanelPlacement } from "./DockablePanel";
 import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
+import DockZoneSplitter from "./DockZoneSplitter";
 import type {
   Adjustment,
   ApplyBlend,
@@ -161,6 +162,11 @@ const DEFAULT_PANEL_LAYOUT: Record<string, PanelPlacement> = {
 // together with -- `{ follower: leader }`, so the leader's own
 // PANEL_LAYOUT entry is what actually places the shared frame.
 const PANEL_GROUPS_STORAGE_KEY = "legelabs.panelGroups";
+// Window > Panel Stacking: explicit pixel height for a panel that shares
+// a dock zone with another one -- `{ panelId: heightPx }`. Only the
+// panels above the last one in a zone ever get an entry here; the last
+// always fills whatever space is left (see the dock-zone assembly below).
+const PANEL_STACK_HEIGHTS_STORAGE_KEY = "legelabs.panelStackHeights";
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -1763,6 +1769,31 @@ export default function App() {
         }
         try {
           localStorage.setItem(PANEL_GROUPS_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
+  // Window > Panel Stacking: explicit height for a panel sharing a dock
+  // zone with another one.
+  const [stackHeights, setStackHeights] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem(PANEL_STACK_HEIGHTS_STORAGE_KEY);
+      return saved ? (JSON.parse(saved) as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  });
+  const resizeStackedPanel = useCallback(
+    (id: string, height: number) => {
+      if (lockWorkspace) return;
+      setStackHeights((current) => {
+        const next = { ...current, [id]: height };
+        try {
+          localStorage.setItem(PANEL_STACK_HEIGHTS_STORAGE_KEY, JSON.stringify(next));
         } catch {
           // ignore
         }
@@ -7208,8 +7239,8 @@ export default function App() {
     groupsByLeader.set(leader, members);
   }
 
-  const leftDockedPanels: React.ReactNode[] = [];
-  const rightDockedPanels: React.ReactNode[] = [];
+  const leftDocked: { id: string; node: React.ReactNode }[] = [];
+  const rightDocked: { id: string; node: React.ReactNode }[] = [];
   const floatingPanels: React.ReactNode[] = [];
   for (const [leaderId, members] of groupsByLeader) {
     const placement = panelLayout[leaderId] ?? DEFAULT_PANEL_LAYOUT[leaderId] ?? { zone: "right" };
@@ -7235,10 +7266,59 @@ export default function App() {
           {members[0].content}
         </DockablePanel>
       );
-    if (placement.zone === "left") leftDockedPanels.push(node);
-    else if (placement.zone === "right") rightDockedPanels.push(node);
+    if (placement.zone === "left") leftDocked.push({ id: leaderId, node });
+    else if (placement.zone === "right") rightDocked.push({ id: leaderId, node });
     else floatingPanels.push(node);
   }
+
+  // Window > Panel Stacking: when two or more panels share a dock zone,
+  // give every one but the last an explicit, independently resizable
+  // height (a live drag or a previous session's saved one; content-sized
+  // until either exists) and drop a draggable splitter between each pair
+  // -- the last panel always takes `flex: 1 1 0` to absorb whatever
+  // height is left, exactly the "last pane fills the rest" convention
+  // every resizable-splitter layout uses. A lone panel in a zone (by far
+  // the common case once Panel Groups lets the two combine into one) is
+  // untouched: no splitter, no forced flex, identical to Panel Docking's
+  // own original single-panel behavior.
+  const stackZone = (entries: { id: string; node: React.ReactNode }[]): React.ReactNode[] => {
+    if (entries.length <= 1) return entries.map((entry) => entry.node);
+    const out: React.ReactNode[] = [];
+    entries.forEach((entry, index) => {
+      const isLast = index === entries.length - 1;
+      const explicitHeight = stackHeights[entry.id];
+      // A slot only gets a *definite* size -- and so only gets the
+      // stretch-to-fill treatment .dock-zone__slot--fill drives -- once
+      // it is the last one (flex: 1 1 0 against .dock-zone's own real
+      // height) or has an explicit dragged/saved height of its own
+      // (flex: 0 0 Xpx). Before either exists, height:100% on a child
+      // whose own parent is itself sized by that same child's content
+      // (flex-basis: auto) is circular and collapses to near nothing --
+      // so an untouched, auto-sized slot stays exactly the plain,
+      // content-sized div Panel Docking always used, panel included.
+      const fill = isLast || explicitHeight !== undefined;
+      out.push(
+        <div
+          key={entry.id}
+          className={fill ? "dock-zone__slot dock-zone__slot--fill" : "dock-zone__slot"}
+          style={{
+            flex: isLast ? "1 1 0" : explicitHeight ? `0 0 ${explicitHeight}px` : "0 1 auto",
+            minHeight: 0,
+          }}
+        >
+          {entry.node}
+        </div>,
+      );
+      if (!isLast) {
+        out.push(
+          <DockZoneSplitter key={`split-${entry.id}`} onResize={(height) => resizeStackedPanel(entry.id, height)} />,
+        );
+      }
+    });
+    return out;
+  };
+  const leftDockedPanels = stackZone(leftDocked);
+  const rightDockedPanels = stackZone(rightDocked);
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
