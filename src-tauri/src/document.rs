@@ -502,20 +502,12 @@ fn encode_dithered(profile: ColorProfile, c: f64, dither: f64) -> u8 {
     (v * 255.0 + dither).round().clamp(0.0, 255.0) as u8
 }
 
-/// [`convert_profile_pixel`]'s own gamma-decode-then-matrix math, shared
-/// with [`Document::convert_to_profile`]'s own dithered per-pixel pass —
-/// everything up to (but not including) the final gamma-encode and
-/// rounding, which is the one step dithering changes. `None` when
-/// `from == to`, the identity case both callers handle themselves.
-fn convert_profile_linear(
-    from: ColorProfile,
-    to: ColorProfile,
-    [r, g, b]: [u8; 3],
-) -> Option<(f64, f64, f64)> {
-    if from == to {
-        return None;
-    }
-    let (lr, lg, lb) = match from {
+/// One profile's own gamma-decode-then-matrix-in half of a conversion:
+/// a byte RGB triple to CIE XYZ (D65-relative, Lindbloom's own published
+/// matrices). The shared first stage of every profile conversion below,
+/// and also how [`black_point_xyz`] measures a profile's own black.
+fn profile_to_xyz(profile: ColorProfile, [r, g, b]: [u8; 3]) -> (f64, f64, f64) {
+    let (lr, lg, lb) = match profile {
         ColorProfile::Srgb => (srgb_linearize(r), srgb_linearize(g), srgb_linearize(b)),
         ColorProfile::AdobeRgb1998 => (
             adobe_rgb_linearize(r),
@@ -523,7 +515,7 @@ fn convert_profile_linear(
             adobe_rgb_linearize(b),
         ),
     };
-    let (x, y, z) = match from {
+    match profile {
         ColorProfile::Srgb => (
             0.4124564 * lr + 0.3575761 * lg + 0.1804375 * lb,
             0.2126729 * lr + 0.7151522 * lg + 0.0721750 * lb,
@@ -534,8 +526,13 @@ fn convert_profile_linear(
             0.2973769 * lr + 0.6273491 * lg + 0.0752741 * lb,
             0.0270343 * lr + 0.0706872 * lg + 0.9911085 * lb,
         ),
-    };
-    Some(match to {
+    }
+}
+
+/// The matrix-out half: CIE XYZ to a profile's own linear (not yet
+/// gamma-encoded) RGB.
+fn xyz_to_profile_linear(profile: ColorProfile, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+    match profile {
         ColorProfile::Srgb => (
             3.2404542 * x - 1.5371385 * y - 0.4985314 * z,
             -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
@@ -546,7 +543,76 @@ fn convert_profile_linear(
             -0.9692660 * x + 1.8760108 * y + 0.0415560 * z,
             0.0134474 * x - 0.1183897 * y + 1.0154096 * z,
         ),
-    })
+    }
+}
+
+/// A profile's own black point in CIE XYZ — what pure black (`[0, 0, 0]`)
+/// in that profile's own RGB measures as once decoded and matrixed in.
+/// Both profiles this project models use a pure power-law (or
+/// power-law-with-a-linear-toe) gamma curve, and every one of those maps
+/// `0 -> 0` exactly, so this is `(0.0, 0.0, 0.0)` for both today — computed
+/// here rather than hard-coded, so [`apply_black_point_compensation`]
+/// stays correct on its own terms if a profile with a real, non-zero
+/// black point (a scanned or measured one, say) is ever added.
+fn black_point_xyz(profile: ColorProfile) -> (f64, f64, f64) {
+    profile_to_xyz(profile, [0, 0, 0])
+}
+
+/// The CIE standard illuminant D65's own XYZ, normalised to Y = 1 —
+/// this project's own common connection space white, matching the D65
+/// matrices [`profile_to_xyz`]/[`xyz_to_profile_linear`] already use.
+const D65_WHITE_XYZ: (f64, f64, f64) = (0.95047, 1.0, 1.08883);
+
+/// Edit > Convert to Profile > Use Black Point Compensation: rescales XYZ
+/// per channel so the source profile's own black maps exactly onto the
+/// destination's, and the shared D65 white stays fixed — the standard
+/// linear BPC every ICC-aware conversion offers, `X' = X * scale +
+/// offset` with `scale = (Xw - Xk_dst) / (Xw - Xk_src)` and `offset =
+/// Xk_dst - Xk_src * scale`. Falls back to the identity on any channel
+/// where `Xw == Xk_src` (a source black exactly at white — never true
+/// for a real profile, but division by zero is not a XYZ triple) rather
+/// than propagating a NaN into the whole pixel.
+fn apply_black_point_compensation(
+    (x, y, z): (f64, f64, f64),
+    src_black: (f64, f64, f64),
+    dst_black: (f64, f64, f64),
+) -> (f64, f64, f64) {
+    let scale_offset = |v: f64, xk_src: f64, xk_dst: f64, xw: f64| -> f64 {
+        let denom = xw - xk_src;
+        if denom == 0.0 {
+            return v;
+        }
+        let scale = (xw - xk_dst) / denom;
+        v * scale + (xk_dst - xk_src * scale)
+    };
+    (
+        scale_offset(x, src_black.0, dst_black.0, D65_WHITE_XYZ.0),
+        scale_offset(y, src_black.1, dst_black.1, D65_WHITE_XYZ.1),
+        scale_offset(z, src_black.2, dst_black.2, D65_WHITE_XYZ.2),
+    )
+}
+
+/// [`convert_profile_pixel`]'s own gamma-decode-then-matrix math, shared
+/// with [`Document::convert_to_profile`]'s own dithered per-pixel pass —
+/// everything up to (but not including) the final gamma-encode and
+/// rounding, which is the one step dithering changes. `None` when
+/// `from == to`, the identity case both callers handle themselves.
+fn convert_profile_linear(
+    from: ColorProfile,
+    to: ColorProfile,
+    [r, g, b]: [u8; 3],
+    bpc: bool,
+) -> Option<(f64, f64, f64)> {
+    if from == to {
+        return None;
+    }
+    let xyz = profile_to_xyz(from, [r, g, b]);
+    let xyz = if bpc {
+        apply_black_point_compensation(xyz, black_point_xyz(from), black_point_xyz(to))
+    } else {
+        xyz
+    };
+    Some(xyz_to_profile_linear(to, xyz))
 }
 
 /// Edit > Convert to Profile: one pixel's RGB converted from `from`'s own
@@ -555,9 +621,17 @@ fn convert_profile_linear(
 /// `from`, matrix into CIE XYZ, matrix out of XYZ into `to`'s own linear
 /// RGB, gamma-encode in `to`. Identity (returns the pixel unchanged) when
 /// `from == to`, matching Photoshop's own no-op there. Alpha is not
-/// touched by any caller of this — it is a pure RGB function.
-pub fn convert_profile_pixel(from: ColorProfile, to: ColorProfile, [r, g, b]: [u8; 3]) -> [u8; 3] {
-    match convert_profile_linear(from, to, [r, g, b]) {
+/// touched by any caller of this — it is a pure RGB function. `bpc` is
+/// Use Black Point Compensation — see [`apply_black_point_compensation`]
+/// for what it does and why it is a real, computed no-op for both
+/// profiles this project currently models.
+pub fn convert_profile_pixel(
+    from: ColorProfile,
+    to: ColorProfile,
+    [r, g, b]: [u8; 3],
+    bpc: bool,
+) -> [u8; 3] {
+    match convert_profile_linear(from, to, [r, g, b], bpc) {
         None => [r, g, b],
         Some((lr2, lg2, lb2)) => [
             encode_dithered(to, lr2, 0.0),
@@ -576,8 +650,9 @@ fn convert_profile_pixel_dithered(
     to: ColorProfile,
     [r, g, b]: [u8; 3],
     [dr, dg, db]: [f64; 3],
+    bpc: bool,
 ) -> [u8; 3] {
-    match convert_profile_linear(from, to, [r, g, b]) {
+    match convert_profile_linear(from, to, [r, g, b], bpc) {
         None => [r, g, b],
         Some((lr2, lg2, lb2)) => [
             encode_dithered(to, lr2, dr),
@@ -3997,12 +4072,17 @@ impl Document {
     /// updated to match — unlike Assign Profile, this is a real,
     /// numeric conversion, not just a relabel. A no-op, still updating
     /// the label, when `profile` already matches. Alpha is untouched.
-    pub fn convert_to_profile(&mut self, profile: ColorProfile) -> Option<Rect> {
+    /// `bpc` is Use Black Point Compensation — see
+    /// [`apply_black_point_compensation`] for what it does; a real,
+    /// computed no-op for both profiles this project currently models,
+    /// since both have a black point of exactly `(0, 0, 0)` XYZ.
+    pub fn convert_to_profile(&mut self, profile: ColorProfile, bpc: bool) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
             for layer in &mut self.layers {
                 for px in layer.pixels.chunks_exact_mut(CHANNELS) {
-                    let [r, g, b] = convert_profile_pixel(from, profile, [px[0], px[1], px[2]]);
+                    let [r, g, b] =
+                        convert_profile_pixel(from, profile, [px[0], px[1], px[2]], bpc);
                     px[0] = r;
                     px[1] = g;
                     px[2] = b;
@@ -4031,6 +4111,7 @@ impl Document {
         &mut self,
         profile: ColorProfile,
         seed: u32,
+        bpc: bool,
     ) -> Option<Rect> {
         if profile != self.profile {
             let from = self.profile;
@@ -4047,6 +4128,7 @@ impl Document {
                         profile,
                         [px[0], px[1], px[2]],
                         dither,
+                        bpc,
                     );
                     px[0] = r;
                     px[1] = g;
@@ -47308,14 +47390,15 @@ mod tests {
     #[test]
     fn convert_profile_pixel_is_the_identity_when_the_profiles_match() {
         assert_eq!(
-            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30]),
+            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30], false),
             [10, 20, 30]
         );
         assert_eq!(
             convert_profile_pixel(
                 ColorProfile::AdobeRgb1998,
                 ColorProfile::AdobeRgb1998,
-                [10, 20, 30]
+                [10, 20, 30],
+                false
             ),
             [10, 20, 30]
         );
@@ -47329,7 +47412,8 @@ mod tests {
             convert_profile_pixel(
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
-                [255, 255, 255]
+                [255, 255, 255],
+                false
             ),
             [255, 255, 255]
         );
@@ -47337,7 +47421,8 @@ mod tests {
             convert_profile_pixel(
                 ColorProfile::Srgb,
                 ColorProfile::AdobeRgb1998,
-                [128, 128, 128]
+                [128, 128, 128],
+                false
             ),
             [127, 127, 127]
         );
@@ -47352,7 +47437,12 @@ mod tests {
         // own, larger green primary -- lands on Adobe RGB's own
         // (144, 255, 60).
         assert_eq!(
-            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::AdobeRgb1998, [0, 255, 0]),
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [0, 255, 0],
+                false
+            ),
             [144, 255, 60]
         );
         // Converting that value back to sRGB round-trips to within one
@@ -47362,8 +47452,110 @@ mod tests {
             ColorProfile::AdobeRgb1998,
             ColorProfile::Srgb,
             [144, 255, 60],
+            false,
         );
         assert_eq!(back, [0, 255, 1]);
+    }
+
+    #[test]
+    fn black_point_compensation_is_a_pixel_no_op_for_both_profiles_this_project_models() {
+        // Both sRGB and Adobe RGB (1998) here use a pure power-law (or
+        // power-law-with-linear-toe) gamma curve, which maps byte 0 to
+        // linear 0.0 exactly, which the D65 matrices then map to XYZ
+        // (0.0, 0.0, 0.0) exactly -- so every real profile pair this
+        // project currently models shares the same (0, 0, 0) black
+        // point, and turning BPC on must not change a single byte of a
+        // real conversion. Every case from the three tests above,
+        // repeated with `bpc: true`, must produce the identical result.
+        assert_eq!(
+            convert_profile_pixel(ColorProfile::Srgb, ColorProfile::Srgb, [10, 20, 30], true),
+            [10, 20, 30]
+        );
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [255, 255, 255],
+                true
+            ),
+            [255, 255, 255]
+        );
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [128, 128, 128],
+                true
+            ),
+            [127, 127, 127]
+        );
+        assert_eq!(
+            convert_profile_pixel(
+                ColorProfile::Srgb,
+                ColorProfile::AdobeRgb1998,
+                [0, 255, 0],
+                true
+            ),
+            [144, 255, 60]
+        );
+        let back = convert_profile_pixel(
+            ColorProfile::AdobeRgb1998,
+            ColorProfile::Srgb,
+            [144, 255, 60],
+            true,
+        );
+        assert_eq!(back, [0, 255, 1]);
+    }
+
+    #[test]
+    fn black_point_xyz_measures_exactly_zero_for_both_profiles() {
+        // The premise the no-op test above rests on, confirmed directly
+        // rather than only inferred from its own passing.
+        assert_eq!(black_point_xyz(ColorProfile::Srgb), (0.0, 0.0, 0.0));
+        assert_eq!(black_point_xyz(ColorProfile::AdobeRgb1998), (0.0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn apply_black_point_compensation_maps_a_real_non_zero_black_onto_the_destinations_own() {
+        // Neither profile this project ships has a non-zero black point
+        // to exercise this against live, so the algorithm itself is
+        // proven directly, against a synthetic pair of black points --
+        // hand-computed against the standard linear BPC formula (`X' =
+        // X * scale + offset`, `scale = (Xw - Xk_dst) / (Xw - Xk_src)`,
+        // `offset = Xk_dst - Xk_src * scale`) rather than against this
+        // function's own code.
+        let src_black = (0.01, 0.012, 0.008);
+        let dst_black = (0.02, 0.018, 0.015);
+        // Black itself must map exactly onto the destination's own black.
+        assert_eq!(
+            apply_black_point_compensation(src_black, src_black, dst_black),
+            dst_black
+        );
+        // D65 white (the PCS white every conversion here shares) must
+        // stay fixed regardless of either profile's own black point --
+        // BPC only ever moves the black end of the scale.
+        let (wx, wy, wz) = D65_WHITE_XYZ;
+        let (wx2, wy2, wz2) = apply_black_point_compensation(D65_WHITE_XYZ, src_black, dst_black);
+        assert!((wx2 - wx).abs() < 1e-9);
+        assert!((wy2 - wy).abs() < 1e-9);
+        assert!((wz2 - wz).abs() < 1e-9);
+        // A point halfway between this source's own black and the D65
+        // white lands halfway between the destination's own black and
+        // that same white, on every channel -- BPC is linear.
+        let halfway = (
+            (src_black.0 + wx) / 2.0,
+            (src_black.1 + wy) / 2.0,
+            (src_black.2 + wz) / 2.0,
+        );
+        let expected = (
+            (dst_black.0 + wx) / 2.0,
+            (dst_black.1 + wy) / 2.0,
+            (dst_black.2 + wz) / 2.0,
+        );
+        let (hx, hy, hz) = apply_black_point_compensation(halfway, src_black, dst_black);
+        assert!((hx - expected.0).abs() < 1e-9);
+        assert!((hy - expected.1).abs() < 1e-9);
+        assert!((hz - expected.2).abs() < 1e-9);
     }
 
     #[test]
@@ -47380,12 +47572,25 @@ mod tests {
     fn convert_to_profile_remaps_every_layers_own_pixels_and_updates_the_label() {
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
-        doc.convert_to_profile(ColorProfile::AdobeRgb1998);
+        doc.convert_to_profile(ColorProfile::AdobeRgb1998, false);
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
         // Converting to the profile already in effect is a documented
         // no-op on the pixels, even though it still re-confirms the label.
-        doc.convert_to_profile(ColorProfile::AdobeRgb1998);
+        doc.convert_to_profile(ColorProfile::AdobeRgb1998, false);
+        assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
+    }
+
+    #[test]
+    fn convert_to_profile_with_black_point_compensation_matches_without_for_this_projects_profiles()
+    {
+        // The same conversion as the test above, with `bpc: true` --
+        // must land on the identical bytes, for the same reason
+        // black_point_compensation_is_a_pixel_no_op_... does.
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
+        doc.convert_to_profile(ColorProfile::AdobeRgb1998, true);
+        assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 60, 255]);
     }
 
@@ -47402,7 +47607,7 @@ mod tests {
         // byte the undithered conversion already does.
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
-        doc.convert_to_profile_dithered(ColorProfile::AdobeRgb1998, 2);
+        doc.convert_to_profile_dithered(ColorProfile::AdobeRgb1998, 2, false);
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![144, 255, 59, 255]);
     }
@@ -47411,7 +47616,7 @@ mod tests {
     fn convert_to_profile_dithered_is_a_pixel_no_op_when_the_profile_already_matches() {
         let mut doc = Document::new(1, 1).unwrap();
         doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
-        doc.convert_to_profile_dithered(ColorProfile::Srgb, 2);
+        doc.convert_to_profile_dithered(ColorProfile::Srgb, 2, false);
         assert_eq!(doc.profile(), ColorProfile::Srgb);
         assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
     }

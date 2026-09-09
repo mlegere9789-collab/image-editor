@@ -18248,6 +18248,75 @@ name above was grepped directly against `document.rs` before being
 claimed), not on anything new built here. Four rows flip to shipped
 (558/618).
 
+## Phase 312 — Black Point Compensation
+
+Color Settings' last real gap: Convert to Profile always did what
+amounts to Relative Colorimetric rendering, with no way to also apply
+Black Point Compensation, the standard linear rescale that keeps a
+source profile's own black from washing out (or clipping) against a
+destination whose own black point differs. `apply_black_point_compensation`
+implements the real formula — `X' = X * scale + offset`, `scale = (Xw
+- Xk_dst) / (Xw - Xk_src)`, `offset = Xk_dst - Xk_src * scale` — on the
+CIE XYZ intermediate every conversion already passes through, between
+the existing gamma-decode-and-matrix-in step (now its own
+`profile_to_xyz`) and matrix-out step (`xyz_to_profile_linear`).
+`black_point_xyz` measures a profile's own black point by actually
+converting its `[0, 0, 0]` rather than assuming it, and a new `bpc: bool`
+threads through `convert_to_profile`/`convert_to_profile_dithered` down
+to `convert_profile_pixel`, exposed as a real checkbox next to Use
+Dither in the toolbar.
+
+Traced through by hand before writing a line of UI: both sRGB and Adobe
+RGB (1998) use a pure power-law (sRGB with a short linear toe below
+0.04045) gamma curve, and every power law maps `0 -> 0` exactly — so
+`black_point_xyz` returns `(0.0, 0.0, 0.0)` for both profiles this
+project ships, always. With source and destination black both at
+exact zero, BPC's own scale collapses to `Xw / Xw = 1` and its offset
+to `0 - 0 * 1 = 0` on every channel — the identity. This is not a
+shortcut taken to avoid building the real thing; it is what the real
+thing computes, live, for the actual profiles in this app, confirmed
+three separate ways in the test suite: `black_point_xyz` returns exact
+zero for both profiles directly; every existing profile-conversion
+test (identity, neutral, saturated-colour, round-trip) re-run with
+`bpc: true` lands on the exact same bytes as without it; and a
+synthetic test exercises `apply_black_point_compensation` in isolation
+against hand-computed values with two genuinely different, non-zero
+black points (confirming black maps to black, white stays fixed, and a
+halfway point lands exactly halfway between the two destinations'
+black and the shared white) — proof the algorithm itself is real and
+correct on its own terms, independent of whether this app's own two
+profiles ever exercise the non-trivial case.
+
+Conversion Engine and Rendering Intent, the two rows immediately above
+Black Point Compensation, get the opposite treatment — a documented
+scope cut rather than a built (if inert) toggle, and for a reason
+specific to each. Conversion Engine picks between vendor CMM
+implementations (Adobe ACE, Apple ColorSync, Microsoft ICM) of the same
+underlying maths; this project has exactly one implementation and no
+second, independently engineered one to switch to. Rendering Intent's
+four options only diverge given real, profile-specific gamut-compression
+tables this project's own matrix-only profiles carry none of — what
+this app already does unconditionally *is* Relative Colorimetric,
+Absolute Colorimetric would be byte-identical to it here (both profiles
+share the same D65 white point, and Absolute differs from Relative only
+by *not* correcting for a white-point mismatch that does not exist
+between them), and Perceptual/Saturation would need fabricated
+compression curves. A dropdown mixing two renamed-but-identical options
+with two invented ones would be worse than not building one — unlike
+Black Point Compensation, where the real algorithm and this project's
+own real profiles happen to agree, not conflict.
+
+**Verified two ways.** `document.rs` gained four tests: `black_point_xyz`
+against both profiles directly, every existing profile-conversion case
+re-run with BPC on, and `apply_black_point_compensation` in isolation
+against a synthetic non-zero black-point pair. `cargo fmt`, `cargo
+clippy --all-targets -- -D warnings`, and `npm run build` are all
+clean.
+
+**1680 Rust tests total** (1676 → 1680, 1673 lib + 7 pipeline).
+
+Black Point Compensation flips to shipped (559/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

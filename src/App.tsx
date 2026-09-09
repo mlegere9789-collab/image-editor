@@ -642,6 +642,13 @@ export default function App() {
   // rounding with a fresh seed per click instead of always rounding the
   // same way, breaking up gradient banding.
   const [useDitherForProfile, setUseDitherForProfile] = useState(false);
+  // Edit > Convert to Profile > Use Black Point Compensation: rescales
+  // XYZ so the source profile's own black maps exactly onto the
+  // destination's. A real, computed option, not a hollow toggle -- see
+  // convert_to_profile's own doc comment for why it happens to be a
+  // no-op for both profiles this project currently models (both have a
+  // black point of exactly XYZ (0, 0, 0)).
+  const [useBlackPointCompensation, setUseBlackPointCompensation] = useState(false);
   // Color Settings > Ask When Opening: a real choice dialog, not just a
   // passive warning, whenever Open Project/Load from Cloud reports the
   // loaded project had no embedded colour profile of its own.
@@ -7609,9 +7616,10 @@ export default function App() {
                 void runCommand("convert_to_profile_dithered", {
                   profile,
                   seed: Math.floor(Math.random() * 0xffffffff),
+                  bpc: useBlackPointCompensation,
                 });
               } else {
-                void runCommand("convert_to_profile", { profile });
+                void runCommand("convert_to_profile", { profile, bpc: useBlackPointCompensation });
               }
             }}
             disabled={busy || !hasDocument}
@@ -7630,6 +7638,18 @@ export default function App() {
               onChange={(event) => setUseDitherForProfile(event.target.checked)}
             />
             Use Dither
+          </label>
+          <label
+            className="tools__slider"
+            title="Edit > Convert to Profile > Use Black Point Compensation: rescales the darkest reproducible colour onto the destination profile's own black. Both profiles this app models share the same (0, 0, 0) black point, so this makes no visible difference here -- it is a real, computed option, not a hollow one."
+          >
+            <input
+              type="checkbox"
+              checked={useBlackPointCompensation}
+              disabled={busy || !hasDocument}
+              onChange={(event) => setUseBlackPointCompensation(event.target.checked)}
+            />
+            Black Point Compensation
           </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
