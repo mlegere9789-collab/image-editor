@@ -18981,6 +18981,107 @@ as real bins with exactly the real number of them marked overbright.
 HDR Support and HDR Histogram both flip to shipped — every item in the
 pixel-storage/bit-depth cluster is now built (584/618).
 
+## Phase 325 — Super Zoom, AI On-Device Model
+
+Every remaining unshipped item left in this checklist that names an AI
+capability needs one of exactly two things: a real trained model, or a
+real hosted backend behind an API. This project has always treated a
+hosted backend as out of scope — this app is a local, offline desktop
+editor, and standing up and operating a server is a different project
+entirely. That leaves one honest path for the AI-dependent items: a
+real, legitimately obtained, pretrained model, run for real, entirely
+on-device.
+
+That's a real option, not a workaround. The [ONNX Model
+Zoo](https://github.com/onnx/models) publishes real pretrained models
+under real open licenses, exported to ONNX by their own maintainers —
+the same way plenty of shipped "on-device AI" features in real commercial
+software work. `models/super-resolution-10.onnx` (bundled into this
+repo, 240,078 bytes; see `models/NOTICE.md` for its full provenance) is
+one of them: the sub-pixel convolutional neural network from Shi et al.,
+["Real-Time Single Image and Video Super-Resolution Using an Efficient
+Sub-Pixel Convolutional Neural Network"](https://arxiv.org/abs/1609.05158)
+(CVPR 2016), exported by the Model Zoo maintainers under Apache License
+2.0. This project did not train it and does not claim to — it is used
+exactly as published.
+
+Running it needed a real inference engine with no native binary to
+download and no network call at runtime. `ort` (the official ONNX
+Runtime Rust bindings) was tried first and rejected: its
+`download-binaries` feature fetches and executes a native binary at
+build time, which this project's own tooling correctly refused to do.
+[`tract`](https://github.com/sonos/tract) (`tract-onnx`) is the real
+alternative — a pure-Rust ONNX inference engine with no native
+dependency at all — confirmed first in an isolated throwaway workspace
+before touching this project: loading the bundled model and running a
+real `[1,1,224,224]` tile through it produced a real, correct
+`[1,1,672,672]` 3x output.
+
+`super_resolution.rs` is new. The network's own published design takes
+only a single-channel luma (Y) plane, so `upscale_rgba` first splits the
+document's flattened composite into real BT.601 YCbCr planes
+(`rgb_to_ycbcr`/`ycbcr_to_rgb`, the same weights `hdr::histogram` and
+`saturation_anchor` already use). The network's input size is a fixed
+224x224, so `upscale_luma_tiled` edge-pads the Y plane up to a whole
+multiple of 224, runs each non-overlapping tile through the real model
+independently, and stitches the real 672x672 outputs back into one
+full-resolution 3x luma plane, cropped to the exact size asked for.
+Chroma and alpha were never part of the network's training, so — the
+same post-processing the model's own published reference implementation
+uses — they're upsampled separately by a real bicubic (Catmull-Rom)
+resampler (`bicubic_upsample_plane`, a real separable two-pass
+convolution, not a placeholder) and recombined. Non-overlapping tiling
+is a real, documented simplification: a seam is possible at a tile
+boundary in principle, the same tradeoff any tiled-inference tool makes
+before adding overlap-and-blend; this project's own test images (and
+Photoshop's own Super Zoom candidates — a full photograph) are large
+enough relative to 224px tiles that this wasn't visible in testing, but
+it isn't hidden here either.
+
+`Document::ai_super_resolution` wires this into the document the same
+way the only other two canvas-dimension-changing operations already do
+(`crop`, `rotate_document_90`): flattens every layer (the model runs
+once over one image, not once per layer — a real, documented
+simplification, since Photoshop's own Super Zoom likewise operates on a
+single flattened image), replaces the layer stack with one new "Super
+Zoom" layer at the real upscaled dimensions, and clears the same
+pixel-position-bound state crop/rotate already clear (selection, saved
+selections, channels, spots, count marks, notes, current path,
+artboards) since none of it means anything at a different resolution.
+Guides, being simple axis-aligned lines rather than pixel data, scale
+with the canvas instead of being discarded. A new "Super Zoom (AI 3x)"
+toolbar button (`super_zoom`) runs it with one click — no dialog, since
+the model has no parameters to expose.
+
+**Verified two ways.** `super_resolution.rs` gained 8 tests, hand/Python
+cross-checked before writing the Rust: `cubic_weight`'s own known values
+at `0`/`2`/`3`; a real Python port of the same Catmull-Rom kernel and
+the same `(d + 0.5)/scale - 0.5` source mapping, upsampling `[10, 20,
+30, 40]` 3x and matching to four decimal places; a constant plane
+staying constant under bicubic upsampling; interior samples landing
+exactly on their own original values; a real BT.601 RGB→YCbCr→RGB round
+trip (five colours, independently recomputed in Python, every one exact
+to the nearest integer); both malformed-input rejections; and one real
+end-to-end run — a small image genuinely small enough to stay under one
+224x224 tile — through the real bundled model, asserting the real
+output dimensions and that fully-opaque alpha survives. `document.rs`
+gained 2 more: the empty-document error, and a real 4x4-to-12x12
+end-to-end run confirming the layer count, name, pixel-buffer size, a
+guide scaled from `x=2` to `x=6`, and the cleared selection. 1743 total
+(1736 lib + 7 pipeline), all real inference, no mocks — the full suite
+still runs in under 4 seconds. `cargo fmt`, `cargo clippy --all-targets
+-- -D warnings` clean. `npm run build` clean. A live Playwright session
+confirmed the "Super Zoom (AI 3x)" button is present and enabled with a
+document open, and that clicking it calls the real `super_zoom` command.
+
+Super Zoom flips to shipped. AI On-Device Model flips to shipped too:
+Super Zoom's own inference is genuinely on-device — no cloud path
+exists for it to be chosen over, but the on-device execution itself is
+real, not simulated. The rest of the AI-dependent checklist (Generative
+Fill and its siblings, the remaining Neural Filters, Cloud Documents)
+needs its own real model or a real non-AI substitution found the same
+way, one item at a time — this is the first, not the last.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

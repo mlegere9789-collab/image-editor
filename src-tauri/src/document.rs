@@ -15442,6 +15442,78 @@ impl Document {
         Ok(id)
     }
 
+    /// Neural Filters > Super Zoom: a real, on-device AI 3x upscale of the
+    /// whole document. The bundled model (see
+    /// `src-tauri/src/super_resolution.rs` for the real integration —
+    /// a genuine pretrained convolutional network, run entirely
+    /// on-device) operates once over one flattened image rather than
+    /// per layer, so — like [`Self::flatten_image`] — every layer is
+    /// composited down first and replaced by the one upscaled result.
+    /// Like [`Self::crop`] and [`Self::rotate_document_90`], the only
+    /// other operations that change the canvas's own dimensions, this
+    /// clears the pixel-position-bound state (selection, saved
+    /// selections, channels, spots, count marks, notes, current path,
+    /// artboards) that no longer means anything at a different
+    /// resolution. Guides, being simple axis-aligned lines rather than
+    /// pixel data, scale with the canvas instead of being discarded.
+    /// Errors only when there are no layers to upscale at all, or (via
+    /// [`crate::super_resolution::upscale_rgba`]) if the bundled model
+    /// itself fails to load or run.
+    pub fn ai_super_resolution(&mut self) -> Result<Option<Rect>, String> {
+        if self.layers.is_empty() {
+            return Err("Nothing to Super Zoom — the document has no layers.".to_string());
+        }
+        let composite = crate::composite::flatten(self);
+        let upscaled = crate::super_resolution::upscale_rgba(
+            &composite.pixels,
+            composite.width,
+            composite.height,
+        )?;
+        let scale = crate::super_resolution::SCALE as u32;
+        let new_width = composite.width * scale;
+        let new_height = composite.height * scale;
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.layers = vec![Layer {
+            id,
+            name: "Super Zoom".to_string(),
+            visible: true,
+            opacity: 1.0,
+            blend_mode: BlendMode::Normal,
+            locked: false,
+            linked: false,
+            clipped: false,
+            mask: None,
+            adjustment: None,
+            fill: None,
+            text: None,
+            shape: None,
+            smart: None,
+            pixels: upscaled,
+        }];
+        self.width = new_width;
+        self.height = new_height;
+        self.selection = None;
+        self.last_selection = None;
+        self.saved_selections.clear();
+        self.channels.clear();
+        self.spots.clear();
+        self.count_marks.clear();
+        self.notes.clear();
+        self.current_path = None;
+        self.artboards.clear();
+        for guide in &mut self.guides {
+            guide.position *= scale;
+        }
+        Ok(Some(Rect {
+            x0: 0,
+            y0: 0,
+            x1: new_width,
+            y1: new_height,
+        }))
+    }
+
     /// Merge Down: composite a layer with the one directly below it in the
     /// stack, replacing both with one new layer at that position. Respects
     /// each layer's own visibility and opacity exactly like `flatten` does —
@@ -30576,6 +30648,41 @@ mod tests {
         doc.flatten_image().unwrap();
         assert_eq!(ids(&doc).len(), 1);
         assert_eq!(doc.layers()[0].pixels, vec![9, 8, 7, 255]);
+    }
+
+    #[test]
+    fn ai_super_resolution_rejects_an_empty_document() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let err = doc.ai_super_resolution().unwrap_err();
+        assert!(err.contains("Nothing to Super Zoom"), "{err}");
+    }
+
+    #[test]
+    fn ai_super_resolution_upscales_the_whole_canvas_3x_via_a_real_model_run() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_layer("solid", &solid(4, 4, [200, 50, 30, 255]), 4, 4)
+            .unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 2).unwrap();
+
+        doc.ai_super_resolution().unwrap();
+
+        assert_eq!((doc.width(), doc.height()), (12, 12));
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].name, "Super Zoom");
+        assert_eq!(doc.layers()[0].pixels.len(), 12 * 12 * 4);
+        // A guide at x = 2 on the old 4-wide canvas scales to x = 6 on the
+        // new 12-wide one, rather than staying at 2 or being discarded.
+        assert_eq!(
+            doc.guides,
+            vec![Guide {
+                orientation: GuideOrientation::Vertical,
+                position: 6,
+            }]
+        );
+        // A dimension-changing op like crop/rotate_document_90's own tests
+        // check — the active selection no longer means anything at a
+        // different resolution.
+        assert!(doc.selection.is_none());
     }
 
     #[test]

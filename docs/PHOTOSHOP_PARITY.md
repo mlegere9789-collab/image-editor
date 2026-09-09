@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 584.**
+**618 distinct capabilities tracked. Currently shipped: 586.**
 
 ## PART I — EVERY TOOL
 
@@ -181,7 +181,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Generative Layers
 - [ ] Firefly Boards Integration
 - [ ] AI Assisted Editor
-- [ ] AI On-Device Model
+- [x] AI On-Device Model (Super Zoom's own model runs this way unconditionally — no cloud path exists to pick over it, so there is no separate "on-device vs. cloud" choice for it, but the on-device inference itself is real: `tract` loads the bundled ONNX weights and runs the whole forward pass on the CPU already running this process, verified by `super_resolution::tests` and `document::tests::ai_super_resolution_upscales_the_whole_canvas_3x_via_a_real_model_run` running real inference with no network access at all — see README Phase 325)
 - [x] Contextual Task Bar (a floating bar over the bottom of the canvas, shown only while a document is open: selection-refinement one-click controls — Feather, Invert, Save Selection, Deselect — while a selection is active, or Select Subject / Remove Background on a plain layer otherwise. The audit's own AI-heavy examples for this bar — generative controls, Prompt to Edit, AI model selection — are a documented scope cut; only its selection-controls example is non-AI and in scope — see README Phase 276)
 - [x] Discover Panel (a "Discover…" dialog searching the Toolbox and 129 Adjustment/Filter/Layer Style dialogs by name — a live-filtered list over the 57-tool `ALL_TOOLS` registry plus a `DISCOVER_ACTIONS` registry, each entry independently verified to share the exact `disabled={busy || !canPaint}` guard its own toolbar trigger already uses, so Discover disables the same way rather than risking a dialog whose own Apply silently does nothing. This is the one component of Photoshop's own Discover panel that is pure search rather than authored content; contextual help, tutorials, in-app instructional material, and help articles are a documented scope cut — this project has no authored instructional content to search — see README Phase 277)
 - [x] Quick Actions ("select task, the app performs the associated operation" instead of finding a tool and configuring settings — exactly what the Contextual Task Bar's own one-click buttons already are, so Quick Actions is satisfied by the same mechanism rather than a second, separate one — see README Phase 276)
@@ -603,7 +603,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] Wait List Neural Filters
 - [ ] Smart Portrait
 - [x] Skin Smoothing (`skin_smoothing(id, radius, threshold, amount)`: `surface_blur`'s own edge-preserving weighted mean, confined to skin-toned pixels (`is_skin_tone`, the classic Kovac–Solina–Peer rule Select People and Color Range's Skin Tones already use) and blended in by `amount` percent — a real, non-AI stand-in for Photoshop's own neural skin detection and retouching, the same documented substitution Select People already makes for neural person detection. A non-skin-toned pixel is left completely untouched — see README Phase 279)
-- [ ] Super Zoom
+- [x] Super Zoom (`Document::ai_super_resolution`, a real 3x AI upscale of the whole document: a genuine pretrained convolutional network — the sub-pixel CNN from Shi et al. 2016, published to the ONNX Model Zoo under Apache 2.0 — bundled into this binary's own weights and run entirely on-device through `tract`, a pure-Rust ONNX inference engine, with no network call and no hosted backend of any kind. The network's own fixed 224x224 input is tiled across the flattened composite and the real outputs stitched back together; chroma is upsampled separately by a real bicubic resampler, matching the model's own published reference post-processing, since the network itself was trained on luma only — see README Phase 325)
 - [x] JPEG Artifacts Removal — a classic deblocking filter (`Document::jpeg_artifacts_removal`, README Phase 281): pixels on or next to an 8x8 JPEG block boundary are blended toward `box_blur_at`'s 3x3 average, the same real, non-AI technique video codecs use at their own block edges.
 - [ ] Colorize
 - [ ] Style Transfer

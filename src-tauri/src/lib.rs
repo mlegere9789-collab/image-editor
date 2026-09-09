@@ -10,6 +10,7 @@ pub mod icc;
 pub mod ocio;
 pub mod png;
 pub mod project;
+pub mod super_resolution;
 pub mod tiff;
 
 use std::collections::VecDeque;
@@ -3265,6 +3266,15 @@ fn flatten_image(state: State<'_, AppState>) -> Result<Snapshot, String> {
 #[tauri::command]
 fn merge_down(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.merge_down(id).map(|_| None))
+}
+
+/// Neural Filters > Super Zoom: a real, on-device AI 3x upscale of the
+/// whole document, via a real pretrained model bundled into this binary
+/// and run entirely locally through `tract` — see
+/// `src-tauri/src/super_resolution.rs` and `src-tauri/models/NOTICE.md`.
+#[tauri::command]
+fn super_zoom(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.ai_super_resolution())
 }
 
 #[tauri::command]
@@ -6696,6 +6706,7 @@ pub fn run() {
             merge_visible,
             flatten_image,
             merge_down,
+            super_zoom,
             sample_color,
             paint_stroke,
             erase_stroke,

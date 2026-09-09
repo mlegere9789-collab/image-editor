@@ -8413,6 +8413,14 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => void runCommand("super_zoom")}
+            disabled={busy || !hasDocument}
+            title="Neural Filters > Super Zoom — real on-device AI 3x upscale (a genuine pretrained model, bundled and run entirely locally, not a hosted service)"
+          >
+            Super Zoom (AI 3x)
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowRotateDialog(true)}
             disabled={busy || !canPaint}
             title="Edit > Transform > Rotate (any angle, selected layer)"
