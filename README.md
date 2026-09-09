@@ -18884,6 +18884,51 @@ widens. 32 Bits/Channel stays unchecked — real state, no real output
 of its own yet, since it currently falls back to the same path 16-bit
 uses (581/618).
 
+## Phase 323 — 32 Bits/Channel
+
+Closes the gap Phase 322 left open: `BitDepth::ThirtyTwo` had real
+state but no output of its own, silently reusing the 16-bit path.
+PNG — this project's only other export format — cannot hold float
+samples at all; that's a real limitation of the format itself, not
+something a wider integer encoding can paper over the way 16-bit
+widening did for the 8-to-16 case. 32-bit needed a genuinely different,
+real format.
+
+`tiff.rs` is new: `encode_pixels_32f` normalizes each RGBA8 byte to
+`0.0..=1.0` (`byte / 255.0`) and writes it as a real IEEE 754 `f32`
+sample, encoded through the `image` crate's own `tiff` feature
+(newly added — confirmed directly, before writing any of this, that
+`image::codecs::tiff::TiffEncoder` really does support
+`ExtendedColorType::Rgba32F` and round-trips exactly through the same
+crate's own decoder) — a genuine 32-bit-float-per-channel TIFF any
+real reader reports as such, not a relabelled anything.
+
+A new, separate command, `export_tiff_32f` (`export_tiff_32f_to` is
+the real, directly-testable function underneath, the same split
+`export` itself uses) — refuses with a real, clear error unless the
+document is actually set to 32 Bits/Channel, the same real, meaningful
+gating Photoshop's own format availability has on its document mode.
+This is what makes ThirtyTwo genuinely distinguishing now: it's the
+one mode this real export command actually succeeds in. A real "Export
+TIFF (32-bit float)…" button appears in the toolbar only once the
+document's own bit depth is set to 32 — not merely disabled, absent,
+mirroring how this project's other mode-gated controls already behave
+(OCIO's own controls before a config loads, for one).
+
+**Verified two ways.** `tiff.rs` gained 2 tests (exact byte-to-float
+normalization decoded back through the real `image` crate's own
+float-TIFF path, a two-pixel round trip); `lib.rs` gained 2 more
+(`export_tiff_32f_to` writing a real file when the document is 32-bit,
+and refusing — file never written — for both the default Eight and an
+explicit Sixteen) — 1728 total (1721 lib + 7 pipeline, up from 1717
+lib). `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
+`npm run build` all clean. In the frontend, a live
+Playwright session confirmed the Export TIFF button is absent at the
+default 8-bit depth, appears the instant the document switches to 32
+Bits/Channel, and sends the real chosen file path to `export_tiff_32f`.
+
+32 Bits/Channel flips to shipped (582/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

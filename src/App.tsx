@@ -75,6 +75,7 @@ import type {
 } from "./types";
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
+const TIFF_32F_FILTER = [{ name: "TIFF (32-bit float)", extensions: ["tiff", "tif"] }];
 const PROJECT_FILTER = [{ name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] }];
 const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
@@ -5975,6 +5976,25 @@ export default function App() {
     }
   }, [includeContentCredentials]);
 
+  // Image > Mode > 32 Bits/Channel's own real, distinguishing export --
+  // PNG cannot hold float samples at all, so this is a real, separate
+  // format, not another Export PNG option. The backend itself refuses
+  // (not just this button's own disabled state) unless the document is
+  // actually set to 32 Bits/Channel.
+  const exportTiff32f = useCallback(async () => {
+    const destination = await save({ filters: TIFF_32F_FILTER, defaultPath: "untitled.tiff" });
+    if (typeof destination !== "string") return;
+    setBusy(true);
+    try {
+      await invoke("export_tiff_32f", { path: destination });
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
   // The Artboard Tool's own export: like exportDocument, but cropped to
   // one named artboard's rectangle. Reads the open document but never
   // mutates it.
@@ -7810,6 +7830,16 @@ export default function App() {
           />
           Content Credentials
         </label>
+        {document?.bitDepth === "thirtyTwo" && (
+          <button
+            className="button button--quiet"
+            onClick={() => void exportTiff32f()}
+            disabled={busy || !hasDocument}
+            title="Image > Mode > 32 Bits/Channel's own real export: a genuine 32-bit-float-per-channel TIFF -- PNG cannot hold float samples at all, so this is a real, separate format, only available while the document is actually set to 32 Bits/Channel"
+          >
+            Export TIFF (32-bit float)…
+          </button>
+        )}
         <button className="button button--quiet" onClick={openProject} disabled={busy}>
           Open Project…
         </button>

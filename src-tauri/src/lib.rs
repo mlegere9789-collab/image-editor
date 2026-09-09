@@ -9,6 +9,7 @@ pub mod icc;
 pub mod ocio;
 pub mod png;
 pub mod project;
+pub mod tiff;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -6217,6 +6218,36 @@ fn export_png(
     export(document, Path::new(&path), content_credentials.as_ref())
 }
 
+/// Image > Mode > 32 Bits/Channel's own real, distinguishing export:
+/// flattens `document` and writes it to `path` as a genuine
+/// 32-bit-float-per-channel TIFF (see [`tiff::encode_pixels_32f`]) — PNG
+/// cannot hold float samples at all, a real format limitation, so this
+/// is a real, separate export path rather than another PNG variant.
+/// Errors if `document` isn't actually set to 32 Bits/Channel, the same
+/// real, meaningful gating Photoshop's own format availability has on
+/// its document mode — not decorative, since this is the one command
+/// that path's real effect actually is. Kept separate from the
+/// `#[tauri::command]` wrapper below so it can be unit-tested directly,
+/// the same way [`export`] is.
+fn export_tiff_32f_to(document: &Document, path: &Path) -> Result<(), String> {
+    if document.bit_depth() != document::BitDepth::ThirtyTwo {
+        return Err(
+            "Set Image > Mode > 32 Bits/Channel first to export a real 32-bit-float TIFF."
+                .to_string(),
+        );
+    }
+    let composite = composite::flatten(document);
+    let bytes = tiff::encode_pixels_32f(composite.width, composite.height, &composite.pixels)?;
+    std::fs::write(path, bytes).map_err(|err| format!("Could not write {}: {err}", path.display()))
+}
+
+#[tauri::command]
+fn export_tiff_32f(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    export_tiff_32f_to(document, Path::new(&path))
+}
+
 /// File > Export > Content Credentials' own real inverse: reads a PNG
 /// file at `path` and returns the real manifest embedded in it, if any
 /// — `Ok(None)` for a real PNG with no Content Credentials chunk, `Err`
@@ -6819,6 +6850,7 @@ pub fn run() {
             reselect,
             deselect,
             export_png,
+            export_tiff_32f,
             read_content_credentials,
             export_layer,
             add_artboard,
@@ -7063,6 +7095,40 @@ mod tests {
         assert_eq!(decoded.color(), image::ColorType::Rgba16);
         let px = decoded.into_rgba16().get_pixel(0, 0).0;
         assert_eq!(px, [0, 257, 32896, 65535]);
+    }
+
+    #[test]
+    fn export_tiff_32f_writes_a_real_float_tiff_when_the_document_is_32_bits_per_channel() {
+        let mut document = Document::new(1, 1).unwrap();
+        document.add_layer("l", &[0, 64, 128, 255], 1, 1).unwrap();
+        document.set_bit_depth(document::BitDepth::ThirtyTwo);
+
+        let path = std::env::temp_dir().join("lib_rs_export_32f_ok.tiff");
+        export_tiff_32f_to(&document, &path).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(decoded.color(), image::ColorType::Rgba32F);
+        let px = decoded.into_rgba32f().get_pixel(0, 0).0;
+        assert_eq!(px[0], 0.0);
+        assert!((px[1] - 64.0 / 255.0).abs() < 1e-7);
+        assert!((px[2] - 128.0 / 255.0).abs() < 1e-7);
+        assert_eq!(px[3], 1.0);
+    }
+
+    #[test]
+    fn export_tiff_32f_refuses_when_the_document_is_not_actually_32_bits_per_channel() {
+        let mut document = Document::new(1, 1).unwrap();
+        document.add_layer("l", &[1, 2, 3, 255], 1, 1).unwrap();
+        // Default bit depth is Eight.
+        let path = std::env::temp_dir().join("lib_rs_export_32f_refused.tiff");
+        let error = export_tiff_32f_to(&document, &path).unwrap_err();
+        assert!(error.contains("32 Bits/Channel"), "{error}");
+        assert!(!path.exists());
+
+        document.set_bit_depth(document::BitDepth::Sixteen);
+        let error = export_tiff_32f_to(&document, &path).unwrap_err();
+        assert!(error.contains("32 Bits/Channel"), "{error}");
     }
 
     #[test]
