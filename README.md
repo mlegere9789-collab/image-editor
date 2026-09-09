@@ -18190,6 +18190,64 @@ survived the reload. `npm run build` is clean.
 
 Panel Stacking flips to shipped (554/618).
 
+## Phase 311 — PART XXX's remaining non-obvious recipes
+
+Four more rows from "Non-Obvious Things Photoshop Can Do," found the
+same way Phases 302-304 were: reading `photoshop-capability-audit.txt`'s
+own text for each row instead of assuming every one needed AI. As with
+those phases, none of these four gets a new one-click command — the
+audit's own recipe for each is itself a multi-step manual workflow,
+never a single deterministic filter — so what flips each row is
+confirming every one of the audit's own named ingredients already
+ships.
+
+**Turn CAD/PDF Drawings into Presentation Graphics** names eight steps:
+isolate linework, establish hierarchy, colorize surfaces, add textures,
+add vegetation, add people, add shadows, add labels. `find_edges`/
+`threshold` isolate linework exactly as they already do for Turn a
+Photograph into Linework; layer groups establish hierarchy;
+`selective_color` and ordinary fills colorize surfaces; `texturizer`
+adds textures; vegetation and people are composited in from the user's
+own imagery via masked image layers, the same way Create an
+Architectural Collage's own Trees/People/Cars already are; `drop_shadow`
+grounds them; a Text layer adds labels.
+
+**Change Seasons** names "color, masking, vegetation replacement and
+generative systems." Color and masking are `hue_saturation`,
+`color_balance`, `photo_filter`, `selective_color`, `gradient_map`, and
+every layer's own mask — all shipped. Vegetation replacement is
+ordinary masked compositing, or removing/repainting foliage with
+`content_aware_fill`/the Clone Stamp Tool — the same non-AI half of
+Remove an Entire Crowd's own recipe, reapplied here. "Generative
+systems," the recipe's newest ingredient, is Generative Fill — stays
+tracked separately under its own row (Phase 296's real client layer,
+still needing a real provider), the same carve-out Remove an Entire
+Crowd already uses for the same tool.
+
+**Change Time of Day** names "tonal/color manipulation and
+compositing," targeting Morning/Noon/Golden hour/Sunset/Night. Every
+tonal/color tool it needs already ships — `curves`, `levels`,
+`color_balance`, `photo_filter`, `gradient_map`, `selective_color` —
+and "compositing" is this app's own generic layer/mask/blend stack, the
+same machinery Create an Architectural Collage already relies on for
+adding a sun, a sky, or a light source as its own layer.
+
+**Change Weather** names four effects, each an already-shipped tool or
+small combination: Fog/Haze is a solid-colour or gradient fill layer
+blended in with Screen or Lighten; Rain is `add_noise` stretched into
+streaks with `motion_blur`, the same two filters this app's own Film
+Grain and Motion Blur presets already combine; Snow is `add_noise`'s
+own fine speckle, optionally through a Pattern fill layer; Dramatic
+Clouds is literally `clouds`/`difference_clouds`, already shipped
+verbatim and named for exactly this.
+
+No code changed in this phase and no new tests were needed — each row
+flips on the strength of confirming its own named ingredients are real,
+shipped, and tested elsewhere in this project's history (every function
+name above was grepped directly against `document.rs` before being
+claimed), not on anything new built here. Four rows flip to shipped
+(558/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
