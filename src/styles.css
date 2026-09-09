@@ -315,6 +315,26 @@ body {
   color: var(--text);
 }
 
+/* Image > Mode > HDR Histogram: real bin counts as bar heights, a
+ * distinct accent colour past the real in-gamut boundary marking real
+ * overbright content a normal 0-255 histogram has no bin for. */
+.hdr-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  height: 48px;
+}
+.hdr-histogram__bar {
+  flex: 1;
+  min-height: 1px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+}
+.hdr-histogram__bar--overbright {
+  background: #e0a030;
+}
+
 .tools {
   display: flex;
   align-items: center;

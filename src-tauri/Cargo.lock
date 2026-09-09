@@ -1513,6 +1513,7 @@ dependencies = [
 name = "image-editor"
 version = "0.1.0"
 dependencies = [
+ "bytemuck",
  "crc32fast",
  "image",
  "serde",

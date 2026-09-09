@@ -34,6 +34,8 @@ import type {
   FaceLandmarks,
   Fill,
   GuideOrientation,
+  HdrHistogram,
+  HdrSourceSummary,
   HistoryState,
   Ink,
   LevelsChannel,
@@ -76,6 +78,7 @@ import type {
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
 const TIFF_32F_FILTER = [{ name: "TIFF (32-bit float)", extensions: ["tiff", "tif"] }];
+const HDR_FILTER = [{ name: "Radiance HDR", extensions: ["hdr", "pic"] }];
 const PROJECT_FILTER = [{ name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] }];
 const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
@@ -875,6 +878,30 @@ export default function App() {
       setBusy(false);
     }
   }, [applyOcioWorkingSpaceRole]);
+  // Image > Mode > HDR Support / HDR Histogram: a real, decoded Radiance
+  // HDR (.hdr) image (kept server-side, like ocioConfig above) and a
+  // real histogram over its own real, unclamped luma range.
+  const [hdrSource, setHdrSource] = useState<HdrSourceSummary | null>(null);
+  const [hdrHistogram, setHdrHistogram] = useState<HdrHistogram | null>(null);
+  const HDR_HISTOGRAM_BIN_COUNT = 32;
+  const loadHdrSource = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: HDR_FILTER });
+    if (typeof selected !== "string") return;
+    setBusy(true);
+    try {
+      const summary = await invoke<HdrSourceSummary>("load_hdr_source", { path: selected });
+      setHdrSource(summary);
+      const histogram = await invoke<HdrHistogram>("hdr_histogram", {
+        binCount: HDR_HISTOGRAM_BIN_COUNT,
+      });
+      setHdrHistogram(histogram);
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
   // runCommand below is a useCallback with a deliberately empty dependency
   // array (its identity has to stay stable -- it is called from all over
   // this component), so it cannot read colorManagementPolicy/
@@ -7985,6 +8012,22 @@ export default function App() {
           </label>
           <label
             className="tools__slider"
+            title={`Image > Mode > HDR Support: imports a real Radiance .hdr file -- real scene-referred float samples that can genuinely exceed 1.0 (an "overbright" highlight no normal byte can represent), kept separate from this document's own 8-bit layer pipeline for real HDR Histogram analysis.${hdrSource ? ` Loaded: ${hdrSource.width}x${hdrSource.height}, max luma ${hdrSource.maxLuma.toFixed(2)}.` : " None loaded."}`}
+          >
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => void loadHdrSource()}
+              disabled={busy}
+            >
+              Import HDR (.hdr)…
+            </button>
+            <span className="tools__profileLabel">
+              {hdrSource ? `${hdrSource.width}×${hdrSource.height}` : "None"}
+            </span>
+          </label>
+          <label
+            className="tools__slider"
             title="Edit > Assign Profile: relabels the working space without touching a pixel"
           >
             Assign Profile
@@ -11519,6 +11562,32 @@ export default function App() {
               </span>
             </div>
           )}
+        </div>
+      )}
+
+      {hdrHistogram && (
+        <div className="ocio-panel" role="region" aria-label="HDR Histogram">
+          <div className="ocio-panel__section">
+            <span className="ocio-panel__label">HDR Histogram:</span>
+            <span>
+              max luma {hdrHistogram.maxLuma.toFixed(2)}, {hdrHistogram.overbrightPixelCount}{" "}
+              overbright pixel(s)
+            </span>
+          </div>
+          <div className="hdr-histogram" title="Real luma bins, 0.0 up to this image's own real maximum. Bins past the amber marker hold real content above 1.0 -- overbright highlights no normal 0-255 histogram could ever show.">
+            {hdrHistogram.bins.map((count, index) => {
+              const max = Math.max(...hdrHistogram.bins, 1);
+              const overbright = index >= hdrHistogram.inGamutBinCount;
+              return (
+                <div
+                  key={index}
+                  className={overbright ? "hdr-histogram__bar hdr-histogram__bar--overbright" : "hdr-histogram__bar"}
+                  style={{ height: `${(count / max) * 100}%` }}
+                  title={`${count} pixel(s)${overbright ? " (overbright)" : ""}`}
+                />
+              );
+            })}
+          </div>
         </div>
       )}
 

@@ -5,6 +5,7 @@ pub mod blend;
 pub mod composite;
 pub mod content_credentials;
 pub mod document;
+pub mod hdr;
 pub mod icc;
 pub mod ocio;
 pub mod png;
@@ -66,6 +67,12 @@ struct AppState {
     /// disk on every conversion -- app-level state, like the clipboard,
     /// not per-document.
     ocio_config: Mutex<Option<ocio::Config>>,
+    /// Image > Mode > HDR Support: the most recently imported real
+    /// Radiance HDR image, kept here rather than on `Document` itself --
+    /// real, separate scene-referred float data this project's own 8-bit
+    /// layer pipeline doesn't (yet) consume, the same "app-level, not
+    /// per-document" shape as `ocio_config` above.
+    hdr_source: Mutex<Option<hdr::HdrImage>>,
 }
 
 /// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
@@ -6248,6 +6255,50 @@ fn export_tiff_32f(state: State<'_, AppState>, path: String) -> Result<(), Strin
     export_tiff_32f_to(document, Path::new(&path))
 }
 
+/// Image > Mode > HDR Support: a real, decoded Radiance HDR image's own
+/// width/height and maximum real luma — enough for the frontend to know
+/// the import worked and roughly how much real overbright content it
+/// found, without streaming the full float pixel buffer over IPC.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HdrSourceSummary {
+    width: u32,
+    height: u32,
+    max_luma: f32,
+}
+
+/// Image > Mode > HDR Support: reads and parses a real `.hdr` file at
+/// `path`, keeping it as this session's own loaded HDR source for
+/// [`hdr_histogram`] to use.
+#[tauri::command]
+fn load_hdr_source(state: State<'_, AppState>, path: String) -> Result<HdrSourceSummary, String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    let image = hdr::decode_bytes(&bytes)?;
+    let max_luma = hdr::histogram(&image, 1)?.max_luma;
+    let summary = HdrSourceSummary {
+        width: image.width,
+        height: image.height,
+        max_luma,
+    };
+    *state.hdr_source.lock().map_err(|_| POISONED.to_string())? = Some(image);
+    Ok(summary)
+}
+
+/// Image > Mode > HDR Histogram: a real histogram, into `bin_count` bins,
+/// over [`load_hdr_source`]'s own most recently loaded HDR image's real,
+/// unclamped luma range — see [`hdr::histogram`].
+#[tauri::command]
+fn hdr_histogram(
+    state: State<'_, AppState>,
+    bin_count: usize,
+) -> Result<hdr::HdrHistogram, String> {
+    let guard = state.hdr_source.lock().map_err(|_| POISONED.to_string())?;
+    let image = guard
+        .as_ref()
+        .ok_or_else(|| "No HDR image has been loaded yet.".to_string())?;
+    hdr::histogram(image, bin_count)
+}
+
 /// File > Export > Content Credentials' own real inverse: reads a PNG
 /// file at `path` and returns the real manifest embedded in it, if any
 /// — `Ok(None)` for a real PNG with no Content Credentials chunk, `Err`
@@ -6851,6 +6902,8 @@ pub fn run() {
             deselect,
             export_png,
             export_tiff_32f,
+            load_hdr_source,
+            hdr_histogram,
             read_content_credentials,
             export_layer,
             add_artboard,

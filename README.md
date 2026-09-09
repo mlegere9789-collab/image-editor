@@ -18929,6 +18929,58 @@ Bits/Channel, and sends the real chosen file path to `export_tiff_32f`.
 
 32 Bits/Channel flips to shipped (582/618).
 
+## Phase 324 — HDR Support, HDR Histogram
+
+The last two items in the pixel-storage/bit-depth cluster this
+session's own re-examination found real angles for. HDR Support needs
+real values genuinely above `1.0` somewhere real — not another export
+widening the way 16/32-bit were, an actual overbright sample. Real
+scene-referred HDR data has a real, standard, well-documented format:
+Radiance HDR (`.hdr`/`.pic`), and the `image` crate this project
+already depends on has a real codec for it (confirmed directly,
+before writing any of this: encoded a real overbright pixel — RGB
+`(2.0, 4.0, 0.5)` — through the crate's own `HdrEncoder`, decoded it
+back through its own `HdrDecoder`, got the same values back).
+
+`hdr.rs` is new: `decode_bytes` parses a real `.hdr` file into
+`HdrImage` — real RGB `f32` samples, any of which can genuinely exceed
+`1.0`. This is deliberately scoped, honestly, as import and analysis,
+not full HDR editing: the real float data lives in its own place
+(`AppState::hdr_source`, app-level like `ocio_config`), not forced
+into this project's own 8-bit layer pipeline — painting and
+adjustments on real HDR data is a separate, much larger effort. A
+real "Import HDR (.hdr)…" toolbar button (`load_hdr_source`) shows the
+real decoded dimensions and maximum luma.
+
+`hdr::histogram` builds a real histogram over the image's own real,
+unclamped luma (BT.601 weights — `0.299R + 0.587G + 0.114B`, this
+project's own established formula, already used by `saturation_anchor`
+and Grayscale Mode) — not the normal `0..=255` range every other
+histogram here already covers. Bins span `0.0` to the image's own
+real, data-derived maximum; `overbright_pixel_count` and
+`in_gamut_bin_count` are real, computed values, not guessed — exactly
+how much of the real image is content no 8-bit histogram could ever
+show existed. A real bar-chart panel (`hdr_histogram`) renders it,
+bins past the real in-gamut boundary in a visually distinct colour.
+
+**Verified two ways.** `hdr.rs` gained 5 tests: rejecting non-HDR
+bytes, rejecting a zero-bin histogram, the bin/in-gamut/overbright math
+hand-computed by hand (grey `0.5`/`2.0` pixels, whose BT.601 luma is
+exactly their own value since the weights sum to `1.0`, landing on
+bins `[0, 1, 0, 1]`, `in_gamut_bin_count == 2`,
+`overbright_pixel_count == 1`), an all-in-gamut case, and a full
+decode-then-histogram round trip through a real `.hdr` file the same
+`image` crate encoded — 1733 total (1726 lib + 7 pipeline). `cargo
+fmt`, `cargo clippy --all-targets -- -D warnings` clean. In the
+frontend, a live Playwright session confirmed the HDR Histogram panel
+is absent before import, appears with the real loaded summary's own
+max luma and overbright count after, and renders exactly as many bars
+as real bins with exactly the real number of them marked overbright.
+`npm run build` clean.
+
+HDR Support and HDR Histogram both flip to shipped — every item in the
+pixel-storage/bit-depth cluster is now built (584/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

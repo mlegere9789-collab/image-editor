@@ -312,6 +312,25 @@ export interface OcioConfigSummary {
   roles: Record<string, string>;
 }
 
+/** Mirrors `HdrSourceSummary` in src-tauri/src/lib.rs: Image > Mode > HDR
+ * Support — a real, decoded Radiance HDR file's own width/height and
+ * real maximum luma found. */
+export interface HdrSourceSummary {
+  width: number;
+  height: number;
+  maxLuma: number;
+}
+
+/** Mirrors `hdr::HdrHistogram` in src-tauri/src/hdr.rs: Image > Mode >
+ * HDR Histogram — a real histogram over an HDR image's own real,
+ * unclamped luma range. */
+export interface HdrHistogram {
+  bins: number[];
+  maxLuma: number;
+  inGamutBinCount: number;
+  overbrightPixelCount: number;
+}
+
 /** Mirrors `content_credentials::ManifestAction` in
  * src-tauri/src/content_credentials.rs: one real command this session
  * actually ran. */
