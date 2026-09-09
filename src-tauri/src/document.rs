@@ -168,6 +168,8 @@ pub struct Document {
     mode: ColorMode,
     /// Edit > Assign Profile / Convert to Profile — see [`ColorProfile`].
     profile: ColorProfile,
+    /// Image > Mode > 8/16/32 Bits/Channel — see [`BitDepth`].
+    bit_depth: BitDepth,
     /// Color Settings > Missing Profile Warning: set by `project::decode`
     /// when the project file it just loaded had no embedded profile of
     /// its own (a file saved before Embed Color Profile existed), so the
@@ -474,6 +476,27 @@ pub enum ColorProfile {
     /// isn't is what makes that distinction real and testable rather
     /// than coincidentally always identical.
     ProPhotoRgb,
+}
+
+/// Image > Mode > 8/16/32 Bits/Channel: the document's own declared bit
+/// depth. This project's own layer storage is, and stays, real 8-bit
+/// (`Vec<u8>`) — changing that is a much larger rewrite than this one
+/// real, honestly-scoped capability. What genuinely changes with this
+/// setting: [`Document::export_bytes`]'s own real output. `Sixteen`
+/// widens every channel byte to a real 16-bit sample (`v * 257`, exact,
+/// lossless) and encodes a genuine 16-bit PNG any real reader will
+/// report as such — not an 8-bit file relabelled. `ThirtyTwo` is a
+/// documented, not-yet-built extension of the same real path (no 32-bit
+/// float PNG encoder in this project's own `image` crate feature set to
+/// build it on yet); selecting it is real, persisted state, but export
+/// still falls back to the real 16-bit path until that lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum BitDepth {
+    #[default]
+    Eight,
+    Sixteen,
+    ThirtyTwo,
 }
 
 /// One channel's sRGB gamma decode: the standard piecewise curve — a
@@ -4073,6 +4096,8 @@ pub struct DocumentView {
     pub mode: ColorMode,
     /// Edit > Assign Profile / Convert to Profile's current working space.
     pub profile: ColorProfile,
+    /// Image > Mode > 8/16/32 Bits/Channel — see [`BitDepth`].
+    pub bit_depth: BitDepth,
     /// Color Settings > Missing Profile Warning — see
     /// [`Document::profile_was_missing`].
     pub profile_was_missing: bool,
@@ -4121,6 +4146,7 @@ impl Document {
             saved_selections: Vec::new(),
             mode: ColorMode::Rgb,
             profile: ColorProfile::Srgb,
+            bit_depth: BitDepth::Eight,
             profile_was_missing: false,
             color_table: Vec::new(),
             duotone: Vec::new(),
@@ -4180,6 +4206,7 @@ impl Document {
                 .collect(),
             mode: self.mode,
             profile: self.profile,
+            bit_depth: self.bit_depth,
             profile_was_missing: self.profile_was_missing,
             color_table_size: self.color_table.len(),
             duotone: self.duotone.clone(),
@@ -4397,6 +4424,18 @@ impl Document {
     /// the one that actually remaps pixel values.
     pub fn assign_profile(&mut self, profile: ColorProfile) {
         self.profile = profile;
+    }
+
+    /// Image > Mode > 8/16/32 Bits/Channel's current setting.
+    pub fn bit_depth(&self) -> BitDepth {
+        self.bit_depth
+    }
+
+    /// Image > Mode > 8/16/32 Bits/Channel: sets the document's own
+    /// declared bit depth — see [`BitDepth`]'s own doc comment for
+    /// exactly what this does and does not change.
+    pub fn set_bit_depth(&mut self, depth: BitDepth) {
+        self.bit_depth = depth;
     }
 
     /// Edit > Convert to Profile: every layer's own pixels remapped from
@@ -48367,6 +48406,18 @@ colorspaces:
         doc.assign_profile(ColorProfile::AdobeRgb1998);
         assert_eq!(doc.profile(), ColorProfile::AdobeRgb1998);
         assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn set_bit_depth_relabels_without_touching_a_single_pixel() {
+        let mut doc = Document::new(1, 1).unwrap();
+        doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        assert_eq!(doc.bit_depth(), BitDepth::Eight);
+        doc.set_bit_depth(BitDepth::Sixteen);
+        assert_eq!(doc.bit_depth(), BitDepth::Sixteen);
+        assert_eq!(doc.layers()[0].pixels, vec![10, 20, 30, 255]);
+        doc.set_bit_depth(BitDepth::ThirtyTwo);
+        assert_eq!(doc.bit_depth(), BitDepth::ThirtyTwo);
     }
 
     #[test]

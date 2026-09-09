@@ -75,6 +75,29 @@ pub fn encode_pixels(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, 
     Ok(buffer)
 }
 
+/// Image > Mode > 16 Bits/Channel's own real export path: `pixels` (RGBA8,
+/// the same shape [`encode_pixels`] takes) widened to real 16-bit-per-
+/// channel samples and encoded as a genuine 16-bit PNG (`ExtendedColorType::Rgba16`)
+/// — not an 8-bit file relabelled, a file any real PNG reader will report
+/// as 16 bits per channel. Each byte `v` widens to `v * 257` (`0..=255 *
+/// 257 == 0..=65535` exactly, since `257 == 0x0101`): the standard,
+/// lossless, bit-replicating 8-to-16-bit expansion (`v * 0x0101` repeats
+/// the byte into both the high and low halves of the 16-bit sample), the
+/// same technique real image libraries use to widen 8-bit source data
+/// without inventing intermediate precision that was never there.
+pub fn encode_pixels_16(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
+    let widened: Vec<u8> = pixels
+        .iter()
+        .flat_map(|&byte| (u16::from(byte) * 257).to_be_bytes())
+        .collect();
+    let mut buffer = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut buffer)
+        .write_image(&widened, width, height, image::ExtendedColorType::Rgba16)
+        .map_err(|err| format!("Could not encode the image: {err}"))?;
+
+    Ok(buffer)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +137,19 @@ mod tests {
     #[test]
     fn decode_bytes_rejects_non_png_bytes() {
         assert!(decode_bytes(b"not a png").is_err());
+    }
+
+    #[test]
+    fn encode_pixels_16_widens_every_byte_exactly_and_is_a_real_16bit_png() {
+        let pixels = vec![0u8, 1, 128, 255];
+        let bytes = encode_pixels_16(1, 1, &pixels).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(decoded.color(), image::ColorType::Rgba16);
+        let rgba16 = decoded.into_rgba16();
+        let px = rgba16.get_pixel(0, 0).0;
+        // 0*257=0, 1*257=257, 128*257=32896, 255*257=65535 -- exact,
+        // hand-computed, no rounding since 255*257 == 65535 == u16::MAX.
+        assert_eq!(px, [0, 257, 32896, 65535]);
     }
 
     #[test]

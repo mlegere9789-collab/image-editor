@@ -197,6 +197,8 @@ export type DocumentView = {
   mode: ColorMode;
   /** Edit > Assign Profile / Convert to Profile's current working space. */
   profile: ColorProfile;
+  /** Image > Mode > 8/16/32 Bits/Channel. */
+  bitDepth: BitDepth;
   /** Color Settings > Missing Profile Warning: whether the project file
    * this document was just loaded from had no embedded profile of its own. */
   profileWasMissing: boolean;
@@ -275,6 +277,10 @@ export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
  * Profile / Convert to Profile's real, minimal working spaces. */
 export type ColorProfile = "srgb" | "adobeRgb1998" | "proPhotoRgb";
+
+/** Mirrors `BitDepth` in src-tauri/src/document.rs: Image > Mode > 8/16/32
+ * Bits/Channel. */
+export type BitDepth = "eight" | "sixteen" | "thirtyTwo";
 
 /** Mirrors `RenderingIntent` in src-tauri/src/document.rs. */
 export type RenderingIntent = "relativeColorimetric" | "absoluteColorimetric" | "perceptual" | "saturation";

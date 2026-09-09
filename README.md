@@ -18837,6 +18837,53 @@ and a real edit (Copy) already run, the exported manifest's own
 
 Content Credentials flips to shipped (580/618).
 
+## Phase 322 — 16 Bits/Channel
+
+The first real increment of the pixel-storage/bit-depth cluster — real,
+scoped honestly, not the full internal rewrite in one commit. This
+project's own layer storage stays real 8-bit (`Vec<u8>`, referenced
+~1238 times across the codebase); rewriting that safely is a separate,
+much larger, carefully-staged effort. What's real and shipped now is
+the actual boundary where bit depth genuinely matters most for a file
+leaving this app: export.
+
+`document::BitDepth` (`Eight`/`Sixteen`/`ThirtyTwo`) is real,
+persisted per-document state — `Document::bit_depth()`/`set_bit_depth`,
+mirroring `ColorProfile`'s own shape exactly. Image > Mode gained a
+real select (replacing the old static "8 Bits/Channel" label that had
+sat there since Phase 228).
+
+The real effect: `png::encode_pixels_16` widens every RGBA8 byte to a
+genuine 16-bit sample — `v * 257` (`0..=255 * 257 == 0..=65535`
+exactly, since `257 == 0x0101`, the standard lossless bit-replicating
+8-to-16-bit expansion) — and encodes through the `image` crate's own
+`ExtendedColorType::Rgba16`, producing a real 16-bit-per-channel PNG
+any real reader reports as such. `export` (the function
+`export_png`/every export-through-file path already shares) branches
+on `document.bit_depth()`: `Eight` unchanged, `Sixteen` and
+`ThirtyTwo` (documented as falling back to the same real 16-bit path —
+no 32-bit float PNG encoder exists in this project's own dependency
+tree yet) both take the new path.
+
+**Verified two ways.** 3 new tests: `png::encode_pixels_16` widening
+every byte exactly (`0`→`0`, `1`→`257`, `128`→`32896`, `255`→`65535`,
+decoded back through the real `image` crate's own 16-bit decode path,
+not just re-encoded and trusted), `export` producing a real 16-bit PNG
+when the document's bit depth is set, and `set_bit_depth` relabelling
+without touching a pixel (the same shape `assign_profile`'s own test
+uses) — 1724 total (1717 lib + 7 pipeline, up from 1714 lib).
+`cargo fmt`, `cargo clippy --all-targets -- -D warnings` clean.
+In the frontend, a live Playwright session confirmed the Bits/Channel
+select offers all three real options, defaults to 8, and selecting 16
+sends the exact `set_bit_depth` call and updates the document view.
+`npm run build` clean.
+
+16 Bits/Channel flips to shipped, with its own real, honest scope
+spelled out in the checklist: the storage stays 8-bit, only export
+widens. 32 Bits/Channel stays unchecked — real state, no real output
+of its own yet, since it currently falls back to the same path 16-bit
+uses (581/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

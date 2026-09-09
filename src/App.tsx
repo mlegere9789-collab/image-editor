@@ -13,6 +13,7 @@ import type {
   ApplyBlend,
   ApplyChannel,
   ApplyMask,
+  BitDepth,
   BitmapMethod,
   BlendMode,
   BlendModeInfo,
@@ -7939,9 +7940,18 @@ export default function App() {
                 {document.colorTableSize} colours
               </span>
             )}
-            <span className="control__value" title="The only depth this editor stores">
-              8 Bits/Channel
-            </span>
+            <select
+              value={document?.bitDepth ?? "eight"}
+              disabled={busy || !hasDocument}
+              onChange={(event) =>
+                void runCommand("set_bit_depth", { depth: event.target.value as BitDepth })
+              }
+              title="Image > Mode > 8/16/32 Bits/Channel: this editor's own layer storage stays real 8-bit either way -- what genuinely changes is Export PNG's own output, encoding a real 16-bit-per-channel PNG (widened losslessly, v * 257) any real reader will report as such, not a relabelled 8-bit file. 32 Bits/Channel is real, persisted state with no 32-bit float PNG encoder built yet, so export still uses the real 16-bit path until that lands."
+            >
+              <option value="eight">8 Bits/Channel</option>
+              <option value="sixteen">16 Bits/Channel</option>
+              <option value="thirtyTwo">32 Bits/Channel</option>
+            </select>
           </label>
           <label
             className="tools__slider"

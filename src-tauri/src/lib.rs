@@ -260,13 +260,24 @@ fn encode_with_spots(
 /// from the `#[tauri::command]` wrapper below so it can be unit-tested
 /// directly, the same way [`snapshot`] is. `content_credentials`, when
 /// given, is embedded as a real PNG `tEXt` chunk (see
-/// [`content_credentials::embed`]) before the file is written.
+/// [`content_credentials::embed`]) before the file is written. Image >
+/// Mode > 8/16/32 Bits/Channel: `document.bit_depth()` other than
+/// `Eight` (`Sixteen`, or `ThirtyTwo` falling back to the same real
+/// 16-bit path — see [`document::BitDepth`]'s own doc comment) encodes a
+/// genuine 16-bit-per-channel PNG through [`png::encode_pixels_16`]
+/// instead of the plain 8-bit path.
 fn export(
     document: &Document,
     path: &Path,
     content_credentials: Option<&content_credentials::Manifest>,
 ) -> Result<(), String> {
-    let bytes = png::encode(&composite::flatten(document))?;
+    let composite = composite::flatten(document);
+    let bytes = match document.bit_depth() {
+        document::BitDepth::Eight => png::encode(&composite)?,
+        document::BitDepth::Sixteen | document::BitDepth::ThirtyTwo => {
+            png::encode_pixels_16(composite.width, composite.height, &composite.pixels)?
+        }
+    };
     let bytes = match content_credentials {
         Some(manifest) => content_credentials::embed(&bytes, manifest)?,
         None => bytes,
@@ -1826,6 +1837,20 @@ fn convert_mode(
             x1: document.width(),
             y1: document.height(),
         }))
+    })
+}
+
+/// Image > Mode > 8/16/32 Bits/Channel: sets the document's own declared
+/// bit depth — see [`document::BitDepth`]'s own doc comment for exactly
+/// what this changes.
+#[tauri::command]
+fn set_bit_depth(
+    state: State<'_, AppState>,
+    depth: document::BitDepth,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_bit_depth(depth);
+        Ok(None)
     })
 }
 
@@ -6477,6 +6502,7 @@ pub fn run() {
             liquify_mesh,
             face_landmarks,
             convert_to_indexed,
+            set_bit_depth,
             assign_profile,
             convert_to_profile,
             convert_to_profile_dithered,
@@ -7021,6 +7047,22 @@ mod tests {
         // Still a real, decodable PNG -- embedding didn't corrupt it.
         let decoded = png::read(&path).unwrap();
         assert_eq!(decoded.pixels, composite::flatten(&document).pixels);
+    }
+
+    #[test]
+    fn export_writes_a_real_16bit_png_when_the_document_is_set_to_16_bits_per_channel() {
+        let mut document = Document::new(1, 1).unwrap();
+        document.add_layer("l", &[0, 1, 128, 255], 1, 1).unwrap();
+        document.set_bit_depth(document::BitDepth::Sixteen);
+
+        let path = std::env::temp_dir().join("lib_rs_export_16bit_ok.png");
+        export(&document, &path, None).unwrap();
+
+        let bytes = std::fs::read(&path).unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap();
+        assert_eq!(decoded.color(), image::ColorType::Rgba16);
+        let px = decoded.into_rgba16().get_pixel(0, 0).0;
+        assert_eq!(px, [0, 257, 32896, 65535]);
     }
 
     #[test]
