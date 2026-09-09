@@ -167,6 +167,13 @@ const PANEL_GROUPS_STORAGE_KEY = "legelabs.panelGroups";
 // panels above the last one in a zone ever get an entry here; the last
 // always fills whatever space is left (see the dock-zone assembly below).
 const PANEL_STACK_HEIGHTS_STORAGE_KEY = "legelabs.panelStackHeights";
+// Color Settings > Profile Mismatch Warnings: the human-readable name
+// for each profile this project models, shared by the mismatch notice
+// and anywhere else that needs one rather than a raw ColorProfile value.
+const PROFILE_LABELS: Record<ColorProfile, string> = {
+  srgb: "sRGB",
+  adobeRgb1998: "Adobe RGB (1998)",
+};
 // Color Settings > Color Management Policies: what happens when a project
 // is opened with an embedded profile that differs from
 // COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY's own value below --
@@ -718,6 +725,13 @@ export default function App() {
   // loaded project had no embedded colour profile of its own.
   const [showMissingProfileDialog, setShowMissingProfileDialog] = useState(false);
   const [missingProfileChoice, setMissingProfileChoice] = useState<ColorProfile>("srgb");
+  // Color Settings > Profile Mismatch Warnings: a real, passive notice --
+  // not an interactive choice dialog, Missing Profile's own split between
+  // Missing Profile Warning (a message) and Ask When Opening (a dialog)
+  // applies here too -- whenever a project's own real, present profile
+  // differs from the working space, saying plainly what the active
+  // Color Management Policy just did about it.
+  const [colorMismatchNotice, setColorMismatchNotice] = useState<string | null>(null);
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -2119,6 +2133,9 @@ export default function App() {
         // meaningful right after loading a project, since `profileWasMissing`
         // stays set to whatever the most recent load left it at otherwise.
         const justLoadedAProject = command === "open_project" || command === "import_project_bytes";
+        if (justLoadedAProject) {
+          setColorMismatchNotice(null);
+        }
         if (justLoadedAProject && snapshot.document.profileWasMissing) {
           setMissingProfileChoice("srgb");
           setShowMissingProfileDialog(true);
@@ -2144,31 +2161,44 @@ export default function App() {
         });
 
         // Color Settings > Color Management Policies > Convert to Working
-        // Space: a project whose own embedded profile is real (not the
-        // Missing Profile case just above, Ask When Opening's own separate
-        // concern) but differs from the preferred working space gets
-        // remapped into it right after loading, when that policy is on.
-        // A genuine second command, not folded into the load itself, so
-        // it goes through the exact same convert_to_profile path Edit >
-        // Convert to Profile itself does -- selectAfter carried through so
-        // the usual "select the top layer after a load" still applies to
-        // this, the snapshot the UI actually ends up showing. Always
-        // bpc: false here -- this is an automatic background conversion,
-        // not the explicit Convert to Profile button, so it deliberately
-        // does not inherit whatever that toolbar's own Use Black Point
-        // Compensation checkbox happens to be set to at the moment a file
-        // is opened.
+        // Space / Profile Mismatch Warnings: a project whose own embedded
+        // profile is real (not the Missing Profile case just above, Ask
+        // When Opening's own separate concern) but differs from the
+        // preferred working space triggers the active policy, and either
+        // way says so -- a real, passive notice, not an interactive
+        // choice; Convert to Working Space already applies its own policy
+        // silently, matching Ask When Opening's own established scope.
         if (
           justLoadedAProject &&
           !snapshot.document.profileWasMissing &&
-          colorManagementPolicyRef.current === "convert" &&
           snapshot.document.profile !== defaultWorkingSpaceRef.current
         ) {
-          void runCommand(
-            "convert_to_profile",
-            { profile: defaultWorkingSpaceRef.current, bpc: false },
-            selectAfter,
-          );
+          const fromLabel = PROFILE_LABELS[snapshot.document.profile];
+          const toLabel = PROFILE_LABELS[defaultWorkingSpaceRef.current];
+          if (colorManagementPolicyRef.current === "convert") {
+            setColorMismatchNotice(
+              `This project's own ${fromLabel} profile differed from your ${toLabel} working space — converted automatically.`,
+            );
+            // A genuine second command, not folded into the load itself,
+            // so it goes through the exact same convert_to_profile path
+            // Edit > Convert to Profile itself does -- selectAfter
+            // carried through so the usual "select the top layer after a
+            // load" still applies to this, the snapshot the UI actually
+            // ends up showing. Always bpc: false here -- this is an
+            // automatic background conversion, not the explicit Convert
+            // to Profile button, so it deliberately does not inherit
+            // whatever that toolbar's own Use Black Point Compensation
+            // checkbox happens to be set to at the moment a file is opened.
+            void runCommand(
+              "convert_to_profile",
+              { profile: defaultWorkingSpaceRef.current, bpc: false },
+              selectAfter,
+            );
+          } else {
+            setColorMismatchNotice(
+              `This project's own ${fromLabel} profile differs from your ${toLabel} working space and was preserved as-is.`,
+            );
+          }
         }
       } catch (err) {
         if (ticket !== requestId.current) return;
@@ -10983,6 +11013,20 @@ export default function App() {
           </label>
         </div>
       </header>
+
+      {colorMismatchNotice && (
+        <div className="color-mismatch-banner" role="status">
+          {colorMismatchNotice}
+          <button
+            type="button"
+            className="color-mismatch-banner__dismiss"
+            onClick={() => setColorMismatchNotice(null)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       {showNewDialog && (
         <div

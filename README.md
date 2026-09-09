@@ -18375,6 +18375,37 @@ is now fully covered between the existing toolbar select (the
 *document's* current one) and this phase's own new one (the *preferred*
 one a mismatched project converts into) (562/618).
 
+## Phase 314 — Profile Mismatch Warnings
+
+The real, passive half of the pair Missing Profile Warning/Ask When
+Opening already established: a project opened with a profile that
+genuinely differs from the working space now gets a real, dismissible
+notice saying plainly what the active Color Management Policy just
+did — "differs from your sRGB working space and was preserved as-is"
+under Preserve, "differed... — converted automatically" under Convert.
+Not an interactive choice; Convert to Working Space already applies its
+own policy silently (Phase 313), matching Ask When Opening's own
+established scope — a passive statement of fact, the same shape Missing
+Profile Warning already is next to Ask When Opening's own dialog.
+
+The one real layout decision: `.notice` is a centered card meant to
+*replace* the canvas (the "No image open" placeholder, the error state)
+— reusing it here would fight an actually-open document rather than sit
+alongside it. A new `.color-mismatch-banner`, a slim full-width strip
+between the toolbar and the canvas with its own dismiss button, coexists
+with whatever the canvas is showing instead.
+
+**Verified two ways.** No new Rust surface — pure frontend, reusing
+`colorManagementPolicyRef`/`defaultWorkingSpaceRef` Phase 313 already
+built, so the existing 1680 tests stay green unchanged. In their place,
+a live Playwright session opened the same Adobe RGB (1998) project under
+each policy in turn: under Preserve, confirmed the banner's exact text
+and that its own dismiss button actually cleared it; under Convert,
+confirmed the banner's differently-worded text. `npm run build` is
+clean.
+
+Profile Mismatch Warnings flips to shipped (563/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
