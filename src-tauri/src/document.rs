@@ -3663,6 +3663,12 @@ pub struct Clipboard {
     height: u32,
     /// `width * height * CHANNELS` bytes, row-major, relative to `origin`.
     pixels: Vec<u8>,
+    /// Color Settings > Ask When Pasting: the working space the document
+    /// this clipboard was captured from was in at the moment of capture
+    /// (see [`Document::extract`]) — not necessarily the working space of
+    /// whatever document it later gets pasted into, since this app's own
+    /// clipboard, like Photoshop's real one, survives switching documents.
+    profile: ColorProfile,
 }
 
 /// The Magic Wand's region: one flag per pixel of the `width` × `height`
@@ -10230,6 +10236,7 @@ impl Document {
             width,
             height,
             pixels,
+            profile: self.profile,
         }
     }
 
@@ -10876,6 +10883,45 @@ impl Document {
             }
         }
         Ok(Some(bounds))
+    }
+
+    /// Color Settings > Ask When Pasting: `Some(clipboard`'s own working
+    /// space`)` when it genuinely differs from this document's current
+    /// one — the one real case this app can detect a profile mismatch on
+    /// a paste, since [`Clipboard`] now carries the real working space it
+    /// was captured under (see [`Self::extract`]). `None` either when the
+    /// two already match, or (Photoshop's own real behaviour too) there
+    /// is nothing on the clipboard to compare against.
+    pub fn clipboard_profile_mismatch(&self, clipboard: &Clipboard) -> Option<ColorProfile> {
+        (clipboard.profile != self.profile).then_some(clipboard.profile)
+    }
+
+    /// Color Settings > Ask When Pasting > Convert: `clipboard`'s own
+    /// pixels remapped from the real working space they were captured
+    /// under into this document's current one — Relative Colorimetric,
+    /// no Black Point Compensation, the same deliberate choice this
+    /// project's other automatic (not toolbar-driven) conversions already
+    /// make, since there is no Convert to Profile dialog's own Rendering
+    /// Intent/BPC selection in play here for a real value to come from.
+    /// A genuinely different [`Clipboard`], not a mutation of `self` --
+    /// [`Self::paste`] itself is unchanged either way, called with
+    /// whichever clipboard (converted or not) the caller decided on.
+    pub fn convert_clipboard(&self, clipboard: &Clipboard) -> Clipboard {
+        let mut converted = clipboard.clone();
+        for px in converted.pixels.chunks_exact_mut(CHANNELS) {
+            let [r, g, b] = convert_profile_pixel(
+                clipboard.profile,
+                self.profile,
+                [px[0], px[1], px[2]],
+                false,
+                RenderingIntent::RelativeColorimetric,
+            );
+            px[0] = r;
+            px[1] = g;
+            px[2] = b;
+        }
+        converted.profile = self.profile;
+        converted
     }
 
     /// Edit > Paste — and, since this app has no scrollable viewport to
@@ -24852,6 +24898,71 @@ mod tests {
         assert_eq!(&layer.pixels[idx(0, 0)..idx(0, 0) + 4], &[0, 0, 0, 0]);
         assert_eq!(&layer.pixels[idx(1, 1)..idx(1, 1) + 4], &[9, 8, 7, 255]);
         assert_eq!(&layer.pixels[idx(2, 2)..idx(2, 2) + 4], &[9, 8, 7, 255]);
+    }
+
+    #[test]
+    fn clipboard_profile_mismatch_is_none_within_the_same_document() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        let clipboard = doc.copy(id).unwrap();
+        assert_eq!(doc.clipboard_profile_mismatch(&clipboard), None);
+    }
+
+    #[test]
+    fn clipboard_profile_mismatch_detects_a_real_difference_across_documents() {
+        let mut source = Document::new(1, 1).unwrap();
+        let id = source.add_layer("l", &[10, 20, 30, 255], 1, 1).unwrap();
+        source.assign_profile(ColorProfile::AdobeRgb1998);
+        let clipboard = source.copy(id).unwrap();
+
+        let target = Document::new(1, 1).unwrap();
+        assert_eq!(target.profile(), ColorProfile::Srgb);
+        assert_eq!(
+            target.clipboard_profile_mismatch(&clipboard),
+            Some(ColorProfile::AdobeRgb1998)
+        );
+    }
+
+    #[test]
+    fn convert_clipboard_remaps_pixels_into_the_destination_working_space() {
+        // sRGB (0, 255, 0) copied, then converted into an Adobe RGB
+        // (1998) document -- the exact same conversion, and the exact
+        // same already-hand-verified (144, 255, 60) result, as
+        // convert_to_profile_remaps_every_layers_own_pixels_and_updates_the_label.
+        let mut source = Document::new(1, 1).unwrap();
+        let id = source.add_layer("l", &[0, 255, 0, 255], 1, 1).unwrap();
+        let clipboard = source.copy(id).unwrap();
+
+        let mut target = Document::new(1, 1).unwrap();
+        target.assign_profile(ColorProfile::AdobeRgb1998);
+        let converted = target.convert_clipboard(&clipboard);
+        // Opaque outside document.rs by design -- paste it and read the
+        // result back rather than reaching into Clipboard's own fields.
+        let pasted = target.paste(&converted, "Pasted");
+        assert_eq!(
+            target
+                .layers()
+                .iter()
+                .find(|l| l.id == pasted)
+                .unwrap()
+                .pixels,
+            vec![144, 255, 60, 255]
+        );
+        // The unconverted clipboard, pasted as-is, keeps its own raw sRGB
+        // numbers unchanged -- proving convert_clipboard is what actually
+        // did the work above, not some other implicit conversion.
+        let mut target_no_convert = Document::new(1, 1).unwrap();
+        target_no_convert.assign_profile(ColorProfile::AdobeRgb1998);
+        let pasted_raw = target_no_convert.paste(&clipboard, "Pasted");
+        assert_eq!(
+            target_no_convert
+                .layers()
+                .iter()
+                .find(|l| l.id == pasted_raw)
+                .unwrap()
+                .pixels,
+            vec![0, 255, 0, 255]
+        );
     }
 
     #[test]

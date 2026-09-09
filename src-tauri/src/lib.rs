@@ -2077,6 +2077,25 @@ fn cut(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     snapshot(&state, document, rect)
 }
 
+/// Color Settings > Ask When Pasting: whether the clipboard's own real
+/// working space (captured at Copy/Cut time) genuinely differs from the
+/// current document's — `Ok(None)` when there's nothing to ask about
+/// (nothing copied, or the profiles already match), letting the frontend
+/// skip straight to [`paste`] the same way Photoshop skips the dialog
+/// when there is nothing to ask.
+#[tauri::command]
+fn clipboard_profile_mismatch(
+    state: State<'_, AppState>,
+) -> Result<Option<document::ColorProfile>, String> {
+    let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
+    let Some(clipboard) = guard.as_ref() else {
+        return Ok(None);
+    };
+    let doc_guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = doc_guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    Ok(document.clipboard_profile_mismatch(clipboard))
+}
+
 /// Edit > Paste — also serves as Edit > Paste Special > Paste in Place,
 /// since [`document::Document::paste`] always lands the clipboard back at
 /// its original coordinates (see that function's own docs for why). Errors
@@ -2093,6 +2112,26 @@ fn paste(state: State<'_, AppState>) -> Result<Snapshot, String> {
     };
     edit_checkpointed(&state, |document| {
         document.paste(&clipboard, "Pasted Layer");
+        Ok(None)
+    })
+}
+
+/// Color Settings > Ask When Pasting > Convert: identical to [`paste`],
+/// except the clipboard's own pixels are first remapped from their real
+/// captured working space into the current document's, through
+/// [`document::Document::convert_clipboard`].
+#[tauri::command]
+fn paste_converted(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    let clipboard = {
+        let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
+        guard
+            .as_ref()
+            .ok_or_else(|| "Nothing has been copied or cut yet.".to_string())?
+            .clone()
+    };
+    edit_checkpointed(&state, |document| {
+        let converted = document.convert_clipboard(&clipboard);
+        document.paste(&converted, "Pasted Layer");
         Ok(None)
     })
 }
@@ -6425,7 +6464,9 @@ pub fn run() {
             paint_spot_channel,
             spot_library,
             cut,
+            clipboard_profile_mismatch,
             paste,
+            paste_converted,
             paste_into,
             paste_outside,
             camera_raw_geometry,

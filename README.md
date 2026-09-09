@@ -18691,6 +18691,54 @@ to shipped; OpenColorIO Settings, OpenColorIO Working Space, and
 OpenColorIO Panel remain open for a dedicated settings surface beyond
 this phase's own load-and-convert controls (575/618).
 
+## Phase 319 — Ask When Pasting
+
+Found while auditing the checklist for what else is real and buildable,
+not just labelled a permanent cut: this app's own clipboard already
+survives switching documents (see `AppState::clipboard` in `lib.rs`),
+which means copying in one document, opening a different one with a
+different working space, and pasting is a real, reachable case here —
+`Clipboard` just never recorded which working space it was copied
+under, so there was no way to detect a mismatch even though one was
+genuinely possible.
+
+`Clipboard` gained a real `profile: ColorProfile` field, set from
+`self.profile` the moment `Document::extract` builds one — every
+`Clipboard` in this codebase is built through that one function, so
+every copy or cut now carries its own real provenance.
+`Document::clipboard_profile_mismatch(clipboard)` compares it to the
+current document's own profile, returning `None` — no dialog, straight
+to Paste — when nothing's on the clipboard or the two already match,
+the same "don't ask when there's nothing to ask" restraint Ask When
+Opening's own dialog already has. `Document::convert_clipboard(clipboard)`
+remaps the clipboard's own pixels into the current document's working
+space (Relative Colorimetric, no Black Point Compensation — the same
+deliberate choice this project's other automatic, not toolbar-driven,
+conversions already make) and returns a new `Clipboard`, leaving
+`Document::paste` itself untouched either way.
+
+The frontend calls `clipboard_profile_mismatch` fresh on every Paste
+(it depends on whatever is on the clipboard right now, not on any
+state kept between pastes) and, only on a real mismatch, shows a
+choice dialog naming the clipboard's own real source profile: Convert
+(`paste_converted`, a new command pairing `convert_clipboard` with the
+existing `paste`) or Don't Convert (today's plain `paste`, pixels
+unchanged).
+
+**Verified two ways.** `document.rs` gained 3 tests: no mismatch within
+one document, a real mismatch detected across two, and the conversion
+itself landing on sRGB `(0, 255, 0)` → Adobe RGB (1998) `(144, 255,
+60)` — the exact same already-hand-verified byte triple
+`convert_to_profile_remaps_every_layers_own_pixels_and_updates_the_label`
+uses, since it's the identical underlying conversion — 1714 total
+(1707 lib + 7 pipeline, up from 1711). `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings`, `npm run build` all clean. In the frontend, a live Playwright session
+confirmed the dialog appears only on a genuine mismatch, names the
+source profile correctly, and each button fires the exact command it
+should — verified separately for both.
+
+Ask When Pasting flips to shipped (576/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

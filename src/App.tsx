@@ -863,6 +863,15 @@ export default function App() {
   // loaded project had no embedded colour profile of its own.
   const [showMissingProfileDialog, setShowMissingProfileDialog] = useState(false);
   const [missingProfileChoice, setMissingProfileChoice] = useState<ColorProfile>("srgb");
+  // Color Settings > Ask When Pasting: shown only when
+  // clipboard_profile_mismatch actually finds a real difference -- the
+  // clipboard's own real captured working space, for the dialog's own
+  // wording, not the destination document's (that's whatever the
+  // toolbar's own Assign Profile select currently shows).
+  const [showPasteMismatchDialog, setShowPasteMismatchDialog] = useState(false);
+  const [pasteMismatchFromProfile, setPasteMismatchFromProfile] = useState<ColorProfile | null>(
+    null,
+  );
   // Color Settings > Profile Mismatch Warnings: a real, passive notice --
   // not an interactive choice dialog, Missing Profile's own split between
   // Missing Profile Warning (a message) and Ask When Opening (a dialog)
@@ -4437,7 +4446,16 @@ export default function App() {
     setCanPaste(true);
   }, [runCommand, selectedId]);
 
+  // Color Settings > Ask When Pasting: checked fresh on every Paste,
+  // since it depends on whatever is on the clipboard right now, not on
+  // any state kept between pastes.
   const pasteClipboard = useCallback(async () => {
+    const mismatch = await invoke<ColorProfile | null>("clipboard_profile_mismatch", {});
+    if (mismatch) {
+      setPasteMismatchFromProfile(mismatch);
+      setShowPasteMismatchDialog(true);
+      return;
+    }
     await runCommand("paste", {}, "top");
   }, [runCommand]);
 
@@ -16349,6 +16367,51 @@ export default function App() {
                 title="Assign the chosen profile"
               >
                 Assign
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPasteMismatchDialog && pasteMismatchFromProfile && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPasteMismatchDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Paste Profile Mismatch"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Paste Profile Mismatch</h2>
+            <p className="modal__hint">
+              The clipboard was copied from a {PROFILE_LABELS[pasteMismatchFromProfile]} document,
+              which differs from this document's own working space. Convert remaps the pasted
+              pixels to look the same in this document's working space; Don't Convert keeps the
+              pasted pixels' own raw numbers unchanged, which can shift their appearance.
+            </p>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setShowPasteMismatchDialog(false);
+                  void runCommand("paste", {}, "top");
+                }}
+                title="Keep the pasted pixels' own raw numbers unchanged"
+              >
+                Don't Convert
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  setShowPasteMismatchDialog(false);
+                  void runCommand("paste_converted", {}, "top");
+                }}
+                title="Remap the pasted pixels into this document's own working space"
+              >
+                Convert
               </button>
             </div>
           </div>
