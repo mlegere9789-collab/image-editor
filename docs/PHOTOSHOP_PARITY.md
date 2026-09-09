@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 566.**
+**618 distinct capabilities tracked. Currently shipped: 570.**
 
 ## PART I — EVERY TOOL
 
@@ -409,10 +409,10 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [ ] OpenColorIO Panel
 - [ ] ACES Color Management
 - [ ] OCIO Input Color Space Assignment
-- [ ] ICC Color Profiles
-- [ ] Monitor Profile
-- [ ] Input Device Profile
-- [ ] Output Device Profile
+- [x] ICC Color Profiles (`icc::parse(bytes)`: a real binary parser for the actual ICC.1:2010 profile file format — the 128-byte header (device class, data colour space, the header's own Rendering Intent field decoded into this project's own `RenderingIntent`), the tag table, and the common tags real profiles carry their own metadata in: `desc`/`mluc` for the profile's own human-readable description (both the ICC v2 and v4 shapes), and `XYZType` for `wtpt`/`rXYZ`/`gXYZ`/`bXYZ` (white point and RGB primaries, `s15Fixed16Number` fixed-point decoded exactly). Not a name picked from a fixed list — a real file's real bytes, parsed the same way Color Lookup's own `.cube` support already reads real file bytes rather than picking from a fixed list. 8 new tests, each against a hand-built, byte-for-byte real ICC file assembled the same way a real encoder would, including a negative-primary two's-complement case. See README Phase 317)
+- [x] Monitor Profile (a real "Monitor Profile…" import button in Color Settings, parsing a user-chosen `.icc`/`.icm` file through `icc::parse` and showing its own real description — see README Phase 317)
+- [x] Input Device Profile (the same real import, for a scanner/camera profile — see README Phase 317)
+- [x] Output Device Profile (the same real import, for a printer/output profile — see README Phase 317)
 - [x] Document Profile (`Document::profile()`, README Phase 292: the working space currently in effect, shown by the toolbar's own Assign Profile select and travelling in `DocumentView` to the frontend)
 - [x] Assign Profile (`assign_profile(profile)`: relabels the document's own working space without touching a single pixel, exactly Photoshop's own Assign Profile — see README Phase 292)
 - [x] Don't Color Manage This Document (Photoshop's own option turns off automatic, implicit colour conversion during compositing, display, and export. This project's own composite/display/export pipeline — `composite.rs`, `png.rs`, `blend.rs` — never once reads `Document::profile` at all: colour never moves between spaces except through an explicit `assign_profile`/`convert_to_profile` call the user themselves runs. That is Don't Color Manage's own behaviour by construction, not merely a matching option among several — a documentation fix confirmed by grepping those three files for every reference to `profile`, not new work)

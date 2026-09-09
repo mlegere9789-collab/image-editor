@@ -26,6 +26,7 @@ import type {
   ColorSample,
   ContentAwareScaleOptions,
   ConversionEngine,
+  IccProfile,
   DocumentView,
   FaceLandmarks,
   Fill,
@@ -188,6 +189,16 @@ const PROFILE_LABELS: Record<ColorProfile, string> = {
 // Opening's own, separately-scoped dialog, not this policy.
 const COLOR_MANAGEMENT_POLICY_STORAGE_KEY = "legelabs.colorManagementPolicy";
 const COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY = "legelabs.defaultWorkingSpace";
+
+// Color Settings > Monitor Profile / Input Device Profile / Output Device
+// Profile: each is a real .icc/.icm file's own path, persisted the same
+// way Color Management Policy's own preferences are -- re-parsed on
+// launch so the profile itself (not just its path) is available again
+// without asking the user to re-import it every session.
+const MONITOR_PROFILE_PATH_STORAGE_KEY = "legelabs.monitorProfilePath";
+const INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.inputDeviceProfilePath";
+const OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.outputDeviceProfilePath";
+const ICC_PROFILE_FILTER = [{ name: "ICC Profile (.icc, .icm)", extensions: ["icc", "icm", "ICC", "ICM"] }];
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -718,6 +729,91 @@ export default function App() {
     } catch {
       // ignore
     }
+  }, []);
+  // Color Settings > Monitor Profile / Input Device Profile / Output
+  // Device Profile: each a real, parsed .icc/.icm file (icc.rs's own
+  // IccProfile), or null when none has been imported. Not per-document --
+  // these three, like the working-space select above, are app-level Color
+  // Settings, the same real distinction Photoshop's own dialog makes.
+  const [monitorProfile, setMonitorProfile] = useState<IccProfile | null>(null);
+  const [inputDeviceProfile, setInputDeviceProfile] = useState<IccProfile | null>(null);
+  const [outputDeviceProfile, setOutputDeviceProfile] = useState<IccProfile | null>(null);
+  const importDeviceProfile = useCallback(
+    async (
+      storageKey: string,
+      setProfile: (profile: IccProfile | null) => void,
+      path: string,
+    ) => {
+      setBusy(true);
+      try {
+        const profile = await invoke<IccProfile>("parse_icc_profile", { path });
+        setProfile(profile);
+        setError(null);
+        try {
+          localStorage.setItem(storageKey, path);
+        } catch {
+          // ignore
+        }
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
+  );
+  const importMonitorProfile = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    if (typeof selected === "string") {
+      await importDeviceProfile(MONITOR_PROFILE_PATH_STORAGE_KEY, setMonitorProfile, selected);
+    }
+  }, [importDeviceProfile]);
+  const importInputDeviceProfile = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    if (typeof selected === "string") {
+      await importDeviceProfile(
+        INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY,
+        setInputDeviceProfile,
+        selected,
+      );
+    }
+  }, [importDeviceProfile]);
+  const importOutputDeviceProfile = useCallback(async () => {
+    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    if (typeof selected === "string") {
+      await importDeviceProfile(
+        OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY,
+        setOutputDeviceProfile,
+        selected,
+      );
+    }
+  }, [importDeviceProfile]);
+  // Re-parses whichever of the three device profiles were imported in an
+  // earlier session, the same "persist the path, re-derive the value on
+  // launch" shape Color Management Policy's own preferences use -- a
+  // stale path (the file moved or was deleted) fails quietly into "no
+  // profile imported" rather than surfacing a startup error for a Color
+  // Settings preference nothing has asked to use yet.
+  useEffect(() => {
+    const restore = async (storageKey: string, setProfile: (profile: IccProfile | null) => void) => {
+      let path: string | null;
+      try {
+        path = localStorage.getItem(storageKey);
+      } catch {
+        return;
+      }
+      if (!path) return;
+      try {
+        const profile = await invoke<IccProfile>("parse_icc_profile", { path });
+        setProfile(profile);
+      } catch {
+        // The file moved, was deleted, or is no longer valid -- leave the
+        // profile unset rather than surfacing a startup error for it.
+      }
+    };
+    void restore(MONITOR_PROFILE_PATH_STORAGE_KEY, setMonitorProfile);
+    void restore(INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setInputDeviceProfile);
+    void restore(OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setOutputDeviceProfile);
   }, []);
   // runCommand below is a useCallback with a deliberately empty dependency
   // array (its identity has to stay stable -- it is called from all over
@@ -7880,6 +7976,58 @@ export default function App() {
               <option value="adobeRgb1998">Adobe RGB (1998)</option>
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
+          </label>
+          <label
+            className="tools__slider"
+            title={`Color Settings > Monitor Profile: a real, parsed .icc/.icm file describing the display's own colour response.${monitorProfile ? ` Currently: ${monitorProfile.description ?? monitorProfile.colorSpace} (${monitorProfile.deviceClass}).` : " None imported."}`}
+          >
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => void importMonitorProfile()}
+              disabled={busy}
+            >
+              Monitor Profile…
+            </button>
+            <span className="tools__profileLabel">
+              {monitorProfile ? (monitorProfile.description ?? monitorProfile.colorSpace) : "None"}
+            </span>
+          </label>
+          <label
+            className="tools__slider"
+            title={`Color Settings > Input Device Profile: a real, parsed .icc/.icm file for a scanner or camera's own colour response.${inputDeviceProfile ? ` Currently: ${inputDeviceProfile.description ?? inputDeviceProfile.colorSpace} (${inputDeviceProfile.deviceClass}).` : " None imported."}`}
+          >
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => void importInputDeviceProfile()}
+              disabled={busy}
+            >
+              Input Device Profile…
+            </button>
+            <span className="tools__profileLabel">
+              {inputDeviceProfile
+                ? (inputDeviceProfile.description ?? inputDeviceProfile.colorSpace)
+                : "None"}
+            </span>
+          </label>
+          <label
+            className="tools__slider"
+            title={`Color Settings > Output Device Profile: a real, parsed .icc/.icm file for a printer or other output device's own colour response.${outputDeviceProfile ? ` Currently: ${outputDeviceProfile.description ?? outputDeviceProfile.colorSpace} (${outputDeviceProfile.deviceClass}).` : " None imported."}`}
+          >
+            <button
+              type="button"
+              className="button button--quiet"
+              onClick={() => void importOutputDeviceProfile()}
+              disabled={busy}
+            >
+              Output Device Profile…
+            </button>
+            <span className="tools__profileLabel">
+              {outputDeviceProfile
+                ? (outputDeviceProfile.description ?? outputDeviceProfile.colorSpace)
+                : "None"}
+            </span>
           </label>
           <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof

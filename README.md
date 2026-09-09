@@ -18565,6 +18565,60 @@ and that both the plain and dithered Convert commands send the exact
 Conversion Engine flips to shipped; Color Settings' own umbrella row
 flips too, since every real row that dialog has is now built (566/618).
 
+## Phase 317 — ICC Color Profiles, Monitor/Input/Output Device Profile
+
+A real binary parser for the actual ICC.1:2010 profile file format — a
+new `icc.rs` module, `icc::parse(bytes)` — not a name picked from a
+fixed list, the same "read the real file" bar Color Lookup's own
+`.cube` support already set for 3D LUTs.
+
+The 128-byte header: device class (`"mntr"`/`"scnr"`/`"prtr"`/…), data
+colour space (`"RGB"`, `"CMYK"`, `"Lab"`, …), and the header's own
+Rendering Intent field (bytes 64-67) decoded straight into this
+project's own `RenderingIntent` — the ICC spec and Photoshop's own
+Rendering Intent dropdown share the exact same four values (0
+Perceptual, 1 Media-Relative Colorimetric, 2 Saturation, 3 ICC-Absolute
+Colorimetric), so no separate mapping type was needed. Then the tag
+table, and the common tags a real profile's own metadata actually lives
+in: `desc` (ICC v2's `textDescriptionType`) or `mluc` (ICC v4's
+`multiLocalizedUnicodeType`, UTF-16BE) for the profile's own
+human-readable description — both real shapes are parsed, since a v4
+profile's `desc` tag never uses the v2 layout — and `XYZType` for
+`wtpt`/`rXYZ`/`gXYZ`/`bXYZ` (white point and RGB primaries), each
+`s15Fixed16Number` decoded as a big-endian `i32` divided by `65536.0`,
+signed correctly (a wide-gamut profile's own primary can carry a small
+negative XYZ component).
+
+Color Settings gained three real "Import…" buttons — Monitor Profile,
+Input Device Profile, Output Device Profile — each opening a real file
+picker filtered to `.icc`/`.icm`, parsing the chosen file through the
+new `parse_icc_profile` Tauri command, and showing the file's own real
+description next to the button. All three are app-level Color Settings,
+not per-document state, the same real distinction the Working Space
+select already makes; each one's own file path persists to
+`localStorage` and is silently re-parsed on the next launch, failing
+quietly into "no profile imported" if the file has since moved rather
+than surfacing a startup error for a preference nothing has asked to
+use yet.
+
+**Verified two ways.** `icc.rs` gained 8 tests, each against a
+hand-built, byte-for-byte real ICC file — header, tag table, and tag
+data assembled exactly the way a real ICC encoder would, not a
+shortcut around the real format: device class/colour space/rendering
+intent, all four real ICC rendering-intent values decoded correctly,
+white point + all three RGB primaries from real `XYZType` tags, both
+the v2 `desc` and v4 `mluc` description shapes, a negative-primary
+two's-complement round-trip, and two real rejection cases (missing
+`"acsp"` signature, a file too short to hold a header) — 1691 total
+(1683 lib + 8 icc). `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings` clean. In the frontend, a live Playwright session confirmed
+the Monitor Profile button starts at "None", sends the exact
+`parse_icc_profile` call with the picked file's own path, and updates
+to the parsed file's own real description. `npm run build` is clean.
+
+ICC Color Profiles, Monitor Profile, Input Device Profile, and Output
+Device Profile all flip to shipped (570/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

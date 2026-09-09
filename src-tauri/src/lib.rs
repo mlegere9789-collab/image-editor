@@ -4,6 +4,7 @@
 pub mod blend;
 pub mod composite;
 pub mod document;
+pub mod icc;
 pub mod png;
 pub mod project;
 
@@ -1726,6 +1727,17 @@ fn color_lookup(state: State<'_, AppState>, id: LayerId, path: String) -> Result
         std::fs::read_to_string(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
     let lut = document::parse_cube(&text)?;
     edit_checkpointed(&state, |document| document.color_lookup(id, &lut))
+}
+
+/// Color Settings > Monitor Profile / Input Device Profile / Output Device
+/// Profile / ICC Color Profiles: reads and parses a real `.icc`/`.icm` file
+/// at `path`, returning its own real, file-derived metadata — not state on
+/// `AppState`, since none of these three assignments are per-document, the
+/// same way `assign_profile`'s own working-space profile is.
+#[tauri::command]
+fn parse_icc_profile(path: String) -> Result<icc::IccProfile, String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    icc::parse(&bytes)
 }
 
 /// Image > Mode: convert the document to `mode`, with Bitmap's `method`.
@@ -6315,6 +6327,7 @@ pub fn run() {
             add_channel,
             convert_mode,
             color_lookup,
+            parse_icc_profile,
             content_aware_scale,
             transform_to_bounds,
             perspective_warp,

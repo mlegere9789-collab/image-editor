@@ -283,6 +283,20 @@ export type RenderingIntent = "relativeColorimetric" | "absoluteColorimetric" | 
  * > Conversion Engine. */
 export type ConversionEngine = "analytic" | "lookupTable";
 
+/** Mirrors `icc::IccProfile` in src-tauri/src/icc.rs: Color Settings >
+ * Monitor Profile / Input Device Profile / Output Device Profile / ICC
+ * Color Profiles — a real `.icc`/`.icm` file's own parsed metadata. */
+export interface IccProfile {
+  colorSpace: string;
+  deviceClass: string;
+  renderingIntent: RenderingIntent;
+  description: string | null;
+  whitePoint: [number, number, number] | null;
+  redPrimary: [number, number, number] | null;
+  greenPrimary: [number, number, number] | null;
+  bluePrimary: [number, number, number] | null;
+}
+
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */
 export type ColorSample = { color: [number, number, number]; position: [number, number] | null };

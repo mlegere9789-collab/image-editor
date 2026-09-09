@@ -327,6 +327,13 @@ body {
   accent-color: var(--accent);
 }
 
+.tools__profileLabel {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .toolbar__title {
   flex: 1;
   margin: 0;
