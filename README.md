@@ -19109,22 +19109,45 @@ rediscover from scratch:
   `.onnx` weights on Google Drive rather than in their own GitHub
   repos — unreachable from this project's own build/dev sandbox,
   which can only fetch a GitHub repo's own committed content (`raw.`/
-  `media.githubusercontent.com`), not arbitrary third-party file
-  hosts.
+  `media.githubusercontent.com`). One more real conversion
+  (`clibdev/colorization`, carrying forward the real BSD-2-Clause
+  license from Richard Zhang's own original repository) does host its
+  `.onnx` files directly as GitHub Release assets — genuinely
+  reachable — but both the ECCV16 and SIGGRAPH17 exports are
+  ~123-130 MB, over GitHub's own 100 MB per-file push limit. Bundling
+  either would need Git LFS set up for this repository (a `.gitattributes`
+  change plus `lfs: true` in the CI checkout step) rather than a plain
+  commit, which is real infrastructure to add, not a quick increment —
+  left for a deliberate decision rather than done unilaterally
+  mid-session.
 - **Photo Restoration.** Xintao Wang's real, official
   `RealESRGAN_x4plus.pth` (BSD-3-Clause, confirmed against the
   repository's own `LICENSE`) *is* genuinely fetchable — its GitHub
-  Release asset resolved and downloaded correctly — and its
-  architecture's nearest-neighbour-upsample-then-conv design would
-  export to ONNX's modern `Resize` op (which `tract` supports) rather
-  than the deprecated one, if exported at a current opset. But turning
-  a PyTorch `.pth` checkpoint into a runnable ONNX file needs PyTorch
-  installed to run the export, and PyTorch's own installed footprint
-  (2-3 GB) does not fit in this sandbox's remaining disk allowance
-  (confirmed directly: downloading just the wheel left under 3 GB
-  free, and it was deleted again immediately after confirming this).
-  Real, licensed, and technically plausible — blocked by a disk
-  budget, not a missing model or a licensing question.
+  Release asset resolved and downloaded correctly — and its real
+  architecture (fetched directly from BasicSR's own
+  `rrdbnet_arch.py`/`arch_util.py`: nearest-neighbour
+  `F.interpolate` + conv, not `nn.Upsample`) would export to ONNX's
+  modern `Resize` op at a current opset, which `tract` supports,
+  sidestepping Style Transfer's exact dead end above. A real export
+  script was written against the exact fetched source and got as far
+  as being ready to run. Two real obstacles surfaced, in order: first,
+  disk — this sandbox's Rust `target/` directory alone was 22 GB of
+  purely regenerable build cache, and clearing it (a safe, zero-risk
+  `cargo clean`, since it rebuilds from the already-cached crates.io
+  registry) freed enough room for PyTorch's real install footprint.
+  Second, and the one that actually stopped this: running the export
+  script — which calls `torch.load` on a downloaded checkpoint — was
+  refused by Claude Code's own auto-mode security classifier, which
+  treats executing a downloaded model checkpoint as a real risk
+  category (PyTorch's own pickle format can execute arbitrary code
+  during deserialization) independent of this specific file's real,
+  verified provenance. That denial was respected, not routed around;
+  the temporary PyTorch install was removed again immediately after.
+  Real, licensed, and technically plausible all the way to one
+  permission boundary — resuming this needs either that permission
+  granted deliberately, or a way to do the same lossless format
+  conversion without running arbitrary Python against a downloaded
+  checkpoint in this environment.
 - **Smart Portrait, Makeup Transfer, Landscape Mixer.** Each needs a
   GAN operating in a learned latent space (facial attribute editing,
   face-region-aware style transfer, learned scene blending
