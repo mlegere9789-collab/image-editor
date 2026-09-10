@@ -34,6 +34,217 @@ body {
   display: grid;
   grid-template-rows: auto 1fr auto;
   height: 100%;
+  min-height: 0;
+}
+
+.workspace {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Window > Panel Docking: a column of docked panels beside the canvas,
+ * left or right. Only rendered when at least one panel is docked there,
+ * so undocking every panel from a side collapses it rather than leaving
+ * an empty column. */
+.dock-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: fit-content;
+  flex: none;
+  overflow-y: auto;
+  padding: 4px;
+}
+.dock-zone--left {
+  order: 0;
+  border-right: 1px solid var(--border);
+}
+.dock-zone--right {
+  order: 2;
+  border-left: 1px solid var(--border);
+}
+
+/* Window > Panel Stacking: only present when a dock zone holds two or
+ * more panels (a lone panel per zone -- the common case, especially once
+ * Panel Groups lets Layers and Channels combine into one -- renders with
+ * none of this, identical to Panel Docking's original behavior). Each
+ * slot gets the explicit height App.tsx computes (a live drag, a saved
+ * one, or content-sized until either exists); the panel inside stretches
+ * to fill it so its own `.panel`'s existing `overflow-y: auto` does the
+ * scrolling, rather than the slot clipping it or leaving dead space.
+ * Excluded while collapsed to an icon strip -- Collapsed Icon Panels
+ * already gives that its own fixed 32px width and full content height
+ * meaning, which stretching to fill an unrelated stack slot would fight. */
+.dock-zone__slot {
+  overflow: hidden;
+  min-height: 0;
+}
+/* Only a slot with a *definite* size -- the last one in a zone (fills
+ * whatever height is left) or one with its own explicit dragged/saved
+ * height -- stretches its panel to fill it. An auto-sized slot (nothing
+ * dragged yet) carries no `--fill` class at all and stays exactly the
+ * plain, content-sized box Panel Docking always used. */
+.dock-zone__slot--fill > .dockable-panel:not(.dockable-panel--collapsed) {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.dock-zone__slot--fill > .dockable-panel:not(.dockable-panel--collapsed) > .panel {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.dock-zone__splitter {
+  flex: 0 0 auto;
+  height: 6px;
+  margin: -3px 0;
+  cursor: row-resize;
+  touch-action: none;
+  position: relative;
+  z-index: 4;
+}
+.dock-zone__splitter::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--border);
+}
+.dock-zone__splitter:hover::after,
+.dock-zone__splitter:active::after {
+  background: var(--accent);
+}
+
+/* Window > Panel Docking / Floating Panels: the drag handle every
+ * dockable panel gets, and the floating variant's own window chrome. */
+.dockable-panel {
+  position: relative;
+}
+.dockable-panel__grip {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+.dockable-panel__grip:active {
+  cursor: grabbing;
+}
+.dockable-panel--floating {
+  position: fixed;
+  z-index: 50;
+  width: 260px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.dockable-panel__collapse {
+  position: absolute;
+  top: 2px;
+  right: 26px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Window > Collapsed Icon Panels: the panel's own content is replaced by
+ * a narrow vertical label, its own two buttons still reachable to expand
+ * or re-dock it. */
+.dockable-panel--collapsed {
+  width: 32px !important;
+  min-width: 32px;
+}
+.dockable-panel--collapsed .dockable-panel__collapse {
+  right: 6px;
+  top: 26px;
+}
+.dockable-panel__label {
+  display: block;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  padding: 30px 0 10px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* Window > Panel Groups: the tab strip a TabbedPanelGroup renders above
+ * whichever member panel is currently active. Right padding clears the
+ * three-button cluster (grip, collapse, ungroup) that DockablePanel
+ * overlays on this same panel's top-right corner -- see .panel-group__ungroup
+ * below for why that cluster is 74px wide, not the 28px a single grip
+ * button alone would need. */
+.panel-group__tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 74px 0 4px;
+  border-bottom: 1px solid var(--border);
+}
+.panel-group__tab {
+  padding: 6px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.panel-group__tab--active {
+  color: var(--text, #eee);
+  border-bottom-color: var(--accent);
+}
+/* Absolutely positioned against .dockable-panel (the nearest `position:
+ * relative` ancestor -- same one .dockable-panel__grip/__collapse below
+ * already anchor to), immediately left of those two, rather than a flex
+ * child riding this row's own padding: margin-left:auto here previously
+ * placed it at right:28px, squarely inside the 26px-46px band
+ * .dockable-panel__collapse already occupies -- the collapse button sat
+ * on top of it and silently ate every click. right:50px is the next free
+ * 20px slot in that same right-to-left button run (grip at 2-22,
+ * collapse at 26-46, this at 50-70), confirmed with a live drag-drop-
+ * ungroup Playwright pass after the original overlap was caught the same
+ * way. */
+.panel-group__ungroup {
+  position: absolute;
+  top: 2px;
+  right: 50px;
+  z-index: 5;
+  width: 20px;
+  height: 20px;
+  line-height: 18px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
 }
 
 .app--dropping .stage {
@@ -43,11 +254,129 @@ body {
 
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+}
+
+/* Color Settings > Profile Mismatch Warnings: a slim, dismissible
+ * status bar between the toolbar and the canvas -- unlike .notice, this
+ * has to coexist with an open document rather than replace the canvas,
+ * so it is a full-width strip rather than a centered card. */
+.color-mismatch-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+}
+.color-mismatch-banner__dismiss {
+  margin-left: auto;
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  text-align: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+/* Color Settings > OpenColorIO Panel: a real, expandable listing of the
+ * loaded config's own colour spaces and role mappings -- same slim strip
+ * shape as .color-mismatch-banner, but its own content can run longer
+ * than one line, so it wraps instead of staying single-line. */
+.ocio-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+.ocio-panel__section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+}
+.ocio-panel__label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Image > Mode > HDR Histogram: real bin counts as bar heights, a
+ * distinct accent colour past the real in-gamut boundary marking real
+ * overbright content a normal 0-255 histogram has no bin for. */
+.hdr-histogram {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 100%;
+  height: 48px;
+}
+.hdr-histogram__bar {
+  flex: 1;
+  min-height: 1px;
+  background: var(--accent);
+  border-radius: 1px 1px 0 0;
+}
+.hdr-histogram__bar--overbright {
+  background: #e0a030;
+}
+
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.tools__color {
+  width: 30px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.tools__color:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.tools__slider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.tools__slider input[type="range"] {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.tools__profileLabel {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .toolbar__title {
@@ -79,10 +408,15 @@ body {
 }
 
 .stage {
+  position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   place-items: center;
   overflow: auto;
   padding: 24px;
+  order: 1;
+  flex: 1;
+  min-width: 0;
   /* Checkerboard, so transparent PNGs read correctly. */
   background-color: #15171a;
   background-image:
@@ -94,11 +428,114 @@ body {
   background-position: 0 0, 0 10px, 10px -10px, -10px 0;
 }
 
+.canvas-wrap {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+  /* A pointer drag across the canvas is a tool gesture, never a native
+     "select this image" gesture — without this, WebKitGTK renders its own
+     full-image selection highlight over any click-drag. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
 .canvas {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 6px 24px rgb(0 0 0 / 45%);
+  touch-action: none;
+  -webkit-user-drag: none;
+}
+
+.canvas--brush {
+  cursor: crosshair;
+}
+
+.canvas--eraser {
+  cursor: cell;
+}
+
+.canvas--selectRect,
+.canvas--selectEllipse {
+  cursor: crosshair;
+}
+
+.canvas--selectRow {
+  cursor: row-resize;
+}
+
+.canvas--selectColumn {
+  cursor: col-resize;
+}
+
+.canvas--eyedropper {
+  cursor: copy;
+}
+
+.canvas--selectionBrush,
+.canvas--quickSelection,
+.canvas--magneticLasso,
+.canvas--vectorMask,
+.canvas--objectSelect,
+.canvas--objectSelectLasso {
+  cursor: crosshair;
+}
+
+.canvas--paintBucket {
+  cursor: cell;
+}
+
+.canvas--gradient {
+  cursor: crosshair;
+}
+
+.canvas--rectangle,
+.canvas--ellipse,
+.canvas--line,
+.canvas--polygon,
+.canvas--star,
+.canvas--triangle {
+  cursor: crosshair;
+}
+
+/* A selection's marching-ants outline: four repeating-gradient "edges"
+   (border-style: dashed itself has no animatable offset), animated in the
+   direction that reads as ants marching clockwise. mix-blend-mode: difference
+   keeps it visible against either theme or any image colour underneath,
+   rather than picking one fixed outline colour that could vanish into a
+   similarly-coloured canvas. */
+.selection-outline {
+  position: absolute;
+  pointer-events: none;
+  mix-blend-mode: difference;
+  background-image:
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(90deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%),
+    linear-gradient(0deg, #fff 50%, transparent 50%);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+  background-size: 8px 1.5px, 8px 1.5px, 1.5px 8px, 1.5px 8px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  animation: marching-ants 0.5s linear infinite;
+}
+
+.selection-outline--ellipse {
+  border-radius: 50%;
+  overflow: hidden;
+}
+
+@keyframes marching-ants {
+  to {
+    background-position:
+      8px 0,
+      -8px 100%,
+      0 -8px,
+      100% 8px;
+  }
 }
 
 .notice {
@@ -145,4 +582,662 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
+}
+
+/* --- Layers panel --- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 260px;
+  padding: 14px;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+/* A docked panel's own edge border comes from `.dock-zone--left`/`--right`
+ * now that Panel Docking lets `.panel` land on either side or float; a
+ * floating one gets a full border of its own instead. */
+.dockable-panel--floating .panel,
+.dockable-panel--floating .channels {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 70vh;
+}
+
+.panel__heading {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.panel__empty {
+  margin: 0;
+  color: var(--muted);
+}
+
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.layer:hover {
+  background: rgb(255 255 255 / 4%);
+}
+
+.layer--selected {
+  border-color: var(--accent);
+  background: rgb(76 141 255 / 14%);
+}
+
+.layer__eye,
+.layer__lock,
+.layer__link,
+.layer__clip {
+  flex: none;
+  cursor: pointer;
+}
+
+.layer__group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: -7px -8px 6px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.layer--grouped {
+  flex-wrap: wrap;
+}
+
+.layer__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer__meta {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.control--row {
+  flex-direction: row;
+  gap: 6px;
+}
+
+.control--row .button {
+  flex: 1;
+}
+
+.control__label {
+  display: flex;
+  justify-content: space-between;
+}
+
+.control__value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.smart-filter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.smart-filter-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.control input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.control select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.button--quiet {
+  background: transparent;
+  color: var(--text);
+}
+
+.button--quiet:hover:not(:disabled) {
+  background: rgb(255 255 255 / 7%);
+  filter: none;
+}
+
+.button--active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button--active:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.1);
+}
+
+.button--danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.button--danger:hover:not(:disabled) {
+  background: rgb(255 107 107 / 14%);
+  filter: none;
+}
+
+.control input[type="number"] {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 50%);
+  z-index: 10;
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 280px;
+  padding: 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+}
+
+.modal__heading {
+  margin: 0;
+  font-size: 15px;
+}
+
+.modal__subheading {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.channels {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.channels__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.channels__thumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.channel__thumb {
+  flex: none;
+  object-fit: contain;
+  background: repeating-conic-gradient(#666 0 25%, #999 0 50%) 0 0 / 8px 8px;
+  border: 1px solid var(--border);
+  image-rendering: pixelated;
+}
+
+.channel__thumb--small {
+  width: 24px;
+  height: 24px;
+}
+
+.channel__thumb--medium {
+  width: 40px;
+  height: 40px;
+}
+
+.channel__thumb--large {
+  width: 64px;
+  height: 64px;
+}
+
+.channel__actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.channel__rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.color-range-preview {
+  display: block;
+  max-width: 100%;
+  image-rendering: pixelated;
+  border: 1px solid var(--border, #444);
+  margin: 0.5rem 0;
+}
+
+.modal__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.modal__hint--error {
+  color: var(--danger);
+}
+
+.toolbar-customize__list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px 16px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.modal--wide {
+  width: 360px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal__section {
+  margin: 6px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.selection-outline--mask {
+  border-style: dotted;
+}
+
+.statusbar__levels {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.count-mark {
+  position: absolute;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  min-width: 1.2em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  background: #d9480f;
+  color: #fff;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 0 0 1px #fff;
+}
+
+.lasso-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.hover-bounds {
+  position: absolute;
+  pointer-events: none;
+  border: 1px solid #f5c400;
+  box-sizing: border-box;
+}
+
+.transform-box {
+  position: absolute;
+  pointer-events: none;
+  border: 1px dashed #4cc2ff;
+  box-sizing: border-box;
+}
+
+.transform-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -5px 0 0 -5px;
+  background: #fff;
+  border: 1px solid #4cc2ff;
+  box-sizing: border-box;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.transform-handle--nw { left: 0; top: 0; cursor: nwse-resize; }
+.transform-handle--n { left: 50%; top: 0; cursor: ns-resize; }
+.transform-handle--ne { left: 100%; top: 0; cursor: nesw-resize; }
+.transform-handle--e { left: 100%; top: 50%; cursor: ew-resize; }
+.transform-handle--se { left: 100%; top: 100%; cursor: nwse-resize; }
+.transform-handle--s { left: 50%; top: 100%; cursor: ns-resize; }
+.transform-handle--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.transform-handle--w { left: 0; top: 50%; cursor: ew-resize; }
+
+.guide-line {
+  position: absolute;
+  background: #22d3ee;
+  opacity: 0.85;
+  cursor: pointer;
+}
+
+.guide-line--vertical {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-0.5px);
+}
+
+.guide-line--horizontal {
+  left: 0;
+  right: 0;
+  height: 1px;
+  transform: translateY(-0.5px);
+}
+
+.note-mark {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border: 1px solid #fff;
+  border-radius: 4px;
+  background: #f5c400;
+  color: #222;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.clipping {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.clipping__channel {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+}
+
+.clipping__channel--lit {
+  color: inherit;
+  border-color: currentColor;
+}
+
+.histogram {
+  width: 100%;
+  height: 120px;
+  background: var(--canvas-bg, rgb(0 0 0 / 25%));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.channel-mixer {
+  border-collapse: collapse;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.channel-mixer th,
+.channel-mixer td {
+  padding: 4px 6px;
+  text-align: center;
+}
+
+.channel-mixer input[type="number"],
+.kernel-grid input[type="number"] {
+  width: 56px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.kernel-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 56px);
+  gap: 6px;
+  justify-content: center;
+}
+
+/* Edit > Transform > Warp: the mesh preview, drawn in document pixel-index
+   coordinates with a margin of a quarter canvas on every side. */
+.warp-mesh {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  margin: 0.5rem 0;
+  background: var(--panel-bg, #1f1f24);
+  border: 1px solid var(--border, #3a3a44);
+  touch-action: none;
+}
+.warp-mesh__canvas {
+  fill: rgba(255, 255, 255, 0.08);
+  stroke: rgba(255, 255, 255, 0.35);
+  stroke-width: 0.5%;
+  vector-effect: non-scaling-stroke;
+}
+.warp-mesh__curve {
+  fill: none;
+  stroke: #7fb2ff;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.warp-mesh__handle {
+  fill: #ffffff;
+  stroke: #1f6fe0;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  cursor: grab;
+}
+.warp-mesh__points {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.warp-mesh__points input {
+  width: 4.5rem;
+}
+
+/* Edit > Puppet Warp's pins on the mesh preview. */
+.puppet-pin {
+  fill: #ffd34d;
+  cursor: grab;
+}
+.puppet-pin--selected {
+  fill: #ff8a3d;
+  stroke: #ffffff;
+}
+
+/* Channels panel: a spot channel's ink swatch. */
+.channel__swatch {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+/* Rich Tooltips: a `data-tooltip-name` (the tool's own name, bold) and a
+ * `data-tooltip` (its explanation) rendered as two stacked floating boxes
+ * on hover, in place of a plain single-line browser title tooltip.
+ * `title` is deliberately not set on these elements — a native tooltip
+ * alongside this one would double up. Pure CSS: no positioning JS, no
+ * hover-delay timer to manage, nothing to clean up on unmount. */
+[data-tooltip] {
+  position: relative;
+}
+
+[data-tooltip]:hover::before,
+[data-tooltip]:hover::after {
+  position: absolute;
+  left: 0;
+  z-index: 30;
+  width: max-content;
+  max-width: 260px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+[data-tooltip]:hover::before {
+  content: attr(data-tooltip-name);
+  bottom: calc(100% + 30px);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  bottom: 100%;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+/* Contextual Task Bar: one-click controls relevant to whatever is
+ * currently selected — selection-refinement tools with an active
+ * selection, or Quick Actions (Select Subject, Remove Background) on a
+ * plain layer otherwise. Floats over the bottom of the canvas the same
+ * way Photoshop's own does, rather than living in the fixed toolbar. */
+.contextual-task-bar {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Search Your Cloud Files: the filtered document-name list. */
+.cloud-search__list {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.cloud-search__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.cloud-search__row:last-child {
+  border-bottom: none;
 }

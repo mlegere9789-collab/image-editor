@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Image Editor",
+  "productName": "LegeLabs Photo Editing Suite",
   "version": "0.1.0",
-  "identifier": "com.mlegere.image-editor",
+  "identifier": "com.legelabs.photo-editing-suite",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Image Editor",
+        "title": "LegeLabs: Photo Editing Suite",
         "width": 1100,
         "height": 750,
         "minWidth": 640,
@@ -21,7 +21,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; img-src 'self' composite: http://composite.localhost; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
