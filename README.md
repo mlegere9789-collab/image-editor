@@ -19159,6 +19159,84 @@ None of this is a reason to stop looking — it's the opposite: a
 record of exactly which door was tried and exactly why it didn't open,
 so the next attempt starts past this point instead of at it.
 
+## Phase 326 — Colorize
+
+Every other model this project bundles is a real, already-published,
+pretrained one obtained from its real source — Super Zoom's own
+sub-pixel CNN, most notably. This phase is different on purpose: rather
+than search for a fourth pretrained candidate, this trains one, from
+scratch, for this project, in this sandbox.
+
+`src-tauri/models/train/` holds the exact scripts: `model.py` defines
+`TinyColorizer`, a small (~83,600-parameter) fully-convolutional
+encoder-decoder — two stride-2 downsamples, a bottleneck, two
+nearest-neighbour-upsample-then-conv stages with additive skip
+connections back to the matching encoder stage. `train.py` fetches
+nothing itself; it trains against 51 real photographs already fetched
+from OpenCV's own `samples/data` (Apache License 2.0), extracting random
+96x96 crops with random flips as real data augmentation. Every one of
+the network's parameters starts at PyTorch's own random initialization
+and is updated only by real gradient descent — Adam, learning rate
+`2e-3`, batch 16, 200 steps/epoch, 40 epochs, 8,000 real updates total,
+MSE loss between predicted and real Cb/Cr chrominance (this project's
+own established BT.601 YCbCr convention, the same one
+`super_resolution.rs` already uses) — run directly in this sandbox, no
+GPU, in a little over 45 minutes. Loss converged from `0.00435` to
+`~0.0033` MSE over the run. `export_onnx.py` then exports the
+just-trained weights (not any downloaded checkpoint) to ONNX at opset
+13; upsampling lowers to the `Resize` op, not the deprecated `Upsample`
+op that blocked reusing an already-published Style Transfer model
+earlier in this same investigation.
+
+`colorize.rs` is new: `colorize_rgba` builds a Y plane from the input
+(edge-padded to a multiple of 4, since the network's two stride-2/
+upsample-by-2 stages need matching dimensions for their skip
+connections to line up), runs one dynamic-shape inference pass through
+the bundled network — confirmed in an isolated test harness to run
+correctly at several arbitrary sizes before touching this project, not
+just the one it was trained at — crops the predicted Cb/Cr back to the
+original size, and recombines it with the *input's own, unmodified*
+luma (Colorize never touches brightness or detail, only synthesizes
+colour) and the input's own alpha. `Document::colorize` wires this into
+a single layer via the existing `filter_pixels` helper, so it respects
+the active selection and a locked layer exactly like every other filter
+already does — and, being a same-size operation unlike Super Zoom, it
+slots into the existing Neural Filter Output family (Current Layer/New
+Layer/New Layer Masked/New Document) instead of needing its own special
+case. A new "Colorize (AI)" toolbar button runs it with one click.
+
+**Honestly, plainly:** this works, and it is not vivid. A qualitative
+check against a real training photo (`fruits.jpg`, resized and
+regrayed, colorized fresh through the exported ONNX model — not the
+training loop) shows real, visible, plausible colour — the orange slice
+picks up warm orange-toward-tan tones, the kiwi picks up green — but
+desaturated overall, the exact well-documented failure mode of training
+a colorization network under plain MSE regression to chrominance (it
+biases toward the safe average colour rather than a vivid, confident
+one — the reason the original Zhang et al. 2016 research this
+project's own **pretrained** neighbour category doesn't include used a
+classification loss instead). Trained on only 51 source images, its
+colour priors are narrow. Both of those are named plainly in
+`models/COLORIZE_NOTICE.md` as real properties of what was actually
+built, not smoothed over.
+
+**Verified two ways.** `colorize.rs` gained 4 tests (two malformed-input
+rejections, a real end-to-end run confirming output dimensions and
+alpha preservation, and a real run confirming pure-black/pure-white
+input luma comes back out unchanged to within a small floating-point
+tolerance — Colorize only ever touches chrominance). `document.rs`
+gained 2 more (the canvas-size/single-layer-touched check, and the
+existing locked-layer rejection every other filter already has).
+1749 total (1742 lib + 7 pipeline). `cargo fmt`, `cargo clippy
+--all-targets -- -D warnings` clean. `npm run build` clean. A live
+Playwright session confirmed the "Colorize (AI)" button is present,
+enabled with a paintable layer selected, and calls the real `colorize`
+command with that layer's own id.
+
+Colorize flips to shipped (587/618) — the third of the 32 AI-dependent
+items to get a real answer, and the first to be a real answer this
+project made rather than found.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

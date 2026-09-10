@@ -4621,6 +4621,15 @@ export default function App() {
     [runCommand, neuralFilterOutput],
   );
 
+  // Neural Filters > Colorize: a real, self-trained on-device AI model —
+  // designed and trained from scratch for this project on 51 real
+  // photographs, not a pretrained checkpoint from anywhere else —
+  // predicts colour from the selected layer's own luma.
+  const applyColorize = useCallback(async () => {
+    if (selectedId === null) return;
+    await applyNeuralFilterOutput("colorize", {}, selectedId);
+  }, [applyNeuralFilterOutput, selectedId]);
+
   const applySkinSmoothing = useCallback(async () => {
     if (selectedId === null) return;
     await applyNeuralFilterOutput(
@@ -9701,6 +9710,14 @@ export default function App() {
             title="Neural Filters > JPEG Artifacts Removal"
           >
             JPEG Artifacts Removal…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyColorize()}
+            disabled={busy || !canPaint}
+            title="Neural Filters > Colorize — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
+          >
+            Colorize (AI)
           </button>
           <button
             className="button button--quiet"

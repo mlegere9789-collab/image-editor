@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 pub mod blend;
+pub mod colorize;
 pub mod composite;
 pub mod content_credentials;
 pub mod document;
@@ -3275,6 +3276,15 @@ fn merge_down(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, Strin
 #[tauri::command]
 fn super_zoom(state: State<'_, AppState>) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.ai_super_resolution())
+}
+
+/// Neural Filters > Colorize: a real, self-trained on-device AI model —
+/// trained from scratch for this project, not a pretrained checkpoint —
+/// predicts colour for layer `id`'s own current luma. See
+/// `src-tauri/src/colorize.rs` and `src-tauri/models/COLORIZE_NOTICE.md`.
+#[tauri::command]
+fn colorize(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.colorize(id))
 }
 
 #[tauri::command]
@@ -6707,6 +6717,7 @@ pub fn run() {
             flatten_image,
             merge_down,
             super_zoom,
+            colorize,
             sample_color,
             paint_stroke,
             erase_stroke,

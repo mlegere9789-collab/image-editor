@@ -15514,6 +15514,29 @@ impl Document {
         }))
     }
 
+    /// Neural Filters > Colorize: predicts real Cb/Cr chrominance for
+    /// layer `id`'s own current pixels via a small convolutional network
+    /// this project trained itself from random initial weights (see
+    /// `src-tauri/src/colorize.rs` and `models/COLORIZE_NOTICE.md`) —
+    /// unlike [`Self::ai_super_resolution`]'s bundled model, which is a
+    /// real pretrained one obtained from its real source, this one was
+    /// never pretrained by anyone else at all. Each pixel's own luma is
+    /// kept exactly as it was; only the synthesized colour is new. Like
+    /// every other filter, goes through [`Self::filter_pixels`], so it
+    /// respects the active selection and a locked layer the same way.
+    pub fn colorize(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (doc_width, doc_height) = (self.width, self.height);
+        let source = self.layer(id)?.pixels.clone();
+        let predicted = crate::colorize::colorize_rgba(&source, doc_width, doc_height)?;
+        let doc_width = doc_width as usize;
+        self.filter_pixels(id, move |_source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&predicted[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Merge Down: composite a layer with the one directly below it in the
     /// stack, replacing both with one new layer at that position. Respects
     /// each layer's own visibility and opacity exactly like `flatten` does —
@@ -30683,6 +30706,32 @@ mod tests {
         // check — the active selection no longer means anything at a
         // different resolution.
         assert!(doc.selection.is_none());
+    }
+
+    #[test]
+    fn colorize_keeps_the_canvas_size_and_touches_only_the_selected_layer() {
+        let mut doc = Document::new(6, 5).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(6, 5, [128, 128, 128, 255]), 6, 5)
+            .unwrap();
+
+        doc.colorize(id).unwrap();
+
+        assert_eq!((doc.width(), doc.height()), (6, 5));
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].pixels.len(), 6 * 5 * 4);
+        // Alpha was fully opaque everywhere and Colorize never touches it.
+        assert!(doc.layers()[0].pixels.chunks_exact(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn colorize_rejects_a_locked_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(2, 2, [100, 100, 100, 255]), 2, 2)
+            .unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.colorize(id).is_err());
     }
 
     #[test]

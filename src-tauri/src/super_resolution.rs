@@ -97,7 +97,7 @@ pub fn upscale_rgba(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, S
 /// `0.0..=1.0`. The reciprocals of [`ycbcr_to_rgb`]'s own multipliers, so
 /// the two round-trip up to floating-point rounding — proven by this
 /// module's own `ycbcr_round_trip_recovers_the_original_rgb` test.
-fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+pub(crate) fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let luma = 0.299 * r + 0.587 * g + 0.114 * b;
     let y = luma / 255.0;
     let cb = 0.5 + (b - luma) / 1.772 / 255.0;
@@ -107,7 +107,7 @@ fn rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 
 /// The inverse of [`rgb_to_ycbcr`]: real BT.601 YCbCr (each `0.0..=1.0`)
 /// back to clamped RGB8.
-fn ycbcr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
+pub(crate) fn ycbcr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
     let y = y * 255.0;
     let cb = (cb - 0.5) * 255.0;
     let cr = (cr - 0.5) * 255.0;

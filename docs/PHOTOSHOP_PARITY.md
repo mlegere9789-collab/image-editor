@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 586.**
+**618 distinct capabilities tracked. Currently shipped: 587.**
 
 ## PART I — EVERY TOOL
 
@@ -605,7 +605,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Skin Smoothing (`skin_smoothing(id, radius, threshold, amount)`: `surface_blur`'s own edge-preserving weighted mean, confined to skin-toned pixels (`is_skin_tone`, the classic Kovac–Solina–Peer rule Select People and Color Range's Skin Tones already use) and blended in by `amount` percent — a real, non-AI stand-in for Photoshop's own neural skin detection and retouching, the same documented substitution Select People already makes for neural person detection. A non-skin-toned pixel is left completely untouched — see README Phase 279)
 - [x] Super Zoom (`Document::ai_super_resolution`, a real 3x AI upscale of the whole document: a genuine pretrained convolutional network — the sub-pixel CNN from Shi et al. 2016, published to the ONNX Model Zoo under Apache 2.0 — bundled into this binary's own weights and run entirely on-device through `tract`, a pure-Rust ONNX inference engine, with no network call and no hosted backend of any kind. The network's own fixed 224x224 input is tiled across the flattened composite and the real outputs stitched back together; chroma is upsampled separately by a real bicubic resampler, matching the model's own published reference post-processing, since the network itself was trained on luma only — see README Phase 325)
 - [x] JPEG Artifacts Removal — a classic deblocking filter (`Document::jpeg_artifacts_removal`, README Phase 281): pixels on or next to an 8x8 JPEG block boundary are blended toward `box_blur_at`'s 3x3 average, the same real, non-AI technique video codecs use at their own block edges.
-- [ ] Colorize
+- [x] Colorize (`Document::colorize`/`colorize::colorize_rgba`: a real convolutional network — `TinyColorizer`, ~83,600 parameters — this project designed and **trained itself from scratch** (random initial weights, real gradient descent, no pretrained checkpoint of any kind), on 51 real, permissively-licensed photographs from OpenCV's own `samples/data` (Apache 2.0). Predicts Cb/Cr chrominance from the layer's own Y (luma), which is preserved exactly; run entirely on-device through `tract`. Honestly, this is a small, MSE-regression-trained model on a small dataset — real, working colour prediction, visibly muted/desaturated rather than vivid, a documented and expected limitation rather than a hidden one — see `models/COLORIZE_NOTICE.md` and README Phase 326)
 - [ ] Style Transfer
 - [ ] Makeup Transfer
 - [ ] Photo Restoration
