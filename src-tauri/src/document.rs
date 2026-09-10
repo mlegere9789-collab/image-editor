@@ -15561,6 +15561,31 @@ impl Document {
         })
     }
 
+    /// Neural Filters > Photo Restoration: corrects layer `id`'s own
+    /// current pixels via a real denoising/deblurring/JPEG-artifact
+    /// correction network this project trained itself, from scratch
+    /// (see `src-tauri/src/restoration.rs` and
+    /// `models/RESTORATION_NOTICE.md`) — a real, official, permissively
+    /// licensed pretrained candidate for this exact item
+    /// (`RealESRGAN_x4plus.pth`) was found and confirmed feasible, but
+    /// converting its downloaded checkpoint was blocked by Claude
+    /// Code's own security classifier, so this one was trained instead
+    /// of found. Each pixel's own alpha is kept exactly as it was. Like
+    /// every other filter, goes through [`Self::filter_pixels`], so it
+    /// respects the active selection and a locked layer the same way.
+    pub fn photo_restoration(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (doc_width, doc_height) = (self.width, self.height);
+        let source = self.layer(id)?.pixels.clone();
+        let restored = crate::restoration::restore_rgba(&source, doc_width, doc_height)?;
+        let doc_width = doc_width as usize;
+        self.filter_pixels(id, move |_source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&restored[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Merge Down: composite a layer with the one directly below it in the
     /// stack, replacing both with one new layer at that position. Respects
     /// each layer's own visibility and opacity exactly like `flatten` does —
@@ -30781,6 +30806,31 @@ mod tests {
             .unwrap();
         doc.set_locked(id, true).unwrap();
         assert!(doc.style_transfer(id).is_err());
+    }
+
+    #[test]
+    fn photo_restoration_keeps_the_canvas_size_and_alpha() {
+        let mut doc = Document::new(6, 5).unwrap();
+        let id = doc
+            .add_layer("solid", &solid(6, 5, [60, 90, 120, 255]), 6, 5)
+            .unwrap();
+
+        doc.photo_restoration(id).unwrap();
+
+        assert_eq!((doc.width(), doc.height()), (6, 5));
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].pixels.len(), 6 * 5 * 4);
+        assert!(doc.layers()[0].pixels.chunks_exact(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn photo_restoration_rejects_a_locked_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(2, 2, [100, 100, 100, 255]), 2, 2)
+            .unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.photo_restoration(id).is_err());
     }
 
     #[test]

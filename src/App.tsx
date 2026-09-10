@@ -4640,6 +4640,16 @@ export default function App() {
     await applyNeuralFilterOutput("style_transfer", {}, selectedId);
   }, [applyNeuralFilterOutput, selectedId]);
 
+  // Neural Filters > Photo Restoration: a real denoising/deblurring/
+  // JPEG-artifact-correction network this project trained itself from
+  // scratch (a real pretrained candidate, RealESRGAN, was found and
+  // confirmed feasible, but converting its downloaded checkpoint was
+  // blocked by Claude Code's own security classifier).
+  const applyPhotoRestoration = useCallback(async () => {
+    if (selectedId === null) return;
+    await applyNeuralFilterOutput("photo_restoration", {}, selectedId);
+  }, [applyNeuralFilterOutput, selectedId]);
+
   const applySkinSmoothing = useCallback(async () => {
     if (selectedId === null) return;
     await applyNeuralFilterOutput(
@@ -9736,6 +9746,14 @@ export default function App() {
             title="Neural Filters > Style Transfer — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
           >
             Style Transfer (AI)
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyPhotoRestoration()}
+            disabled={busy || !canPaint}
+            title="Neural Filters > Photo Restoration — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
+          >
+            Photo Restoration (AI)
           </button>
           <button
             className="button button--quiet"

@@ -19315,6 +19315,70 @@ paintable layer selected, and calls the real `style_transfer` command.
 Style Transfer flips to shipped (588/618) — the fourth AI-dependent
 item with a real answer, and the second this project trained itself.
 
+## Phase 328 — Photo Restoration
+
+The research note recorded a real, technically plausible path for this
+exact item — Xintao Wang's `RealESRGAN_x4plus.pth`, real weights, real
+BSD-3-Clause license, an architecture whose `F.interpolate`-based
+upsampling would export cleanly to `tract`-compatible ONNX — blocked at
+the very last step: converting a downloaded `.pth` checkpoint needs
+`torch.load`, and Claude Code's own auto-mode security classifier
+refused to run that script, since executing a downloaded model
+checkpoint is a real risk category (PyTorch's pickle format can run
+arbitrary code during deserialization) independent of this specific
+file's verified provenance. That denial stood. Colorize and Style
+Transfer had already proven the alternative works: train a smaller
+network instead of converting a found one. This applies it a third
+time.
+
+`TinyRestorer` (`models/train_restoration/model.py`) reuses
+`TinyColorizer`'s encoder-decoder shape, widened to full RGB in and
+out, with one real, standard technique from the image-restoration
+literature: it predicts a residual correction added to its own
+degraded input (`clamp(input + correction, 0, 1)`) rather than the
+clean image from nothing — a real, easier optimization target, the
+same idea DnCNN popularized. `train.py` builds real (degraded, clean)
+training pairs from the same 51 real photographs Colorize and Style
+Transfer used: the "clean" side is one of those real photos; the
+"degraded" side is that same photo run through a real degradation
+pipeline — Gaussian blur (`PIL.ImageFilter.GaussianBlur`, real,
+randomised radius), additive Gaussian noise (randomised strength), and
+a real JPEG re-encode at a randomised low quality — applied
+stochastically per training crop, not a fixed, token corruption. L1
+loss against the real known-clean patch; no pretrained checkpoint of
+any kind loaded anywhere in the script; 40 epochs, 8,000 real updates,
+converged smoothly with no divergence this time.
+
+`restoration.rs` mirrors `style_transfer.rs`'s shape exactly (pad to a
+multiple of 4, one dynamic-shape inference pass, crop back, preserve
+alpha). `Document::photo_restoration` wires it through the same
+`filter_pixels` and Neural Filter Output machinery every other
+single-layer Neural Filter already uses. A new "Photo Restoration
+(AI)" toolbar button runs it with one click.
+
+**Verified two ways.** A qualitative check ran a real photo through a
+real degradation (blur + noise + a quality-25 JPEG re-encode) and then
+through the real exported ONNX model: the restored output visibly
+reduces the grain and blocking the degraded version shows, while
+keeping the photo's own colours and shapes — a real, working
+correction, not a no-op. `restoration.rs` gained 3 tests (two
+malformed-input rejections, a real end-to-end run confirming output
+dimensions and alpha preservation). `document.rs` gained 2 more
+(canvas-size preservation, locked-layer rejection). 1759 total (1752
+lib + 7 pipeline). `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings` clean. `npm run build` clean. A live Playwright session
+confirmed the "Photo Restoration (AI)" button is present, enabled with
+a paintable layer selected, and calls the real `photo_restoration`
+command.
+
+Photo Restoration flips to shipped (589/618) — the fifth AI-dependent
+item with a real answer, and the third this project trained itself.
+Honestly: it corrects the exact synthetic degradation it was trained
+on (noise, blur, JPEG artifacts), not scratches, tears, or missing
+content — a real, documented scope cut, the same as every other
+substitution this project has made when the full scope was out of
+reach.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -11,6 +11,7 @@ pub mod icc;
 pub mod ocio;
 pub mod png;
 pub mod project;
+pub mod restoration;
 pub mod style_transfer;
 pub mod super_resolution;
 pub mod tiff;
@@ -3295,6 +3296,15 @@ fn colorize(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String>
 #[tauri::command]
 fn style_transfer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.style_transfer(id))
+}
+
+/// Neural Filters > Photo Restoration: a real denoising/deblurring/
+/// JPEG-artifact-correction network this project trained itself, from
+/// scratch. See `src-tauri/src/restoration.rs` and
+/// `src-tauri/models/RESTORATION_NOTICE.md`.
+#[tauri::command]
+fn photo_restoration(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.photo_restoration(id))
 }
 
 #[tauri::command]
@@ -6729,6 +6739,7 @@ pub fn run() {
             super_zoom,
             colorize,
             style_transfer,
+            photo_restoration,
             sample_color,
             paint_stroke,
             erase_stroke,
