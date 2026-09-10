@@ -8,6 +8,7 @@ pub mod content_credentials;
 pub mod document;
 pub mod hdr;
 pub mod icc;
+pub mod landscape_mixer;
 pub mod ocio;
 pub mod png;
 pub mod project;
@@ -3305,6 +3306,15 @@ fn style_transfer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, S
 #[tauri::command]
 fn photo_restoration(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.photo_restoration(id))
+}
+
+/// Neural Filters > Landscape Mixer: a real feed-forward network
+/// this project trained itself, from scratch, on real landscape
+/// photography. See `src-tauri/src/landscape_mixer.rs` and
+/// `src-tauri/models/LANDSCAPE_MIXER_NOTICE.md`.
+#[tauri::command]
+fn landscape_mixer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.landscape_mixer(id))
 }
 
 #[tauri::command]
@@ -6740,6 +6750,7 @@ pub fn run() {
             colorize,
             style_transfer,
             photo_restoration,
+            landscape_mixer,
             sample_color,
             paint_stroke,
             erase_stroke,

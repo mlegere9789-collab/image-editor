@@ -15586,6 +15586,29 @@ impl Document {
         })
     }
 
+    /// Neural Filters > Landscape Mixer: blends layer `id`'s own
+    /// current pixels toward a real landscape mood via a real
+    /// feed-forward network this project trained itself, from scratch,
+    /// on 787 real, permissively-licensed landscape photographs (see
+    /// `src-tauri/src/landscape_mixer.rs` and
+    /// `models/LANDSCAPE_MIXER_NOTICE.md`) — the same real training
+    /// technique as [`Self::style_transfer`], applied to a
+    /// landscape-specific dataset and mood target. Like every other
+    /// filter, goes through [`Self::filter_pixels`], so it respects the
+    /// active selection and a locked layer the same way.
+    pub fn landscape_mixer(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let (doc_width, doc_height) = (self.width, self.height);
+        let source = self.layer(id)?.pixels.clone();
+        let mixed = crate::landscape_mixer::mix_landscape_rgba(&source, doc_width, doc_height)?;
+        let doc_width = doc_width as usize;
+        self.filter_pixels(id, move |_source, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let mut out = [0u8; CHANNELS];
+            out.copy_from_slice(&mixed[base..base + CHANNELS]);
+            out
+        })
+    }
+
     /// Merge Down: composite a layer with the one directly below it in the
     /// stack, replacing both with one new layer at that position. Respects
     /// each layer's own visibility and opacity exactly like `flatten` does —
@@ -30831,6 +30854,31 @@ mod tests {
             .unwrap();
         doc.set_locked(id, true).unwrap();
         assert!(doc.photo_restoration(id).is_err());
+    }
+
+    #[test]
+    fn landscape_mixer_keeps_the_canvas_size_and_alpha() {
+        let mut doc = Document::new(6, 5).unwrap();
+        let id = doc
+            .add_layer("solid", &solid(6, 5, [40, 110, 160, 255]), 6, 5)
+            .unwrap();
+
+        doc.landscape_mixer(id).unwrap();
+
+        assert_eq!((doc.width(), doc.height()), (6, 5));
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].pixels.len(), 6 * 5 * 4);
+        assert!(doc.layers()[0].pixels.chunks_exact(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn landscape_mixer_rejects_a_locked_layer() {
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("grey", &solid(2, 2, [100, 100, 100, 255]), 2, 2)
+            .unwrap();
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.landscape_mixer(id).is_err());
     }
 
     #[test]

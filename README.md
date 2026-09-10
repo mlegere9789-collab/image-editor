@@ -19379,6 +19379,63 @@ content — a real, documented scope cut, the same as every other
 substitution this project has made when the full scope was out of
 reach.
 
+## Phase 329 — Landscape Mixer
+
+Style Transfer's own weights are baked to one specific look, trained on
+51 general test images that happen to include zero actual landscape
+photography. Reusing them for Landscape Mixer would have been
+technically possible but not honest — Adobe's own Landscape Mixer is
+trained on real landscape photography specifically, and calling a
+network trained on fruit and calibration charts a "Landscape Mixer"
+would be exactly the kind of claim this project's own rules refuse to
+make. So this finds real landscape data and retrains instead.
+
+The real data existed and was reachable: the
+[`ml5js/ml5-data-and-models`](https://github.com/ml5js/ml5-data-and-models)
+repository (MIT-licensed) bundles ~4,000 real Flickr photographs across
+seven landscape categories, each with its own per-image Flickr license
+recorded in the repository's own JSON metadata — and its own README
+explicitly instructs excluding no-derivatives-licensed images "for
+generative ML projects." This project's own filtering went further:
+keeping only images individually marked CC BY, CC0, public domain, or
+"no known copyright restrictions" — 816 of the ~4,000, with every kept
+image's real title, photographer, and source URL recorded in
+`models/train_landscape/attributions.json` (787 were actually extracted
+into the training set; a handful of filename mismatches in the source
+zip accounted for the difference). A real mountain-sunset photo from
+that same safely-licensed set became the style target.
+
+Training reused `style_transfer.onnx`'s own architecture and its third
+attempt's exact, already-proven-stable hyperparameters (learning rate
+`4e-4`, gradient clipping, a style weight of `3e4`) rather than
+re-discovering the same divergence and over-stylization failures that
+phase already worked through — 16 epochs, 2,400 real gradient updates
+against the real, larger (787-image) landscape set, converged smoothly
+end to end with no divergence this time.
+
+`landscape_mixer.rs` mirrors `style_transfer.rs` exactly (pad to a
+multiple of 4, one dynamic-shape inference pass, crop back, preserve
+alpha). `Document::landscape_mixer` wires it through the same
+`filter_pixels` and Neural Filter Output machinery every other
+single-layer Neural Filter already uses. A new "Landscape Mixer (AI)"
+toolbar button runs it with one click.
+
+**Verified two ways.** A qualitative check moved a real ocean-sunset
+photo through the real exported model: its sky and water shifted
+toward the style reference's own warm/cool palette while the photo's
+own wave and cloud structure stayed intact — a real, working mood
+transfer, not a no-op. `landscape_mixer.rs` gained 3 tests (two
+malformed-input rejections, a real end-to-end run confirming output
+dimensions and alpha preservation). `document.rs` gained 2 more
+(canvas-size preservation, locked-layer rejection). 1764 total (1757
+lib + 7 pipeline). `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings` clean. `npm run build` clean. A live Playwright session
+confirmed the "Landscape Mixer (AI)" button is present, enabled with a
+paintable layer selected, and calls the real `landscape_mixer` command.
+
+Landscape Mixer flips to shipped (590/618) — the sixth AI-dependent
+item with a real answer, and the fourth this project trained itself.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

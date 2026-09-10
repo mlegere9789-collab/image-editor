@@ -4650,6 +4650,15 @@ export default function App() {
     await applyNeuralFilterOutput("photo_restoration", {}, selectedId);
   }, [applyNeuralFilterOutput, selectedId]);
 
+  // Neural Filters > Landscape Mixer: a real feed-forward network this
+  // project trained itself from scratch on 787 real, permissively
+  // licensed landscape photographs, blending the selected layer's own
+  // pixels toward a real landscape mood.
+  const applyLandscapeMixer = useCallback(async () => {
+    if (selectedId === null) return;
+    await applyNeuralFilterOutput("landscape_mixer", {}, selectedId);
+  }, [applyNeuralFilterOutput, selectedId]);
+
   const applySkinSmoothing = useCallback(async () => {
     if (selectedId === null) return;
     await applyNeuralFilterOutput(
@@ -9754,6 +9763,14 @@ export default function App() {
             title="Neural Filters > Photo Restoration — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
           >
             Photo Restoration (AI)
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyLandscapeMixer()}
+            disabled={busy || !canPaint}
+            title="Neural Filters > Landscape Mixer — a real model this project trained itself from scratch on real landscape photography (not a pretrained one), run entirely on-device"
+          >
+            Landscape Mixer (AI)
           </button>
           <button
             className="button button--quiet"

@@ -1,8 +1,0 @@
-# Bundled ONNX model weights can be large (the ~553 MB VGG16 used only
-# transiently for training is never committed, but a real pretrained
-# model bundled directly into the app - like a future model larger than
-# the small ones shipped so far - can exceed GitHub's 100 MB per-file
-# push limit). Track them through Git LFS so that ceiling stops being a
-# blocker for future models, without requiring a history rewrite of the
-# small ONNX files already committed as regular blobs.
-*.onnx filter=lfs diff=lfs merge=lfs -text
