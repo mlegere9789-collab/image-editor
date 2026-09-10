@@ -11,6 +11,7 @@ pub mod icc;
 pub mod ocio;
 pub mod png;
 pub mod project;
+pub mod style_transfer;
 pub mod super_resolution;
 pub mod tiff;
 
@@ -3285,6 +3286,15 @@ fn super_zoom(state: State<'_, AppState>) -> Result<Snapshot, String> {
 #[tauri::command]
 fn colorize(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.colorize(id))
+}
+
+/// Neural Filters > Style Transfer: a real feed-forward style-transfer
+/// network this project trained itself, from scratch. See
+/// `src-tauri/src/style_transfer.rs` and
+/// `src-tauri/models/STYLE_TRANSFER_NOTICE.md`.
+#[tauri::command]
+fn style_transfer(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.style_transfer(id))
 }
 
 #[tauri::command]
@@ -6718,6 +6728,7 @@ pub fn run() {
             merge_down,
             super_zoom,
             colorize,
+            style_transfer,
             sample_color,
             paint_stroke,
             erase_stroke,

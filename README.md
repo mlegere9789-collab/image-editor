@@ -19237,6 +19237,84 @@ Colorize flips to shipped (587/618) — the third of the 32 AI-dependent
 items to get a real answer, and the first to be a real answer this
 project made rather than found.
 
+## Phase 327 — Style Transfer
+
+The research note two phases back left Style Transfer as a confirmed
+dead end for a pretrained model: the ONNX Model Zoo's own real
+`fast_neural_style` models are fetchable, but every one of them is
+exported at opset 9, before ONNX's `Resize` op existed, so their
+upsampling lowers to the deprecated `Upsample` op — and `tract` has
+zero implementation of it, confirmed by grepping `tract-onnx` and
+`tract-hir`'s own source. Colorize proved the alternative — train the
+model instead of finding one — works. This applies the same alternative
+to a harder, better-studied problem: real feed-forward neural style
+transfer (Johnson, Alahi & Fei-Fei, ECCV 2016).
+
+The published architecture — downsampling front end, five residual
+blocks, upsampling back end, instance normalization throughout — is
+reimplemented in `models/train_style/transform_net.py` with one
+deliberate change from the original paper (and the ONNX Model Zoo's own
+export): nearest-neighbour upsample + convolution instead of
+transposed-convolution/`Upsample`-based upsampling, so it lowers to the
+modern `Resize` op `tract` actually implements.
+
+Training a style-transfer network needs a perceptual loss, which needs
+a real pretrained image classifier — an untrained one has meaningless
+features. `models/train_style/vgg_extract.py` fetches the real, official
+VGG16 from the ONNX Model Zoo (Apache 2.0, 553 MB) and extracts its real
+weights directly via the `onnx` Python package's own protobuf parsing —
+deliberately not `torch.load`/pickle deserialization, a different and
+narrower mechanism with no arbitrary-code-execution surface, since
+protobuf is a fixed schema. Those weights are loaded into a frozen
+PyTorch module used only to score training progress; VGG16 itself is
+never bundled or committed. `train_style.py` then trains the real
+transform network from random initial weights against the real Johnson
+et al. loss (content MSE at `relu2_2`, style MSE over Gram matrices at
+four layers, a small total-variation term) over the same 51 real
+photographs Colorize used, with one of them (`baboon.jpg`, chosen for
+its own strong colour and texture) as the single style target.
+
+**Two real training failures, fixed before shipping, not hidden.** The
+first attempt (learning rate `1e-3`, a heavier style weight, no
+gradient clipping) diverged to `NaN` at epoch 11 of 20 — caught by this
+project's own habit of verifying rather than assuming, which is exactly
+why a training script that can silently save broken weights is worth
+catching: an early-abort check on non-finite loss was added afterward
+so a future divergence fails loudly at the step it happens, not three
+epochs of wasted CPU-hours later. The second attempt converged cleanly
+but was rejected anyway on a qualitative check — a real held-out photo,
+run through the real exported ONNX model, came back with its own
+content structure completely erased under a repeating pattern of
+eye-like blobs, a worse result than shipping nothing. The version
+actually bundled is the third attempt: lower learning rate, gradient
+norm clipped to `5.0`, and the style loss weighted roughly 16x lower
+than the first attempt — verified both numerically (finite output at
+several real dynamic sizes through the actual exported file) and
+visually (the photo's own shapes stay recognizable, the style image's
+colour and texture genuinely applied over them, not replacing them).
+
+`style_transfer.rs` mirrors `colorize.rs`'s shape: pads the input to a
+multiple of 4 (the network's two stride-2/upsample-by-2 stages need
+matching dimensions for their skip connections), runs one dynamic-shape
+inference pass, crops back to the original size, and preserves the
+input's own alpha exactly (the network was trained on RGB only).
+`Document::style_transfer` wires it through the same `filter_pixels`
+and Neural Filter Output machinery every other single-layer Neural
+Filter already uses. A new "Style Transfer (AI)" toolbar button runs
+it with one click.
+
+**Verified two ways.** `style_transfer.rs` gained 3 tests (two
+malformed-input rejections, a real end-to-end run confirming output
+dimensions and alpha preservation). `document.rs` gained 2 more
+(canvas-size preservation, locked-layer rejection). 1754 total (1747
+lib + 7 pipeline). `cargo fmt`, `cargo clippy --all-targets -- -D
+warnings` clean. `npm run build` clean. A live Playwright session
+confirmed the "Style Transfer (AI)" button is present, enabled with a
+paintable layer selected, and calls the real `style_transfer` command.
+
+Style Transfer flips to shipped (588/618) — the fourth AI-dependent
+item with a real answer, and the second this project trained itself.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

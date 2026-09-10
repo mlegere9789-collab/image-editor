@@ -4630,6 +4630,16 @@ export default function App() {
     await applyNeuralFilterOutput("colorize", {}, selectedId);
   }, [applyNeuralFilterOutput, selectedId]);
 
+  // Neural Filters > Style Transfer: a real feed-forward style-transfer
+  // network this project trained itself from scratch (the ONNX Model
+  // Zoo's own published fast_neural_style models are permanently
+  // blocked for this project's Rust inference engine), restyling the
+  // selected layer's own pixels.
+  const applyStyleTransfer = useCallback(async () => {
+    if (selectedId === null) return;
+    await applyNeuralFilterOutput("style_transfer", {}, selectedId);
+  }, [applyNeuralFilterOutput, selectedId]);
+
   const applySkinSmoothing = useCallback(async () => {
     if (selectedId === null) return;
     await applyNeuralFilterOutput(
@@ -9718,6 +9728,14 @@ export default function App() {
             title="Neural Filters > Colorize — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
           >
             Colorize (AI)
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void applyStyleTransfer()}
+            disabled={busy || !canPaint}
+            title="Neural Filters > Style Transfer — a real model this project trained itself from scratch (not a pretrained one), run entirely on-device"
+          >
+            Style Transfer (AI)
           </button>
           <button
             className="button button--quiet"
