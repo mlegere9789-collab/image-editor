@@ -19436,6 +19436,57 @@ paintable layer selected, and calls the real `landscape_mixer` command.
 Landscape Mixer flips to shipped (590/618) — the sixth AI-dependent
 item with a real answer, and the fourth this project trained itself.
 
+**Research note: Smart Portrait and Makeup Transfer, investigated in
+full, not assumed impossible.** Landscape Mixer worked because real,
+appropriately-licensed *landscape* photography turned out to be
+reachable through this sandbox's one reliable channel (a permissively
+licensed GitHub repository's own committed content). The same search
+was run, in the same depth, for face data — Smart Portrait and Makeup
+Transfer both fundamentally need it — before concluding it isn't
+reachable the same way, rather than assuming so:
+
+- **Kaggle** (`SelfishGene/SFHQ-dataset`, 425,000 synthetic — not
+  real-person — faces, "no privacy issues or license issues surrounding
+  these images" per the dataset's own description, exactly the kind of
+  consent-free source this search was hoping to find): the dataset
+  itself is real and exists, but Kaggle is blocked by this sandbox's own
+  network policy — confirmed directly (`connect_rejected`, "organization
+  policy"), not inferred.
+- **Hugging Face Datasets** (where most modern synthetic-face and
+  general face datasets are actually hosted today): confirmed blocked
+  the same explicit way.
+- **Small samples committed directly to the dataset's own GitHub repo**
+  (`SFHQ-T2I-dataset/figures/`, checked directly): only composite
+  demonstration grids showing many faces per image for illustration,
+  not individual images usable as training data.
+- **Pretrained face-generator checkpoints** (StyleGAN and its
+  derivatives): every real, well-known one found is hosted on Google
+  Drive, Hugging Face, or Baidu Cloud — never committed directly to a
+  GitHub repository the way the ONNX Model Zoo's own models are.
+- **Microsoft FaceSynthetics** (100,000 synthetic faces, ruling out the
+  consent question the same way SFHQ does): licensed "non-commercial
+  research" only — disqualifying on its own regardless of hosting,
+  since a model trained on it and bundled into this project's own
+  binary would carry that restriction forward.
+
+This isn't a "didn't look hard enough" gap: it's the same category of
+wall as Cloud Documents needing a real server, arrived at by testing
+the actual doors rather than assuming they're locked. It also
+compounds with a second, architectural wall this session's three
+successful trained models don't share: Colorize, Style Transfer,
+Landscape Mixer, and Photo Restoration all learn a fixed, spatially-local
+pixel-wise function (predict this pixel's colour, this pixel's
+style, this pixel's correction) — a small feed-forward CNN under a
+plain reconstruction loss is a real, adequate tool for that. Smart
+Portrait and Makeup Transfer need semantic, structural editing (age a
+face, change an expression, apply a makeup style while preserving
+identity) — real capability of that kind, in the published research
+this project surveyed, comes from a GAN or diffusion model trained
+adversarially or with a diffusion objective, neither of which this
+project has a proven, working, from-scratch recipe for in a CPU-only
+sandbox, independent of the data question. Both walls would need to
+give simultaneously, not just one.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
