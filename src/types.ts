@@ -129,6 +129,12 @@ export type Adjustment =
   | { kind: "threshold"; level: number }
   | { kind: "posterize"; levels: number };
 
+/** Mirrors `NeuralFilterKind` in src-tauri/src/document.rs (serde
+ * camelCase, fieldless variants so each serializes as a bare string) — a
+ * real whole-image model run a smart object can remember and re-apply
+ * non-destructively via `add_neural_smart_filter`. */
+export type NeuralFilterKind = "colorize" | "styleTransfer" | "photoRestoration" | "landscapeMixer";
+
 /** Mirrors `MaskSource` in src-tauri/src/document.rs. */
 export type MaskSource = "revealAll" | "hideAll" | "revealSelection" | "hideSelection";
 

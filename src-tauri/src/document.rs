@@ -2062,6 +2062,44 @@ pub struct ShapeLayer {
     pub stroke: Option<([u8; 4], u32)>,
 }
 
+/// Neural Filters > ... > Output: Smart Filter — which trained model to
+/// reapply non-destructively, mirroring the standalone
+/// [`Document::colorize`]/[`Document::style_transfer`]/
+/// [`Document::photo_restoration`]/[`Document::landscape_mixer`]
+/// commands, but stored on a [`SmartObject`] so [`Document::render_smart_object`]
+/// can replay it from the smart object's own source every time the
+/// transform or filter list changes, the same non-destructive contract
+/// [`SmartObject::filters`] already has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NeuralFilterKind {
+    Colorize,
+    StyleTransfer,
+    PhotoRestoration,
+    LandscapeMixer,
+}
+
+impl NeuralFilterKind {
+    /// Runs the real bundled model this variant names over the whole
+    /// `width * height` RGBA8 image — each one a real, trained-by-this-
+    /// project (or, for Super Zoom's own model, pretrained-and-found)
+    /// network, never a stand-in.
+    fn apply(self, pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+        match self {
+            NeuralFilterKind::Colorize => crate::colorize::colorize_rgba(pixels, width, height),
+            NeuralFilterKind::StyleTransfer => {
+                crate::style_transfer::stylize_rgba(pixels, width, height)
+            }
+            NeuralFilterKind::PhotoRestoration => {
+                crate::restoration::restore_rgba(pixels, width, height)
+            }
+            NeuralFilterKind::LandscapeMixer => {
+                crate::landscape_mixer::mix_landscape_rgba(pixels, width, height)
+            }
+        }
+    }
+}
+
 /// A smart object's embedded contents: the layer's pixels as they were
 /// when it was made (its source), the [`FreeTransform`] they are shown
 /// through, and its Smart Filters — see
@@ -2079,6 +2117,16 @@ pub struct SmartObject {
     /// rest of the Filter menu) as Smart Filters are a documented scope
     /// cut.
     pub filters: Vec<Adjustment>,
+    /// Neural Filters > ... > Output: Smart Filter — real trained
+    /// models applied, in order, after every per-pixel `filters` entry
+    /// above, each re-run from scratch over the whole transformed
+    /// result whenever the list or transform changes; non-destructive
+    /// the same way. A documented simplification: unlike Photoshop's
+    /// own single interleaved filter stack, this project keeps
+    /// per-pixel `Adjustment`s and whole-image Neural Filters as two
+    /// separate ordered lists rather than one unified one, always
+    /// applying every pixel adjustment before every neural one.
+    pub neural_filters: Vec<NeuralFilterKind>,
 }
 
 /// The Art History Brush's stroke style: how much of the history source
@@ -8079,6 +8127,7 @@ impl Document {
             source: layer.pixels.clone(),
             transform: FreeTransform::default(),
             filters: Vec::new(),
+            neural_filters: Vec::new(),
         });
         Ok(())
     }
@@ -8127,6 +8176,7 @@ impl Document {
                 source: pixels.clone(),
                 transform: FreeTransform::default(),
                 filters: Vec::new(),
+                neural_filters: Vec::new(),
             }),
             pixels,
         };
@@ -8144,14 +8194,17 @@ impl Document {
     }
 
     /// Shared by [`Self::set_smart_transform`], [`Self::add_smart_filter`],
-    /// and [`Self::remove_smart_filter`]: resets layer `id`'s pixels to its
-    /// smart object's source, replays `transform` through
+    /// [`Self::remove_smart_filter`], [`Self::add_neural_smart_filter`],
+    /// and [`Self::remove_neural_smart_filter`]: resets layer `id`'s
+    /// pixels to its smart object's source, replays `transform` through
     /// [`Self::free_transform`], and — on success — applies every Smart
     /// Filter in the smart object's own `filters` list in order, each a
     /// plain per-pixel [`Adjustment`] via [`apply_adjustment`] over the
-    /// whole canvas. Restores the pixels the layer had before this call on
-    /// failure. Errors for a layer that is not a smart object, or a locked
-    /// or unknown layer.
+    /// whole canvas, then every entry in `neural_filters` in order, each a
+    /// real whole-image model run via [`NeuralFilterKind::apply`].
+    /// Restores the pixels the layer had before this call on failure.
+    /// Errors for a layer that is not a smart object, or a locked or
+    /// unknown layer.
     fn render_smart_object(
         &mut self,
         id: LayerId,
@@ -8167,31 +8220,56 @@ impl Document {
         let before = layer.pixels.clone();
         let source = smart.source.clone();
         let filters = smart.filters.clone();
+        let neural_filters = smart.neural_filters.clone();
         self.layer_mut(id)?.pixels = source;
         match self.free_transform(id, transform) {
-            Ok(touched) => {
-                if !filters.is_empty() {
-                    let layer = self.layer_mut(id)?;
-                    for pixel in layer.pixels.chunks_exact_mut(CHANNELS) {
-                        let mut rgb = [pixel[0], pixel[1], pixel[2]];
-                        for &adjustment in &filters {
-                            rgb = apply_adjustment(adjustment, rgb);
-                        }
-                        pixel[..3].copy_from_slice(&rgb);
-                    }
-                }
-                Ok(touched.or(Some(Rect {
+            Ok(touched) => match self.apply_smart_object_filters(id, &filters, &neural_filters) {
+                Ok(()) => Ok(touched.or(Some(Rect {
                     x0: 0,
                     y0: 0,
                     x1: self.width,
                     y1: self.height,
-                })))
-            }
+                }))),
+                Err(err) => {
+                    self.layer_mut(id)?.pixels = before;
+                    Err(err)
+                }
+            },
             Err(err) => {
                 self.layer_mut(id)?.pixels = before;
                 Err(err)
             }
         }
+    }
+
+    /// The per-pixel [`Adjustment`] pass then the whole-image
+    /// [`NeuralFilterKind`] pass of [`Self::render_smart_object`], as a
+    /// plain method rather than a closure so it can borrow `self` mutably
+    /// on each loop iteration without fighting the borrow already taken by
+    /// [`Self::free_transform`] in the caller.
+    fn apply_smart_object_filters(
+        &mut self,
+        id: LayerId,
+        filters: &[Adjustment],
+        neural_filters: &[NeuralFilterKind],
+    ) -> Result<(), String> {
+        if !filters.is_empty() {
+            let layer = self.layer_mut(id)?;
+            for pixel in layer.pixels.chunks_exact_mut(CHANNELS) {
+                let mut rgb = [pixel[0], pixel[1], pixel[2]];
+                for &adjustment in filters {
+                    rgb = apply_adjustment(adjustment, rgb);
+                }
+                pixel[..3].copy_from_slice(&rgb);
+            }
+        }
+        for &kind in neural_filters {
+            let (width, height) = (self.width, self.height);
+            let layer = self.layer(id)?;
+            let applied = kind.apply(&layer.pixels, width, height)?;
+            self.layer_mut(id)?.pixels = applied;
+        }
+        Ok(())
     }
 
     /// A smart object's transform: layer `id`'s pixels are restored from
@@ -8285,6 +8363,77 @@ impl Document {
             return Err("That layer is not a smart object.".to_string());
         };
         Ok(smart.filters.clone())
+    }
+
+    /// Neural Filters > ... > Output: Smart Filter — appends `kind` to
+    /// smart object `id`'s own `neural_filters` list and re-renders from
+    /// its source through its transform, every per-pixel `filters` entry,
+    /// and every neural filter in order, [`Self::render_smart_object`]'s
+    /// own mechanism. Non-destructive the same way
+    /// [`Self::add_smart_filter`] already is. Errors for a layer that is
+    /// not a smart object, or a locked or unknown layer.
+    pub fn add_neural_smart_filter(
+        &mut self,
+        id: LayerId,
+        kind: NeuralFilterKind,
+    ) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let Some(smart) = layer.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        let transform = smart.transform;
+        self.layer_mut(id)?
+            .smart
+            .as_mut()
+            .expect("checked above")
+            .neural_filters
+            .push(kind);
+        self.render_smart_object(id, transform)
+    }
+
+    /// Neural Filters > ... > Output: Smart Filter — removes the neural
+    /// filter at `index` (in the order [`Self::add_neural_smart_filter`]
+    /// appended them) from smart object `id`'s own `neural_filters` list
+    /// and re-renders from its source through its transform and every
+    /// filter that remains. Errors for an `index` past the end of the
+    /// list, a layer that is not a smart object, or a locked or unknown
+    /// layer.
+    pub fn remove_neural_smart_filter(
+        &mut self,
+        id: LayerId,
+        index: usize,
+    ) -> Result<Option<Rect>, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let Some(smart) = layer.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        if index >= smart.neural_filters.len() {
+            return Err(format!("No Neural Smart Filter at index {index}."));
+        }
+        let transform = smart.transform;
+        self.layer_mut(id)?
+            .smart
+            .as_mut()
+            .expect("checked above")
+            .neural_filters
+            .remove(index);
+        self.render_smart_object(id, transform)
+    }
+
+    /// Read-only: smart object `id`'s own `neural_filters` list, in
+    /// application order. Errors for a layer that is not a smart object, or
+    /// an unknown layer.
+    pub fn neural_smart_filters(&self, id: LayerId) -> Result<Vec<NeuralFilterKind>, String> {
+        let Some(smart) = self.layer(id)?.smart.as_ref() else {
+            return Err("That layer is not a smart object.".to_string());
+        };
+        Ok(smart.neural_filters.clone())
     }
 
     /// Layer > Rasterize > Smart Object: layer `id` keeps the pixels it
@@ -52845,6 +52994,106 @@ colorspaces:
         assert!(doc.add_smart_filter(999, Adjustment::Invert).is_err());
         assert!(doc.remove_smart_filter(999, 0).is_err());
         assert!(doc.smart_filters(999).is_err());
+    }
+
+    #[test]
+    fn add_neural_smart_filter_applies_the_real_model_over_the_whole_canvas() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap();
+
+        // Matches what colorize_rgba itself produces from the exact same
+        // source pixels, run directly (not through a smart object) --
+        // proof render_smart_object dispatches to the real model rather
+        // than a stand-in.
+        let (plain, pid) = ramped_4x4();
+        let expected = crate::colorize::colorize_rgba(&plain.layers()[0].pixels, 4, 4).unwrap();
+        let _ = pid;
+        assert_eq!(doc.layers()[0].pixels, expected);
+        assert_eq!(
+            doc.neural_smart_filters(id).unwrap(),
+            vec![NeuralFilterKind::Colorize]
+        );
+    }
+
+    #[test]
+    fn neural_smart_filters_apply_after_every_per_pixel_filter_in_order() {
+        // Invert (a per-pixel Adjustment) then Colorize (a neural filter):
+        // Invert must run first, so Colorize sees the inverted luma, not
+        // the original -- proof the two lists compose in the documented
+        // order rather than being interleaved or reversed.
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_smart_filter(id, Adjustment::Invert).unwrap();
+        doc.add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap();
+
+        let (mut inverted_first, iid) = ramped_4x4();
+        for pixel in inverted_first.layers[0].pixels.chunks_exact_mut(CHANNELS) {
+            let inv = apply_adjustment(Adjustment::Invert, [pixel[0], pixel[1], pixel[2]]);
+            pixel[..3].copy_from_slice(&inv);
+        }
+        let expected =
+            crate::colorize::colorize_rgba(&inverted_first.layers()[0].pixels, 4, 4).unwrap();
+        let _ = iid;
+        assert_eq!(doc.layers()[0].pixels, expected);
+    }
+
+    #[test]
+    fn remove_neural_smart_filter_re_renders_as_though_it_had_never_run() {
+        let (mut doc, id) = ramped_4x4();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap();
+        doc.add_neural_smart_filter(id, NeuralFilterKind::StyleTransfer)
+            .unwrap();
+        doc.remove_neural_smart_filter(id, 1).unwrap();
+        assert_eq!(
+            doc.neural_smart_filters(id).unwrap(),
+            vec![NeuralFilterKind::Colorize]
+        );
+
+        let (mut only_colorize, oid) = ramped_4x4();
+        only_colorize.convert_to_smart_object(oid).unwrap();
+        only_colorize
+            .add_neural_smart_filter(oid, NeuralFilterKind::Colorize)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, only_colorize.layers()[0].pixels);
+    }
+
+    #[test]
+    fn neural_smart_filters_validate_layer_state() {
+        let (mut doc, id) = ramped_4x4();
+        assert!(doc
+            .add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap_err()
+            .contains("smart object"));
+        assert!(doc
+            .neural_smart_filters(id)
+            .unwrap_err()
+            .contains("smart object"));
+        doc.convert_to_smart_object(id).unwrap();
+        doc.add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap();
+        assert!(doc
+            .remove_neural_smart_filter(id, 1)
+            .unwrap_err()
+            .contains("index 1"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .add_neural_smart_filter(id, NeuralFilterKind::Colorize)
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .remove_neural_smart_filter(id, 0)
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc
+            .add_neural_smart_filter(999, NeuralFilterKind::Colorize)
+            .is_err());
+        assert!(doc.remove_neural_smart_filter(999, 0).is_err());
+        assert!(doc.neural_smart_filters(999).is_err());
     }
 
     #[test]

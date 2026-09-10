@@ -43,6 +43,7 @@ import type {
   LiquifyMesh,
   Measurement,
   MoveDirection,
+  NeuralFilterKind,
   OcioConfigSummary,
   Palette,
   PersonComponent,
@@ -384,26 +385,43 @@ function rgbToHex(r: number, g: number, b: number): string {
  * New Document are a documented scope cut -- this app has no Smart
  * Filter/adjustment-layer wrapping to attach a mask or a live filter
  * reference to. */
+/** A `NeuralFilterOutput`'s Output value. `"smartFilter"` only actually
+ * does anything for a command listed in `NEURAL_FILTER_KIND_BY_COMMAND`
+ * below — for every other Neural Filter (Skin Smoothing, JPEG Artifacts
+ * Removal, Harmonize, Color Transfer, none of which are a whole-image
+ * model this project can remember and replay) it falls back to Current
+ * Layer, the same as picking that option directly. */
+type NeuralFilterOutputValue = "current" | "new" | "newMasked" | "newDocument" | "smartFilter";
+
+/** Neural Filters whose command has a real [`NeuralFilterKind`] — these
+ * are the ones `applyNeuralFilterOutput` can hand to
+ * `add_neural_smart_filter` when Output is Smart Filter. */
+const NEURAL_FILTER_KIND_BY_COMMAND: Partial<Record<string, NeuralFilterKind>> = {
+  colorize: "colorize",
+  style_transfer: "styleTransfer",
+  photo_restoration: "photoRestoration",
+  landscape_mixer: "landscapeMixer",
+};
+
 function NeuralFilterOutput({
   value,
   onChange,
 }: {
-  value: "current" | "new" | "newMasked" | "newDocument";
-  onChange: (value: "current" | "new" | "newMasked" | "newDocument") => void;
+  value: NeuralFilterOutputValue;
+  onChange: (value: NeuralFilterOutputValue) => void;
 }) {
   return (
     <label className="control control--row" title="Neural Filters panel's own Output control">
       <span className="control__label">Output</span>
       <select
         value={value}
-        onChange={(event) =>
-          onChange(event.target.value as "current" | "new" | "newMasked" | "newDocument")
-        }
+        onChange={(event) => onChange(event.target.value as NeuralFilterOutputValue)}
       >
         <option value="current">Current Layer</option>
         <option value="new">New Layer</option>
         <option value="newMasked">New Layer Masked</option>
         <option value="newDocument">New Document</option>
+        <option value="smartFilter">Smart Filter</option>
       </select>
     </label>
   );
@@ -1594,9 +1612,8 @@ export default function App() {
   const [showSkinSmoothingDialog, setShowSkinSmoothingDialog] = useState(false);
   // Neural Filters > Output: shared across every Neural Filter dialog,
   // since only one is ever open at once.
-  const [neuralFilterOutput, setNeuralFilterOutput] = useState<
-    "current" | "new" | "newMasked" | "newDocument"
-  >("current");
+  const [neuralFilterOutput, setNeuralFilterOutput] =
+    useState<NeuralFilterOutputValue>("current");
   const [skinSmoothingRadius, setSkinSmoothingRadius] = useState(5);
   const [skinSmoothingThreshold, setSkinSmoothingThreshold] = useState(15);
   const [skinSmoothingAmount, setSkinSmoothingAmount] = useState(50);
@@ -4583,12 +4600,26 @@ export default function App() {
   // multi-document/tab support to open a second document into, so "new
   // document" is honestly reduced to "a new, independent file on disk,"
   // and the currently open document ends up completely untouched,
-  // exactly as Photoshop's own New Document output leaves it). Smart
-  // Filter is a documented scope cut: this app has no Smart Filter/
-  // adjustment-layer wrapping to attach a *live* filter reference to.
+  // exactly as Photoshop's own New Document output leaves it), or Smart
+  // Filter — for a command in NEURAL_FILTER_KIND_BY_COMMAND only,
+  // converts targetId to a Smart Object first if it isn't one already,
+  // then adds the filter to its neural_filters list via
+  // add_neural_smart_filter instead of running the command directly, so
+  // it's remembered and can be removed/re-rendered later; every other
+  // Neural Filter falls back to Current Layer, same as that has always
+  // meant, since it has no NeuralFilterKind for a smart object to keep.
   const applyNeuralFilterOutput = useCallback(
     async (command: string, args: Record<string, unknown>, targetId: number) => {
       let id = targetId;
+      const kind = NEURAL_FILTER_KIND_BY_COMMAND[command];
+      if (neuralFilterOutput === "smartFilter" && kind) {
+        const layer = document?.layers.find((l) => l.id === id);
+        if (!layer?.smart) {
+          await runCommand("convert_to_smart_object", { id });
+        }
+        await runCommand("add_neural_smart_filter", { id, kind });
+        return;
+      }
       const duplicating =
         neuralFilterOutput === "new" ||
         neuralFilterOutput === "newMasked" ||
@@ -4618,7 +4649,7 @@ export default function App() {
         await runCommand("remove_layer", { id });
       }
     },
-    [runCommand, neuralFilterOutput],
+    [runCommand, neuralFilterOutput, document],
   );
 
   // Neural Filters > Colorize: a real, self-trained on-device AI model —

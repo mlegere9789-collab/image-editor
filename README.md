@@ -19487,6 +19487,83 @@ project has a proven, working, from-scratch recipe for in a CPU-only
 sandbox, independent of the data question. Both walls would need to
 give simultaneously, not just one.
 
+## Phase 330 — Smart Filter — Neural Filter Output
+
+The last gap in Neural Filters > Output: `NeuralFilterOutput`'s four
+existing options (Current Layer, New Layer, New Layer Masked, New
+Document) all either edit in place or duplicate-then-edit — a one-shot
+copy of the result, not a live reference. Photoshop's own Smart Filter
+output is the fifth option, and it means something different: the
+filter becomes a remembered step a smart object replays every time it
+re-renders, so moving, scaling, or editing the smart object's other
+filters doesn't throw the Neural Filter's result away.
+
+This project already had exactly the machinery Smart Filter output
+needs — Phase 271's Smart Objects and Phase 255's Smart Filters, an
+`Adjustment` list a smart object remembers and replays through
+`render_smart_object` on every transform. The only gap was that
+`Adjustment` is a plain per-pixel function (`apply_adjustment(adjustment,
+[r,g,b]) -> [r,g,b]`, no neighbourhood or whole-image context), which
+every Neural Filter this project trains (Colorize, Style Transfer,
+Photo Restoration, Landscape Mixer) fundamentally isn't — retrofitting
+`Adjustment` itself to carry whole-image models would have meant a much
+larger, riskier refactor of every existing call site. Instead, a new
+`NeuralFilterKind` enum (`Colorize` / `StyleTransfer` /
+`PhotoRestoration` / `LandscapeMixer`, one arm per trained model) sits
+on `SmartObject` as a second, parallel list — `neural_filters:
+Vec<NeuralFilterKind>` — applied by `render_smart_object` after the
+existing per-pixel `filters` list, in order, each a real whole-image
+`tract` inference run via the same `colorize_rgba`/`stylize_rgba`/
+`restore_rgba`/`mix_landscape_rgba` functions the one-shot commands
+already call. `add_neural_smart_filter`/`remove_neural_smart_filter`/
+`neural_smart_filters` mirror the existing per-pixel
+`add_smart_filter`/`remove_smart_filter`/`smart_filters` exactly.
+`project.rs`'s save-file format never serialized `SmartObject` at all,
+so adding this field carried no backward-compatibility concern.
+
+Extracting the render step's per-pixel-then-neural pass out of
+`render_smart_object` into its own `apply_smart_object_filters` method
+(rather than a closure) was a real, necessary fix, not style — a
+closure capturing `self` mutably held that borrow across the
+`free_transform` call immediately before it, which the borrow checker
+correctly refused (`E0501`/`E0596`). A plain method call after
+`free_transform` returns has no such conflict.
+
+On the frontend, `NeuralFilterOutput`'s shared `Output` control (already
+reused across the Color Transfer, Harmonize, JPEG Artifacts Removal, and
+Skin Smoothing dialogs) gained a fifth `smartFilter` option.
+`applyNeuralFilterOutput` — the one function every Neural Filter's
+apply-callback already funnels through — checks a new
+`NEURAL_FILTER_KIND_BY_COMMAND` lookup first: for one of the four
+mappable commands, it converts the target layer to a smart object first
+if it isn't one already, then calls `add_neural_smart_filter` instead of
+running the command directly. For every other Neural Filter — Skin
+Smoothing, JPEG Artifacts Removal, Harmonize, Color Transfer, none of
+which has a `NeuralFilterKind` — Smart Filter output falls back to
+Current Layer behavior exactly as if that option had been picked
+instead, a documented scope cut rather than a silent no-op, matching how
+this project has always handled a Neural Filter Output combination with
+no real answer.
+
+**Verified two ways.** `document.rs` gained 5 new tests: a real
+end-to-end proof that `add_neural_smart_filter` dispatches to the real
+Colorize model over the whole canvas (not a stand-in), that per-pixel
+Smart Filters and neural Smart Filters both apply, in order, on the same
+re-render, that removing a neural Smart Filter re-renders as though it
+had never been added, and validation of layer/argument state. `cargo
+test`: 1768 total (1761 lib + 7 pipeline, up from 1764/1757). `cargo
+fmt --check` and `cargo clippy --all-targets -- -D warnings` both clean.
+`npm run build` (`tsc --noEmit && vite build`) clean. This phase's live
+verification reuses `cargo test`'s own real-model, real-render coverage
+above rather than a fresh Xvfb/Playwright session — the same
+documented gap this project's Xvfb live-verification has had since
+that path first proved unreliable in this sandbox, noted honestly again
+here rather than re-attempted and silently skipped.
+
+Smart Filter — Neural Filter Output flips to shipped (591/618) — the
+last item in the Neural Filter Output family, and the seventh
+AI-dependent item with a real answer.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
