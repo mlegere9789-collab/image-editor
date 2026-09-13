@@ -6,6 +6,7 @@ pub mod colorize;
 pub mod composite;
 pub mod content_credentials;
 pub mod document;
+pub mod generative_fill;
 pub mod hdr;
 pub mod icc;
 pub mod landscape_mixer;
@@ -1050,6 +1051,15 @@ fn content_aware_move(
 #[tauri::command]
 fn content_aware_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.content_aware_fill(id))
+}
+
+/// Filter > Generative Fill (no prompt — see `generative_fill`'s own
+/// module docs): fill the selected pixels of layer `id` via this
+/// project's own self-trained on-device model. A whole, discrete
+/// action, so it checkpoints itself.
+#[tauri::command]
+fn generative_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.generative_fill(id))
 }
 
 /// Select > Transform Selection: scale, rotate, and move the selection
@@ -6978,6 +6988,7 @@ pub fn run() {
             patch,
             content_aware_move,
             content_aware_fill,
+            generative_fill,
             transform_selection,
             save_selection,
             load_selection,

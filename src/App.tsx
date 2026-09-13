@@ -8433,6 +8433,16 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
+            onClick={() => {
+              if (selectedId !== null) void runCommand("generative_fill", { id: selectedId });
+            }}
+            disabled={busy || !canPaint || !hasSelection}
+            title="Filter > Generative Fill (AI) — this project's own on-device model hallucinates the selection from its surroundings; no text prompt, no provider endpoint needed. Filter > Generative Fill… opens the prompt-driven, external-provider version instead."
+          >
+            Generative Fill (AI)
+          </button>
+          <button
+            className="button button--quiet"
             onClick={() => setShowFillDialog(true)}
             disabled={busy || selectedId === null}
             title="Edit > Fill"
@@ -16474,6 +16484,12 @@ export default function App() {
               image-generation provider, or a provider that already speaks this shape
               directly, is the only thing needed to make this live. The returned image
               lands as a new top layer.
+            </p>
+            <p className="modal__hint">
+              No provider configured? The "Generative Fill (AI)" button next to
+              Content-Aware Fill runs this project&apos;s own on-device model against
+              the active selection instead — no prompt, no endpoint, entirely local; see
+              its own tooltip and the README for what it can and can&apos;t do.
             </p>
             <label className="control control--row">
               <span className="control__label">Prompt</span>

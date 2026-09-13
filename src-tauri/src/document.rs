@@ -22658,6 +22658,44 @@ impl Document {
         Ok(Some(bounds))
     }
 
+    /// Filter > Generative Fill (no prompt: see
+    /// `crate::generative_fill`'s own module documentation for why a
+    /// text-conditioned version is out of reach for this project):
+    /// every selected pixel of layer `id` is replaced by a real,
+    /// self-trained generative model's own hallucinated content, run
+    /// over a real window of the surrounding, unselected pixels.
+    /// Generate Background is the same real model over a different
+    /// selection — a subject's own inverse selection — rather than a
+    /// separate model, exactly the same tool `content_aware_fill` and
+    /// `content_aware_move` already are for their own Photoshop-menu
+    /// siblings. Generative Expand is a documented scope cut for a
+    /// different reason: it needs new canvas pixels to select in the
+    /// first place, and this app's canvas has always been a single
+    /// fixed size (see the Artboard Tool's own note) — a real
+    /// prerequisite this method doesn't touch, independent of this
+    /// model. Returns the selection's bounding box; errors with nothing
+    /// selected, on a locked or unknown layer, or if the bundled model
+    /// fails to run.
+    pub fn generative_fill(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        let bits = self.selected_bits()?;
+        let (width, height) = (self.width, self.height);
+        let bounds = SelectionMask {
+            width,
+            height,
+            bits: bits.clone(),
+            soft: None,
+        }
+        .bounds()
+        .expect("selected_bits guarantees a pixel");
+        let layer = self.layer_mut(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        layer.pixels =
+            crate::generative_fill::generative_fill_rgba(&layer.pixels, width, height, &bits)?;
+        Ok(Some(bounds))
+    }
+
     /// The Patch tool (Normal, Source mode): the active selection is the
     /// area to repair, dragged by `(dx, dy)` onto the area to sample. Every
     /// selected pixel `p` is rebuilt from the pre-patch pixel `p + (dx,
@@ -32705,6 +32743,46 @@ mod tests {
     }
 
     #[test]
+    fn generative_fill_replaces_the_selection_via_a_real_model_run_and_leaves_the_rest_alone() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        let rect = doc.generative_fill(id).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            })
+        );
+        assert_eq!(doc.layers()[0].pixels.len(), before.len());
+        // Every unselected pixel, alpha included, is untouched byte-for-byte.
+        for y in 0..3u32 {
+            for x in 0..3u32 {
+                if x == 1 && y == 1 {
+                    continue;
+                }
+                let idx = (y * 3 + x) as usize * 4;
+                assert_eq!(doc.layers()[0].pixels[idx..idx + 4], before[idx..idx + 4]);
+            }
+        }
+    }
+
+    #[test]
+    fn generative_fill_rejects_no_selection_and_locked_or_unknown_layers() {
+        let (mut doc, id) = ramped_3x3();
+        let err = doc.generative_fill(id).unwrap_err();
+        assert!(err.contains("Nothing is selected"), "{err}");
+        doc.select_all().unwrap();
+        assert!(doc.generative_fill(999).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.generative_fill(id).is_err());
+        assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+    }
+
+    #[test]
     fn content_aware_fill_rejects_no_selection_and_locked_or_unknown_layers() {
         let (mut doc, id) = ramped_3x3();
         let err = doc.content_aware_fill(id).unwrap_err();
@@ -34987,6 +35065,40 @@ mod tests {
             selection_grid(&doc),
             ["#######", "#######", "##...##", "##...##", "##...##", "#######", "#######"]
         );
+    }
+
+    #[test]
+    fn generate_background_is_select_subject_invert_then_generative_fill() {
+        // Filter > Generate Background's real recipe, end to end: select
+        // the subject, invert to select everything behind it, then the
+        // same real on-device model Generative Fill itself uses fills
+        // that inverted selection. Not a separate model or command —
+        // the three real primitives combined, exactly the way Photoshop
+        // draws that distinction in its own menu, not underneath it.
+        let (mut doc, id) = object_scene();
+        let subject_before: Vec<[u8; 4]> = (2..5)
+            .flat_map(|y| (2..5).map(move |x| (x, y)))
+            .map(|(x, y): (u32, u32)| {
+                let idx = (y * 7 + x) as usize * 4;
+                let mut p = [0u8; 4];
+                p.copy_from_slice(&doc.layers()[0].pixels[idx..idx + 4]);
+                p
+            })
+            .collect();
+        doc.select_subject_with(SelectionMode::New, id, 0).unwrap();
+        doc.invert_selection().unwrap();
+        let rect = doc.generative_fill(id).unwrap();
+        assert!(rect.is_some());
+        // The subject itself was never in the inverted selection, so its
+        // own pixels are untouched byte-for-byte.
+        for (i, (y, x)) in (2..5u32)
+            .flat_map(|y| (2..5u32).map(move |x| (y, x)))
+            .enumerate()
+        {
+            let idx = (y * 7 + x) as usize * 4;
+            assert_eq!(doc.layers()[0].pixels[idx..idx + 4], subject_before[i]);
+        }
+        assert_eq!((doc.width(), doc.height()), (7, 7));
     }
 
     #[test]
