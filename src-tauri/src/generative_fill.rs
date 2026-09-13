@@ -84,16 +84,16 @@ fn nearby_unmasked_mean(
             count += 1;
         }
     }
-    if count == 0 {
-        let base = (y * width + x) * 4;
-        [pixels[base], pixels[base + 1], pixels[base + 2]]
-    } else {
-        [
-            (sum[0] / count) as u8,
-            (sum[1] / count) as u8,
-            (sum[2] / count) as u8,
-        ]
-    }
+    let base = (y * width + x) * 4;
+    [
+        sum[0].checked_div(count).map_or(pixels[base], |v| v as u8),
+        sum[1]
+            .checked_div(count)
+            .map_or(pixels[base + 1], |v| v as u8),
+        sum[2]
+            .checked_div(count)
+            .map_or(pixels[base + 2], |v| v as u8),
+    ]
 }
 
 /// How much of the model's own prediction to use at masked pixel
