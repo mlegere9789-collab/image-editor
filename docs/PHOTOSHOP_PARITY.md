@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 593.**
+**618 distinct capabilities tracked. Currently shipped: 594.**
 
 ## PART I — EVERY TOOL
 
@@ -644,4 +644,4 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Remove Tool — Camera Raw (`camera_raw_retouch` with `RetouchMode::Remove`: a circular spot filled from the mean of the ring two pixels out that the spot does not cover, the Remove tool's own fill, faded by Feather and Opacity — see README Phase 251)
 - [x] Heal — Camera Raw (`RetouchMode::Heal`: the source spot's texture with the destination's 3×3-mean tone, the Healing Brush's own formula — see README Phase 251)
 - [x] Clone — Camera Raw (`RetouchMode::Clone`: the source spot copied outright, every channel — see README Phase 251)
-- [ ] Generative Remove — Camera Raw
+- [x] Generative Remove — Camera Raw (`RetouchMode::GenerativeRemove`: the spot's own coverage mask run once through the same real on-device model `generative_fill` uses, before the per-pixel feather/opacity blend every other retouch mode already shares — no new model or training, the same one Filter > Generative Fill trained, over a circular spot instead of a rectangular selection — see README Phase 332)

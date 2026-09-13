@@ -2793,7 +2793,10 @@ export default function App() {
     if (selectedId === null) return;
     await runCommand("camera_raw_retouch", {
       id: selectedId,
-      spot: { ...retouch, source: retouch.mode === "remove" ? null : retouch.source },
+      spot: {
+        ...retouch,
+        source: retouch.mode === "remove" || retouch.mode === "generativeRemove" ? null : retouch.source,
+      },
     });
   }, [runCommand, selectedId, retouch]);
 
@@ -13111,16 +13114,17 @@ export default function App() {
               <select
                 value={retouch.mode}
                 onChange={(event) => setRetouch((r) => ({ ...r, mode: event.target.value as RetouchMode }))}
-                title="Camera Raw Filter > Remove / Heal / Clone"
+                title="Camera Raw Filter > Remove / Heal / Clone / Generative Remove"
               >
                 <option value="remove">Remove</option>
                 <option value="heal">Heal</option>
                 <option value="clone">Clone</option>
+                <option value="generativeRemove">Generative Remove</option>
               </select>
               <span className="control__label">Spot X / Y</span>
               <input type="number" step={0.5} value={retouch.x} onChange={(event) => setRetouch((r) => ({ ...r, x: Number(event.target.value) }))} />
               <input type="number" step={0.5} value={retouch.y} onChange={(event) => setRetouch((r) => ({ ...r, y: Number(event.target.value) }))} />
-              {retouch.mode !== "remove" && (
+              {retouch.mode !== "remove" && retouch.mode !== "generativeRemove" && (
                 <>
                   <span className="control__label">Source X / Y</span>
                   <input

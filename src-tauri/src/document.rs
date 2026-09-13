@@ -1639,6 +1639,12 @@ pub enum RetouchMode {
     Heal,
     /// Clone: the source copied outright.
     Clone,
+    /// Generative Remove: the spot's own covered pixels, hallucinated by
+    /// [`crate::generative_fill::generative_fill_rgba`]'s real on-device
+    /// model from their surroundings — the same real model Filter >
+    /// Generative Fill uses, over this tool's own coverage mask instead
+    /// of a rectangular selection.
+    GenerativeRemove,
 }
 
 /// One Camera Raw retouch spot: a circle of `radius` at `(x, y)` (pixel
@@ -21594,7 +21600,7 @@ impl Document {
             );
         }
         let offset = match (mode, source) {
-            (RetouchMode::Remove, _) => (0i64, 0i64),
+            (RetouchMode::Remove | RetouchMode::GenerativeRemove, _) => (0i64, 0i64),
             (_, Some((sx, sy))) if sx.is_finite() && sy.is_finite() => {
                 ((sx - x).round() as i64, (sy - y).round() as i64)
             }
@@ -21628,6 +21634,35 @@ impl Document {
         let x_hi = ((x + radius).ceil().min(w as f32 - 1.0)) as i64;
         let y_lo = ((y - radius).floor().max(0.0)) as i64;
         let y_hi = ((y + radius).ceil().min(h as f32 - 1.0)) as i64;
+        // Generative Remove needs the whole hole up front (a single real
+        // model run over every pixel this spot will touch), not
+        // per-pixel like every other mode — computed once here, read
+        // back inside the loop below.
+        let generative_fill: Option<Vec<u8>> = if mode == RetouchMode::GenerativeRemove {
+            let mut mask = vec![false; width as usize * height as usize];
+            let mut any = false;
+            for py in y_lo..=y_hi {
+                for px in x_lo..=x_hi {
+                    let mut c = coverage_at(px, py);
+                    if let Some(s) = &selection {
+                        c *= s.coverage(px as f32 + 0.5, py as f32 + 0.5);
+                    }
+                    if c > 0.0 {
+                        mask[py as usize * width as usize + px as usize] = true;
+                        any = true;
+                    }
+                }
+            }
+            if any {
+                Some(crate::generative_fill::generative_fill_rgba(
+                    &snapshot, width, height, &mask,
+                )?)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let mut touched: Option<Rect> = None;
         for py in y_lo..=y_hi {
             for px in x_lo..=x_hi {
@@ -21711,6 +21746,17 @@ impl Document {
                         };
                         mean[3] = snapshot[base + 3];
                         mean
+                    }
+                    RetouchMode::GenerativeRemove => {
+                        if snapshot[base + 3] == 0 {
+                            continue;
+                        }
+                        let filled = generative_fill
+                            .as_ref()
+                            .expect("mask included this pixel, so generative_fill ran");
+                        let mut colour = [0u8; CHANNELS];
+                        colour.copy_from_slice(&filled[base..base + CHANNELS]);
+                        colour
                     }
                 };
                 for (slot, &value) in layer.pixels[base..base + CHANNELS].iter_mut().zip(&target) {
@@ -52214,6 +52260,36 @@ colorspaces:
         doc.camera_raw_retouch(id, &spot(RetouchMode::Remove, 3.5, None, 1.5, 0, 100))
             .unwrap();
         assert_eq!(reds_of(&doc, id, 0), vec![10, 20, 12, 20, 152]);
+    }
+
+    #[test]
+    fn camera_raw_generative_remove_spot_fills_via_a_real_model_run() {
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.camera_raw_retouch(
+            id,
+            &spot(RetouchMode::GenerativeRemove, 3.5, None, 1.5, 0, 100),
+        )
+        .unwrap();
+        let after = doc.layers()[0].pixels.clone();
+        // Pixels 2–4 are covered by this spot and a real model run
+        // changed at least one of their channels; alpha is untouched
+        // everywhere, and the uncovered pixels 0–1 are byte-for-byte the
+        // same as before.
+        assert_eq!(before[0..8], after[0..8]);
+        assert!(before[8..20] != after[8..20]);
+        assert!(after.chunks_exact(4).all(|p| p[3] == 255));
+
+        // Opacity 0 is a true no-op: coverage is zero everywhere, so the
+        // model never even runs.
+        let (mut doc, id) = row_5([10, 20, 30, 200, 210]);
+        let before = doc.layers()[0].pixels.clone();
+        doc.camera_raw_retouch(
+            id,
+            &spot(RetouchMode::GenerativeRemove, 3.5, None, 1.5, 0, 0),
+        )
+        .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 
     #[test]

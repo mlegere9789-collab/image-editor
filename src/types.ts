@@ -444,8 +444,8 @@ export type CameraRawMask =
   | { kind: "colorRange"; color: [number, number, number]; fuzziness: number; invert: boolean };
 
 /** Mirrors `RetouchSpot` / `RetouchMode` in src-tauri/src/document.rs:
- * one Camera Raw Remove / Heal / Clone spot. */
-export type RetouchMode = "remove" | "heal" | "clone";
+ * one Camera Raw Remove / Heal / Clone / Generative Remove spot. */
+export type RetouchMode = "remove" | "heal" | "clone" | "generativeRemove";
 export type RetouchSpot = {
   mode: RetouchMode;
   x: number;

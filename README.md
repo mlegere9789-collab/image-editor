@@ -19685,6 +19685,50 @@ wall most of them share, a categorical difference from Super Resolution
 for Generative Upscale, a real hosted-service dependency for Firefly
 Boards — rather than left as bare unchecked rows.
 
+## Phase 332 — Generative Remove — Camera Raw
+
+The last Generative Fill family item this phase can honestly reach: not
+a new model or a new training run, but the one Phase 331 already
+trained put to work a second time. Camera Raw's own Remove/Heal/Clone
+retouch spots already share one function, `camera_raw_retouch`, and one
+per-pixel coverage-and-blend loop keyed on `RetouchMode`; Generative
+Remove is a fourth mode in that same enum, `RetouchMode::GenerativeRemove`.
+
+The shape doesn't quite fit the existing per-pixel match arms, though,
+and that's worth explaining rather than papering over: Remove, Heal, and
+Clone each compute their own pixel's replacement independently, reading
+only that pixel's own neighbourhood or its own source offset. Generative
+Fill's model needs the *whole* hole at once — it's a single real
+inference run over a context window, not a per-pixel formula. So
+`camera_raw_retouch` builds the spot's own coverage mask (every pixel
+where `coverage_at(px, py) * selection > 0`, exactly the same condition
+the per-pixel loop already uses to decide what to touch) once, up front,
+calls `generative_fill_rgba` on it exactly once if that mask is
+non-empty, and the per-pixel loop then just reads that one precomputed
+result back for `GenerativeRemove` — same feather/opacity blend every
+other mode already gets, applied to a real model's output instead of a
+ring mean, a clone, or a healed tone.
+
+Frontend: a fourth `RetouchMode` value, `generativeRemove`, in the
+existing Retouch dropdown next to Remove/Heal/Clone; it needs no source
+point, the same as Remove.
+
+**Verified two ways.** A new test drives a real model run through a
+5-pixel row: the covered pixels change (a real inference happened, not
+a no-op), the uncovered pixels are untouched byte-for-byte, alpha is
+untouched everywhere, and Opacity 0 is confirmed a true no-op — coverage
+is zero everywhere at that setting, so the model never even runs, not
+just "runs and gets blended away at weight zero." `cargo test`: 1777
+total (1770 lib + 7 pipeline, up from 1776/1769). `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` both clean. `npm run
+build` clean.
+
+Generative Remove — Camera Raw flips to shipped (594/618) — the last
+individually-shippable item in the Generative Fill family; everything
+still unchecked in it now needs either real text-to-image generation
+(the compute/data wall from Phase 331's own research note) or a real
+hosted service this project has no path to.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
