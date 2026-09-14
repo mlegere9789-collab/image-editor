@@ -22026,6 +22026,72 @@ Eight screenshots checked by eye.
 
 Tests: 1866 Rust (1862 → 1866), 22 frontend.
 
+## Phase 369 — Render options: Lens Flare's lens types, Lighting Effects' light types, Gloss, Metallic and Texture Channel
+
+Two Render-menu scope cuts of section D.
+
+**Lens Flare** (`lens_flare_with`, a Lens Type select): every lens
+keeps the flare's core, halo and mirrored disc, and adds its own
+elements along the line from the flare through the canvas centre,
+sized in flare radii `r` — a Disc (a soft core), a Ring (a flat band
+between 0.7 and 1 of its radius), a Hexagon (a disc under the
+flat-topped hexagonal metric `max(|dx|, |dx/2 ± dy·√3/2|)`) or, for
+Movie Prime, the horizontal anamorphic Streak through the flare.
+50-300mm Zoom: a hexagon at 0.6, a ring at 1.4, a disc at 1.8; 35mm
+Prime: a disc at 1.6 and a hexagon at 2.4; 105mm Prime: a ring at 1.2
+and a disc at 2.2; Movie Prime: the streak and a disc at 1.5.
+
+**Lighting Effects** (`lighting_effects_with`; Light Type, Aim, Cone,
+Gloss, Metallic, Texture Channel and White is high in the dialog):
+Spot aims the light from its position at a point on the canvas and
+lights only inside a cone about that axis, fading linearly in cosine
+from the cone's edge to its axis; Infinite lights every pixel from the
+same direction, the one from the aim point to the light. Gloss sets
+the specular exponent, `round(16 · 4^(gloss/100))` — 4 matte, 16 the
+default, 64 shiny. Metallic colours the highlight, from the light's
+white at −100 (plastic) to the surface's own colour at 100 (metal).
+Texture Channel picks Red, Green or Blue as the height field instead
+of the luma, and White is high off inverts it. One light rather than
+Photoshop's up to three stays a documented scope cut.
+
+The Chromium check found the contextual task bar (Select Subject /
+Remove Background) drawn above modal dialogs and intercepting a click
+on a tall dialog's Apply button: `.modal-overlay` now sits above it.
+
+**Verified.** Two Rust tests. `lens_types_add_their_own_elements` on a
+100×100 black layer with the flare at (20, 20): every lens leaves the
+flare's own pixel white; pixel (38, 38) reads 25 from the halo alone
+and 86 with the Zoom lens's hexagon; the Zoom lens's ring band reads
+64 at (61, 68) and nothing at its own centre; Movie Prime's streak
+lifts (50, 20) from 19 to 62 and leaves (50, 24) at 19; the two primes
+differ from each other and from the base.
+`lighting_types_gloss_metallic_and_texture_channel` on flat grey 100
+under a 200-grey light at (2, 2, 10): Point reads 138 at the light's
+foot and 127 at the corner; Infinite aimed at the foot reads 138
+everywhere; a 10° Spot aimed at the corner reads 127 there and 0 at
+the foot; Gloss 100 dims the corner to 108 and −100 lifts it to 133;
+on a red surface the plastic highlight puts 60 into green and blue
+(red 217) where the metal one puts nothing (red 204); Red as the
+texture channel of a red-flat, green-ramped layer equals no bump at
+all while Green bumps; the defaults equal `lighting_effects`; a 91°
+cone errors. In Chromium against the built frontend: Filter > Render
+> Lens Flare… shows Lens Type (50-300mm Zoom) and Movie Prime sends
+`lens_flare_with` with `lens: "moviePrime"`; Lighting Effects… shows
+Light Type (Point), Gloss, Metallic, Texture Channel and White is
+high, Spot reveals Aim X, Aim Y and Cone, and Apply sends
+`lighting_effects_with` with `lightType: "spot", cone: 30, gloss: 60,
+metallic: 40, texture: "blue", whiteIsHigh: false`; Infinite keeps Aim
+and hides Cone; every dialog closes on Apply. On the real app under
+Xvfb, on the recovered brush-stroke document: Lens Flare… with Movie
+Prime on the transparent layer changed nothing visible (the screen
+lightens colour, and alpha stays), so Filter > Render > Clouds… first
+made the layer opaque; Lens Flare… again, Movie Prime at the canvas
+centre, applied through the real IPC, drew the white core, its halo
+and the long horizontal streak across the clouds; nine screenshots
+checked by eye.
+
+Tests: 1868 Rust (1866 → 1868), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

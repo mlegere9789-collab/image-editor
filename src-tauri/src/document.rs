@@ -159,6 +159,126 @@ impl RadialBlurQuality {
     }
 }
 
+/// Filter > Render > Lens Flare's Lens Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LensType {
+    Zoom50To300,
+    Prime35,
+    Prime105,
+    MoviePrime,
+}
+
+/// Filter > Render > Lighting Effects' Light Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum LightType {
+    Point,
+    Spot,
+    Infinite,
+}
+
+/// Filter > Render > Lighting Effects' Texture Channel: which colour
+/// channel stands in for the height field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TextureChannel {
+    Red,
+    Green,
+    Blue,
+}
+
+/// One of a lens's secondary flare elements, placed at `t` along the
+/// line from the flare (`0`) through the canvas centre (`1`), `size` in
+/// flare radii, `strength` its peak, and its shape.
+#[derive(Clone, Copy)]
+struct FlareElement {
+    t: f32,
+    size: f32,
+    strength: f32,
+    shape: FlareShape,
+}
+
+#[derive(Clone, Copy)]
+enum FlareShape {
+    Disc,
+    Ring,
+    Hexagon,
+    Streak,
+}
+
+impl LensType {
+    /// The secondary elements each lens adds to the flare every lens
+    /// shares (the core, its halo and the mirrored disc).
+    fn elements(self) -> &'static [FlareElement] {
+        use FlareShape::*;
+        match self {
+            LensType::Zoom50To300 => &[
+                FlareElement {
+                    t: 0.6,
+                    size: 0.25,
+                    strength: 0.3,
+                    shape: Hexagon,
+                },
+                FlareElement {
+                    t: 1.4,
+                    size: 0.6,
+                    strength: 0.25,
+                    shape: Ring,
+                },
+                FlareElement {
+                    t: 1.8,
+                    size: 0.2,
+                    strength: 0.35,
+                    shape: Disc,
+                },
+            ],
+            LensType::Prime35 => &[
+                FlareElement {
+                    t: 1.6,
+                    size: 0.3,
+                    strength: 0.35,
+                    shape: Disc,
+                },
+                FlareElement {
+                    t: 2.4,
+                    size: 0.4,
+                    strength: 0.3,
+                    shape: Hexagon,
+                },
+            ],
+            LensType::Prime105 => &[
+                FlareElement {
+                    t: 1.2,
+                    size: 0.5,
+                    strength: 0.3,
+                    shape: Ring,
+                },
+                FlareElement {
+                    t: 2.2,
+                    size: 0.25,
+                    strength: 0.3,
+                    shape: Disc,
+                },
+            ],
+            LensType::MoviePrime => &[
+                FlareElement {
+                    t: 0.0,
+                    size: 3.0,
+                    strength: 0.5,
+                    shape: Streak,
+                },
+                FlareElement {
+                    t: 1.5,
+                    size: 0.3,
+                    strength: 0.3,
+                    shape: Disc,
+                },
+            ],
+        }
+    }
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15997,11 +16117,9 @@ impl Document {
     /// the layer, centred at `(center_x, center_y)`, plus a smaller,
     /// dimmer secondary reflection mirrored through the canvas centre —
     /// the two elements of a real lens flare a viewer's eye is drawn to
-    /// first. This is a documented, deliberately reduced approximation of
-    /// Photoshop's own four lens types, which add several more hexagonal
-    /// or ring-shaped secondary flares along that same line; those are a
-    /// scope cut, since a closed-form radial falloff is what makes this
-    /// filter hand-verifiable at all, and hexagons/rings wouldn't be.
+    /// first — the elements every lens shares; [`Self::lens_flare_with`]
+    /// adds each of Photoshop's four lens types' own hexagons, rings,
+    /// discs and streak along that same line.
     /// `radius = 0.15 · min(width, height)` (not user-adjustable, matching
     /// Photoshop's own dialog, which has no size control either). The main
     /// flare's intensity at distance `d` is a soft core, `(1 − d/radius)²`
@@ -16021,6 +16139,43 @@ impl Document {
         center_y: f32,
         brightness: u32,
     ) -> Result<Option<Rect>, String> {
+        self.lens_flare_elements(id, center_x, center_y, brightness, &[])
+    }
+
+    /// [`Self::lens_flare`] with Photoshop's Lens Type, each adding its
+    /// own secondary elements along the line from the flare through the
+    /// canvas centre (`t = 0` at the flare, `1` at the centre), sized in
+    /// flare radii `r`: a Disc is a soft core, `strength · (1 − d/R)²`
+    /// inside `R`; a Ring is a flat band, `strength` where `0.7R ≤ d <
+    /// R`; a Hexagon is a disc under the flat-topped hexagonal metric
+    /// `max(|dx|, |dx/2 ± dy·√3/2|)`; a Streak is the horizontal
+    /// anamorphic bar Movie Prime draws through the flare, `strength ·
+    /// (1 − |dy|/w) · (1 − |dx|/L)` with `w = 0.08r` and `L = size·r`.
+    /// 50-300mm Zoom: a hexagon at 0.6 (0.25r, 0.3), a ring at 1.4 (0.6r,
+    /// 0.25), a disc at 1.8 (0.2r, 0.35). 35mm Prime: a disc at 1.6 (0.3r,
+    /// 0.35), a hexagon at 2.4 (0.4r, 0.3). 105mm Prime: a ring at 1.2
+    /// (0.5r, 0.3), a disc at 2.2 (0.25r, 0.3). Movie Prime: the streak
+    /// (3r long, 0.5) and a disc at 1.5 (0.3r, 0.3). Everything sums,
+    /// scales and screens as in `lens_flare`.
+    pub fn lens_flare_with(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        brightness: u32,
+        lens: LensType,
+    ) -> Result<Option<Rect>, String> {
+        self.lens_flare_elements(id, center_x, center_y, brightness, lens.elements())
+    }
+
+    fn lens_flare_elements(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        brightness: u32,
+        elements: &[FlareElement],
+    ) -> Result<Option<Rect>, String> {
         if !(10..=300).contains(&brightness) {
             return Err("Lens Flare brightness must be between 10 and 300.".to_string());
         }
@@ -16031,6 +16186,19 @@ impl Document {
         let (sx, sy) = (2.0 * dcx - center_x, 2.0 * dcy - center_y);
         let secondary_radius = radius * 0.35;
         let scale = brightness as f32 / 100.0;
+        let placed: Vec<(f32, f32, f32, f32, FlareShape)> = elements
+            .iter()
+            .map(|e| {
+                (
+                    center_x + e.t * (dcx - center_x),
+                    center_y + e.t * (dcy - center_y),
+                    e.size * radius,
+                    e.strength,
+                    e.shape,
+                )
+            })
+            .collect();
+        let streak_width = (0.08 * radius).max(1.0);
         self.filter_pixels(id, |source, row, col| {
             let (x, y) = (col as f32, row as f32);
             let d = ((x - center_x).powi(2) + (y - center_y).powi(2)).sqrt();
@@ -16050,7 +16218,50 @@ impl Document {
             } else {
                 0.0
             };
-            let t = ((core + halo + secondary) * scale).clamp(0.0, 1.0);
+            let extras: f32 = placed
+                .iter()
+                .map(|&(ex, ey, size, strength, shape)| {
+                    let (dx, dy) = (x - ex, y - ey);
+                    match shape {
+                        FlareShape::Disc => {
+                            let dd = (dx * dx + dy * dy).sqrt();
+                            if dd < size {
+                                strength * (1.0 - dd / size).powi(2)
+                            } else {
+                                0.0
+                            }
+                        }
+                        FlareShape::Ring => {
+                            let dd = (dx * dx + dy * dy).sqrt();
+                            if dd >= 0.7 * size && dd < size {
+                                strength
+                            } else {
+                                0.0
+                            }
+                        }
+                        FlareShape::Hexagon => {
+                            let s = 3f32.sqrt() / 2.0;
+                            let dh = dx
+                                .abs()
+                                .max((dx / 2.0 + dy * s).abs())
+                                .max((dx / 2.0 - dy * s).abs());
+                            if dh < size {
+                                strength * (1.0 - dh / size).powi(2)
+                            } else {
+                                0.0
+                            }
+                        }
+                        FlareShape::Streak => {
+                            if dy.abs() < streak_width && dx.abs() < size {
+                                strength * (1.0 - dy.abs() / streak_width) * (1.0 - dx.abs() / size)
+                            } else {
+                                0.0
+                            }
+                        }
+                    }
+                })
+                .sum();
+            let t = ((core + halo + secondary + extras) * scale).clamp(0.0, 1.0);
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
@@ -16337,13 +16548,12 @@ impl Document {
     /// Filter > Render > Lighting Effects: a single point light re-lights
     /// the layer using its own luma as a bump-mapped height field (a
     /// central-difference gradient of the luma feeds a Blinn-Phong
-    /// diffuse+specular model). Scope cuts, documented rather than silently
-    /// dropped: only Photoshop's Point light type is modeled (no Spot or
-    /// Infinite), there is one light rather than Photoshop's up to three,
-    /// and the material is fixed non-metallic plastic (`SPEC_STRENGTH`/
-    /// `SHININESS` below stand in for Photoshop's Gloss/Metallic sliders,
-    /// and there is no texture-channel picker — the layer's own colour is
-    /// always the height field). `light_x`/`light_y`/`light_height` are in
+    /// diffuse+specular model). This is Photoshop's Point light over a
+    /// non-metallic plastic with the luma as the height field;
+    /// [`Self::lighting_effects_with`] adds the Spot and Infinite light
+    /// types, the Gloss and Metallic sliders and the Texture Channel
+    /// picker. One light rather than Photoshop's up to three remains a
+    /// documented scope cut. `light_x`/`light_y`/`light_height` are in
     /// the layer's own pixel/height units; `intensity` and `ambience` are
     /// percentages (0-100) where `intensity` scales the diffuse term and
     /// `ambience` is a flat floor kept even where the diffuse term is zero;
@@ -16365,6 +16575,67 @@ impl Document {
         bump_height: u32,
         color: [u8; 3],
     ) -> Result<Option<Rect>, String> {
+        self.lighting_effects_with(
+            id,
+            light_x,
+            light_y,
+            light_height,
+            intensity,
+            ambience,
+            bump_height,
+            color,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            0,
+            -100,
+            None,
+            true,
+        )
+    }
+
+    /// [`Self::lighting_effects`] with Photoshop's other controls. Light
+    /// Type: Point as before; Spot aims the light from its position at
+    /// `aim` on the canvas and lights only inside a cone of `cone`
+    /// degrees about that axis, fading linearly in cosine from the cone's
+    /// edge to its axis; Infinite lights every pixel from the same
+    /// direction, the one from `aim` to the light's position. Gloss
+    /// (`−100..=100`) sets the specular exponent, `round(16 · 4^(gloss /
+    /// 100))` — 4 matte, 16 the default, 64 shiny. Metallic (`−100..=100`)
+    /// colours the highlight: at −100 (plastic) it is the light's white,
+    /// at 100 (metal) the surface's own colour, blended linearly between.
+    /// `texture` picks Red, Green or Blue as the height field instead of
+    /// the luma, and `white_is_high` false inverts it (dark is high).
+    #[allow(clippy::too_many_arguments)]
+    pub fn lighting_effects_with(
+        &mut self,
+        id: LayerId,
+        light_x: f32,
+        light_y: f32,
+        light_height: f32,
+        intensity: u32,
+        ambience: u32,
+        bump_height: u32,
+        color: [u8; 3],
+        light_type: LightType,
+        aim: (f32, f32),
+        cone: u32,
+        gloss: i32,
+        metallic: i32,
+        texture: Option<TextureChannel>,
+        white_is_high: bool,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=90).contains(&cone) {
+            return Err("Lighting Effects cone must be between 1 and 90 degrees.".to_string());
+        }
+        if !(-100..=100).contains(&gloss) || !(-100..=100).contains(&metallic) {
+            return Err(
+                "Lighting Effects gloss and metallic must be between -100 and 100.".to_string(),
+            );
+        }
+        if !(aim.0.is_finite() && aim.1.is_finite()) {
+            return Err("Lighting Effects aim must be finite numbers.".to_string());
+        }
         if !(0..=100).contains(&intensity) {
             return Err("Lighting Effects intensity must be between 0 and 100.".to_string());
         }
@@ -16378,36 +16649,65 @@ impl Document {
             return Err("Lighting Effects light height must be a positive number.".to_string());
         }
         const SPEC_STRENGTH: f32 = 0.3;
-        const SHININESS: i32 = 16;
+        let shininess = (16.0 * 4f32.powf(gloss as f32 / 100.0)).round() as i32;
+        let metal = (metallic + 100) as f32 / 200.0;
+        let cone_cos = (cone as f32).to_radians().cos();
         let (width, height) = (self.width as usize, self.height as usize);
         let doc_width = width;
         let scale = bump_height as f32 / 100.0;
         let intensity_f = intensity as f32 / 100.0;
         let ambience_f = ambience as f32 / 100.0;
-        let luma_at = move |source: &[u8], x: i64, y: i64| -> f32 {
+        let height_at = move |source: &[u8], x: i64, y: i64| -> f32 {
             let cx = x.clamp(0, width as i64 - 1) as usize;
             let cy = y.clamp(0, height as i64 - 1) as usize;
             let base = (cy * doc_width + cx) * CHANNELS;
-            0.299 * source[base] as f32
-                + 0.587 * source[base + 1] as f32
-                + 0.114 * source[base + 2] as f32
+            let h = match texture {
+                None => {
+                    0.299 * source[base] as f32
+                        + 0.587 * source[base + 1] as f32
+                        + 0.114 * source[base + 2] as f32
+                }
+                Some(TextureChannel::Red) => source[base] as f32,
+                Some(TextureChannel::Green) => source[base + 1] as f32,
+                Some(TextureChannel::Blue) => source[base + 2] as f32,
+            };
+            if white_is_high {
+                h
+            } else {
+                255.0 - h
+            }
         };
+        let infinite_vec = normalize3([light_x - aim.0, light_y - aim.1, light_height]);
+        let spot_axis = normalize3([aim.0 - light_x, aim.1 - light_y, -light_height]);
         self.filter_pixels(id, |source, row, col| {
             let (x, y) = (col as i64, row as i64);
-            let dzdx = (luma_at(source, x + 1, y) - luma_at(source, x - 1, y)) / 2.0 * scale;
-            let dzdy = (luma_at(source, x, y + 1) - luma_at(source, x, y - 1)) / 2.0 * scale;
+            let dzdx = (height_at(source, x + 1, y) - height_at(source, x - 1, y)) / 2.0 * scale;
+            let dzdy = (height_at(source, x, y + 1) - height_at(source, x, y - 1)) / 2.0 * scale;
             let normal = normalize3([-dzdx, -dzdy, 1.0]);
-            let light_vec = normalize3([light_x - col as f32, light_y - row as f32, light_height]);
-            let diffuse = dot3(normal, light_vec).max(0.0);
+            let light_vec = match light_type {
+                LightType::Infinite => infinite_vec,
+                _ => normalize3([light_x - col as f32, light_y - row as f32, light_height]),
+            };
+            let reach = match light_type {
+                LightType::Spot => {
+                    let to_pixel =
+                        normalize3([col as f32 - light_x, row as f32 - light_y, -light_height]);
+                    let along = dot3(spot_axis, to_pixel);
+                    ((along - cone_cos) / (1.0 - cone_cos)).clamp(0.0, 1.0)
+                }
+                _ => 1.0,
+            };
+            let diffuse = dot3(normal, light_vec).max(0.0) * reach;
             let half_vec = normalize3([light_vec[0], light_vec[1], light_vec[2] + 1.0]);
-            let spec = dot3(normal, half_vec).max(0.0).powi(SHININESS);
+            let spec = dot3(normal, half_vec).max(0.0).powi(shininess) * reach;
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 let orig = source[base + c] as f32;
                 let tint = color[c] as f32 / 255.0;
                 let mut val = orig * (ambience_f + intensity_f * diffuse) * tint;
-                val += 255.0 * SPEC_STRENGTH * spec * tint;
+                let highlight = 255.0 * (1.0 - metal) + orig * metal;
+                val += highlight * SPEC_STRENGTH * spec * tint;
                 out[c] = val.round().clamp(0.0, 255.0) as u8;
             }
             out[3] = source[base + 3];
@@ -45553,6 +45853,246 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn lens_types_add_their_own_elements() {
+        // A 100×100 black layer, the flare at (20, 20): radius 15, the
+        // canvas centre (49.5, 49.5), the mirrored disc at (79, 79).
+        let (w, h) = (100u32, 100u32);
+        let black = solid(w, h, [0, 0, 0, 255]);
+        let run = |lens: Option<LensType>| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("k", &black, w, h).unwrap();
+            match lens {
+                Some(lens) => doc.lens_flare_with(id, 20.0, 20.0, 100, lens).unwrap(),
+                None => doc.lens_flare(id, 20.0, 20.0, 100).unwrap(),
+            };
+            red_plane(&doc)
+        };
+        let at = |plane: &[u8], x: usize, y: usize| plane[y * w as usize + x];
+        let base = run(None);
+        let zoom = run(Some(LensType::Zoom50To300));
+        let movie = run(Some(LensType::MoviePrime));
+        // Every lens shares the core: the flare's own pixel is white.
+        for plane in [&base, &zoom, &movie] {
+            assert_eq!(at(plane, 20, 20), 255);
+        }
+        // Pixel (38, 38), 25.5 from the flare, gets only the halo in the
+        // base (0.0994 → 25); the Zoom lens's hexagon, centred at 0.6 of
+        // the way to the centre (37.7, 37.7) with radius 3.75, adds 0.3 ·
+        // (1 − 0.41/3.75)² = 0.238 → 86.
+        assert_eq!(at(&base, 38, 38), 25);
+        assert_eq!(at(&zoom, 38, 38), 86);
+        // The Zoom lens's ring at 1.4 (61.3, 61.3), radius 9: pixel (61,
+        // 68) at 6.7 sits in the band (0.25 → 64) where nothing else
+        // reaches; the ring's own centre pixel is empty.
+        assert_eq!(at(&zoom, 61, 68), 64);
+        assert_eq!(at(&zoom, 61, 61), 0);
+        assert_eq!(at(&base, 61, 68), 0);
+        // Movie Prime's streak runs horizontally through the flare: pixel
+        // (50, 20), 30 out along it, reads the halo (0.075 → 19) in the
+        // base and the halo plus 0.5 · (1 − 30/45) = 0.167 → 62 with it.
+        assert_eq!(at(&base, 50, 20), 19);
+        assert_eq!(at(&movie, 50, 20), 62);
+        assert_eq!(at(&movie, 50, 24), 19);
+        // 35mm and 105mm differ from each other and from the base.
+        let prime35 = run(Some(LensType::Prime35));
+        let prime105 = run(Some(LensType::Prime105));
+        assert_ne!(prime35, prime105);
+        assert_ne!(prime35, base);
+        assert_ne!(prime105, base);
+    }
+
+    #[test]
+    fn lighting_types_gloss_metallic_and_texture_channel() {
+        // A flat grey 100 5×5 layer lit by a 200-grey light at (2, 2, 10).
+        let (w, h) = (5u32, 5u32);
+        let grey = solid(w, h, [100, 100, 100, 255]);
+        let light = [200u8, 200, 200];
+        let run = |pixels: &[u8],
+                   light_type: LightType,
+                   aim: (f32, f32),
+                   cone: u32,
+                   gloss: i32,
+                   metallic: i32,
+                   texture: Option<TextureChannel>,
+                   color: [u8; 3]| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("g", pixels, w, h).unwrap();
+            doc.lighting_effects_with(
+                id, 2.0, 2.0, 10.0, 100, 0, 0, color, light_type, aim, cone, gloss, metallic,
+                texture, true,
+            )
+            .unwrap();
+            doc.layers()[0].pixels.clone()
+        };
+        let red = |px: &[u8], x: usize, y: usize| px[(y * 5 + x) * 4];
+        // Point: the foot pixel (2, 2) has diffuse and specular 1 → (100 +
+        // 76.5) · 200/255 = 138; the corner (0, 0) has diffuse 0.962 and
+        // a highlight of 0.859 (exponent 16) → 127.
+        let point = run(
+            &grey,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            0,
+            -100,
+            None,
+            light,
+        );
+        assert_eq!(red(&point, 2, 2), 138);
+        assert_eq!(red(&point, 0, 0), 127);
+        // Infinite from the light's position toward its aim (2, 2): every
+        // pixel is lit straight down → 138 everywhere.
+        let infinite = run(
+            &grey,
+            LightType::Infinite,
+            (2.0, 2.0),
+            45,
+            0,
+            -100,
+            None,
+            light,
+        );
+        assert!((0..25).all(|i| infinite[i * 4] == 138));
+        // Spot aimed at the corner (0, 0) with a 10° cone: the corner is
+        // on the axis (127 as under the point light), the foot 15.8° off
+        // it is dark.
+        let spot = run(&grey, LightType::Spot, (0.0, 0.0), 10, 0, -100, None, light);
+        assert_eq!(red(&spot, 0, 0), 127);
+        assert_eq!(red(&spot, 2, 2), 0);
+        // Gloss: exponent 64 dims the corner's highlight to 0.544 → 108,
+        // exponent 4 brightens it to 0.963 → 133.
+        let shiny = run(
+            &grey,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            100,
+            -100,
+            None,
+            light,
+        );
+        let matte = run(
+            &grey,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            -100,
+            -100,
+            None,
+            light,
+        );
+        assert_eq!(red(&shiny, 0, 0), 108);
+        assert_eq!(red(&matte, 0, 0), 133);
+        // Metallic on a red surface: plastic's white highlight puts 60
+        // into green at the foot, metal's surface-coloured one nothing;
+        // red reads 217 and 204.
+        let red_surface = solid(w, h, [200, 0, 0, 255]);
+        let plastic = run(
+            &red_surface,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            0,
+            -100,
+            None,
+            light,
+        );
+        let metal = run(
+            &red_surface,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            0,
+            100,
+            None,
+            light,
+        );
+        assert_eq!(
+            &plastic[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 3],
+            &[217, 60, 60]
+        );
+        assert_eq!(&metal[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 3], &[204, 0, 0]);
+        // Texture channel: red flat, green a ramp. Red as the height field
+        // is flat, so bump 100 on it equals no bump at all; Green bumps.
+        let mut ramp = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                ramp.extend_from_slice(&[100, (x * 40) as u8, 0, 255]);
+            }
+        }
+        let bump = |texture: Option<TextureChannel>, bump_height: u32| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("g", &ramp, w, h).unwrap();
+            doc.lighting_effects_with(
+                id,
+                2.0,
+                2.0,
+                10.0,
+                100,
+                0,
+                bump_height,
+                light,
+                LightType::Point,
+                (0.0, 0.0),
+                45,
+                0,
+                -100,
+                texture,
+                true,
+            )
+            .unwrap();
+            doc.layers()[0].pixels.clone()
+        };
+        assert_eq!(bump(Some(TextureChannel::Red), 100), bump(None, 0));
+        assert_ne!(bump(Some(TextureChannel::Green), 100), bump(None, 0));
+        // The defaults are lighting_effects.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("g", &ramp, w, h).unwrap();
+        doc.lighting_effects(id, 2.0, 2.0, 10.0, 100, 20, 50, light)
+            .unwrap();
+        let mut with = Document::new(w, h).unwrap();
+        let with_id = with.add_layer("g", &ramp, w, h).unwrap();
+        with.lighting_effects_with(
+            with_id,
+            2.0,
+            2.0,
+            10.0,
+            100,
+            20,
+            50,
+            light,
+            LightType::Point,
+            (0.0, 0.0),
+            45,
+            0,
+            -100,
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(doc.layers()[0].pixels, with.layers()[0].pixels);
+        assert!(doc
+            .lighting_effects_with(
+                id,
+                2.0,
+                2.0,
+                10.0,
+                100,
+                0,
+                0,
+                light,
+                LightType::Spot,
+                (0.0, 0.0),
+                91,
+                0,
+                -100,
+                None,
+                true,
+            )
+            .is_err());
     }
 
     #[test]

@@ -3110,6 +3110,66 @@ fn shape_blur_with(
     })
 }
 
+/// Filter > Render > Lens Flare on layer `id` with its Lens Type.
+#[tauri::command]
+fn lens_flare_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    brightness: u32,
+    lens: document::LensType,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lens_flare_with(id, center_x, center_y, brightness, lens)
+    })
+}
+
+/// Filter > Render > Lighting Effects on layer `id` with its Light Type
+/// (`aim` and `cone` for Spot, `aim` for Infinite), Gloss, Metallic and
+/// Texture Channel.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn lighting_effects_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    light_x: f32,
+    light_y: f32,
+    light_height: f32,
+    intensity: u32,
+    ambience: u32,
+    bump_height: u32,
+    color: [u8; 3],
+    light_type: document::LightType,
+    aim_x: f32,
+    aim_y: f32,
+    cone: u32,
+    gloss: i32,
+    metallic: i32,
+    texture: Option<document::TextureChannel>,
+    white_is_high: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lighting_effects_with(
+            id,
+            light_x,
+            light_y,
+            light_height,
+            intensity,
+            ambience,
+            bump_height,
+            color,
+            light_type,
+            (aim_x, aim_y),
+            cone,
+            gloss,
+            metallic,
+            texture,
+            white_is_high,
+        )
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -8146,6 +8206,8 @@ pub fn run() {
             levels_white_point_with,
             levels_gray_point_with,
             auto_color_with,
+            lens_flare_with,
+            lighting_effects_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

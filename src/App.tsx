@@ -2599,6 +2599,7 @@ export default function App() {
   const [lensFlareCenterX, setLensFlareCenterX] = useState(0);
   const [lensFlareCenterY, setLensFlareCenterY] = useState(0);
   const [lensFlareBrightness, setLensFlareBrightness] = useState(100);
+  const [lensFlareLens, setLensFlareLens] = useState("zoom50To300");
   const [showLightingEffectsDialog, setShowLightingEffectsDialog] =
     useState(false);
   const [lightingLightX, setLightingLightX] = useState(0);
@@ -2608,6 +2609,14 @@ export default function App() {
   const [lightingAmbience, setLightingAmbience] = useState(20);
   const [lightingBumpHeight, setLightingBumpHeight] = useState(50);
   const [lightingColor, setLightingColor] = useState("#ffffff");
+  const [lightingType, setLightingType] = useState("point");
+  const [lightingAimX, setLightingAimX] = useState(0);
+  const [lightingAimY, setLightingAimY] = useState(0);
+  const [lightingCone, setLightingCone] = useState(45);
+  const [lightingGloss, setLightingGloss] = useState(0);
+  const [lightingMetallic, setLightingMetallic] = useState(-100);
+  const [lightingTexture, setLightingTexture] = useState("none");
+  const [lightingWhiteIsHigh, setLightingWhiteIsHigh] = useState(true);
   const [showDiffuseDialog, setShowDiffuseDialog] = useState(false);
   const [diffuseMode, setDiffuseMode] = useState<DiffuseMode>("normal");
 
@@ -8576,11 +8585,12 @@ export default function App() {
 
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("lens_flare", {
+    await runCommand("lens_flare_with", {
       id: selectedId,
       centerX: lensFlareCenterX,
       centerY: lensFlareCenterY,
       brightness: lensFlareBrightness,
+      lens: lensFlareLens,
     });
     setShowLensFlareDialog(false);
   }, [
@@ -8589,18 +8599,21 @@ export default function App() {
     lensFlareCenterX,
     lensFlareCenterY,
     lensFlareBrightness,
+    lensFlareLens,
   ]);
 
   const openLightingEffectsDialog = useCallback(() => {
     setLightingLightX(Math.round((document?.width ?? 2) / 2));
     setLightingLightY(Math.round((document?.height ?? 2) / 2));
+    setLightingAimX(Math.round((document?.width ?? 2) / 2));
+    setLightingAimY(Math.round((document?.height ?? 2) / 2));
     setShowLightingEffectsDialog(true);
   }, [document]);
 
   const applyLightingEffects = useCallback(async () => {
     if (selectedId === null) return;
     const [r, g, b] = hexToRgb(lightingColor);
-    await runCommand("lighting_effects", {
+    await runCommand("lighting_effects_with", {
       id: selectedId,
       lightX: lightingLightX,
       lightY: lightingLightY,
@@ -8609,6 +8622,14 @@ export default function App() {
       ambience: lightingAmbience,
       bumpHeight: lightingBumpHeight,
       color: [r, g, b],
+      lightType: lightingType,
+      aimX: lightingAimX,
+      aimY: lightingAimY,
+      cone: lightingCone,
+      gloss: lightingGloss,
+      metallic: lightingMetallic,
+      texture: lightingTexture === "none" ? null : lightingTexture,
+      whiteIsHigh: lightingWhiteIsHigh,
     });
     setShowLightingEffectsDialog(false);
   }, [
@@ -8621,6 +8642,14 @@ export default function App() {
     lightingAmbience,
     lightingBumpHeight,
     lightingColor,
+    lightingType,
+    lightingAimX,
+    lightingAimY,
+    lightingCone,
+    lightingGloss,
+    lightingMetallic,
+    lightingTexture,
+    lightingWhiteIsHigh,
   ]);
 
   const applyDiffuse = useCallback(async () => {
@@ -33640,6 +33669,18 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control control--row">
+              <span className="control__label">Lens Type</span>
+              <select
+                value={lensFlareLens}
+                onChange={(event) => setLensFlareLens(event.target.value)}
+              >
+                <option value="zoom50To300">50-300mm Zoom</option>
+                <option value="prime35">35mm Prime</option>
+                <option value="prime105">105mm Prime</option>
+                <option value="moviePrime">Movie Prime</option>
+              </select>
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -34402,6 +34443,120 @@ export default function App() {
                 className="tools__color"
                 value={lightingColor}
                 onChange={(event) => setLightingColor(event.target.value)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light Type</span>
+              <select
+                value={lightingType}
+                onChange={(event) => setLightingType(event.target.value)}
+              >
+                <option value="point">Point</option>
+                <option value="spot">Spot</option>
+                <option value="infinite">Infinite</option>
+              </select>
+            </label>
+            {lightingType !== "point" && (
+              <>
+                <label className="control">
+                  <span className="control__label">
+                    Aim X
+                    <span className="control__value">{lightingAimX}px</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={document?.width ?? 1}
+                    value={lightingAimX}
+                    onChange={(event) =>
+                      setLightingAimX(Number(event.target.value))
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Aim Y
+                    <span className="control__value">{lightingAimY}px</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={document?.height ?? 1}
+                    value={lightingAimY}
+                    onChange={(event) =>
+                      setLightingAimY(Number(event.target.value))
+                    }
+                  />
+                </label>
+              </>
+            )}
+            {lightingType === "spot" && (
+              <label className="control">
+                <span className="control__label">
+                  Cone
+                  <span className="control__value">{lightingCone}°</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={90}
+                  value={lightingCone}
+                  onChange={(event) =>
+                    setLightingCone(Number(event.target.value))
+                  }
+                />
+              </label>
+            )}
+            <label className="control">
+              <span className="control__label">
+                Gloss
+                <span className="control__value">{lightingGloss}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lightingGloss}
+                onChange={(event) =>
+                  setLightingGloss(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Metallic
+                <span className="control__value">{lightingMetallic}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={lightingMetallic}
+                onChange={(event) =>
+                  setLightingMetallic(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Texture Channel</span>
+              <select
+                value={lightingTexture}
+                onChange={(event) => setLightingTexture(event.target.value)}
+              >
+                <option value="none">None</option>
+                <option value="red">Red</option>
+                <option value="green">Green</option>
+                <option value="blue">Blue</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">White is high</span>
+              <input
+                type="checkbox"
+                checked={lightingWhiteIsHigh}
+                onChange={(event) =>
+                  setLightingWhiteIsHigh(event.target.checked)
+                }
               />
             </label>
             <div className="modal__actions">
