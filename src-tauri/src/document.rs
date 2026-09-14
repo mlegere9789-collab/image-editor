@@ -13448,16 +13448,28 @@ impl Document {
     /// fall inside the selection's own shape, so an elliptical or bordered
     /// selection clips the pasted content to that shape and not just to its
     /// box. Anything off the canvas or outside the selection is left fully
-    /// transparent. Photoshop implements the clipping as a live layer mask;
-    /// this project's layer model has no masks, so it is baked in as
-    /// transparency — a documented scope cut. Errors when nothing is
-    /// selected, as Photoshop greys the command out.
+    /// transparent. The clipping is baked in as transparency here;
+    /// [`Self::paste_into_masked`] is Photoshop's own live layer mask.
+    /// Errors when nothing is selected, as Photoshop greys the command out.
     pub fn paste_into(
         &mut self,
         clipboard: &Clipboard,
         name: impl Into<String>,
     ) -> Result<LayerId, String> {
-        self.paste_against_selection(clipboard, name, "Paste Into", true)
+        self.paste_against_selection(clipboard, name, "Paste Into", true, false)
+    }
+
+    /// [`Self::paste_into`] as Photoshop does it: the new layer keeps every
+    /// clipboard pixel that lands on the canvas and wears a layer mask that
+    /// is the selection's coverage — 255 inside, 0 outside, and in between
+    /// along a feathered or anti-aliased edge — so the pasted content stays
+    /// whole and can be moved or unmasked later.
+    pub fn paste_into_masked(
+        &mut self,
+        clipboard: &Clipboard,
+        name: impl Into<String>,
+    ) -> Result<LayerId, String> {
+        self.paste_against_selection(clipboard, name, "Paste Into", true, true)
     }
 
     /// Edit > Paste Special > Paste Outside: the mirror image of
@@ -13466,15 +13478,26 @@ impl Document {
     /// the pixels that fall *outside* the selection's shape are kept, so the
     /// pasted layer surrounds the selection rather than filling it. The two
     /// commands' results are exact complements: pixel for pixel, one holds
-    /// the clipboard and the other is transparent. As with Paste Into,
-    /// Photoshop's live layer mask is baked in as transparency here, and
-    /// nothing selected is an error.
+    /// the clipboard and the other is transparent. As with Paste Into, the
+    /// clipping is baked in as transparency here and
+    /// [`Self::paste_outside_masked`] is the live layer mask; nothing
+    /// selected is an error.
     pub fn paste_outside(
         &mut self,
         clipboard: &Clipboard,
         name: impl Into<String>,
     ) -> Result<LayerId, String> {
-        self.paste_against_selection(clipboard, name, "Paste Outside", false)
+        self.paste_against_selection(clipboard, name, "Paste Outside", false, false)
+    }
+
+    /// [`Self::paste_outside`] with Photoshop's live layer mask: the whole
+    /// clipboard on the layer, masked by one minus the selection's coverage.
+    pub fn paste_outside_masked(
+        &mut self,
+        clipboard: &Clipboard,
+        name: impl Into<String>,
+    ) -> Result<LayerId, String> {
+        self.paste_against_selection(clipboard, name, "Paste Outside", false, true)
     }
 
     fn paste_against_selection(
@@ -13483,6 +13506,7 @@ impl Document {
         name: impl Into<String>,
         command: &str,
         inside: bool,
+        masked: bool,
     ) -> Result<LayerId, String> {
         let selection = self
             .selection
@@ -13506,7 +13530,7 @@ impl Document {
                 if px < 0 || px >= width {
                     continue;
                 }
-                if selection.contains(px as f32 + 0.5, py as f32 + 0.5) != inside {
+                if !masked && selection.contains(px as f32 + 0.5, py as f32 + 0.5) != inside {
                     continue;
                 }
                 let src = (row as usize * clipboard.width as usize + col as usize) * CHANNELS;
@@ -13514,7 +13538,20 @@ impl Document {
                 pixels[dst..dst + CHANNELS].copy_from_slice(&clipboard.pixels[src..src + CHANNELS]);
             }
         }
-        Ok(self.push_pixel_layer(name, pixels))
+        let id = self.push_pixel_layer(name, pixels);
+        if masked {
+            let mask: Vec<u8> = (0..height)
+                .flat_map(|py| {
+                    let selection = &selection;
+                    (0..width).map(move |px| {
+                        let cover = selection.coverage(px as f32 + 0.5, py as f32 + 0.5);
+                        to_byte(if inside { cover } else { 1.0 - cover })
+                    })
+                })
+                .collect();
+            self.layer_mut(id)?.mask = Some(mask);
+        }
+        Ok(id)
     }
 
     /// Adds a new, visible, unlocked, Normal-blend top layer holding
@@ -53269,6 +53306,57 @@ mod tests {
         assert_eq!(pixel(&doc, pasted, 0, 0), [0, 0, 0, 0]);
         assert_eq!(pixel(&doc, pasted, 2, 2), [50, 0, 0, 255]);
         assert_eq!(doc.layers()[0].pixels, ramped_3x3().0.layers()[0].pixels);
+    }
+
+    #[test]
+    fn paste_into_and_outside_masked_keep_the_clipboard_under_a_live_mask() {
+        // The same paste as above, masked: every clipboard pixel lands on
+        // the layer and the mask is the selection — 255 over the
+        // bottom-right 2×2, 0 elsewhere; Paste Outside masks the other way.
+        let (mut doc, id) = ramped_3x3();
+        doc.select_rectangle(0.0, 0.0, 2.0, 2.0).unwrap();
+        let clipboard = doc.copy(id).unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        let pasted = doc.paste_into_masked(&clipboard, "into").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 10, 20], vec![0, 40, 50]]
+        );
+        let mask = doc.layers()[1].mask.clone().unwrap();
+        assert_eq!(mask, vec![0, 0, 0, 0, 255, 255, 0, 255, 255]);
+        // The composite honours the mask: (1, 1) shows the paste, (0, 0)
+        // the layer beneath.
+        assert_eq!(crate::composite::composite_pixel(&doc, 1, 1)[0], 10);
+        assert_eq!(crate::composite::composite_pixel(&doc, 0, 0)[0], 10);
+        doc.remove_layer(pasted).unwrap();
+        let outside = doc.paste_outside_masked(&clipboard, "outside").unwrap();
+        assert_eq!(
+            grid_of(&doc, 1),
+            vec![vec![0, 0, 0], vec![0, 10, 20], vec![0, 40, 50]]
+        );
+        assert_eq!(
+            doc.layers()[1].mask.clone().unwrap(),
+            vec![255, 255, 255, 255, 0, 0, 255, 0, 0]
+        );
+        doc.remove_layer(outside).unwrap();
+        // A feathered selection gives a soft mask: with Feather 1 each
+        // pixel's coverage is the share of the 3×3 pixel centres around it
+        // inside the hard 2×2 — 4 of 9 at (1, 1) → 113, 1 of 9 at (0, 0)
+        // and (2, 2)'s far corner → 28 — and Paste Outside is 255 minus.
+        doc.feather_selection(1).unwrap();
+        doc.paste_into_masked(&clipboard, "soft").unwrap();
+        let mask = doc.layers()[1].mask.clone().unwrap();
+        assert_eq!(mask[4], 113);
+        assert_eq!(mask[0], 28);
+        assert_eq!(mask[8], 113);
+        doc.remove_layer(doc.layers()[1].id).unwrap();
+        doc.paste_outside_masked(&clipboard, "soft out").unwrap();
+        let mask = doc.layers()[1].mask.clone().unwrap();
+        assert_eq!(mask[4], 142);
+        assert_eq!(mask[0], 227);
+        // Nothing selected is still an error.
+        doc.deselect();
+        assert!(doc.paste_into_masked(&clipboard, "x").is_err());
     }
 
     #[test]

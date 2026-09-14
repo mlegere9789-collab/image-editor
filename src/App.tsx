@@ -12468,17 +12468,21 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => void runCommand("paste_into", {}, "top")}
+            onClick={() =>
+              void runCommand("paste_into", { masked: true }, "top")
+            }
             disabled={busy || !hasDocument || !canPaste || !document?.selection}
-            title="Edit > Paste Special > Paste Into (centred in the selection, clipped to it)"
+            title="Edit > Paste Special > Paste Into (centred in the selection, under a layer mask that reveals it)"
           >
             Paste Into
           </button>
           <button
             className="button button--quiet"
-            onClick={() => void runCommand("paste_outside", {}, "top")}
+            onClick={() =>
+              void runCommand("paste_outside", { masked: true }, "top")
+            }
             disabled={busy || !hasDocument || !canPaste || !document?.selection}
-            title="Edit > Paste Special > Paste Outside (centred on the selection, keeping only what falls outside it)"
+            title="Edit > Paste Special > Paste Outside (centred on the selection, under a layer mask that hides it)"
           >
             Paste Outside
           </button>

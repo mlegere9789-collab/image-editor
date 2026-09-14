@@ -2606,7 +2606,7 @@ fn paste_converted(state: State<'_, AppState>) -> Result<Snapshot, String> {
 /// active selection, keeping only the pixels inside it. Errors if nothing
 /// has been copied yet or nothing is selected.
 #[tauri::command]
-fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
+fn paste_into(state: State<'_, AppState>, masked: Option<bool>) -> Result<Snapshot, String> {
     let clipboard = {
         let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
         guard
@@ -2615,9 +2615,11 @@ fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
             .clone()
     };
     edit_checkpointed(&state, |document| {
-        document
-            .paste_into(&clipboard, "Pasted Layer")
-            .map(|_| None)
+        match masked.unwrap_or(false) {
+            true => document.paste_into_masked(&clipboard, "Pasted Layer"),
+            false => document.paste_into(&clipboard, "Pasted Layer"),
+        }
+        .map(|_| None)
     })
 }
 
@@ -2625,7 +2627,7 @@ fn paste_into(state: State<'_, AppState>) -> Result<Snapshot, String> {
 /// active selection, keeping only the pixels outside it. Errors if nothing
 /// has been copied yet or nothing is selected.
 #[tauri::command]
-fn paste_outside(state: State<'_, AppState>) -> Result<Snapshot, String> {
+fn paste_outside(state: State<'_, AppState>, masked: Option<bool>) -> Result<Snapshot, String> {
     let clipboard = {
         let guard = state.clipboard.lock().map_err(|_| POISONED.to_string())?;
         guard
@@ -2634,9 +2636,11 @@ fn paste_outside(state: State<'_, AppState>) -> Result<Snapshot, String> {
             .clone()
     };
     edit_checkpointed(&state, |document| {
-        document
-            .paste_outside(&clipboard, "Pasted Layer")
-            .map(|_| None)
+        match masked.unwrap_or(false) {
+            true => document.paste_outside_masked(&clipboard, "Pasted Layer"),
+            false => document.paste_outside(&clipboard, "Pasted Layer"),
+        }
+        .map(|_| None)
     })
 }
 

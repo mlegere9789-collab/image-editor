@@ -22558,6 +22558,51 @@ eye.
 
 Tests: 1886 Rust (1885 → 1886), 22 frontend.
 
+## Phase 380 — Paste Into and Paste Outside's live layer mask
+
+Two rows of section D, the last of the paste-clipping scope cuts.
+`Document::paste_into_masked` and `paste_outside_masked` are
+Photoshop's own behaviour for the two commands: the new layer keeps
+every clipboard pixel that lands on the canvas — nothing thrown away —
+and wears a layer mask built from the selection's own coverage, 255
+inside and 0 outside for Paste Into, the other way for Paste Outside,
+graded along a feathered or anti-aliased edge exactly as
+`Selection::coverage` reads it elsewhere. `paste_against_selection`
+grew a `masked` flag: unmasked, it still clips pixels to transparency
+as before (`paste_into`/`paste_outside` unchanged); masked, every
+clipboard pixel is written and the mask is computed afterward over the
+new layer. The composite already honours any layer's mask, so the
+pasted content displays identically to the old baked-in version until
+someone edits, moves, or deletes the mask — at which point the whole
+clipboard is still there to work with, as Photoshop's users expect.
+
+The two commands take an optional `masked` flag; the toolbar's Paste
+Into and Paste Outside buttons now always pass `masked: true`, so this
+is the paste behaviour going forward, with the plain baked-in version
+kept as the documented, still-tested alternative.
+
+**Verified.** One Rust test,
+`paste_into_and_outside_masked_keep_the_clipboard_under_a_live_mask`:
+copying the top-left 2×2 of a ramped 3×3 layer and pasting into the
+bottom-right 2×2 selection lays every clipboard pixel on the new
+layer and gives it the mask `0 0 0 / 0 255 255 / 0 255 255`; the
+composite at (1, 1) shows the paste and at (0, 0) the layer beneath,
+proving the mask — not missing pixels — hides the rest; Paste Outside
+gives the exact complement mask. With Feather 1 the mask grades: 4 of
+9 sub-samples at the selection's own edge pixel give 113, 1 of 9 at a
+far corner gives 28, and Paste Outside is 255 minus. Nothing selected
+still errors. In Chromium against the built frontend: both toolbar
+buttons send `paste_into`/`paste_outside` with `masked: true`. On the
+real app under Xvfb: a brush stroke was copied, an elliptical
+selection drawn over part of it, and Paste Into created a second
+layer; Layer > Layer Mask showed Hide All Mask / Apply Mask / Delete
+Mask enabled, confirming a real mask; deleting that mask and hiding
+the original layer revealed the whole stroke, not just the ellipse's
+slice, proving every clipboard pixel survived under the mask; four
+screenshots checked by eye.
+
+Tests: 1887 Rust (1886 → 1887), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
