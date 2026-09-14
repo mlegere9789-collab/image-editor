@@ -1845,6 +1845,12 @@ export default function App() {
     "discontiguous" | "contiguous"
   >("discontiguous");
   const [bgEraserProtect, setBgEraserProtect] = useState(false);
+  // Color Replacement options: Mode and Anti-alias; Sampling, its swatch
+  // and Limits are shared with the Background Eraser.
+  const [colorReplaceMode, setColorReplaceMode] = useState<
+    "hue" | "saturation" | "color" | "luminosity"
+  >("color");
+  const [colorReplaceAntiAlias, setColorReplaceAntiAlias] = useState(true);
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
   const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
@@ -9547,6 +9553,11 @@ export default function App() {
           radius: brushSize,
           color: [r, g, b],
           tolerance: magicWandTolerance,
+          mode: colorReplaceMode,
+          sampling: bgEraserSampling,
+          swatch: hexToRgb(bgEraserSwatch),
+          limits: bgEraserLimits,
+          antiAlias: colorReplaceAntiAlias,
         });
       } else if (tool === "smudge") {
         void runCommand("smudge_stroke", {
@@ -9710,6 +9721,8 @@ export default function App() {
       bgEraserSwatch,
       bgEraserLimits,
       bgEraserProtect,
+      colorReplaceMode,
+      colorReplaceAntiAlias,
       channelView,
     ],
   );
@@ -15157,8 +15170,32 @@ export default function App() {
               </select>
             </label>
           )}
-          {tool === "backgroundEraser" && (
+          {(tool === "backgroundEraser" || tool === "colorReplace") && (
             <>
+              {tool === "colorReplace" && (
+                <label className="tools__slider">
+                  Mode
+                  <select
+                    value={colorReplaceMode}
+                    disabled={!canPaint}
+                    aria-label="Replace mode"
+                    onChange={(event) =>
+                      setColorReplaceMode(
+                        event.target.value as
+                          | "hue"
+                          | "saturation"
+                          | "color"
+                          | "luminosity",
+                      )
+                    }
+                  >
+                    <option value="hue">Hue</option>
+                    <option value="saturation">Saturation</option>
+                    <option value="color">Color</option>
+                    <option value="luminosity">Luminosity</option>
+                  </select>
+                </label>
+              )}
               <label className="tools__slider">
                 Sampling
                 <select
@@ -15208,18 +15245,38 @@ export default function App() {
                   <option value="contiguous">Contiguous</option>
                 </select>
               </label>
-              <label
-                className="tools__slider"
-                title="Protect Foreground Color: never erase pixels within Tolerance of the brush colour"
-              >
-                <input
-                  type="checkbox"
-                  checked={bgEraserProtect}
-                  disabled={!canPaint}
-                  onChange={(event) => setBgEraserProtect(event.target.checked)}
-                />
-                Protect Foreground Color
-              </label>
+              {tool === "backgroundEraser" && (
+                <label
+                  className="tools__slider"
+                  title="Protect Foreground Color: never erase pixels nearer the brush colour than the sample"
+                >
+                  <input
+                    type="checkbox"
+                    checked={bgEraserProtect}
+                    disabled={!canPaint}
+                    onChange={(event) =>
+                      setBgEraserProtect(event.target.checked)
+                    }
+                  />
+                  Protect Foreground Color
+                </label>
+              )}
+              {tool === "colorReplace" && (
+                <label
+                  className="tools__slider"
+                  title="Anti-alias: soften the edge of the replaced area"
+                >
+                  <input
+                    type="checkbox"
+                    checked={colorReplaceAntiAlias}
+                    disabled={!canPaint}
+                    onChange={(event) =>
+                      setColorReplaceAntiAlias(event.target.checked)
+                    }
+                  />
+                  Anti-alias
+                </label>
+              )}
             </>
           )}
           {(tool === "dodge" || tool === "burn") && (

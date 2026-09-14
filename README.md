@@ -22470,6 +22470,54 @@ not follow; two screenshots checked by eye.
 
 Tests: 1883 Rust (1881 → 1883), 22 frontend.
 
+## Phase 378 — The Color Replacement tool's Mode, Sampling, Limits and Anti-alias
+
+One tool row of section D, closing the Color Replacement tool's cuts
+with the Background Eraser's machinery. `Stroke::ColorReplace` gains
+`mode` — `ReplaceMode`: Hue takes the brush hue at the pixel's own
+saturation and lightness, Saturation the brush saturation at the
+pixel's hue and lightness, Color (the default, the old behaviour) the
+brush hue and saturation at the pixel's lightness, Luminosity the
+brush lightness at the pixel's hue and saturation — plus `sampling`,
+`swatch` and `limits`, the eraser's own types renamed `BrushSampling`
+and `BrushLimits` now that two brushes share them, and `anti_alias`.
+The per-pixel plan the eraser builds now serves both tools and yields
+a share per pixel: with Anti-alias the share is the pixel's 3×3
+coverage of the matching pixels over the covered box, so the replaced
+area's edge and the ring just outside it blend rather than step; each
+pixel's mix is the brush coverage times that share. The command takes
+the five optional fields; the options bar shows Mode before the
+Sampling and Limits controls it shares with the Background Eraser, and
+Anti-alias after them (Protect Foreground Color stays the eraser's).
+
+**Verified.** Two Rust tests, the HSL values hand-computed and
+cross-checked against an f32 emulation of `rgb_to_hsl`/`hsl_to_rgb`.
+`color_replacement_modes_take_one_part_of_the_brush_colour`: the pixel
+(255, 128, 128), HSL (0, 1, 0.751), under one full dab of the brush
+(64, 128, 128), HSL (180, 0.333, 0.376): Color gives (170, 213, 213),
+Hue (128, 255, 255), Saturation (213, 170, 170), Luminosity
+(192, 0, 0). `color_replacement_anti_alias_sampling_and_limits`: a row
+R R B under one dab with a green brush at tolerance 0: Once turns the
+reds pure green and leaves the blue; with Anti-alias the shares in a
+one-row box are 9/9, 6/9 and 3/9, giving (0, 255, 0), (85, 170, 0) and
+the blue a third of the way to green, (0, 85, 170); Continuous along
+the row replaces all three; Background Swatch of blue replaces only
+the blue; Contiguous on R B R from the first pixel reaches only it. In
+Chromium against the built frontend: choosing the tool shows Mode,
+Sampling, Limits and Anti-alias, a drag sends `color_replace_stroke`
+with `mode: "color", sampling: "once", limits: "discontiguous",
+antiAlias: true`, and `luminosity`, `continuous`, `contiguous`, `false`
+after toggling; the Background Eraser shows no Mode or Anti-alias but
+keeps Protect Foreground Color and shares the Sampling and Limits just
+set. On the real app under Xvfb, on the recovered document: picking
+the tool put Mode (Color), Sampling, Limits and Anti-alias (ticked) in
+the options bar; with Luminosity chosen and the white brush, a drag
+along the stroke's grey end lifted the greys within Tolerance of the
+first point to white through the real IPC; two screenshots checked by
+eye.
+
+Tests: 1885 Rust (1883 → 1885), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

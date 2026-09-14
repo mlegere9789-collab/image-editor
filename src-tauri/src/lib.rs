@@ -4475,6 +4475,7 @@ fn smudge_stroke(
 /// stroke's start along `points` on layer `id` with `color`'s hue and
 /// saturation. See [`paint_stroke`] for `points` and checkpointing.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn color_replace_stroke(
     state: State<'_, AppState>,
     id: LayerId,
@@ -4482,13 +4483,26 @@ fn color_replace_stroke(
     radius: f32,
     color: [u8; 3],
     tolerance: u8,
+    mode: Option<document::ReplaceMode>,
+    sampling: Option<document::BrushSampling>,
+    swatch: Option<[u8; 3]>,
+    limits: Option<document::BrushLimits>,
+    anti_alias: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.stroke(
             id,
             &points,
             radius,
-            Stroke::ColorReplace { color, tolerance },
+            Stroke::ColorReplace {
+                color,
+                tolerance,
+                mode: mode.unwrap_or_default(),
+                sampling: sampling.unwrap_or_default(),
+                swatch: swatch.unwrap_or([0, 0, 0]),
+                limits: limits.unwrap_or_default(),
+                anti_alias: anti_alias.unwrap_or(false),
+            },
         )
     })
 }
@@ -4507,9 +4521,9 @@ fn background_erase_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     tolerance: u8,
-    sampling: Option<document::EraseSampling>,
+    sampling: Option<document::BrushSampling>,
     swatch: Option<[u8; 3]>,
-    limits: Option<document::EraseLimits>,
+    limits: Option<document::BrushLimits>,
     protect: Option<[u8; 3]>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {

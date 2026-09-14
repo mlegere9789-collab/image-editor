@@ -279,10 +279,27 @@ impl LensType {
     }
 }
 
-/// The Background Eraser's Sampling: where the colour to erase comes from.
+/// The Color Replacement tool's Mode: which of the brush colour's HSL
+/// parts a replaced pixel takes, keeping its own others.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub enum EraseSampling {
+pub enum ReplaceMode {
+    /// The brush hue at the pixel's saturation and lightness.
+    Hue,
+    /// The brush saturation at the pixel's hue and lightness.
+    Saturation,
+    /// The brush hue and saturation at the pixel's lightness.
+    #[default]
+    Color,
+    /// The brush lightness at the pixel's hue and saturation.
+    Luminosity,
+}
+
+/// The Background Eraser's and Color Replacement tool's Sampling: where
+/// the colour to erase or replace comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum BrushSampling {
     /// The colour under the stroke's first point.
     #[default]
     Once,
@@ -293,11 +310,11 @@ pub enum EraseSampling {
     BackgroundSwatch,
 }
 
-/// The Background Eraser's Limits: how far an erase reaches within the
-/// brush.
+/// The Background Eraser's and Color Replacement tool's Limits: how far
+/// an erase or replacement reaches within the brush.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub enum EraseLimits {
+pub enum BrushLimits {
     /// Every covered pixel of the sampled colour.
     #[default]
     Discontiguous,
@@ -19031,19 +19048,32 @@ impl Document {
             }
         }
 
-        // The Background Eraser decides per covered pixel, before erasing
-        // anything, whether its colour is the one to erase: judged against
-        // the sample its Sampling names, never a protected colour, and with
-        // Contiguous limits only where 4-connected to the pixels under the
-        // path through such pixels.
-        let erase_plan: Option<Vec<bool>> = match stroke {
+        // The Background Eraser and the Color Replacement tool decide per
+        // covered pixel, before touching anything, how much of it is the
+        // colour to erase or replace: judged against the sample their
+        // Sampling names, never a protected colour, with Contiguous limits
+        // only where 4-connected to the pixels under the path through such
+        // pixels, and with Anti-alias by the pixel's 3×3 share of them.
+        let plan_options = match stroke {
             Stroke::BackgroundErase {
                 tolerance,
                 sampling,
                 swatch,
                 limits,
                 protect,
-            } => {
+            } => Some((tolerance, sampling, swatch, limits, protect, false)),
+            Stroke::ColorReplace {
+                tolerance,
+                sampling,
+                swatch,
+                limits,
+                anti_alias,
+                ..
+            } => Some((tolerance, sampling, swatch, limits, None, anti_alias)),
+            _ => None,
+        };
+        let erase_plan: Option<Vec<f32>> = plan_options.map(
+            |(tolerance, sampling, swatch, limits, protect, anti_alias)| {
                 let distance = |px: &[u8], sample: [u8; 3]| {
                     px.iter()
                         .zip(sample.iter())
@@ -19062,9 +19092,9 @@ impl Document {
                             ((y0 as usize + row) * width as usize + (x0 as usize + col)) * CHANNELS;
                         let px = &layer.pixels[base..base + 3];
                         let sample = match sampling {
-                            EraseSampling::Once => replace_sample,
-                            EraseSampling::BackgroundSwatch => swatch,
-                            EraseSampling::Continuous => {
+                            BrushSampling::Once => replace_sample,
+                            BrushSampling::BackgroundSwatch => swatch,
+                            BrushSampling::Continuous => {
                                 let cx = (x0 as usize + col) as f32 + 0.5;
                                 let cy = (y0 as usize + row) as f32 + 0.5;
                                 let (nx, ny) = segments
@@ -19088,7 +19118,7 @@ impl Document {
                             && !protect.is_some_and(|f| distance(px, f) <= distance(px, sample));
                     }
                 }
-                if limits == EraseLimits::Contiguous {
+                if limits == BrushLimits::Contiguous {
                     let mut reached = vec![false; plan.len()];
                     let mut stack: Vec<usize> = Vec::new();
                     for &(a, b) in &segments {
@@ -19131,10 +19161,30 @@ impl Document {
                     }
                     plan = reached;
                 }
-                Some(plan)
-            }
-            _ => None,
-        };
+                if !anti_alias {
+                    return plan.iter().map(|&b| if b { 1.0 } else { 0.0 }).collect();
+                }
+                let (w, h) = (box_width as i64, box_height as i64);
+                (0..h)
+                    .flat_map(|py| {
+                        let plan = &plan;
+                        (0..w).map(move |px| {
+                            let mut hits = 0u32;
+                            for dy in -1..=1 {
+                                for dx in -1..=1 {
+                                    let sx = (px + dx).clamp(0, w - 1);
+                                    let sy = (py + dy).clamp(0, h - 1);
+                                    if plan[(sy * w + sx) as usize] {
+                                        hits += 1;
+                                    }
+                                }
+                            }
+                            hits as f32 / 9.0
+                        })
+                    })
+                    .collect()
+            },
+        );
 
         for row in 0..box_height {
             for col in 0..box_width {
@@ -19348,30 +19398,35 @@ impl Document {
                     Stroke::BackgroundErase { .. } => {
                         let planned = erase_plan
                             .as_ref()
-                            .is_some_and(|plan| plan[row * box_width + col]);
+                            .is_some_and(|plan| plan[row * box_width + col] > 0.0);
                         if planned {
                             let dest_alpha = to_unit(layer.pixels[base + 3]);
                             layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
                         }
                         continue;
                     }
-                    Stroke::ColorReplace { color, tolerance } => {
+                    Stroke::ColorReplace { color, mode, .. } => {
                         if layer.pixels[base + 3] == 0 {
                             continue;
                         }
-                        let px = &mut layer.pixels[base..base + 3];
-                        let within = px
-                            .iter()
-                            .zip(replace_sample.iter())
-                            .all(|(&a, &b)| a.abs_diff(b) <= tolerance);
-                        if !within {
+                        let share = erase_plan
+                            .as_ref()
+                            .map_or(0.0, |plan| plan[row * box_width + col]);
+                        if share <= 0.0 {
                             continue;
                         }
-                        let (_, _, l) = rgb_to_hsl(px[0], px[1], px[2]);
-                        let (h, s, _) = rgb_to_hsl(color[0], color[1], color[2]);
-                        let target = hsl_to_rgb(h, s, l);
+                        let px = &mut layer.pixels[base..base + 3];
+                        let (ph, ps, pl) = rgb_to_hsl(px[0], px[1], px[2]);
+                        let (bh, bs, bl) = rgb_to_hsl(color[0], color[1], color[2]);
+                        let target = match mode {
+                            ReplaceMode::Hue => hsl_to_rgb(bh, ps, pl),
+                            ReplaceMode::Saturation => hsl_to_rgb(ph, bs, pl),
+                            ReplaceMode::Color => hsl_to_rgb(bh, bs, pl),
+                            ReplaceMode::Luminosity => hsl_to_rgb(ph, ps, bl),
+                        };
+                        let amount = c * share;
                         for (slot, t) in px.iter_mut().zip([target.0, target.1, target.2]) {
-                            *slot = to_byte(lerp(to_unit(*slot), to_unit(t), c));
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(t), amount));
                         }
                         continue;
                     }
@@ -29434,16 +29489,28 @@ pub enum Stroke<'a> {
     /// a pixel whose source lies off the canvas is left alone. Photoshop's
     /// Finger Painting and Sample All Layers are documented scope cuts.
     Smudge { strength: u8 },
-    /// The Color Replacement tool in its default Color mode: each covered
-    /// pixel whose RGB is within `tolerance` (per channel) of the pixel
-    /// under the stroke's first point takes the brush `color`'s hue and
-    /// saturation at its own lightness — through the same `rgb_to_hsl` /
-    /// `hsl_to_rgb` pair the Sponge uses — mixed in by the brush's
-    /// coverage; alpha is untouched and fully transparent pixels are
-    /// skipped. Photoshop's Sampling: Once; its Continuous and Background
-    /// Swatch sampling, Hue/Saturation/Luminosity modes, Limits, and
-    /// Anti-alias are documented scope cuts.
-    ColorReplace { color: [u8; 3], tolerance: u8 },
+    /// The Color Replacement tool: each covered pixel whose RGB is within
+    /// `tolerance` (per channel) of the sampled colour takes the part of
+    /// the brush `color` its `mode` names — Color, the default, its hue
+    /// and saturation at the pixel's own lightness — through the same
+    /// `rgb_to_hsl` / `hsl_to_rgb` pair the Sponge uses, mixed in by the
+    /// brush's coverage; alpha is untouched and fully transparent pixels
+    /// are skipped. `sampling`, `swatch` and `limits` are the Background
+    /// Eraser's: the sample under the stroke's first point, under the
+    /// brush as it moves, or the background swatch; every covered pixel
+    /// or only those 4-connected to the path through matching pixels.
+    /// `anti_alias` softens the replaced area's edge: each pixel's mix is
+    /// scaled by its 3×3 coverage of the matching pixels, so the edge and
+    /// the ring just outside it blend rather than step.
+    ColorReplace {
+        color: [u8; 3],
+        tolerance: u8,
+        mode: ReplaceMode,
+        sampling: BrushSampling,
+        swatch: [u8; 3],
+        limits: BrushLimits,
+        anti_alias: bool,
+    },
     /// The Background Eraser — the Eraser's multiply-toward-zero on alpha,
     /// applied only to covered pixels whose RGB is within `tolerance` (per
     /// channel) of the sampled colour, so a background colour can be
@@ -29457,9 +29524,9 @@ pub enum Stroke<'a> {
     /// at least as near that colour as the sample, per-channel.
     BackgroundErase {
         tolerance: u8,
-        sampling: EraseSampling,
+        sampling: BrushSampling,
         swatch: [u8; 3],
-        limits: EraseLimits,
+        limits: BrushLimits,
         protect: Option<[u8; 3]>,
     },
     /// The Healing Brush: the Clone Stamp's sampling (`offset` from the
@@ -37236,7 +37303,169 @@ mod tests {
     }
 
     fn replace(color: [u8; 3], tolerance: u8) -> Stroke<'static> {
-        Stroke::ColorReplace { color, tolerance }
+        replace_with(
+            color,
+            tolerance,
+            ReplaceMode::Color,
+            BrushSampling::Once,
+            BrushLimits::Discontiguous,
+            false,
+        )
+    }
+
+    fn replace_with(
+        color: [u8; 3],
+        tolerance: u8,
+        mode: ReplaceMode,
+        sampling: BrushSampling,
+        limits: BrushLimits,
+        anti_alias: bool,
+    ) -> Stroke<'static> {
+        Stroke::ColorReplace {
+            color,
+            tolerance,
+            mode,
+            sampling,
+            swatch: [0, 0, 255],
+            limits,
+            anti_alias,
+        }
+    }
+
+    #[test]
+    fn color_replacement_modes_take_one_part_of_the_brush_colour() {
+        // The pixel (255, 128, 128) is HSL (0, 1, 0.751); the brush
+        // (64, 128, 128) is (180, 0.333, 0.376). One full dab on a 1×1 layer:
+        // Color takes the brush hue and saturation at the pixel's lightness
+        // (170, 213, 213); Hue the brush hue at the pixel's own saturation
+        // (128, 255, 255); Saturation the brush saturation at the pixel's
+        // hue (213, 170, 170); Luminosity the brush lightness at the pixel's
+        // hue and saturation (192, 0, 0).
+        let expect = [
+            (ReplaceMode::Color, [170, 213, 213]),
+            (ReplaceMode::Hue, [128, 255, 255]),
+            (ReplaceMode::Saturation, [213, 170, 170]),
+            (ReplaceMode::Luminosity, [192, 0, 0]),
+        ];
+        for (mode, rgb) in expect {
+            let mut doc = Document::new(1, 1).unwrap();
+            let id = doc.add_layer("l", &[255, 128, 128, 255], 1, 1).unwrap();
+            doc.stroke(
+                id,
+                &[(0.5, 0.5)],
+                1.0,
+                replace_with(
+                    [64, 128, 128],
+                    0,
+                    mode,
+                    BrushSampling::Once,
+                    BrushLimits::Discontiguous,
+                    false,
+                ),
+            )
+            .unwrap();
+            assert_eq!(pixel(&doc, id, 0, 0)[..3], rgb, "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn color_replacement_anti_alias_sampling_and_limits() {
+        // A row R R B under one dab of radius 3 at its first pixel, brush
+        // green, tolerance 0. Once samples red: without Anti-alias the two
+        // reds become pure green (green's hue and saturation at lightness
+        // 0.5) and the blue stays. With Anti-alias each pixel's mix is its
+        // 3×3 share of the matching pixels — in a one-row box the rows
+        // clamp, so 9/9, 6/9 and 3/9: (0, 255, 0), then red two thirds of
+        // the way to green (85, 170, 0), then blue a third of the way to its
+        // own target green (0, 85, 170).
+        let row = |pixels: &[[u8; 4]]| {
+            let flat: Vec<u8> = pixels.iter().flatten().copied().collect();
+            let mut doc = Document::new(pixels.len() as u32, 1).unwrap();
+            let id = doc.add_layer("l", &flat, pixels.len() as u32, 1).unwrap();
+            (doc, id)
+        };
+        let red = [255, 0, 0, 255];
+        let blue = [0, 0, 255, 255];
+        let (mut doc, id) = row(&[red, red, blue]);
+        doc.stroke(id, &[(0.5, 0.5)], 3.0, replace([0, 255, 0], 0))
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), blue);
+        let (mut doc, id) = row(&[red, red, blue]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            3.0,
+            replace_with(
+                [0, 255, 0],
+                0,
+                ReplaceMode::Color,
+                BrushSampling::Once,
+                BrushLimits::Discontiguous,
+                true,
+            ),
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [85, 170, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 85, 170, 255]);
+        // Continuous sampling along the row replaces the blue too, each
+        // pixel matching the colour under the brush at its own column;
+        // Background Swatch of blue replaces only the blue.
+        let (mut doc, id) = row(&[red, red, blue]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5), (2.5, 0.5)],
+            0.5,
+            replace_with(
+                [0, 255, 0],
+                0,
+                ReplaceMode::Color,
+                BrushSampling::Continuous,
+                BrushLimits::Discontiguous,
+                false,
+            ),
+        )
+        .unwrap();
+        for x in 0..3 {
+            assert_eq!(pixel(&doc, id, x, 0), [0, 255, 0, 255], "continuous {x}");
+        }
+        let (mut doc, id) = row(&[red, red, blue]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            3.0,
+            replace_with(
+                [0, 255, 0],
+                0,
+                ReplaceMode::Color,
+                BrushSampling::BackgroundSwatch,
+                BrushLimits::Discontiguous,
+                false,
+            ),
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), red);
+        assert_eq!(pixel(&doc, id, 2, 0), [0, 255, 0, 255]);
+        // Contiguous limits on R B R from the first pixel reach only it.
+        let (mut doc, id) = row(&[red, blue, red]);
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            3.0,
+            replace_with(
+                [0, 255, 0],
+                0,
+                ReplaceMode::Color,
+                BrushSampling::Once,
+                BrushLimits::Contiguous,
+                false,
+            ),
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), red);
     }
 
     #[test]
@@ -37342,18 +37571,18 @@ mod tests {
     fn background_erase(tolerance: u8) -> Stroke<'static> {
         background_erase_with(
             tolerance,
-            EraseSampling::Once,
+            BrushSampling::Once,
             [0, 0, 0],
-            EraseLimits::Discontiguous,
+            BrushLimits::Discontiguous,
             None,
         )
     }
 
     fn background_erase_with(
         tolerance: u8,
-        sampling: EraseSampling,
+        sampling: BrushSampling,
         swatch: [u8; 3],
-        limits: EraseLimits,
+        limits: BrushLimits,
         protect: Option<[u8; 3]>,
     ) -> Stroke<'static> {
         Stroke::BackgroundErase {
@@ -37410,9 +37639,9 @@ mod tests {
             1.5,
             background_erase_with(
                 32,
-                EraseSampling::Continuous,
+                BrushSampling::Continuous,
                 [0, 0, 0],
-                EraseLimits::Discontiguous,
+                BrushLimits::Discontiguous,
                 None,
             ),
         )
@@ -37431,9 +37660,9 @@ mod tests {
             1.5,
             background_erase_with(
                 32,
-                EraseSampling::BackgroundSwatch,
+                BrushSampling::BackgroundSwatch,
                 [50, 50, 200],
-                EraseLimits::Discontiguous,
+                BrushLimits::Discontiguous,
                 None,
             ),
         )
@@ -37477,9 +37706,9 @@ mod tests {
             5.0,
             background_erase_with(
                 32,
-                EraseSampling::Once,
+                BrushSampling::Once,
                 [0, 0, 0],
-                EraseLimits::Contiguous,
+                BrushLimits::Contiguous,
                 None,
             ),
         )
@@ -37492,9 +37721,9 @@ mod tests {
             5.0,
             background_erase_with(
                 255,
-                EraseSampling::Once,
+                BrushSampling::Once,
                 [0, 0, 0],
-                EraseLimits::Discontiguous,
+                BrushLimits::Discontiguous,
                 Some([50, 50, 200]),
             ),
         )
