@@ -1690,14 +1690,19 @@ export default function App() {
   const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
   const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
   const [strokeOutlineOpacity, setStrokeOutlineOpacity] = useState(100);
+  const [strokeOutlinePosition, setStrokeOutlinePosition] = useState<"outside" | "inside" | "center">("outside");
   const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
   const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
   const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
   const [showGradientOverlayDialog, setShowGradientOverlayDialog] = useState(false);
   const [gradientOverlayColor1, setGradientOverlayColor1] = useState("#000000");
   const [gradientOverlayColor2, setGradientOverlayColor2] = useState("#ffffff");
-  const [gradientOverlayDirection, setGradientOverlayDirection] = useState(0);
   const [gradientOverlayOpacity, setGradientOverlayOpacity] = useState(100);
+  const [gradientOverlayStyle, setGradientOverlayStyle] = useState<"linear" | "radial" | "angle" | "reflected" | "diamond">("linear");
+  const [gradientOverlayAngle, setGradientOverlayAngle] = useState(90);
+  const [gradientOverlayScale, setGradientOverlayScale] = useState(100);
+  const [gradientOverlayReverse, setGradientOverlayReverse] = useState(false);
+  const [gradientOverlayAlign, setGradientOverlayAlign] = useState(true);
   const [showOuterGlowDialog, setShowOuterGlowDialog] = useState(false);
   const [outerGlowSize, setOuterGlowSize] = useState(10);
   const [outerGlowColor, setOuterGlowColor] = useState("#ffff00");
@@ -1733,8 +1738,18 @@ export default function App() {
   const [patternOverlayOpacity, setPatternOverlayOpacity] = useState(100);
   const [showBevelEmbossDialog, setShowBevelEmbossDialog] = useState(false);
   const [bevelEmbossSize, setBevelEmbossSize] = useState(5);
-  const [bevelEmbossLightDirection, setBevelEmbossLightDirection] = useState(7);
-  const [bevelEmbossStrength, setBevelEmbossStrength] = useState(50);
+  // Bevel & Emboss's Structure and Shading options (README Phase 353).
+  const [bevelStyle, setBevelStyle] = useState<"innerBevel" | "outerBevel" | "emboss" | "pillowEmboss">("innerBevel");
+  const [bevelTechnique, setBevelTechnique] = useState<"smooth" | "chiselHard" | "chiselSoft">("smooth");
+  const [bevelDepth, setBevelDepth] = useState(100);
+  const [bevelUp, setBevelUp] = useState(true);
+  const [bevelSoften, setBevelSoften] = useState(0);
+  const [bevelAngle, setBevelAngle] = useState(120);
+  const [bevelAltitude, setBevelAltitude] = useState(30);
+  const [bevelHighlight, setBevelHighlight] = useState("#ffffff");
+  const [bevelHighlightOpacity, setBevelHighlightOpacity] = useState(50);
+  const [bevelShadow, setBevelShadow] = useState("#000000");
+  const [bevelShadowOpacity, setBevelShadowOpacity] = useState(50);
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
@@ -4988,14 +5003,22 @@ export default function App() {
   const applyStrokeOutline = useCallback(async () => {
     if (selectedId === null) return;
     const [r, g, b] = hexToRgb(strokeOutlineColor);
-    await runCommand("stroke_outline", {
+    await runCommand("stroke_outline_with", {
       id: selectedId,
       size: strokeOutlineSize,
+      position: strokeOutlinePosition,
       color: [r, g, b],
       opacity: strokeOutlineOpacity,
     });
     setShowStrokeOutlineDialog(false);
-  }, [runCommand, selectedId, strokeOutlineSize, strokeOutlineColor, strokeOutlineOpacity]);
+  }, [
+    runCommand,
+    selectedId,
+    strokeOutlineSize,
+    strokeOutlinePosition,
+    strokeOutlineColor,
+    strokeOutlineOpacity,
+  ]);
 
   const applyColorOverlay = useCallback(async () => {
     if (selectedId === null) return;
@@ -5012,12 +5035,18 @@ export default function App() {
     if (selectedId === null) return;
     const [r1, g1, b1] = hexToRgb(gradientOverlayColor1);
     const [r2, g2, b2] = hexToRgb(gradientOverlayColor2);
-    await runCommand("gradient_overlay", {
+    await runCommand("gradient_overlay_with", {
       id: selectedId,
-      color1: [r1, g1, b1],
-      color2: [r2, g2, b2],
-      direction: gradientOverlayDirection,
-      opacity: gradientOverlayOpacity,
+      options: {
+        color1: [r1, g1, b1],
+        color2: [r2, g2, b2],
+        style: gradientOverlayStyle,
+        angle: gradientOverlayAngle,
+        scale: gradientOverlayScale,
+        reverse: gradientOverlayReverse,
+        alignWithLayer: gradientOverlayAlign,
+        opacity: gradientOverlayOpacity,
+      },
     });
     setShowGradientOverlayDialog(false);
   }, [
@@ -5025,7 +5054,11 @@ export default function App() {
     selectedId,
     gradientOverlayColor1,
     gradientOverlayColor2,
-    gradientOverlayDirection,
+    gradientOverlayStyle,
+    gradientOverlayAngle,
+    gradientOverlayScale,
+    gradientOverlayReverse,
+    gradientOverlayAlign,
     gradientOverlayOpacity,
   ]);
 
@@ -5135,14 +5168,42 @@ export default function App() {
 
   const applyBevelEmboss = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("bevel_emboss", {
+    const [hr, hg, hb] = hexToRgb(bevelHighlight);
+    const [sr, sg, sb] = hexToRgb(bevelShadow);
+    await runCommand("bevel_emboss_with", {
       id: selectedId,
-      size: bevelEmbossSize,
-      lightDirection: bevelEmbossLightDirection,
-      strength: bevelEmbossStrength,
+      options: {
+        style: bevelStyle,
+        technique: bevelTechnique,
+        depth: bevelDepth,
+        up: bevelUp,
+        size: bevelEmbossSize,
+        soften: bevelSoften,
+        angle: bevelAngle,
+        altitude: bevelAltitude,
+        highlight: [hr, hg, hb],
+        highlightOpacity: bevelHighlightOpacity,
+        shadow: [sr, sg, sb],
+        shadowOpacity: bevelShadowOpacity,
+      },
     });
     setShowBevelEmbossDialog(false);
-  }, [runCommand, selectedId, bevelEmbossSize, bevelEmbossLightDirection, bevelEmbossStrength]);
+  }, [
+    runCommand,
+    selectedId,
+    bevelStyle,
+    bevelTechnique,
+    bevelDepth,
+    bevelUp,
+    bevelEmbossSize,
+    bevelSoften,
+    bevelAngle,
+    bevelAltitude,
+    bevelHighlight,
+    bevelHighlightOpacity,
+    bevelShadow,
+    bevelShadowOpacity,
+  ]);
 
   const applyContour = useCallback(async () => {
     if (selectedId === null) return;
@@ -20727,6 +20788,19 @@ export default function App() {
               />
             </label>
             <label className="control control--row">
+              <span className="control__label">Position</span>
+              <select
+                value={strokeOutlinePosition}
+                onChange={(event) =>
+                  setStrokeOutlinePosition(event.target.value as typeof strokeOutlinePosition)
+                }
+              >
+                <option value="outside">Outside</option>
+                <option value="inside">Inside</option>
+                <option value="center">Center</option>
+              </select>
+            </label>
+            <label className="control control--row">
               <span className="control__label">Color</span>
               <input
                 type="color"
@@ -20841,14 +20915,61 @@ export default function App() {
               />
             </label>
             <label className="control control--row">
-              <span className="control__label">Direction</span>
+              <span className="control__label">Style</span>
               <select
-                value={gradientOverlayDirection}
-                onChange={(event) => setGradientOverlayDirection(Number(event.target.value))}
+                value={gradientOverlayStyle}
+                onChange={(event) =>
+                  setGradientOverlayStyle(event.target.value as typeof gradientOverlayStyle)
+                }
               >
-                <option value={0}>Horizontal</option>
-                <option value={1}>Vertical</option>
+                <option value="linear">Linear</option>
+                <option value="radial">Radial</option>
+                <option value="angle">Angle</option>
+                <option value="reflected">Reflected</option>
+                <option value="diamond">Diamond</option>
               </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{gradientOverlayAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={gradientOverlayAngle}
+                onChange={(event) => setGradientOverlayAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Scale
+                <span className="control__value">{gradientOverlayScale}%</span>
+              </span>
+              <input
+                type="range"
+                min={10}
+                max={150}
+                value={gradientOverlayScale}
+                onChange={(event) => setGradientOverlayScale(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={gradientOverlayReverse}
+                onChange={(event) => setGradientOverlayReverse(event.target.checked)}
+              />
+              <span className="control__label">Reverse</span>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={gradientOverlayAlign}
+                onChange={(event) => setGradientOverlayAlign(event.target.checked)}
+              />
+              <span className="control__label">Align with Layer</span>
             </label>
             <label className="control">
               <span className="control__label">
@@ -21565,33 +21686,112 @@ export default function App() {
               />
             </label>
             <label className="control control--row">
-              <span className="control__label">Light Direction</span>
+              <span className="control__label">Style</span>
               <select
-                value={bevelEmbossLightDirection}
-                onChange={(event) => setBevelEmbossLightDirection(Number(event.target.value))}
+                value={bevelStyle}
+                onChange={(event) => setBevelStyle(event.target.value as typeof bevelStyle)}
               >
-                <option value={0}>Top</option>
-                <option value={1}>Top Right</option>
-                <option value={2}>Right</option>
-                <option value={3}>Bottom Right</option>
-                <option value={4}>Bottom</option>
-                <option value={5}>Bottom Left</option>
-                <option value={6}>Left</option>
-                <option value={7}>Top Left</option>
+                <option value="innerBevel">Inner Bevel</option>
+                <option value="outerBevel">Outer Bevel</option>
+                <option value="emboss">Emboss</option>
+                <option value="pillowEmboss">Pillow Emboss</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Technique</span>
+              <select
+                value={bevelTechnique}
+                onChange={(event) => setBevelTechnique(event.target.value as typeof bevelTechnique)}
+              >
+                <option value="smooth">Smooth</option>
+                <option value="chiselHard">Chisel Hard</option>
+                <option value="chiselSoft">Chisel Soft</option>
               </select>
             </label>
             <label className="control">
               <span className="control__label">
-                Strength
-                <span className="control__value">{bevelEmbossStrength}%</span>
+                Depth
+                <span className="control__value">{bevelDepth}%</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={1000}
+                value={bevelDepth}
+                onChange={(event) => setBevelDepth(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Direction</span>
+              <select value={bevelUp ? "up" : "down"} onChange={(event) => setBevelUp(event.target.value === "up")}>
+                <option value="up">Up</option>
+                <option value="down">Down</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Soften
+                <span className="control__value">{bevelSoften}px</span>
               </span>
               <input
                 type="range"
                 min={0}
-                max={100}
-                value={bevelEmbossStrength}
-                onChange={(event) => setBevelEmbossStrength(Number(event.target.value))}
+                max={16}
+                value={bevelSoften}
+                onChange={(event) => setBevelSoften(Number(event.target.value))}
               />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{bevelAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-180}
+                max={180}
+                value={bevelAngle}
+                onChange={(event) => setBevelAngle(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Altitude
+                <span className="control__value">{bevelAltitude}°</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={90}
+                value={bevelAltitude}
+                onChange={(event) => setBevelAltitude(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Highlight</span>
+              <input type="color" value={bevelHighlight} onChange={(event) => setBevelHighlight(event.target.value)} />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={bevelHighlightOpacity}
+                onChange={(event) => setBevelHighlightOpacity(Number(event.target.value))}
+                title="Highlight opacity"
+              />
+              <span className="control__value">{bevelHighlightOpacity}%</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Shadow</span>
+              <input type="color" value={bevelShadow} onChange={(event) => setBevelShadow(event.target.value)} />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={bevelShadowOpacity}
+                onChange={(event) => setBevelShadowOpacity(Number(event.target.value))}
+                title="Shadow opacity"
+              />
+              <span className="control__value">{bevelShadowOpacity}%</span>
             </label>
             <div className="modal__actions">
               <button

@@ -30,6 +30,99 @@ pub struct ContentAwareFillOptions {
     pub seed: u64,
 }
 
+/// Layer > Layer Style > Bevel & Emboss's Style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BevelStyle {
+    /// The bevel inside the shape's edge.
+    InnerBevel,
+    /// The bevel outside the shape's edge, on its transparent surround.
+    OuterBevel,
+    /// Both at once, the shape raised from its surround.
+    Emboss,
+    /// The shape pressed into its surround: an inner bevel turned down
+    /// with an outer bevel around it.
+    PillowEmboss,
+}
+
+/// Bevel & Emboss's Technique: how the edge's height field is shaped.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BevelTechnique {
+    /// The distance ramp rounded by a quarter sine, a soft shoulder.
+    Smooth,
+    /// The distance ramp as it is.
+    ChiselHard,
+    /// The distance ramp with a 3×3 box blur.
+    ChiselSoft,
+}
+
+/// Layer > Layer Style > Bevel & Emboss, with every option of
+/// Photoshop's own Structure and Shading panels this app builds.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BevelEmbossOptions {
+    pub style: BevelStyle,
+    pub technique: BevelTechnique,
+    /// Depth, 1–1000 %.
+    pub depth: u32,
+    /// Direction: `true` for Up, `false` for Down.
+    pub up: bool,
+    /// Size, 1–250 px.
+    pub size: u32,
+    /// Soften, 0–16 px.
+    pub soften: u32,
+    /// Angle, degrees counter-clockwise from the right, as Photoshop measures it.
+    pub angle: f32,
+    /// Altitude, 0–90 degrees.
+    pub altitude: f32,
+    pub highlight: [u8; 3],
+    /// Highlight opacity, 0–100.
+    pub highlight_opacity: u32,
+    pub shadow: [u8; 3],
+    /// Shadow opacity, 0–100.
+    pub shadow_opacity: u32,
+}
+
+/// Layer > Layer Style > Stroke's Position.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StrokePosition {
+    Outside,
+    Inside,
+    Center,
+}
+
+/// Layer > Layer Style > Gradient Overlay's Style.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GradientStyle {
+    Linear,
+    Radial,
+    Angle,
+    Reflected,
+    Diamond,
+}
+
+/// Layer > Layer Style > Gradient Overlay, with Photoshop's own options.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientOverlayOptions {
+    pub color1: [u8; 3],
+    pub color2: [u8; 3],
+    pub style: GradientStyle,
+    /// Angle, degrees counter-clockwise from the right.
+    pub angle: f32,
+    /// Scale, 10–150 %.
+    pub scale: u32,
+    pub reverse: bool,
+    /// Align with Layer: the gradient spans the layer's opaque bounds
+    /// rather than the whole document.
+    pub align_with_layer: bool,
+    /// Opacity, 0–100.
+    pub opacity: u32,
+}
+
 impl Default for ContentAwareFillOptions {
     fn default() -> Self {
         ContentAwareFillOptions {
@@ -4449,6 +4542,62 @@ fn normalize_selection_bounds(
 /// its own true (larger) distance. `(row, col)` is pre-clamped to the
 /// layer's own bounds, so callers may pass an off-canvas sample point (one
 /// pixel past an edge) without checking first.
+/// The Chebyshev distance from `(x, y)` to the nearest pixel that is
+/// transparent (`to_transparent`) or opaque, capped at `radius` — the
+/// distance that never finds one reads `radius`.
+fn bevel_distance(
+    source: &[u8],
+    w: usize,
+    h: usize,
+    x: usize,
+    y: usize,
+    radius: i64,
+    to_transparent: bool,
+) -> i64 {
+    let mut nearest = radius;
+    for dy in -radius..=radius {
+        let ny = y as i64 + dy;
+        if ny < 0 || ny >= h as i64 {
+            continue;
+        }
+        for dx in -radius..=radius {
+            let nx = x as i64 + dx;
+            if nx < 0 || nx >= w as i64 {
+                continue;
+            }
+            let transparent = source[(ny as usize * w + nx as usize) * CHANNELS + 3] == 0;
+            if transparent == to_transparent {
+                nearest = nearest.min(dx.abs().max(dy.abs()));
+            }
+        }
+    }
+    nearest
+}
+
+/// A box blur of radius `r` over a float field, edges clamped.
+fn box_blur_field(field: &[f32], w: usize, h: usize, r: usize) -> Vec<f32> {
+    let mut out = vec![0.0f32; w * h];
+    for y in 0..h {
+        for x in 0..w {
+            let mut sum = 0.0;
+            let mut n = 0.0;
+            for dy in y.saturating_sub(r)..=(y + r).min(h - 1) {
+                for dx in x.saturating_sub(r)..=(x + r).min(w - 1) {
+                    sum += field[dy * w + dx];
+                    n += 1.0;
+                }
+            }
+            out[y * w + x] = sum / n;
+        }
+    }
+    out
+}
+
+/// The gradient angle back from its sine and cosine, in degrees.
+fn o_angle(cos: f32, sin: f32) -> f32 {
+    sin.atan2(cos).to_degrees()
+}
+
 fn bevel_height_at(
     source: &[u8],
     doc_width: usize,
@@ -21160,6 +21309,285 @@ impl Document {
                 out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
             }
             out[3] = src[base + 3];
+            out
+        })
+    }
+
+    /// Layer > Layer Style > Bevel & Emboss with its Structure and
+    /// Shading options, baked in destructively. A signed height field
+    /// stands over the whole canvas: inside the shape, the capped
+    /// Chebyshev distance to the nearest transparent pixel (`0` at the
+    /// edge, `size` on the plateau), and outside it, by Style, nothing
+    /// (Inner Bevel), `size − d` rising to the edge (Outer Bevel), or the
+    /// same rise negated so the surround falls away (Emboss); Pillow
+    /// Emboss turns the inside down (`size − d`) and keeps the outside's
+    /// rise. Technique shapes the ramp: Chisel Hard leaves it, Smooth
+    /// rounds it by a quarter sine, Chisel Soft box-blurs it 3×3. The
+    /// light is a real angle and altitude: the field is sampled one
+    /// pixel toward and away from the light by bilinear interpolation,
+    /// and the relief `(away − toward) / size × depth`, scaled by the
+    /// altitude's cosine (light from straight overhead shades nothing),
+    /// clamped to ±1 and turned over for Direction Down, is box-blurred
+    /// by Soften. A positive relief blends the pixel toward the highlight
+    /// colour by relief × highlight opacity, a negative one toward the
+    /// shadow colour; a transparent pixel with relief becomes that colour
+    /// at relief × opacity alpha, so the outer styles paint the surround.
+    /// Gloss Contour and the highlight and shadow blend modes remain
+    /// documented scope cuts. See README Phase 353.
+    pub fn bevel_emboss_with(
+        &mut self,
+        id: LayerId,
+        options: &BevelEmbossOptions,
+    ) -> Result<Option<Rect>, String> {
+        let o = options;
+        if !(1..=250).contains(&o.size) {
+            return Err("Bevel & Emboss size must be between 1 and 250.".to_string());
+        }
+        if !(1..=1000).contains(&o.depth) {
+            return Err("Bevel & Emboss depth must be between 1 and 1000.".to_string());
+        }
+        if o.soften > 16 {
+            return Err("Bevel & Emboss soften must be between 0 and 16.".to_string());
+        }
+        if !o.angle.is_finite() || !(0.0..=90.0).contains(&o.altitude) {
+            return Err("Bevel & Emboss altitude must be between 0 and 90.".to_string());
+        }
+        if o.highlight_opacity > 100 || o.shadow_opacity > 100 {
+            return Err("Bevel & Emboss opacities must be between 0 and 100.".to_string());
+        }
+        let (w, h) = (self.width as usize, self.height as usize);
+        let size = o.size as f32;
+        let radius = o.size as i64;
+        let source = self.layer(id)?.pixels.clone();
+        // The signed height field.
+        let mut field = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let opaque = source[(y * w + x) * CHANNELS + 3] > 0;
+                let d = bevel_distance(&source, w, h, x, y, radius, opaque) as f32;
+                field[y * w + x] = match (o.style, opaque) {
+                    (BevelStyle::InnerBevel, true) => d,
+                    (BevelStyle::InnerBevel, false) => 0.0,
+                    (BevelStyle::OuterBevel, true) => size,
+                    (BevelStyle::OuterBevel, false) => size - d,
+                    (BevelStyle::Emboss, true) => d,
+                    (BevelStyle::Emboss, false) => -(size - d),
+                    (BevelStyle::PillowEmboss, true) => size - d,
+                    (BevelStyle::PillowEmboss, false) => size - d,
+                };
+            }
+        }
+        match o.technique {
+            BevelTechnique::ChiselHard => {}
+            BevelTechnique::Smooth => {
+                for v in field.iter_mut() {
+                    let t = (v.abs() / size).min(1.0);
+                    *v = v.signum() * size * (std::f32::consts::FRAC_PI_2 * t).sin();
+                }
+            }
+            BevelTechnique::ChiselSoft => field = box_blur_field(&field, w, h, 1),
+        }
+        let (sin, cos) = o.angle.to_radians().sin_cos();
+        let (dx, dy) = (cos, -sin);
+        let altitude = o.altitude.to_radians().cos();
+        let depth = o.depth as f32 / 100.0;
+        let sample = |x: f32, y: f32| -> f32 {
+            let x = x.clamp(0.0, (w - 1) as f32);
+            let y = y.clamp(0.0, (h - 1) as f32);
+            let (x0, y0) = (x.floor() as usize, y.floor() as usize);
+            let (x1, y1) = ((x0 + 1).min(w - 1), (y0 + 1).min(h - 1));
+            let (fx, fy) = (x - x0 as f32, y - y0 as f32);
+            let top = field[y0 * w + x0] * (1.0 - fx) + field[y0 * w + x1] * fx;
+            let bottom = field[y1 * w + x0] * (1.0 - fx) + field[y1 * w + x1] * fx;
+            top * (1.0 - fy) + bottom * fy
+        };
+        let mut relief = vec![0.0f32; w * h];
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f32, y as f32);
+                let toward = sample(fx + dx, fy + dy);
+                let away = sample(fx - dx, fy - dy);
+                let mut n = ((away - toward) / size * depth * altitude).clamp(-1.0, 1.0);
+                if !o.up {
+                    n = -n;
+                }
+                relief[y * w + x] = n;
+            }
+        }
+        if o.soften > 0 {
+            relief = box_blur_field(&relief, w, h, o.soften as usize);
+        }
+        let highlight = o.highlight;
+        let shadow = o.shadow;
+        let hl = o.highlight_opacity as f32 / 100.0;
+        let sh = o.shadow_opacity as f32 / 100.0;
+        let style = o.style;
+        self.filter_pixels(id, move |src, row, col| {
+            let idx = row as usize * w + col as usize;
+            let base = idx * CHANNELS;
+            let n = relief[idx];
+            let px = [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            let (colour, t) = if n > 0.0 {
+                (highlight, n * hl)
+            } else {
+                (shadow, -n * sh)
+            };
+            if px[3] == 0 {
+                if style == BevelStyle::InnerBevel || t <= 0.0 {
+                    return px;
+                }
+                return [
+                    colour[0],
+                    colour[1],
+                    colour[2],
+                    (t * 255.0).round().clamp(0.0, 255.0) as u8,
+                ];
+            }
+            let mut out = px;
+            for c in 0..3 {
+                out[c] = (px[c] as f32 + (colour[c] as f32 - px[c] as f32) * t)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out
+        })
+    }
+
+    /// Layer > Layer Style > Stroke with its Position, baked in
+    /// destructively. Outside: a transparent pixel within `size` (Chebyshev
+    /// distance) of an opaque one becomes the stroke colour at the
+    /// opacity, as [`Self::stroke_outline`] paints. Inside: an opaque
+    /// pixel within `size` of a transparent one is blended toward the
+    /// colour by the opacity, its alpha kept. Center: `size / 2` (rounded
+    /// down) outside and the rest inside, so an odd size leans in. Blend
+    /// Mode remains a documented scope cut. See README Phase 353.
+    pub fn stroke_outline_with(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        position: StrokePosition,
+        color: [u8; 3],
+        opacity: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&size) {
+            return Err("Stroke size must be between 1 and 250.".to_string());
+        }
+        if opacity > 100 {
+            return Err("Stroke opacity must be between 0 and 100.".to_string());
+        }
+        let (w, h) = (self.width as usize, self.height as usize);
+        let (outside, inside) = match position {
+            StrokePosition::Outside => (size as i64, 0),
+            StrokePosition::Inside => (0, size as i64),
+            StrokePosition::Center => ((size / 2) as i64, (size - size / 2) as i64),
+        };
+        let frac = opacity as f32 / 100.0;
+        let stroke_alpha = (frac * 255.0).round().clamp(0.0, 255.0) as u8;
+        self.filter_pixels(id, move |src, row, col| {
+            let (x, y) = (col as usize, row as usize);
+            let base = (y * w + x) * CHANNELS;
+            let px = [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            if px[3] == 0 {
+                if outside > 0 && bevel_distance(src, w, h, x, y, outside + 1, false) <= outside {
+                    return [color[0], color[1], color[2], stroke_alpha];
+                }
+                return px;
+            }
+            if inside > 0 && bevel_distance(src, w, h, x, y, inside + 1, true) <= inside {
+                let mut out = px;
+                for c in 0..3 {
+                    out[c] = (px[c] as f32 + (color[c] as f32 - px[c] as f32) * frac)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                return out;
+            }
+            px
+        })
+    }
+
+    /// Layer > Layer Style > Gradient Overlay with its Style, Angle,
+    /// Scale, Reverse, and Align with Layer, baked in destructively. The
+    /// gradient is laid over a box — the layer's opaque bounds with Align
+    /// with Layer, else the document — about its centre: `u` is the
+    /// pixel's offset along the angle, normalised so the box's corners
+    /// reach ±1, and `v` across it. Linear reads `t = (u + 1) / 2`;
+    /// Reflected `|u|`; Radial the normalised distance from the centre;
+    /// Diamond `max(|u|, |v|)`; Angle the bearing from the centre, the
+    /// angle itself at `0`, sweeping counter-clockwise to `1`. Scale
+    /// divides `u`, `v`, and the distance, so 50 % fits the gradient in
+    /// half the box. Reverse reads `1 − t`. `t` is clamped to `0..=1` and
+    /// mixes `color1` to `color2`, blended over the pixel by the opacity;
+    /// transparent pixels are left alone. Dither and the blend mode remain
+    /// documented scope cuts. See README Phase 353.
+    pub fn gradient_overlay_with(
+        &mut self,
+        id: LayerId,
+        options: &GradientOverlayOptions,
+    ) -> Result<Option<Rect>, String> {
+        let o = options;
+        if o.opacity > 100 {
+            return Err("Gradient Overlay opacity must be between 0 and 100.".to_string());
+        }
+        if !(10..=150).contains(&o.scale) {
+            return Err("Gradient Overlay scale must be between 10 and 150.".to_string());
+        }
+        if !o.angle.is_finite() {
+            return Err("Gradient Overlay angle must be a number.".to_string());
+        }
+        let bounds = if o.align_with_layer {
+            self.layer_bounds(id)?
+        } else {
+            None
+        };
+        let (x0, y0, x1, y1) = match bounds {
+            Some(r) => (r.x0 as f32, r.y0 as f32, r.x1 as f32, r.y1 as f32),
+            None => (0.0, 0.0, self.width as f32, self.height as f32),
+        };
+        let (cx, cy) = ((x0 + x1 - 1.0) / 2.0, (y0 + y1 - 1.0) / 2.0);
+        let (hw, hh) = (
+            ((x1 - x0 - 1.0) / 2.0).max(0.5),
+            ((y1 - y0 - 1.0) / 2.0).max(0.5),
+        );
+        let (sin, cos) = o.angle.to_radians().sin_cos();
+        let scale = o.scale as f32 / 100.0;
+        let along = (hw * cos).abs() + (hh * sin).abs();
+        let across = (hw * sin).abs() + (hh * cos).abs();
+        let (style, reverse, color1, color2) = (o.style, o.reverse, o.color1, o.color2);
+        let frac = o.opacity as f32 / 100.0;
+        let w = self.width as usize;
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * w + col as usize) * CHANNELS;
+            let a = src[base + 3];
+            if a == 0 {
+                return [src[base], src[base + 1], src[base + 2], a];
+            }
+            let (ex, ey) = (col as f32 - cx, -(row as f32 - cy));
+            let u = (ex * cos + ey * sin) / along / scale;
+            let v = (-ex * sin + ey * cos) / across / scale;
+            let mut t = match style {
+                GradientStyle::Linear => (u + 1.0) / 2.0,
+                GradientStyle::Reflected => u.abs(),
+                GradientStyle::Radial => ((ex / hw).powi(2) + (ey / hh).powi(2)).sqrt() / scale,
+                GradientStyle::Diamond => u.abs().max(v.abs()),
+                GradientStyle::Angle => {
+                    let bearing = ey.atan2(ex).to_degrees() - o_angle(cos, sin);
+                    bearing.rem_euclid(360.0) / 360.0
+                }
+            }
+            .clamp(0.0, 1.0);
+            if reverse {
+                t = 1.0 - t;
+            }
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let target = color1[c] as f32 + (color2[c] as f32 - color1[c] as f32) * t;
+                let vsrc = src[base + c] as f32;
+                out[c] = (vsrc * (1.0 - frac) + target * frac)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = a;
             out
         })
     }
@@ -43057,6 +43485,458 @@ mod tests {
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty
             .pattern_overlay(999, 2, [255, 0, 0], [0, 0, 255], 100)
+            .is_err());
+    }
+
+    /// 8x8, a solid opaque 4x4 block (100,150,200,255) at rows 2-5,
+    /// columns 2-5, so a transparent pixel next to the block has
+    /// transparent neighbours of its own on the far side.
+    fn bevel_ring_fixture() -> (Document, LayerId) {
+        let mut pixels = Vec::with_capacity(8 * 8 * 4);
+        for row in 0..8u32 {
+            for col in 0..8u32 {
+                if (2..=5).contains(&row) && (2..=5).contains(&col) {
+                    pixels.extend_from_slice(&[100, 150, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        let mut doc = Document::new(8, 8).unwrap();
+        let id = doc.add_layer("block", &pixels, 8, 8).unwrap();
+        (doc, id)
+    }
+
+    fn bevel_options() -> BevelEmbossOptions {
+        BevelEmbossOptions {
+            style: BevelStyle::InnerBevel,
+            technique: BevelTechnique::ChiselHard,
+            depth: 100,
+            up: true,
+            size: 2,
+            soften: 0,
+            angle: 180.0,
+            altitude: 0.0,
+            highlight: [255, 255, 255],
+            highlight_opacity: 75,
+            shadow: [0, 0, 0],
+            shadow_opacity: 75,
+        }
+    }
+
+    #[test]
+    fn bevel_emboss_with_inner_bevel_blends_toward_the_highlight_and_shadow_colours() {
+        // inner_glow_fixture's 4x4 block, light from the left (180°,
+        // altitude 0). Pixel (row 2, col 1) on the left edge: toward =
+        // field(2, 0) = 0 (transparent), away = field(2, 2) = 2 (its
+        // nearest transparent pixel is a Chebyshev 2 away, the cap), so
+        // relief = (2 - 0) / 2 = 1: fully toward the highlight at 75 %,
+        // 100 + 155 * 0.75 = 216.25 -> 216, 150 + 105 * 0.75 = 228.75 ->
+        // 229, 200 + 55 * 0.75 = 241.25 -> 241. The right edge (2, 4):
+        // toward = field(2, 3) = 2, away = field(2, 5) = 0, relief -1:
+        // toward black at 75 %, 25, 37.5 -> 38, 50. The transparent
+        // corner is untouched: an inner bevel paints nothing outside.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(id, &bevel_options()).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 2)..idx(1, 2) + 4], [216, 229, 241, 255]);
+        assert_eq!(&p[idx(4, 2)..idx(4, 2) + 4], [25, 38, 50, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+        // Direction Down turns the relief over: the left edge shadows.
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                up: false,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [25, 38, 50, 255]
+        );
+        // Altitude 60° halves the relief (cos 60° = 0.5): t = 0.375,
+        // 100 + 155 * 0.375 = 158.125 -> 158, 189.375 -> 189, 220.625 ->
+        // 221; Depth 50 % does the same.
+        for options in [
+            BevelEmbossOptions {
+                altitude: 60.0,
+                ..bevel_options()
+            },
+            BevelEmbossOptions {
+                depth: 50,
+                ..bevel_options()
+            },
+        ] {
+            let (mut doc, id) = inner_glow_fixture();
+            doc.bevel_emboss_with(id, &options).unwrap();
+            assert_eq!(
+                &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+                [158, 189, 221, 255]
+            );
+        }
+    }
+
+    #[test]
+    fn bevel_emboss_with_techniques_reshape_the_ramp_and_soften_blurs_it() {
+        // Corner pixel (1, 1), light from the left: toward = field(1, 0)
+        // = 0, away = field(1, 2) = 1 (the transparent (0, 2) is one
+        // above). Chisel Hard: relief 0.5, t = 0.375 -> 158, 189, 221.
+        // Smooth rounds field 1 to 2 sin(π/4) = 1.4142: relief 0.7071,
+        // t = 0.5303 -> 182.2 -> 182, 205.7 -> 206, 229.2 -> 229.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(id, &bevel_options()).unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 1)..idx(1, 1) + 4],
+            [158, 189, 221, 255]
+        );
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                technique: BevelTechnique::Smooth,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 1)..idx(1, 1) + 4],
+            [182, 206, 229, 255]
+        );
+        // Chisel Soft box-blurs the field 3x3 first. For (2, 1): toward
+        // is the blur at (2, 0) — its window (rows 1-3, columns 0-1) holds
+        // 0, 1, 0, 1, 0, 1 -> 0.5; away is the blur at (2, 2) — rows 1-3,
+        // columns 1-3 hold 1, 1, 1, 1, 2, 2, 1, 2, 2 -> 13/9. relief =
+        // (13/9 - 0.5) / 2 = 0.4722, t = 0.3542 -> 154.9 -> 155, 187.2
+        // -> 187, 219.5 -> 219.
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                technique: BevelTechnique::ChiselSoft,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [155, 187, 219, 255]
+        );
+        // Soften blurs the relief: the edge pixel loses some of its
+        // highlight to its neighbours, and the untouched interior gains
+        // some.
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                soften: 1,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert!(p[idx(1, 2)] < 216 && p[idx(1, 2)] > 100, "{}", p[idx(1, 2)]);
+    }
+
+    #[test]
+    fn bevel_emboss_with_outer_styles_paint_the_surround() {
+        // bevel_ring_fixture, light from the left, both opacities 100.
+        // Outer Bevel: the transparent (3, 1), one from the block, has
+        // field size - 1 = 1; toward = field(3, 0) = 2 - 2 = 0, away =
+        // field(3, 2) = size (the shape is a plateau) = 2: relief 1, so
+        // it becomes the highlight at full alpha; (3, 6) on the far side
+        // reads toward = 2, away = 0: the shadow at full alpha. Opaque
+        // pixels sit on the plateau and keep their colour, and (0, 0),
+        // two away from the block, has no relief.
+        let idx = |x: usize, y: usize| (y * 8 + x) * 4;
+        let outer = BevelEmbossOptions {
+            style: BevelStyle::OuterBevel,
+            highlight_opacity: 100,
+            shadow_opacity: 100,
+            ..bevel_options()
+        };
+        let (mut doc, id) = bevel_ring_fixture();
+        doc.bevel_emboss_with(id, &outer).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 3)..idx(1, 3) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx(6, 3)..idx(6, 3) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx(3, 3)..idx(3, 3) + 4], [100, 150, 200, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+        // Emboss: outside falls away, field(3, 1) = -(2 - 1) = -1; toward
+        // = field(3, 0) = 0, away = field(3, 2) = 1 (inside, one from the
+        // edge): relief 0.5, the highlight at 127.5 -> 128 alpha.
+        let (mut doc, id) = bevel_ring_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                style: BevelStyle::Emboss,
+                ..outer.clone()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 3)..idx(1, 3) + 4],
+            [255, 255, 255, 128]
+        );
+        // Pillow Emboss: inside turned down, field = size - d. (3, 2):
+        // toward = field(3, 1) = 2 - 1 = 1, away = field(3, 3) = 2 - 2 =
+        // 0: relief -0.5, halfway to the shadow: 50, 75, 100.
+        let (mut doc, id) = bevel_ring_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                style: BevelStyle::PillowEmboss,
+                ..outer.clone()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(2, 3)..idx(2, 3) + 4],
+            [50, 75, 100, 255]
+        );
+        // Ranges.
+        let (mut doc, id) = bevel_ring_fixture();
+        for bad in [
+            BevelEmbossOptions {
+                size: 0,
+                ..bevel_options()
+            },
+            BevelEmbossOptions {
+                depth: 1001,
+                ..bevel_options()
+            },
+            BevelEmbossOptions {
+                soften: 17,
+                ..bevel_options()
+            },
+            BevelEmbossOptions {
+                altitude: 91.0,
+                ..bevel_options()
+            },
+            BevelEmbossOptions {
+                highlight_opacity: 101,
+                ..bevel_options()
+            },
+        ] {
+            assert!(doc.bevel_emboss_with(id, &bad).is_err());
+        }
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.bevel_emboss_with(id, &bevel_options()).is_err());
+    }
+
+    #[test]
+    fn stroke_outline_with_positions_the_stroke_inside_outside_or_centred() {
+        // stroke_outline_fixture's 2x2 block at rows/columns 2-3.
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        // Inside, size 1: the block's own (2, 2) takes the colour, its
+        // alpha kept; the transparent (1, 1) stays.
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 0, 0, 0]);
+        // Inside at 50 % blends: 100 + 155 * 0.5 = 177.5 -> 178, 75, 100.
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 50)
+            .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(2, 2)..idx(2, 2) + 4],
+            [178, 75, 100, 255]
+        );
+        // Outside matches stroke_outline exactly.
+        let (mut a, id_a) = stroke_outline_fixture();
+        let (mut b, id_b) = stroke_outline_fixture();
+        a.stroke_outline_with(id_a, 2, StrokePosition::Outside, [255, 0, 0], 100)
+            .unwrap();
+        b.stroke_outline(id_b, 2, [255, 0, 0], 100).unwrap();
+        assert_eq!(a.layers()[0].pixels, b.layers()[0].pixels);
+        // Center, size 2: one out, one in. (1, 1) and (2, 2) both take the
+        // colour; (0, 0), two out, does not.
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline_with(id, 2, StrokePosition::Center, [255, 0, 0], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [0, 0, 0, 0]);
+        // Center, size 1: nothing out, one in.
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.stroke_outline_with(id, 1, StrokePosition::Center, [255, 0, 0], 100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(1, 1)..idx(1, 1) + 4], [0, 0, 0, 0]);
+        assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [255, 0, 0, 255]);
+        assert!(doc
+            .stroke_outline_with(id, 0, StrokePosition::Inside, [255, 0, 0], 100)
+            .is_err());
+        assert!(doc
+            .stroke_outline_with(id, 1, StrokePosition::Inside, [255, 0, 0], 101)
+            .is_err());
+    }
+
+    fn gradient_options() -> GradientOverlayOptions {
+        GradientOverlayOptions {
+            color1: [0, 0, 0],
+            color2: [255, 255, 255],
+            style: GradientStyle::Linear,
+            angle: 0.0,
+            scale: 100,
+            reverse: false,
+            align_with_layer: false,
+            opacity: 100,
+        }
+    }
+
+    #[test]
+    fn gradient_overlay_with_styles_angle_scale_reverse_and_alignment() {
+        // column_stripes_fixture, 4x4: the box's centre is (1.5, 1.5) and
+        // its half-width 1.5, so along angle 0 u = (x - 1.5) / 1.5 and
+        // Linear's t = (u + 1) / 2 = x / 3 -- the same 0, 85, 170, 255 as
+        // gradient_overlay's own horizontal case.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let first_row = |doc: &Document| -> Vec<u8> {
+            (0..4).map(|x| doc.layers()[0].pixels[idx(x, 0)]).collect()
+        };
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(id, &gradient_options()).unwrap();
+        assert_eq!(first_row(&doc), vec![0, 85, 170, 255]);
+        // Reverse reads 1 - t.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                reverse: true,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(first_row(&doc), vec![255, 170, 85, 0]);
+        // Angle 90 runs up the layer: the top row is color2, the bottom
+        // color1, every column alike.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                angle: 90.0,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 255);
+        assert_eq!(p[idx(3, 0)], 255);
+        assert_eq!(p[idx(0, 3)], 0);
+        assert_eq!(p[idx(2, 1)], 170);
+        // Reflected: |u|, so both edges read color2 and the middle
+        // columns 1/3: 255, 85, 85, 255.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                style: GradientStyle::Reflected,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(first_row(&doc), vec![255, 85, 85, 255]);
+        // Radial: the corner (0, 0) is sqrt(2) from the centre in box
+        // units, clamped to 1 -> 255; (1, 1) is sqrt(2 * (1/3)^2) = 0.4714
+        // -> 120.2 -> 120.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                style: GradientStyle::Radial,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 255);
+        assert_eq!(p[idx(1, 1)], 120);
+        // Diamond: max(|u|, |v|): the corner 1 -> 255, (1, 1) 1/3 -> 85.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                style: GradientStyle::Diamond,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(0, 0)], 255);
+        assert_eq!(p[idx(1, 1)], 85);
+        // Angle style: the bearing from the centre. (3, 1) sits at
+        // atan2(0.5, 1.5) = 18.43°, t = 0.0512 -> 13.06 -> 13; (0, 1) at
+        // 161.57°, t = 0.4488 -> 114.4 -> 114.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                style: GradientStyle::Angle,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(3, 1)], 13);
+        assert_eq!(p[idx(0, 1)], 114);
+        // Scale 50 % fits the gradient in the middle half: the outer
+        // columns clamp to the ends and column 1 sits well below its
+        // scale-100 reading of 85.
+        let (mut doc, id) = column_stripes_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                scale: 50,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let row = first_row(&doc);
+        assert_eq!(row[0], 0);
+        assert_eq!(row[3], 255);
+        assert!(row[1] > 0 && row[1] < 85, "{}", row[1]);
+        // Align with Layer spans the opaque bounds: stroke_outline_fixture's
+        // block at columns 2-3 reads color1 at column 2 and color2 at 3,
+        // and its transparent surround is untouched.
+        let idx6 = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = stroke_outline_fixture();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                align_with_layer: true,
+                ..gradient_options()
+            },
+        )
+        .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx6(2, 2)..idx6(2, 2) + 4], [0, 0, 0, 255]);
+        assert_eq!(&p[idx6(3, 2)..idx6(3, 2) + 4], [255, 255, 255, 255]);
+        assert_eq!(&p[idx6(0, 0)..idx6(0, 0) + 4], [0, 0, 0, 0]);
+        // Ranges.
+        assert!(doc
+            .gradient_overlay_with(
+                id,
+                &GradientOverlayOptions {
+                    scale: 9,
+                    ..gradient_options()
+                }
+            )
+            .is_err());
+        assert!(doc
+            .gradient_overlay_with(
+                id,
+                &GradientOverlayOptions {
+                    opacity: 101,
+                    ..gradient_options()
+                }
+            )
             .is_err());
     }
 

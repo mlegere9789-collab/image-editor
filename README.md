@@ -21153,6 +21153,85 @@ stands.
 
 **1834 Rust tests total** (1827 → 1834: 1827 lib + 7 pipeline). Frontend tests unchanged at 15.
 
+## Phase 353 — Layer styles' remaining options: Bevel & Emboss, Stroke, Gradient Overlay
+
+Phase D's second cut by impact: the layer styles shipped in Phases
+99–109 each carried one shape of Photoshop's dialog. This phase builds
+the rest of three of them, as new option-taking forms beside the
+originals (which Actions and the Assistant still call).
+
+**Bevel & Emboss** (`bevel_emboss_with`). A signed height field stands
+over the whole canvas: inside the shape, the capped Chebyshev distance to
+the nearest transparent pixel (0 at the edge, `size` on the plateau);
+outside, by Style — nothing for Inner Bevel, `size − d` rising to the
+edge for Outer Bevel, that rise negated for Emboss so the surround falls
+away, and for Pillow Emboss the inside turned down (`size − d`) with the
+outside's rise kept. Technique shapes the ramp: Chisel Hard leaves it,
+Smooth rounds it by a quarter sine, Chisel Soft box-blurs it 3×3. The
+light is a real Angle and Altitude: the field is sampled one pixel
+toward and away from the light by bilinear interpolation, and the
+relief `(away − toward) / size × depth`, scaled by the altitude's cosine
+(light from straight overhead shades nothing), clamped to ±1, turned
+over for Direction Down, and box-blurred by Soften. A positive relief
+blends the pixel toward the highlight colour by relief × highlight
+opacity, a negative one toward the shadow colour; a transparent pixel
+with relief becomes that colour at relief × opacity alpha, which is how
+the outer styles paint the surround. The dialog has all of it: Style,
+Technique, Depth (1–1000 %), Direction, Size, Soften (0–16), Angle,
+Altitude, Highlight and Shadow colours with opacities. Gloss Contour,
+Stroke Emboss, and the two blend modes remain documented scope cuts.
+
+**Stroke** (`stroke_outline_with`) gains Position: Outside as before;
+Inside, where an opaque pixel within `size` of a transparent one blends
+toward the colour by the opacity with its alpha kept; Center, `size / 2`
+out and the rest in.
+
+**Gradient Overlay** (`gradient_overlay_with`) gains Photoshop's five
+Styles, a real Angle, Scale, Reverse, and Align with Layer. The gradient
+is laid over a box — the layer's opaque bounds or the document — about
+its centre: `u` is the pixel's offset along the angle, normalised so the
+box's corners reach ±1, `v` across it. Linear reads `(u + 1) / 2`,
+Reflected `|u|`, Radial the normalised distance from the centre, Diamond
+`max(|u|, |v|)`, Angle the bearing from the centre sweeping
+counter-clockwise from the angle; Scale divides them all, Reverse reads
+`1 − t`.
+
+**Verified two ways.** `cargo test`, every number hand-computed: on the
+6×6 block, light from the left at altitude 0, the left edge pixel reads
+relief 1 and blends 75 % toward white — (216, 229, 241) — and the right
+edge 75 % toward black — (25, 38, 50) — with the transparent corner
+untouched; Direction Down swaps them; Altitude 60° and Depth 50 % each
+halve the relief to (158, 189, 221); the corner pixel reads (158, 189,
+221) under Chisel Hard and (182, 206, 229) under Smooth (field 1 rounded
+to 2 sin π/4); Chisel Soft's 3×3 blur gives the left edge (155, 187,
+219) from window means of 0.5 and 13/9; Soften moves the edge. On an
+8×8 block, Outer Bevel paints the pixel one out on the lit side white at
+full alpha and its far-side twin black, leaves the plateau and the
+distant surround alone; Emboss paints the lit-side pixel white at 128
+alpha (relief ½); Pillow Emboss shades the inside edge halfway to
+black, (50, 75, 100); every range is checked. Stroke: Inside size 1
+colours the block's edge pixel with alpha kept, 50 % blends it to (178,
+75, 100), Outside is byte-identical to `stroke_outline`, Center size 2
+takes one pixel each side and not two, Center size 1 takes one inside
+only. Gradient Overlay: Linear at angle 0 reproduces the original 0, 85,
+170, 255; Reverse flips it; angle 90 runs up the layer; Reflected reads
+255, 85, 85, 255; Radial's corner clamps to 255 and (1, 1) reads 120
+(√2/3 of the way); Diamond's (1, 1) reads 85; Angle style reads 13 at
+18.43° and 114 at 161.57°; Scale 50 % clamps the outer columns and
+compresses the inner; Align with Layer spans the 2-wide block exactly.
+Then the built app in Chromium (`vite preview` + Playwright, the Tauri
+bridge stubbed): the three dialogs opened from the Layer > Layer Style
+menu, their new controls set, and the commands' arguments read back —
+`stroke_outline_with` with `position: "center"`, `gradient_overlay_with`
+with `{style: "radial", angle: 45, scale: 80, reverse: true,
+alignWithLayer: false}`, and `bevel_emboss_with` with `{style:
+"pillowEmboss", technique: "chiselSoft", depth: 250, up: false, soften:
+3, angle: 60, altitude: 45, highlightOpacity: 80, shadowOpacity: 60}`
+and the chosen colours. The Xvfb live-verification gap from the previous
+phases stands.
+
+**1839 Rust tests total** (1834 → 1839: 1832 lib + 7 pipeline). Frontend tests unchanged at 15.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

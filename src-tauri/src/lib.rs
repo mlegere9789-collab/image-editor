@@ -5835,6 +5835,46 @@ fn stroke_outline(
     })
 }
 
+/// Layer > Layer Style > Stroke with its Position -- see
+/// `Document::stroke_outline_with`.
+#[tauri::command]
+fn stroke_outline_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    position: document::StrokePosition,
+    color: [u8; 3],
+    opacity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.stroke_outline_with(id, size, position, color, opacity)
+    })
+}
+
+/// Layer > Layer Style > Gradient Overlay with its Style, Angle, Scale,
+/// Reverse, and Align with Layer -- see `Document::gradient_overlay_with`.
+#[tauri::command]
+fn gradient_overlay_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::GradientOverlayOptions,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.gradient_overlay_with(id, &options)
+    })
+}
+
+/// Layer > Layer Style > Bevel & Emboss with its Structure and Shading
+/// options -- see `Document::bevel_emboss_with`.
+#[tauri::command]
+fn bevel_emboss_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: document::BevelEmbossOptions,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.bevel_emboss_with(id, &options))
+}
+
 /// Layer > Layer Style > Color Overlay on layer `id`, baked in
 /// destructively.
 #[tauri::command]
@@ -7632,6 +7672,9 @@ pub fn run() {
             export_layer_bytes,
             autosave_project,
             cancel_operation,
+            stroke_outline_with,
+            gradient_overlay_with,
+            bevel_emboss_with,
             save_action,
             list_actions,
             delete_action,
