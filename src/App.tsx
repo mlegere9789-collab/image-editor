@@ -10,6 +10,7 @@ import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import type {
   Adjustment,
+  BrushDynamics,
   Interpolation,
   ApplyBlend,
   ApplyChannel,
@@ -1396,6 +1397,27 @@ export default function App() {
   const [foundObjects, setFoundObjects] = useState<ObjectBox[] | null>(null);
   // Define Brush Preset: paint with the captured tip, stamped every Spacing pixels.
   const [useBrushTip, setUseBrushTip] = useState(false);
+  // Brush Settings: Photoshop's dab-by-dab dynamics for the Brush and
+  // Eraser (and a defined tip) -- spacing, shape dynamics, scattering,
+  // opacity jitter and hardness -- on when the checkbox is.
+  const [brushDynamicsOn, setBrushDynamicsOn] = useState(false);
+  const [showBrushSettings, setShowBrushSettings] = useState(false);
+  const [brushDynamics, setBrushDynamics] = useState<BrushDynamics>({
+    spacingPercent: 25,
+    sizeJitter: 0,
+    minDiameter: 0,
+    angleJitter: 0,
+    roundness: 100,
+    roundnessJitter: 0,
+    scatter: 0,
+    bothAxes: false,
+    count: 1,
+    countJitter: 0,
+    opacityJitter: 0,
+    hardness: 100,
+    seed: 1,
+  });
+  const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
   // Gradient / Pattern / Adjustment Presets: the dialog and a name field.
   const [showPresetsDialog, setShowPresetsDialog] = useState(false);
@@ -7193,7 +7215,17 @@ export default function App() {
     (points: [number, number][]) => {
       if (selectedId === null) return;
       const mirrored = symmetry === "off" ? null : symmetry;
-      if (tool === "eraser") {
+      const dynamics = () => ({ ...brushDynamics, seed: (strokeSeed.current = (strokeSeed.current * 1103515245 + 12345) >>> 0) });
+      if (tool === "eraser" && brushDynamicsOn) {
+        void runCommand("paint_stroke_dynamic", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+          color: [0, 0, 0, 255],
+          dynamics: dynamics(),
+          erase: true,
+        });
+      } else if (tool === "eraser") {
         void runCommand("erase_stroke", {
           id: selectedId,
           points,
@@ -7311,7 +7343,22 @@ export default function App() {
         const [r, g, b] = hexToRgb(brushColor);
         const alpha = Math.round(brushOpacity * 255);
         if (useBrushTip && document?.hasBrushTip) {
-          void runCommand("tip_stroke", { id: selectedId, points, color: [r, g, b, alpha], spacing: tipSpacing });
+          if (brushDynamicsOn) {
+            void runCommand("tip_stroke_dynamic", { id: selectedId, points, color: [r, g, b, alpha], dynamics: dynamics() });
+          } else {
+            void runCommand("tip_stroke", { id: selectedId, points, color: [r, g, b, alpha], spacing: tipSpacing });
+          }
+          return;
+        }
+        if (brushDynamicsOn) {
+          void runCommand("paint_stroke_dynamic", {
+            id: selectedId,
+            points,
+            radius: brushSize,
+            color: [r, g, b, alpha],
+            dynamics: dynamics(),
+            erase: false,
+          });
           return;
         }
         void runCommand("paint_stroke", {
@@ -7324,6 +7371,8 @@ export default function App() {
       }
     },
     [
+      brushDynamics,
+      brushDynamicsOn,
       runCommand,
       selectedId,
       tool,
@@ -8978,12 +9027,23 @@ export default function App() {
           <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
           Tip {document?.hasBrushTip ? "" : "(none defined)"}
         </label>
-        {useBrushTip && (
+        {useBrushTip && !brushDynamicsOn && (
           <label className="tools__slider">
             Spacing {tipSpacing}
             <input type="range" min={1} max={50} value={tipSpacing} onChange={(event) => setTipSpacing(Number(event.target.value))} />
           </label>
         )}
+        <label className="tools__slider" title="Brush Settings: paint dab by dab with spacing, shape dynamics, scattering, opacity jitter and hardness">
+          <input type="checkbox" checked={brushDynamicsOn} onChange={(event) => setBrushDynamicsOn(event.target.checked)} />
+          Brush Settings
+        </label>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowBrushSettings(true)}
+          title="Brush Settings: spacing, Shape Dynamics, Scattering, Transfer and hardness"
+        >
+          Brush Settings…
+        </button>
         <button
           className="button button--quiet"
           onClick={() => setShowGradientFillDialog(true)}
@@ -18819,6 +18879,91 @@ export default function App() {
               </button>
               <button className="button button--quiet" onClick={() => setShowAssistantDialog(false)} title="Close">
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBrushSettings && (
+        <div className="modal-overlay" onClick={() => setShowBrushSettings(false)} role="presentation">
+          <div className="modal modal--wide" role="dialog" aria-label="Brush Settings" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Brush Settings</h2>
+            <p className="modal__hint">
+              With Brush Settings on, the Brush, Eraser and a defined tip paint dab by dab:
+              a dab every Spacing percent of the diameter, each dab&apos;s size, angle,
+              roundness, position and opacity drawn by the jitters below. Every jitter at
+              zero, Count 1 and Hardness 100 is the plain stroke laid as dabs.
+            </p>
+            {(
+              [
+                ["spacingPercent", "Spacing (% of diameter)", 1, 200],
+                ["hardness", "Hardness (%)", 0, 100],
+                ["sizeJitter", "Size Jitter (%)", 0, 100],
+                ["minDiameter", "Minimum Diameter (%)", 0, 100],
+                ["angleJitter", "Angle Jitter (%)", 0, 100],
+                ["roundness", "Roundness (%)", 1, 100],
+                ["roundnessJitter", "Roundness Jitter (%)", 0, 100],
+                ["scatter", "Scatter (% of diameter)", 0, 500],
+                ["count", "Count", 1, 16],
+                ["countJitter", "Count Jitter (%)", 0, 100],
+                ["opacityJitter", "Opacity Jitter (%)", 0, 100],
+              ] as [keyof BrushDynamics, string, number, number][]
+            ).map(([key, label, min, max]) => (
+              <label key={key} className="control">
+                <span className="control__label">
+                  {label} <span className="control__value">{String(brushDynamics[key])}</span>
+                </span>
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  value={Number(brushDynamics[key])}
+                  onChange={(event) => setBrushDynamics((d) => ({ ...d, [key]: Number(event.target.value) }))}
+                />
+              </label>
+            ))}
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={brushDynamics.bothAxes}
+                onChange={(event) => setBrushDynamics((d) => ({ ...d, bothAxes: event.target.checked }))}
+              />
+              <span className="control__label">Scatter on both axes</span>
+              <input
+                type="checkbox"
+                checked={brushDynamicsOn}
+                onChange={(event) => setBrushDynamicsOn(event.target.checked)}
+                style={{ marginLeft: 12 }}
+              />
+              <span className="control__label">Use Brush Settings</span>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  setBrushDynamics((d) => ({
+                    ...d,
+                    spacingPercent: 25,
+                    sizeJitter: 0,
+                    minDiameter: 0,
+                    angleJitter: 0,
+                    roundness: 100,
+                    roundnessJitter: 0,
+                    scatter: 0,
+                    bothAxes: false,
+                    count: 1,
+                    countJitter: 0,
+                    opacityJitter: 0,
+                    hardness: 100,
+                  }))
+                }
+                title="Back to the plain round brush"
+              >
+                Reset
+              </button>
+              <button className="button" onClick={() => setShowBrushSettings(false)} title="Close">
+                Done
               </button>
             </div>
           </div>

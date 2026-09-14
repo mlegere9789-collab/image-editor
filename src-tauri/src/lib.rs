@@ -3588,6 +3588,42 @@ fn paint_stroke(
     })
 }
 
+/// Brush Settings: paint (or, with `erase`, erase) along `points` dab by
+/// dab under `dynamics` -- see `Document::stroke_dynamic`.
+#[tauri::command]
+fn paint_stroke_dynamic(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    radius: f32,
+    color: [u8; 4],
+    dynamics: document::BrushDynamics,
+    erase: Option<bool>,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        let stroke = if erase.unwrap_or(false) {
+            Stroke::Eraser
+        } else {
+            Stroke::Brush { color }
+        };
+        document.stroke_dynamic(id, &points, radius, stroke, &dynamics)
+    })
+}
+
+/// Brush Settings with a defined tip -- see `Document::tip_stroke_dynamic`.
+#[tauri::command]
+fn tip_stroke_dynamic(
+    state: State<'_, AppState>,
+    id: LayerId,
+    points: Vec<(f32, f32)>,
+    color: [u8; 4],
+    dynamics: document::BrushDynamics,
+) -> Result<Snapshot, String> {
+    edit(&state, |document| {
+        document.tip_stroke_dynamic(id, &points, color, &dynamics)
+    })
+}
+
 /// Erase along `points` on layer `id`: multiplies existing alpha toward zero
 /// rather than painting a colour. See [`paint_stroke`] for `points`.
 #[tauri::command]
@@ -7395,6 +7431,8 @@ pub fn run() {
             read_content_credentials,
             export_layer,
             export_layer_bytes,
+            paint_stroke_dynamic,
+            tip_stroke_dynamic,
             select_from_mask,
             export_composite_bytes,
             list_fonts,

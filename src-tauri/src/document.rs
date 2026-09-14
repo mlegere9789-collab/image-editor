@@ -2181,6 +2181,188 @@ pub struct BrushTip {
     pub values: Vec<f32>,
 }
 
+/// Photoshop's Brush Settings, the ones that shape a stroke dab by dab:
+/// Spacing (percent of the diameter between dabs), Shape Dynamics (Size
+/// Jitter with a Minimum Diameter, Angle Jitter, Roundness with its
+/// Jitter), Scattering (Scatter as a percent of the diameter, Both Axes,
+/// Count with its Jitter), Transfer's Opacity Jitter, and the tip's
+/// Hardness -- every jitter a seeded draw, so a stroke is reproducible.
+/// With every jitter at zero, count 1 and hardness 100 a dynamic stroke
+/// is the plain capsule stroke laid down as overlapping dabs.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BrushDynamics {
+    pub spacing_percent: u32,
+    pub size_jitter: u8,
+    pub min_diameter: u8,
+    pub angle_jitter: u8,
+    pub roundness: u8,
+    pub roundness_jitter: u8,
+    pub scatter: u16,
+    pub both_axes: bool,
+    pub count: u8,
+    pub count_jitter: u8,
+    pub opacity_jitter: u8,
+    pub hardness: u8,
+    pub seed: u32,
+}
+
+impl Default for BrushDynamics {
+    fn default() -> Self {
+        Self {
+            spacing_percent: 25,
+            size_jitter: 0,
+            min_diameter: 0,
+            angle_jitter: 0,
+            roundness: 100,
+            roundness_jitter: 0,
+            scatter: 0,
+            both_axes: false,
+            count: 1,
+            count_jitter: 0,
+            opacity_jitter: 0,
+            hardness: 100,
+            seed: 0,
+        }
+    }
+}
+
+impl BrushDynamics {
+    fn validate(&self) -> Result<(), String> {
+        if self.spacing_percent == 0 || self.spacing_percent > 1000 {
+            return Err("Spacing must be between 1 and 1000 percent.".to_string());
+        }
+        for (name, value) in [
+            ("Size Jitter", self.size_jitter),
+            ("Minimum Diameter", self.min_diameter),
+            ("Angle Jitter", self.angle_jitter),
+            ("Roundness Jitter", self.roundness_jitter),
+            ("Count Jitter", self.count_jitter),
+            ("Opacity Jitter", self.opacity_jitter),
+            ("Hardness", self.hardness),
+        ] {
+            if value > 100 {
+                return Err(format!("{name} must be between 0 and 100 percent."));
+            }
+        }
+        if self.roundness == 0 || self.roundness > 100 {
+            return Err("Roundness must be between 1 and 100 percent.".to_string());
+        }
+        if self.scatter > 1000 {
+            return Err("Scatter must be between 0 and 1000 percent.".to_string());
+        }
+        if self.count == 0 || self.count > 16 {
+            return Err("Count must be between 1 and 16.".to_string());
+        }
+        Ok(())
+    }
+}
+
+/// One dab of a dynamic stroke: where, how big (a radius, or for a tip
+/// the scale of its own size), turned how far (degrees), squashed to
+/// what roundness, at what opacity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Dab {
+    x: f32,
+    y: f32,
+    radius: f32,
+    angle: f32,
+    roundness: f32,
+    opacity: f32,
+}
+
+/// Where the dabs of a dynamic stroke land: the first point, then one
+/// every `spacing` pixels of path length (spacing being the percent of
+/// the diameter), each position stamped `count` times (less its jitter)
+/// with a drawn size, angle, roundness, opacity and scatter -- scatter
+/// across the stroke's direction, and along it too with Both Axes.
+fn dab_plan(points: &[(f32, f32)], radius: f32, dynamics: &BrushDynamics) -> Vec<Dab> {
+    let mut rng = XorShift32::new(dynamics.seed);
+    let diameter = radius * 2.0;
+    let spacing = (diameter * dynamics.spacing_percent as f32 / 100.0).max(0.5);
+    let mut centres: Vec<((f32, f32), (f32, f32))> = Vec::new();
+    let first_dir = points
+        .windows(2)
+        .find_map(|p| {
+            let (dx, dy) = (p[1].0 - p[0].0, p[1].1 - p[0].1);
+            let len = dx.hypot(dy);
+            (len > 0.0).then(|| (dx / len, dy / len))
+        })
+        .unwrap_or((1.0, 0.0));
+    centres.push((points[0], first_dir));
+    let mut since_last = 0.0f32;
+    for pair in points.windows(2) {
+        let ((ax, ay), (bx, by)) = (pair[0], pair[1]);
+        let (dx, dy) = (bx - ax, by - ay);
+        let len = dx.hypot(dy);
+        if len <= 0.0 {
+            continue;
+        }
+        let dir = (dx / len, dy / len);
+        let mut t = spacing - since_last;
+        while t <= len {
+            centres.push(((ax + dir.0 * t, ay + dir.1 * t), dir));
+            t += spacing;
+        }
+        since_last = len - (t - spacing);
+    }
+    let mut dabs = Vec::new();
+    for ((cx, cy), dir) in centres {
+        let unit = |rng: &mut XorShift32| (rng.next_unit() + 1.0) / 2.0;
+        let count = ((dynamics.count as f32)
+            * (1.0 - unit(&mut rng) * dynamics.count_jitter as f32 / 100.0))
+            .round()
+            .max(1.0) as usize;
+        for _ in 0..count {
+            let scale = (1.0 - unit(&mut rng) * dynamics.size_jitter as f32 / 100.0)
+                .max(dynamics.min_diameter as f32 / 100.0)
+                .max(0.01);
+            let angle = rng.next_unit() * 180.0 * dynamics.angle_jitter as f32 / 100.0;
+            let roundness = (dynamics.roundness as f32 / 100.0
+                * (1.0 - unit(&mut rng) * dynamics.roundness_jitter as f32 / 100.0))
+                .clamp(0.05, 1.0);
+            let across = rng.next_unit() * dynamics.scatter as f32 / 100.0 * diameter;
+            let along = if dynamics.both_axes {
+                rng.next_unit() * dynamics.scatter as f32 / 100.0 * diameter
+            } else {
+                0.0
+            };
+            let opacity = 1.0 - unit(&mut rng) * dynamics.opacity_jitter as f32 / 100.0;
+            dabs.push(Dab {
+                x: cx - dir.1 * across + dir.0 * along,
+                y: cy + dir.0 * across + dir.1 * along,
+                radius: radius * scale,
+                angle,
+                roundness,
+                opacity,
+            });
+        }
+    }
+    dabs
+}
+
+/// A round (or squashed, turned) dab's coverage of the point `(px, py)`:
+/// `1` inside the hard core (`hardness` percent of the radius), falling
+/// off linearly to `0` at the radius, with the capsule stroke's own
+/// half-pixel anti-aliasing at a fully hard edge.
+fn dab_coverage(dab: &Dab, hardness: u8, px: f32, py: f32) -> f32 {
+    let (dx, dy) = (px - dab.x, py - dab.y);
+    let (sin, cos) = dab.angle.to_radians().sin_cos();
+    let xr = dx * cos + dy * sin;
+    let yr = (-dx * sin + dy * cos) / dab.roundness;
+    let d = xr.hypot(yr);
+    let r = dab.radius;
+    let core = r * hardness as f32 / 100.0;
+    let c = if d <= core {
+        1.0
+    } else if r - core > 0.5 {
+        ((r - d) / (r - core)).clamp(0.0, 1.0)
+    } else {
+        (r - d + 0.5).clamp(0.0, 1.0)
+    };
+    c * dab.opacity
+}
+
 /// One anchor of a Bézier path — Photoshop's path point: its position
 /// and optional handles for the curve entering (`in_handle`) and leaving
 /// (`out_handle`) it, both absolute pixel coordinates; `None` on a side
@@ -10093,6 +10275,33 @@ impl Document {
         color: [u8; 4],
         spacing: u32,
     ) -> Result<Option<Rect>, String> {
+        self.tip_stroke_inner(id, points, color, spacing, None)
+    }
+
+    /// [`Self::tip_stroke`] under Brush Settings: the tip stamped where
+    /// [`dab_plan`] puts the dabs (spacing as a percent of the tip's
+    /// width), each stamp scaled by its dab's size, turned by its angle
+    /// and squashed to its roundness (inverse-mapped, nearest sample of
+    /// the tip), at its opacity. The `spacing` in pixels is unused then.
+    pub fn tip_stroke_dynamic(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        color: [u8; 4],
+        dynamics: &BrushDynamics,
+    ) -> Result<Option<Rect>, String> {
+        dynamics.validate()?;
+        self.tip_stroke_inner(id, points, color, 1, Some(dynamics))
+    }
+
+    fn tip_stroke_inner(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        color: [u8; 4],
+        spacing: u32,
+        dynamics: Option<&BrushDynamics>,
+    ) -> Result<Option<Rect>, String> {
         let tip = self
             .brush_tip
             .clone()
@@ -10133,21 +10342,52 @@ impl Document {
         let (half_w, half_h) = (tip.width as i64 / 2, tip.height as i64 / 2);
         let mut coverage: std::collections::HashMap<(i64, i64), f32> =
             std::collections::HashMap::new();
-        for (sx, sy) in stamps {
-            let (cx, cy) = (sx.floor() as i64, sy.floor() as i64);
-            for ty in 0..tip.height as i64 {
-                for tx in 0..tip.width as i64 {
-                    let v = tip.values[(ty * tip.width as i64 + tx) as usize];
-                    if v <= 0.0 {
-                        continue;
+        if let Some(dynamics) = dynamics {
+            let base_radius = tip.width.max(tip.height) as f32 / 2.0;
+            for dab in dab_plan(points, base_radius, dynamics) {
+                let scale = dab.radius / base_radius;
+                let reach = (base_radius * scale * 1.5).ceil() as i64 + 1;
+                let (cx, cy) = (dab.x.floor() as i64, dab.y.floor() as i64);
+                let (sin, cos) = dab.angle.to_radians().sin_cos();
+                for py in (cy - reach).max(0)..(cy + reach + 1).min(height) {
+                    for px in (cx - reach).max(0)..(cx + reach + 1).min(width) {
+                        // Inverse-map the pixel into the tip's own frame.
+                        let (dx, dy) = ((px - cx) as f32, (py - cy) as f32);
+                        let xr = (dx * cos + dy * sin) / scale;
+                        let yr = (-dx * sin + dy * cos) / (scale * dab.roundness);
+                        let tx = (xr + half_w as f32).round() as i64;
+                        let ty = (yr + half_h as f32).round() as i64;
+                        if tx < 0 || ty < 0 || tx >= tip.width as i64 || ty >= tip.height as i64 {
+                            continue;
+                        }
+                        let v = tip.values[(ty * tip.width as i64 + tx) as usize] * dab.opacity;
+                        if v <= 0.0 {
+                            continue;
+                        }
+                        let slot = coverage.entry((px, py)).or_insert(0.0);
+                        if v > *slot {
+                            *slot = v;
+                        }
                     }
-                    let (px, py) = (cx - half_w + tx, cy - half_h + ty);
-                    if px < 0 || py < 0 || px >= width || py >= height {
-                        continue;
-                    }
-                    let slot = coverage.entry((px, py)).or_insert(0.0);
-                    if v > *slot {
-                        *slot = v;
+                }
+            }
+        } else {
+            for (sx, sy) in stamps {
+                let (cx, cy) = (sx.floor() as i64, sy.floor() as i64);
+                for ty in 0..tip.height as i64 {
+                    for tx in 0..tip.width as i64 {
+                        let v = tip.values[(ty * tip.width as i64 + tx) as usize];
+                        if v <= 0.0 {
+                            continue;
+                        }
+                        let (px, py) = (cx - half_w + tx, cy - half_h + ty);
+                        if px < 0 || py < 0 || px >= width || py >= height {
+                            continue;
+                        }
+                        let slot = coverage.entry((px, py)).or_insert(0.0);
+                        if v > *slot {
+                            *slot = v;
+                        }
                     }
                 }
             }
@@ -16899,6 +17139,35 @@ impl Document {
         radius: f32,
         stroke: Stroke<'_>,
     ) -> Result<Option<Rect>, String> {
+        self.stroke_inner(id, points, radius, stroke, None)
+    }
+
+    /// [`Self::stroke`] laid down dab by dab under `dynamics` (Brush
+    /// Settings) instead of as continuous capsules: the same tools, the
+    /// same per-pixel arithmetic, the coverage coming from [`dab_plan`]
+    /// and [`dab_coverage`] -- each pixel's the greatest any dab gives it,
+    /// times the selection's. Errors as `stroke` does, plus for settings
+    /// out of range.
+    pub fn stroke_dynamic(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke<'_>,
+        dynamics: &BrushDynamics,
+    ) -> Result<Option<Rect>, String> {
+        dynamics.validate()?;
+        self.stroke_inner(id, points, radius, stroke, Some(dynamics))
+    }
+
+    fn stroke_inner(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke<'_>,
+        dynamics: Option<&BrushDynamics>,
+    ) -> Result<Option<Rect>, String> {
         if points.is_empty() {
             return Ok(None);
         }
@@ -17012,13 +17281,17 @@ impl Document {
             min_y = min_y.min(y);
             max_y = max_y.max(y);
         }
-        // The stroke's bounding box, expanded by the brush radius and clamped
-        // to the document — painting off the edge of the canvas is clipped,
-        // not an error.
-        let x0 = (min_x - radius).floor().max(0.0) as u32;
-        let y0 = (min_y - radius).floor().max(0.0) as u32;
-        let x1 = ((max_x + radius).ceil().max(0.0) as u32).min(width);
-        let y1 = ((max_y + radius).ceil().max(0.0) as u32).min(height);
+        // The stroke's bounding box, expanded by the brush radius (and how
+        // far scatter can throw a dab) and clamped to the document —
+        // painting off the edge of the canvas is clipped, not an error.
+        let reach = radius
+            + dynamics.map_or(0.0, |d| {
+                d.scatter as f32 / 100.0 * 2.0 * radius * if d.both_axes { 2.0 } else { 1.0 } + 1.0
+            });
+        let x0 = (min_x - reach).floor().max(0.0) as u32;
+        let y0 = (min_y - reach).floor().max(0.0) as u32;
+        let x1 = ((max_x + reach).ceil().max(0.0) as u32).min(width);
+        let y1 = ((max_y + reach).ceil().max(0.0) as u32).min(height);
         if x0 >= x1 || y0 >= y1 {
             return Ok(None);
         }
@@ -17032,20 +17305,47 @@ impl Document {
         };
 
         let mut coverage = vec![0f32; box_width * box_height];
-        for (a, b) in segments {
-            for row in 0..box_height {
-                let cy = (y0 as usize + row) as f32 + 0.5;
-                for col in 0..box_width {
-                    let cx = (x0 as usize + col) as f32 + 0.5;
-                    let distance = point_segment_distance(cx, cy, a, b);
-                    // A soft 1px edge rather than a hard aliased circle.
-                    let mut c = (radius - distance + 0.5).clamp(0.0, 1.0);
-                    if let Some(selection) = &selection {
-                        c *= selection.coverage(cx, cy);
+        if let Some(dynamics) = dynamics {
+            for dab in dab_plan(points, radius, dynamics) {
+                let r = dab.radius + 1.0;
+                let row_range = ((dab.y - r).floor().max(y0 as f32) as usize)
+                    ..(((dab.y + r).ceil().max(0.0) as usize).min(y1 as usize));
+                let col_range = ((dab.x - r).floor().max(x0 as f32) as usize)
+                    ..(((dab.x + r).ceil().max(0.0) as usize).min(x1 as usize));
+                for py in row_range {
+                    for px in col_range.clone() {
+                        let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                        let mut c = dab_coverage(&dab, dynamics.hardness, cx, cy);
+                        if c <= 0.0 {
+                            continue;
+                        }
+                        if let Some(selection) = &selection {
+                            c *= selection.coverage(cx, cy);
+                        }
+                        let slot =
+                            &mut coverage[(py - y0 as usize) * box_width + (px - x0 as usize)];
+                        if c > *slot {
+                            *slot = c;
+                        }
                     }
-                    let slot = &mut coverage[row * box_width + col];
-                    if c > *slot {
-                        *slot = c;
+                }
+            }
+        } else {
+            for (a, b) in segments {
+                for row in 0..box_height {
+                    let cy = (y0 as usize + row) as f32 + 0.5;
+                    for col in 0..box_width {
+                        let cx = (x0 as usize + col) as f32 + 0.5;
+                        let distance = point_segment_distance(cx, cy, a, b);
+                        // A soft 1px edge rather than a hard aliased circle.
+                        let mut c = (radius - distance + 0.5).clamp(0.0, 1.0);
+                        if let Some(selection) = &selection {
+                            c *= selection.coverage(cx, cy);
+                        }
+                        let slot = &mut coverage[row * box_width + col];
+                        if c > *slot {
+                            *slot = c;
+                        }
                     }
                 }
             }
@@ -45713,6 +46013,239 @@ mod tests {
         }
         let id = doc.add_layer("t", &pixels, 12, 12).unwrap();
         (doc, id)
+    }
+
+    #[test]
+    fn a_dynamic_stroke_without_jitter_is_the_capsule_stroke_laid_as_dabs() {
+        let red = [255, 0, 0, 255];
+        let points = [(5.0, 20.0), (35.0, 20.0)];
+        let mut capsule = Document::new(40, 40).unwrap();
+        let a = capsule
+            .add_layer("a", &[0; 40 * 40 * CHANNELS], 40, 40)
+            .unwrap();
+        capsule
+            .stroke(a, &points, 5.0, Stroke::Brush { color: red })
+            .unwrap();
+        let mut dynamic = Document::new(40, 40).unwrap();
+        let b = dynamic
+            .add_layer("b", &[0; 40 * 40 * CHANNELS], 40, 40)
+            .unwrap();
+        let dynamics = BrushDynamics {
+            spacing_percent: 10,
+            ..BrushDynamics::default()
+        };
+        dynamic
+            .stroke_dynamic(b, &points, 5.0, Stroke::Brush { color: red }, &dynamics)
+            .unwrap();
+        let (mut painted_a, mut painted_b, mut interior_equal) = (0, 0, true);
+        for y in 0..40u32 {
+            for x in 0..40u32 {
+                let (pa, pb) = (pixel(&capsule, a, x, y), pixel(&dynamic, b, x, y));
+                painted_a += (pa[3] > 0) as usize;
+                painted_b += (pb[3] > 0) as usize;
+                let inside =
+                    point_segment_distance(x as f32 + 0.5, y as f32 + 0.5, points[0], points[1])
+                        < 3.5;
+                if inside && pa != pb {
+                    interior_equal = false;
+                }
+            }
+        }
+        assert!(interior_equal, "the interior is identical");
+        assert!(
+            (painted_a as i32 - painted_b as i32).abs() * 20 < painted_a as i32,
+            "{painted_a} vs {painted_b}"
+        );
+    }
+
+    #[test]
+    fn brush_settings_jitter_scatter_shape_and_hardness() {
+        let red = [255, 0, 0, 255];
+        let points = [(10.0, 30.0), (50.0, 30.0)];
+        let fresh = || {
+            let mut doc = Document::new(60, 60).unwrap();
+            let id = doc
+                .add_layer("x", &[0; 60 * 60 * CHANNELS], 60, 60)
+                .unwrap();
+            (doc, id)
+        };
+        let painted = |doc: &Document, id: LayerId| -> Vec<(u32, u32)> {
+            (0..60u32)
+                .flat_map(|y| (0..60u32).map(move |x| (x, y)))
+                .filter(|&(x, y)| pixel(doc, id, x, y)[3] > 0)
+                .collect()
+        };
+        // Size jitter: the same seed repeats, another seed differs.
+        let jitter = BrushDynamics {
+            size_jitter: 80,
+            seed: 7,
+            ..BrushDynamics::default()
+        };
+        let (mut d1, i1) = fresh();
+        d1.stroke_dynamic(i1, &points, 6.0, Stroke::Brush { color: red }, &jitter)
+            .unwrap();
+        let (mut d2, i2) = fresh();
+        d2.stroke_dynamic(i2, &points, 6.0, Stroke::Brush { color: red }, &jitter)
+            .unwrap();
+        assert_eq!(d1.layers()[0].pixels, d2.layers()[0].pixels);
+        let (mut d3, i3) = fresh();
+        d3.stroke_dynamic(
+            i3,
+            &points,
+            6.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics { seed: 8, ..jitter },
+        )
+        .unwrap();
+        assert_ne!(d1.layers()[0].pixels, d3.layers()[0].pixels);
+        // Scatter throws dabs off the line.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &points,
+            4.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                scatter: 300,
+                seed: 3,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        assert!(
+            painted(&d, id)
+                .iter()
+                .any(|&(_, y)| (y as f32 - 30.0).abs() > 12.0),
+            "scattered"
+        );
+        // Roundness squashes a dab: a single point at roundness 50, angle 0
+        // paints wider than tall.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &[(30.0, 30.0)],
+            10.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                roundness: 50,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        let wide = (0..60u32)
+            .filter(|&x| pixel(&d, id, x, 29)[3] > 128)
+            .count();
+        let tall = (0..60u32)
+            .filter(|&y| pixel(&d, id, 29, y)[3] > 128)
+            .count();
+        assert!(wide > tall + 6, "wide {wide} tall {tall}");
+        // Angle jitter at 100% with roundness 50 can stand a dab up instead.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &[(30.0, 30.0)],
+            10.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                roundness: 50,
+                angle_jitter: 100,
+                seed: 11,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        let wide2 = (0..60u32)
+            .filter(|&x| pixel(&d, id, x, 29)[3] > 128)
+            .count();
+        assert_ne!(wide, wide2, "the dab turned");
+        // Hardness: a soft dab is solid at its centre and faint near its edge.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &[(30.0, 30.0)],
+            10.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                hardness: 0,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        // The centre pixel's own centre sits 0.7 px from the dab's, so at
+        // hardness 0 even it is a little short of solid.
+        assert!(pixel(&d, id, 30, 30)[3] > 220);
+        let mid = pixel(&d, id, 35, 30)[3];
+        let edge = pixel(&d, id, 38, 30)[3];
+        assert!(mid > 60 && mid < 200 && edge < mid, "mid {mid} edge {edge}");
+        // Opacity jitter with count: still deterministic, still painting.
+        let (mut d, id) = fresh();
+        d.stroke_dynamic(
+            id,
+            &points,
+            4.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                count: 3,
+                count_jitter: 50,
+                opacity_jitter: 100,
+                both_axes: true,
+                scatter: 100,
+                seed: 5,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        assert!(!painted(&d, id).is_empty());
+        // Out-of-range settings are refused.
+        let (mut d, id) = fresh();
+        for bad in [
+            BrushDynamics {
+                spacing_percent: 0,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                roundness: 0,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                hardness: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                count: 0,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                scatter: 1001,
+                ..BrushDynamics::default()
+            },
+        ] {
+            assert!(d
+                .stroke_dynamic(id, &points, 4.0, Stroke::Brush { color: red }, &bad)
+                .is_err());
+        }
+        // A tip under dynamics: a 5x1 horizontal tip turned 90 degrees
+        // (angle jitter 100 with a seed that draws close to a quarter turn
+        // is not something to rely on, so the roundness path is checked
+        // instead): scaled by size jitter it still stamps the tip's shape.
+        let mut d = Document::new(30, 30).unwrap();
+        let mut line = vec![0u8; 30 * 30 * CHANNELS];
+        for x in 10..15 {
+            line[(15 * 30 + x) * CHANNELS..(15 * 30 + x) * CHANNELS + 4]
+                .copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let tip_layer = d.add_layer("tip", &line, 30, 30).unwrap();
+        d.define_brush_tip(tip_layer).unwrap();
+        let target = d
+            .add_layer("paint", &[0; 30 * 30 * CHANNELS], 30, 30)
+            .unwrap();
+        d.tip_stroke_dynamic(target, &[(20.0, 5.0)], red, &BrushDynamics::default())
+            .unwrap();
+        let painted_row: Vec<u32> = (0..30u32)
+            .filter(|&x| pixel(&d, target, x, 5)[3] > 0)
+            .collect();
+        assert_eq!(painted_row.len(), 5, "{painted_row:?}");
+        assert!((0..30u32).all(|y| y == 5 || pixel(&d, target, 20, y)[3] == 0));
     }
 
     #[test]

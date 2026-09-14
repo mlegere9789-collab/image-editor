@@ -20700,6 +20700,65 @@ way, since they are the same bytes.
 One scope cut closes, the one that mattered most for keeping work;
 612/618 unchanged.
 
+## Phase 346 — Brush Settings: dynamics for the brush, the eraser and the tip
+
+The Brush tool has painted continuous capsules since Phase 1, and
+Photoshop's Brush Settings — the panel that makes a brush a brush —
+were the largest scope cut in the painting family: Spacing, Shape
+Dynamics, Scattering, Transfer, the tip's hardness, and for a defined
+tip its scaling, angle and roundness. `BrushDynamics` (document.rs)
+holds them: Spacing as a percent of the diameter; Size Jitter with a
+Minimum Diameter; Angle Jitter; Roundness with its Jitter; Scatter as
+a percent of the diameter, across the stroke's direction and, with
+Both Axes, along it; Count with its Jitter; Opacity Jitter; Hardness;
+and a seed, so every jitter is a draw from the document's own
+`XorShift32` and a stroke is reproducible. `dab_plan` walks the
+polyline and places a dab at the first point and every Spacing of path
+length, stamping each position Count times (less its jitter) with a
+drawn size, angle, roundness, scatter and opacity. `dab_coverage` is
+one dab's coverage of a pixel: the pixel inverse-rotated and squashed
+into the dab's frame, `1` inside the hard core (Hardness percent of
+the radius), a linear fall-off to `0` at the radius, and at full
+hardness the capsule stroke's own half-pixel anti-aliasing — so with
+every jitter at zero, Count 1 and Hardness 100 a dynamic stroke is the
+plain stroke laid as overlapping dabs. `stroke_dynamic` runs every
+brush-family tool this way (the same per-pixel arithmetic, the
+coverage's source swapped; `stroke` itself is untouched), and
+`tip_stroke_dynamic` stamps a defined tip where the plan puts it, each
+stamp inverse-mapped through its dab's scale, angle and roundness with
+a nearest sample of the tip. The client's **Brush Settings…** dialog
+carries the eleven sliders and the Both Axes switch; a **Brush
+Settings** checkbox in the options bar routes the Brush, the Eraser and
+the tip through the dynamic commands with a fresh seed per segment.
+
+**Verified two ways.** `cargo test`: 1819 total (1812 lib + 7
+pipeline, up from 1817) — a dynamic stroke with no jitter at 10%
+spacing has an interior byte-identical to the capsule stroke's and a
+painted area within 5% of it; size jitter repeats under the same seed
+and differs under another; Scatter 300% paints pixels more than twelve
+pixels off the line; a single dab at Roundness 50 paints wider than
+tall, and at Angle Jitter 100 turns; a dab at Hardness 0 is near-solid
+at its centre, half-covered midway and fainter at the edge; Count with
+Count, Opacity and Both-Axes scatter jitter still paints
+deterministically; spacing 0, roundness 0, hardness 101, count 0 and
+scatter 1001 are refused; and a 5×1 defined tip stamped under default
+dynamics paints exactly five pixels on its row and none off it. The
+capsule path's bounding box is exactly what it was (the first cut
+widened it by a pixel and four existing tests caught it). `cargo fmt
+--check`, `cargo clippy --all-targets -- -D warnings` and `npm run
+build` clean.
+
+Honest limitations: each pointer segment seeds its own dab plan, so
+the spacing does not carry across segment boundaries (a dab at every
+segment's first point); Dual Brush, Texture, Color Dynamics, Wet Edges
+and Airbrush build-up are not offered; Paint Symmetry applies to the
+capsule strokes, not the dynamic ones; and the tip's dynamic stamp is
+a nearest-sample inverse map, which at large scales shows the tip's own
+pixels.
+
+Brush Settings close the painting family's largest scope cut and the
+tip's scaling, angle, roundness and scatter; 612/618 unchanged.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

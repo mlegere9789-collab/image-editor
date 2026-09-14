@@ -393,6 +393,23 @@ export type ColorRange =
 
 /** Mirrors `ReferencePoint` / `ContentAwareScale` in
  * src-tauri/src/document.rs: Edit > Content-Aware Scale's options bar. */
+/** Mirrors `BrushDynamics` in src-tauri/src/document.rs: Photoshop's Brush Settings. */
+export type BrushDynamics = {
+  spacingPercent: number;
+  sizeJitter: number;
+  minDiameter: number;
+  angleJitter: number;
+  roundness: number;
+  roundnessJitter: number;
+  scatter: number;
+  bothAxes: boolean;
+  count: number;
+  countJitter: number;
+  opacityJitter: number;
+  hardness: number;
+  seed: number;
+};
+
 /** Mirrors `Interpolation` in src-tauri/src/document.rs: a transform's resampling. */
 export type Interpolation = "nearest" | "bilinear" | "bicubic";
 
