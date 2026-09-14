@@ -153,6 +153,8 @@ pub struct Document {
     /// (Generate Similar) to re-draw with a new seed. Travels with the
     /// document through undo/redo like `last_transform`.
     last_generation: Option<LastGeneration>,
+    /// Generative Layers' records, by layer id -- see [`GeneratedLayer`].
+    generated: Vec<GeneratedLayer>,
     /// The pattern most recently captured by `define_pattern` (Edit >
     /// Define Pattern), for pattern fills to tile. Photoshop keeps patterns
     /// as application-wide presets; here the one defined pattern lives on
@@ -4230,6 +4232,20 @@ pub enum MoveDirection {
     Down,
 }
 
+/// Generative Layers: what a layer Generate Image made was made from,
+/// so it can be drawn again on demand -- the prompt, the seed, and the
+/// sampler settings. Transient, like [`LastGeneration`]: the project
+/// format keeps pixels and layer properties, not generation records.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedLayer {
+    pub id: LayerId,
+    pub prompt: String,
+    pub seed: u64,
+    pub steps: usize,
+    pub guidance: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentView {
@@ -4246,6 +4262,9 @@ pub struct DocumentView {
     /// generative fill or expand happened on this canvas at this size and
     /// its layer still exists.
     pub can_generate_similar: bool,
+    /// Every layer Generate Image made that still exists, with what it
+    /// was made from -- the layers Regenerate can redraw.
+    pub generated_layers: Vec<GeneratedLayer>,
     /// Whether `transform_again` has a transform to repeat right now.
     pub can_transform_again: bool,
     /// Whether `define_pattern` has captured a pattern for fills to tile.
@@ -4313,6 +4332,7 @@ impl Document {
             last_selection: None,
             last_transform: None,
             last_generation: None,
+            generated: Vec::new(),
             pattern: None,
             brush_tip: None,
             current_path: None,
@@ -4367,6 +4387,12 @@ impl Document {
                 last.mask.len() == self.width as usize * self.height as usize
                     && self.layers.iter().any(|layer| layer.id == last.id)
             }),
+            generated_layers: self
+                .generated
+                .iter()
+                .filter(|g| self.layers.iter().any(|l| l.id == g.id))
+                .cloned()
+                .collect(),
             can_transform_again: self.last_transform.is_some(),
             has_pattern: self.pattern.is_some(),
             saved_selections: self.saved_selection_names(),
@@ -7922,13 +7948,15 @@ impl Document {
 
     /// Add `source` (an RGBA8 buffer of `source_width` x `source_height`) as a new
     /// top layer, pasted at the origin and clipped or padded to document size.
-    pub fn add_layer(
-        &mut self,
-        name: impl Into<String>,
+    /// A `source_width × source_height` RGBA image at the canvas's top-left
+    /// corner in a canvas-sized buffer, clipped to the canvas, transparent
+    /// elsewhere -- how [`Self::add_layer`] places what it is given.
+    fn placed_on_canvas(
+        &self,
         source: &[u8],
         source_width: u32,
         source_height: u32,
-    ) -> Result<LayerId, String> {
+    ) -> Result<Vec<u8>, String> {
         let expected = source_width as usize * source_height as usize * CHANNELS;
         if source.len() != expected {
             return Err(format!(
@@ -7936,7 +7964,6 @@ impl Document {
                 source.len()
             ));
         }
-
         let mut pixels = vec![0u8; self.buffer_len()];
         let copy_width = source_width.min(self.width) as usize * CHANNELS;
         let copy_height = source_height.min(self.height) as usize;
@@ -7947,6 +7974,86 @@ impl Document {
             let dst = row * dst_stride;
             pixels[dst..dst + copy_width].copy_from_slice(&source[src..src + copy_width]);
         }
+        Ok(pixels)
+    }
+
+    /// Generate Image: this project's own text-conditioned diffusion model
+    /// draws `prompt` at 64×64 from `seed` (see [`crate::generate`]), this
+    /// project's own Super Zoom takes it to 192×192, and the result is a
+    /// new top layer named after the prompt at the canvas's top-left --
+    /// remembered as a generated layer so [`Self::regenerate_layer`] can
+    /// draw it again. Returns the layer's id. Errors as `generate_rgb`
+    /// does.
+    pub fn generate_image(
+        &mut self,
+        prompt: &str,
+        seed: u64,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<LayerId, String> {
+        let upscaled = Self::generated_pixels(prompt, seed, steps, guidance)?;
+        let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
+        let name: String = prompt.trim().chars().take(24).collect();
+        let id = self.add_layer(name, &upscaled, side, side)?;
+        self.generated.push(GeneratedLayer {
+            id,
+            prompt: prompt.trim().to_string(),
+            seed,
+            steps,
+            guidance,
+        });
+        Ok(id)
+    }
+
+    /// The 192×192 RGBA a generation produces: the model's 64×64 RGB,
+    /// made opaque, through Super Zoom.
+    fn generated_pixels(
+        prompt: &str,
+        seed: u64,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<Vec<u8>, String> {
+        let rgb = crate::generate::generate_rgb(prompt, seed, steps, guidance)?;
+        let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
+        for p in rgb.chunks_exact(3) {
+            rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
+        }
+        let side = crate::generate::IMAGE_SIZE as u32;
+        crate::super_resolution::upscale_rgba(&rgba, side, side)
+    }
+
+    /// Generative Layers: draws generated layer `id` again -- at `seed`,
+    /// or at the seed after its last one -- with its own prompt and
+    /// settings, replacing its pixels and keeping everything else about
+    /// the layer. Errors for a layer Generate Image did not make, a
+    /// locked layer, or as `generate_rgb` does.
+    pub fn regenerate_layer(&mut self, id: LayerId, seed: Option<u64>) -> Result<(), String> {
+        let position = self
+            .generated
+            .iter()
+            .position(|g| g.id == id)
+            .ok_or_else(|| "That layer was not made by Generate Image.".to_string())?;
+        if self.layer(id)?.locked {
+            return Err(format!("Layer \"{}\" is locked.", self.layer(id)?.name));
+        }
+        let record = self.generated[position].clone();
+        let seed = seed.unwrap_or(record.seed.wrapping_add(1));
+        let upscaled = Self::generated_pixels(&record.prompt, seed, record.steps, record.guidance)?;
+        let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
+        let pixels = self.placed_on_canvas(&upscaled, side, side)?;
+        self.layer_mut(id)?.pixels = pixels;
+        self.generated[position].seed = seed;
+        Ok(())
+    }
+
+    pub fn add_layer(
+        &mut self,
+        name: impl Into<String>,
+        source: &[u8],
+        source_width: u32,
+        source_height: u32,
+    ) -> Result<LayerId, String> {
+        let pixels = self.placed_on_canvas(source, source_width, source_height)?;
 
         let id = self.next_id;
         self.next_id += 1;
@@ -35602,6 +35709,49 @@ mod tests {
         let (mut doc, id) = object_scene();
         doc.select_subject_with(SelectionMode::New, id, 0).unwrap();
         assert_eq!(selection_grid(&doc), OBJECT_GRID);
+    }
+
+    #[test]
+    fn generate_image_makes_a_192_layer_and_regenerates_it() {
+        let mut doc = Document::new(200, 200).unwrap();
+        // Two steps keep the (debug-build) test affordable; the placement,
+        // the record and the regeneration are what is under test.
+        let id = doc.generate_image("  a lake at dawn ", 5, 2, 2.0).unwrap();
+        assert_eq!(doc.layers().len(), 1);
+        assert_eq!(doc.layers()[0].name, "a lake at dawn");
+        assert_eq!(pixel(&doc, id, 10, 10)[3], 255, "inside the 192x192 image");
+        assert_eq!(pixel(&doc, id, 191, 191)[3], 255);
+        assert_eq!(pixel(&doc, id, 192, 10), [0, 0, 0, 0], "outside it");
+        assert_eq!(pixel(&doc, id, 10, 195), [0, 0, 0, 0]);
+        let view = doc.view();
+        assert_eq!(view.generated_layers.len(), 1);
+        assert_eq!(view.generated_layers[0].prompt, "a lake at dawn");
+        assert_eq!(view.generated_layers[0].seed, 5);
+        let before = doc.layer(id).unwrap().pixels.clone();
+        doc.regenerate_layer(id, None).unwrap();
+        assert_ne!(
+            doc.layer(id).unwrap().pixels,
+            before,
+            "the next seed draws differently"
+        );
+        assert_eq!(doc.view().generated_layers[0].seed, 6);
+        assert_eq!(pixel(&doc, id, 192, 10), [0, 0, 0, 0]);
+        // Not a generated layer, a locked one, and a bad prompt are refused.
+        let plain = doc.add_layer("plain", &[0, 0, 0, 0], 1, 1).unwrap();
+        assert!(doc
+            .regenerate_layer(plain, None)
+            .unwrap_err()
+            .contains("not made"));
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .regenerate_layer(id, Some(9))
+            .unwrap_err()
+            .contains("locked"));
+        assert!(doc.generate_image("  ", 1, 2, 2.0).is_err());
+        // A deleted generated layer drops out of the view's list.
+        doc.set_locked(id, false).unwrap();
+        doc.remove_layer(id).unwrap();
+        assert!(doc.view().generated_layers.is_empty());
     }
 
     #[test]

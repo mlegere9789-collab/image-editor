@@ -20340,6 +20340,101 @@ Refine Hair flips to shipped (605/618). What remains open: the seven
 generative rows waiting on the model training in the background
 (Phase C1), and the tabled pair with its four gated headers.
 
+## Phase 341 — Generate Image, Generative Layers, AI Model Picker
+
+Phase C1 of `docs/PLAN_TO_100.md` lands its first three rows, on the
+model that has been training in the background since Phase 334's
+successor commit: a class- and caption-conditional denoising diffusion
+model (Ho, Jain & Abbeel 2020; cosine schedule, Nichol & Dhariwal
+2021; classifier-free guidance, Ho & Salimans 2022) at 64×64, 9.7M
+parameters, trained from random initialisation on this project's own
+787 individually-licensed landscape photographs, conditioned on their
+seven real categories and a bag-of-words over their real titles. The
+bundled `models/generate.onnx` is the EMA weights at step 4,500 of a
+60,000-step run — the checkpoint current when this phase was built —
+and will be replaced by the finished model when the run ends; every
+mechanism below is the same either way.
+
+Getting the model to run on the device took three real fixes, each
+found by a test rather than assumed. `tract` loads and runs the graph
+(the concern that had kept these rows open), but its first output was
+1.8% off PyTorch's on a fixed input. Bisecting op by op — each of the
+model's operators exported alone and compared — cleared attention,
+convolution, the embedding gather and the ×2 repeat to 1e-6 and
+pinned the whole error on GroupNorm as torch exports it (an
+`InstanceNormalization` over a reshaped tensor), which `tract`
+evaluates up to 0.095 apart from torch. The export now spells
+GroupNorm out as reshape, mean, variance, normalise, scale and shift,
+and the parity test passes at 2e-3. Two further changes keep other
+runtimes out of the numbers: the timestep's sinusoidal embedding is
+computed in Rust in f64 and handed to the graph (no runtime's own
+cos/sin of arguments up to 1000), and the nearest ×2 upsample is a
+`repeat_interleave` rather than a `Resize`, whose coordinate rounding
+is where runtimes quietly differ. The graph takes a batch of two —
+the conditioned and unconditioned passes — so guidance costs one model
+run per step.
+
+`src-tauri/src/generate.rs` reimplements the trainer's prompt reading
+exactly (`tokenize`: runs of ASCII letters, three or more, minus the
+same stopwords; `caption_vector` over the bundled `vocab.json`;
+`category_of_prompt`), its cosine schedule in f64, its DDIM step
+schedule, a seeded standard-normal start (splitmix64, Box–Muller), and
+the DDIM update with guidance. `Document::generate_image` draws the
+prompt at 64×64, makes it opaque, takes it through this project's own
+Super Zoom to 192×192 and adds it as a new top layer named after the
+prompt, at the canvas's top-left, and records a `GeneratedLayer`
+(prompt, seed, steps, guidance) — `DocumentView.generated_layers`
+lists those that still exist. `Document::regenerate_layer` is
+Generative Layers: the same prompt and settings at the next seed (or a
+given one), the pixels replaced and everything else about the layer
+kept, a locked layer refused. `add_layer`'s placement was extracted as
+`placed_on_canvas` so both share it. The **Generate Image…** dialog
+takes the prompt, a seed (with Random), steps (2–100) and guidance
+(0–5), and — through a new `understand_prompt` command — says which
+scene kind and which vocabulary words the model will actually hear,
+so a prompt full of words it has never seen is not a mystery. The
+**AI Model Picker** is the real choice between real models: the
+on-device diffusion model or the Generative AI Endpoint, in External
+Services and in the dialog; with the endpoint chosen, Generate Image
+sends `{ prompt, width, height, seed }` through the contract the
+prompt-driven Generative Fill already speaks. **Regenerate (AI)** sits
+beside Generate Similar (AI) and lights up for a generated layer.
+
+**Verified three ways.** `cargo test`: 1811 total (1804 lib + 7
+pipeline, up from 1806) — `generate.rs`: the tokenizer, category and
+caption against the trainer's rules; the schedule against torch's
+values at steps 0, 500 and 999 and the DDIM step list; the noise's
+mean, variance and determinism; **tract's evaluation of the bundled
+graph against PyTorch's on a fixed input** (`models/generate_check.json`,
+the first 64 outputs and the mean absolute output, within 2e-3);
+and a 2-step generation that is deterministic per seed, differs
+between seeds and is an image rather than a flat colour. `document.rs`:
+Generate Image makes a 192×192 opaque region at the top-left of a
+200×200 canvas with nothing outside it, records the prompt and seed,
+Regenerate at the next seed changes the pixels and advances the
+record, a plain layer, a locked layer and a blank prompt are refused,
+and a deleted generated layer leaves the list. The built frontend in
+Chromium: the model picker offers exactly the two models, and the
+Generate Image… and Regenerate (AI) buttons are present and correctly
+disabled with no document. `cargo fmt --check`, `cargo clippy
+--all-targets -- -D warnings` and `npm run build` clean.
+
+Honest measurements and limitations: in the debug build the tests run
+in, one model run (both passes) takes roughly 8 seconds, so a 25-step
+generation is a few minutes there; a release build is where the app
+runs and is typically an order of magnitude faster — measured and
+recorded in a later phase, once the build cache the disk can hold
+allows a release compile. The model draws landscapes of seven kinds
+at 64×64 native resolution, upscaled ×3 by a classical-prior network:
+a real text-conditioned generator, small, and not Firefly. The
+training run itself stopped once during this phase — the disk filled
+under a cargo build cache and the trainer's log write failed — and
+was resumed from its checkpoint; its 39 MB of weights are bundled
+into the binary like every other model here.
+
+Generate Image, Generative Layers and AI Model Picker flip to shipped
+(608/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

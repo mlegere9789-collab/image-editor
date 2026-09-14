@@ -7,6 +7,7 @@ pub mod composite;
 pub mod content_credentials;
 pub mod document;
 pub mod fonts;
+pub mod generate;
 pub mod generative_fill;
 pub mod hdr;
 pub mod icc;
@@ -1118,6 +1119,61 @@ fn content_aware_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapsho
 #[tauri::command]
 fn generative_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.generative_fill(id))
+}
+
+/// Generate Image: this project's own text-conditioned diffusion model,
+/// on the device, as a new top layer -- see `Document::generate_image`.
+#[tauri::command]
+fn generate_image(
+    state: State<'_, AppState>,
+    prompt: String,
+    seed: u64,
+    steps: Option<usize>,
+    guidance: Option<f32>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.generate_image(
+            &prompt,
+            seed,
+            steps.unwrap_or(generate::DEFAULT_STEPS),
+            guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+        )?;
+        Ok(None)
+    })
+}
+
+/// Generative Layers: draw generated layer `id` again at `seed`, or the
+/// seed after its last one.
+#[tauri::command]
+fn regenerate_layer(
+    state: State<'_, AppState>,
+    id: LayerId,
+    seed: Option<u64>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.regenerate_layer(id, seed)?;
+        Ok(None)
+    })
+}
+
+/// What the on-device generative model will hear of a prompt: the
+/// category it falls under and the vocabulary words it uses.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UnderstoodPrompt {
+    category: Option<String>,
+    words: Vec<String>,
+    categories: Vec<String>,
+}
+
+#[tauri::command]
+fn understand_prompt(prompt: String) -> UnderstoodPrompt {
+    let category = generate::category_of_prompt(&prompt);
+    UnderstoodPrompt {
+        category: generate::CATEGORIES.get(category).map(|c| c.to_string()),
+        words: generate::understood_words(&prompt),
+        categories: generate::CATEGORIES.iter().map(|c| c.to_string()).collect(),
+    }
 }
 
 /// Filter > Generate Similar: draw the most recent generative fill or
@@ -7202,6 +7258,9 @@ pub fn run() {
             content_aware_fill,
             generative_fill,
             generate_similar,
+            generate_image,
+            regenerate_layer,
+            understand_prompt,
             transform_selection,
             save_selection,
             load_selection,

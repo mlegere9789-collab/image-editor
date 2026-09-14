@@ -170,7 +170,14 @@ class UNet(nn.Module):
         self.out = nn.Conv2d(ch, 3, 3, padding=1)
 
     def forward(self, x, t, category, caption):
-        emb = self.time_mlp(timestep_embedding(t, 128)) + self.category(category) + self.caption(caption)
+        return self.forward_with_embedding(x, timestep_embedding(t, 128), category, caption)
+
+    def forward_with_embedding(self, x, temb, category, caption):
+        """The forward pass from a precomputed sinusoidal timestep
+        embedding -- what the exported graph takes, so the cos/sin of
+        large arguments is computed by the caller in full precision
+        rather than by whichever runtime evaluates the graph."""
+        emb = self.time_mlp(temb) + self.category(category) + self.caption(caption)
         h = self.inp(x)
         skips = [h]
         for level, blocks in enumerate(self.down):
@@ -185,7 +192,11 @@ class UNet(nn.Module):
             for block in blocks:
                 h = block(torch.cat([h, skips.pop()], dim=1), emb)
             if i < len(self.upsample):
-                h = nn.functional.interpolate(h, scale_factor=2, mode="nearest")
+                # Nearest x2 written as a repeat: the same numbers as
+                # F.interpolate(mode="nearest"), exported as plain reshapes
+                # that every ONNX runtime resolves identically (a Resize op's
+                # coordinate rounding is where runtimes quietly differ).
+                h = h.repeat_interleave(2, dim=2).repeat_interleave(2, dim=3)
                 h = self.upsample[i](h)
         return self.out(nn.functional.silu(self.out_norm(h)))
 

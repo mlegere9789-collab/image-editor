@@ -160,6 +160,9 @@ const LOCK_WORKSPACE_STORAGE_KEY = "legelabs.lockWorkspace";
 // and credential for each, held only in this browser's own localStorage --
 // never sent anywhere but the endpoint the user themselves entered.
 const GENERATIVE_AI_ENDPOINT_STORAGE_KEY = "legelabs.generativeAi.endpoint";
+// AI Model Picker: which real model Generate Image runs -- this
+// project's own on-device diffusion model, or the Generative AI Endpoint.
+const GENERATIVE_MODEL_STORAGE_KEY = "legelabs.generativeAi.model";
 const GENERATIVE_AI_API_KEY_STORAGE_KEY = "legelabs.generativeAi.apiKey";
 const CLOUD_ENDPOINT_STORAGE_KEY = "legelabs.cloud.endpoint";
 const CLOUD_TOKEN_STORAGE_KEY = "legelabs.cloud.token";
@@ -1228,6 +1231,21 @@ export default function App() {
   const [cloudEndpoint, setCloudEndpoint] = useState(() => localStorage.getItem(CLOUD_ENDPOINT_STORAGE_KEY) ?? "");
   const [cloudToken, setCloudToken] = useState(() => localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY) ?? "");
   const [showGenerativeFillDialog, setShowGenerativeFillDialog] = useState(false);
+  const [generativeModel, setGenerativeModel] = useState<"device" | "endpoint">(() =>
+    localStorage.getItem(GENERATIVE_MODEL_STORAGE_KEY) === "endpoint" ? "endpoint" : "device",
+  );
+  // Generate Image: a prompt, a seed and the sampler's settings for the
+  // on-device model (`generate_image`), or the same prompt to the
+  // endpoint; `understood` is what the on-device model will hear of it.
+  const [showGenerateImageDialog, setShowGenerateImageDialog] = useState(false);
+  const [generatePrompt, setGeneratePrompt] = useState("a mountain lake at dawn");
+  const [generateSeed, setGenerateSeed] = useState(1);
+  const [generateSteps, setGenerateSteps] = useState(25);
+  const [generateGuidance, setGenerateGuidance] = useState(2);
+  const [understood, setUnderstood] = useState<{ category: string | null; words: string[]; categories: string[] } | null>(
+    null,
+  );
+  const [generateBusy, setGenerateBusy] = useState(false);
   const [generativeFillPrompt, setGenerativeFillPrompt] = useState("");
   const [generativeFillBusy, setGenerativeFillBusy] = useState(false);
   const [cloudDocumentName, setCloudDocumentName] = useState("untitled");
@@ -3696,8 +3714,70 @@ export default function App() {
     localStorage.setItem(GENERATIVE_AI_API_KEY_STORAGE_KEY, generativeAiApiKey);
     localStorage.setItem(CLOUD_ENDPOINT_STORAGE_KEY, cloudEndpoint);
     localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, cloudToken);
+    localStorage.setItem(GENERATIVE_MODEL_STORAGE_KEY, generativeModel);
     setShowExternalServicesDialog(false);
-  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken]);
+  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken, generativeModel]);
+
+  const understandPrompt = useCallback(async (prompt: string) => {
+    try {
+      setUnderstood(
+        await invoke<{ category: string | null; words: string[]; categories: string[] }>("understand_prompt", { prompt }),
+      );
+    } catch {
+      setUnderstood(null);
+    }
+  }, []);
+
+  // Generate Image: the chosen model draws the prompt as a new top layer
+  // -- on the device through this project's own diffusion model and Super
+  // Zoom (192x192), or through the Generative AI Endpoint's own contract.
+  const generateImage = useCallback(async () => {
+    if (!generatePrompt.trim()) return;
+    if (generativeModel === "device") {
+      await runCommand(
+        "generate_image",
+        { prompt: generatePrompt, seed: generateSeed, steps: generateSteps, guidance: generateGuidance },
+        "top",
+      );
+      setShowGenerateImageDialog(false);
+      return;
+    }
+    if (!generativeAiEndpoint) {
+      setError("The Generative AI Endpoint model needs an endpoint -- set one in Edit > External Services.");
+      return;
+    }
+    setGenerateBusy(true);
+    try {
+      const response = await fetch(generativeAiEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(generativeAiApiKey ? { Authorization: `Bearer ${generativeAiApiKey}` } : {}),
+        },
+        body: JSON.stringify({ prompt: generatePrompt, width: 192, height: 192, seed: generateSeed }),
+      });
+      if (!response.ok) throw new Error(`The provider returned ${response.status}.`);
+      const body = (await response.json()) as { image?: string };
+      if (!body.image) throw new Error("The provider's response had no image field.");
+      const binary = atob(body.image);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      await runCommand("add_layer_from_bytes", { name: generatePrompt.slice(0, 24), bytes: Array.from(bytes) }, "top");
+      setShowGenerateImageDialog(false);
+    } catch (err) {
+      setError(`Generate Image failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setGenerateBusy(false);
+    }
+  }, [generatePrompt, generativeModel, generateSeed, generateSteps, generateGuidance, generativeAiEndpoint, generativeAiApiKey, runCommand]);
+
+  // Generative Layers: the selected generated layer drawn again at the
+  // next seed, its prompt and settings remembered by the document.
+  const selectedGeneratedLayer = document?.generatedLayers.find((g) => g.id === selectedId) ?? null;
+  const regenerateLayer = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("regenerate_layer", { id: selectedId, seed: null });
+  }, [runCommand, selectedId]);
 
   // Filter > Generative Fill: a settings-gated call to a user-configured
   // image-generation endpoint. This app defines the contract it speaks --
@@ -9502,6 +9582,25 @@ export default function App() {
             title="Filter > Generative Fill: a settings-gated call to a user-configured image-generation endpoint"
           >
             Generative Fill…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => {
+              setShowGenerateImageDialog(true);
+              void understandPrompt(generatePrompt);
+            }}
+            disabled={busy || !hasDocument}
+            title="Generate Image: a text prompt drawn by this project's own on-device diffusion model (or the Generative AI Endpoint) as a new layer"
+          >
+            Generate Image…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void regenerateLayer()}
+            disabled={busy || selectedGeneratedLayer === null}
+            title="Generative Layers: draw the selected generated layer again at the next seed, from its own prompt and settings"
+          >
+            Regenerate (AI)
           </button>
           <button
             className="button button--quiet"
@@ -17359,6 +17458,111 @@ export default function App() {
         </div>
       )}
 
+      {showGenerateImageDialog && (
+        <div className="modal-overlay" onClick={() => setShowGenerateImageDialog(false)} role="presentation">
+          <div
+            className="modal modal--panel"
+            role="dialog"
+            aria-label="Generate Image"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Generate Image</h2>
+            <p className="modal__hint">
+              {generativeModel === "device"
+                ? "This project's own text-conditioned diffusion model, trained here from scratch on 787 licensed landscape photographs, draws the prompt at 64×64 and Super Zoom takes it to 192×192, placed as a new layer at the top-left. It knows seven kinds of scene and the words of those photographs' titles; it is a real generator, and it is not Firefly."
+                : "The prompt goes to the Generative AI Endpoint configured in External Services as { prompt, width, height, seed }, expecting { image: \"<base64 PNG>\" } back, placed as a new layer."}
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Prompt</span>
+              <input
+                type="text"
+                value={generatePrompt}
+                onChange={(event) => {
+                  setGeneratePrompt(event.target.value);
+                  void understandPrompt(event.target.value);
+                }}
+                style={{ flex: 1 }}
+              />
+            </label>
+            {generativeModel === "device" && understood && (
+              <p className="modal__hint">
+                The model will hear:{" "}
+                {understood.category ? <strong>{understood.category}</strong> : <em>no scene kind</em>}
+                {understood.words.length > 0 ? ` — ${understood.words.join(", ")}` : " — none of these words are in its vocabulary"}
+                . Scene kinds it knows: {understood.categories.join(", ")}.
+              </p>
+            )}
+            <label className="control control--row">
+              <span className="control__label">Seed</span>
+              <input
+                type="number"
+                min={0}
+                value={generateSeed}
+                onChange={(event) => setGenerateSeed(Math.max(0, Math.round(Number(event.target.value))))}
+              />
+              <button
+                className="button button--quiet"
+                onClick={() => setGenerateSeed(Math.floor(Math.random() * 1_000_000))}
+                title="Pick a random seed"
+              >
+                Random
+              </button>
+              <label className="control control--row">
+                <span className="control__label">Model</span>
+                <select
+                  value={generativeModel}
+                  onChange={(event) => setGenerativeModel(event.target.value as "device" | "endpoint")}
+                >
+                  <option value="device">On-device diffusion</option>
+                  <option value="endpoint">Generative AI Endpoint</option>
+                </select>
+              </label>
+            </label>
+            {generativeModel === "device" && (
+              <label className="control control--row">
+                <span className="control__label">
+                  Steps <span className="control__value">{generateSteps}</span>
+                </span>
+                <input
+                  type="range"
+                  min={2}
+                  max={100}
+                  value={generateSteps}
+                  onChange={(event) => setGenerateSteps(Number(event.target.value))}
+                />
+                <span className="control__label">
+                  Guidance <span className="control__value">{generateGuidance.toFixed(1)}</span>
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={0.5}
+                  value={generateGuidance}
+                  onChange={(event) => setGenerateGuidance(Number(event.target.value))}
+                />
+              </label>
+            )}
+            {generativeModel === "endpoint" && !generativeAiEndpoint && (
+              <p className="modal__hint">No provider endpoint is configured — set one in External Services first.</p>
+            )}
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowGenerateImageDialog(false)} title="Cancel">
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => void generateImage()}
+                disabled={busy || generateBusy || !generatePrompt.trim() || (generativeModel === "endpoint" && !generativeAiEndpoint)}
+                title={generativeModel === "device" ? "Generate on this device (about a step per second)" : "Generate through the endpoint"}
+              >
+                Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showGenerativeFillDialog && (
         <div className="modal-overlay" onClick={() => setShowGenerativeFillDialog(false)} role="presentation">
           <div
@@ -17453,6 +17657,17 @@ export default function App() {
                 onChange={(event) => setGenerativeAiApiKey(event.target.value)}
                 style={{ flex: 1 }}
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">AI Model</span>
+              <select
+                value={generativeModel}
+                onChange={(event) => setGenerativeModel(event.target.value as "device" | "endpoint")}
+                style={{ flex: 1 }}
+              >
+                <option value="device">On-device diffusion (this project&apos;s own model)</option>
+                <option value="endpoint">Generative AI Endpoint (above)</option>
+              </select>
             </label>
             <label className="control control--row">
               <span className="control__label">Cloud Documents Endpoint</span>

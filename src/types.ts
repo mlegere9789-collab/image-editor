@@ -64,6 +64,9 @@ export type ApplyBlend =
   | { kind: "add"; scale: number; offset: number }
   | { kind: "subtract"; scale: number; offset: number };
 
+/** Mirrors `GeneratedLayer` in src-tauri/src/document.rs. */
+export type GeneratedLayer = { id: number; prompt: string; seed: number; steps: number; guidance: number };
+
 /** Mirrors `TextLayer` in src-tauri/src/document.rs: a text layer's type. */
 export type TextLayer = {
   text: string;
@@ -185,6 +188,8 @@ export type DocumentView = {
   canReselect: boolean;
   /** Whether Filter > Generate Similar has a generative fill/expand to vary right now. */
   canGenerateSimilar: boolean;
+  /** Mirrors `GeneratedLayer`: the layers Generate Image made, with what they were made from. */
+  generatedLayers: GeneratedLayer[];
   /** Whether Edit > Transform > Again has a transform to repeat right now. */
   canTransformAgain: boolean;
   /** Whether Edit > Define Pattern has captured a pattern for fills to tile. */
