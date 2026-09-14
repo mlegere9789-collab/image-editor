@@ -19729,6 +19729,117 @@ still unchecked in it now needs either real text-to-image generation
 (the compute/data wall from Phase 331's own research note) or a real
 hosted service this project has no path to.
 
+## Phase 333 — Canvas Size, Generative Expand
+
+Phase 331 left Generative Expand unchecked for a reason that had nothing
+to do with the model: there was no way to make the canvas bigger. Every
+layer in this app is document-sized, and the only two operations that
+ever changed the document's dimensions — `crop` and `rotate_document_90`
+— can only shrink or swap them. So this phase builds the real
+prerequisite first, Image > Canvas Size, as a feature in its own right
+(it isn't a row in the 618-item audit, so it moves no count on its own),
+and then puts Generative Expand on top of it.
+
+`Document::resize_canvas(new_width, new_height, anchor)` follows the
+exact shape of `crop` and `rotate_document_90`: every layer's pixels and
+mask are rebuilt at the new size, the selection and everything else
+those two clear is cleared, and guides ride along. The anchor is the
+nine-point `ReferencePoint` grid Content-Aware Scale already had, with
+one small private `CanvasPlacement` owning the arithmetic so the resize
+and the expand share one implementation: the old content's top-left
+lands at `dx` = 0 for a left-column anchor, `(new − old) / 2` for a
+centre-column one, `new − old` for a right-column one, rows likewise; a
+negative offset is a crop on that side, so a smaller size with a
+`Center` anchor is a centred crop. `/ 2` is Rust's truncating division,
+and that is asserted, not assumed: shrinking 3×3 to 2×2 about the centre
+gives `dx = (2 − 3) / 2 = 0`, keeping the near side, and a test pins
+exactly that. Added pixels are transparent; a layer mask's added area is
+255 (revealing); the placement `Rect` is returned so a caller knows
+where the old content sits. The same size as now is a no-op that
+touches nothing — not even the selection.
+
+Building it surfaced a real, pre-existing bug, fixed here rather than
+worked around: neither `crop` nor `rotate_document_90` ever remapped a
+smart object's embedded `source`, only its pixels. `render_smart_object`
+copies that source straight back over the layer's pixels on the next
+transform or Smart Filter edit, so a smart object that had been cropped
+or rotated would have been handed a buffer of the wrong size. All three
+dimension-changing operations now go through one `Layer::remap_rgba`,
+which rebuilds pixels and source together, and `crop` and
+`rotate_document_90` each gained a regression test proving a smart
+object survives them.
+
+`Document::generative_expand(id, new_width, new_height, anchor)` is
+then the same real on-device model Generative Fill runs, over a whole
+added border at once: the old content's placement is computed, every
+pixel of layer `id` outside it is the mask, the model fills it, and the
+added area is made opaque — the model never touches alpha and the new
+pixels start transparent, so without that the generated content would
+be invisible. Every other layer just gets the transparent extension.
+Order matters and is deliberate: the layer is checked, the model is run
+over a resized copy of that one layer on its own, and only then is the
+canvas actually resized — so a locked or unknown layer, a size that
+isn't a strict growth, or a model failure all leave the document
+completely untouched, which a test proves by checking the dimensions
+after each rejection. `resize_canvas` and `generative_expand` are two
+new Tauri commands, both refusing an oversized canvas through the same
+64 MB check a new document gets (`check_canvas_bytes`, now shared with
+`create_new_document`, computed in `u64` before anything is allocated).
+
+Frontend: one "Image > Canvas Size" dialog, opened by a "Canvas Size…"
+button next to the two rotation buttons or a "Generative Expand…"
+button beside it, and by both names in the command palette. Width and
+Height default to the document's own, the Anchor select is the same
+nine options as Content-Aware Scale's Reference Point, and a
+"Generative Expand (AI)" checkbox — pre-ticked by the second button,
+disabled with no layer selected — decides whether OK runs
+`resize_canvas` or `generative_expand` on the selected layer.
+
+**Verified two ways, and reviewed adversarially before it was trusted.**
+This phase was built by a workflow: two implementers in parallel on
+disjoint files (Rust backend, TypeScript frontend, against one fixed
+command contract), then three independent reviewers each reading the
+whole diff through a different lens — arithmetic and indexing,
+regressions and test adequacy, frontend↔backend contract plus the newer
+clippy CI runs — then one fixer. The reviewers raised 11 findings, two
+of them medium: no test covered a mixed-column/row anchor (the `dx` and
+`dy` matches are separate arm lists, so a misfiled variant would have
+gone undetected), and `resize_canvas`'s clearing of saved selections,
+channels, spots, count marks, notes, the work path and artboards was
+untested. Both got tests: a nine-anchor table test at 3×3 → 5×5, where
+every anchor lands in a distinct rectangle so any wrong arm fails, and a
+cleared-state sibling of the existing crop/rotate one. Of the lows, a
+misattached doc comment, a stale "the only other operation that changes
+the canvas's dimensions" claim in `crop`'s own doc, and a test that
+asserted a property of the model's output rather than of the operation
+were fixed; two were declined with the reason recorded (a State-free
+command wrapper would mean refactoring `edit_checkpointed`'s whole
+family; gating one palette entry on a selected layer would be
+inconsistent with every other entry, and the dialog gates it anyway).
+19 new tests in all; every gate was then re-run by hand, not taken from
+the agents' word: `cargo test` 1796 total (1789 lib + 7 pipeline, up
+from 1777/1770), `cargo fmt --check` and `cargo clippy --all-targets --
+-D warnings` clean, `npm run build` clean. Live Xvfb verification: the
+same documented gap as every recent phase, not re-attempted.
+
+Honest limitations, recorded rather than glossed: `generative_expand`
+writes the layer's pixels only, exactly like `generative_fill` — a smart
+object's embedded source gets the plain transparent extension, so
+re-rendering it from that source (a later transform) drops the
+generated border, the way it drops any filter run over the rendered
+pixels. The expansion's context window is effectively the whole new
+canvas, resized to the model's fixed 128×128 input, so a large expansion
+of a large photograph is filled from a heavily downscaled view of it and
+comes back correspondingly soft; a wide new sky is the same weak case
+Phase 331 documented, only larger. Photoshop's canvas extension colour
+for a Background layer, relative sizing, and percent units are
+documented scope cuts: the added area is always transparent and the
+dialog takes absolute pixels.
+
+Generative Expand flips to shipped (595/618). Canvas Size itself is a
+real, tested, undoable feature the app didn't have before, moving no
+count only because the audit never listed it.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -116,6 +116,18 @@ impl Layer {
     pub fn contributes(&self) -> bool {
         self.visible && self.opacity > 0.0
     }
+
+    /// Rebuilds every document-sized RGBA buffer this layer owns through
+    /// `remap` when the canvas itself changes shape: its pixels and, for a
+    /// smart object, its embedded source, which
+    /// [`Document::render_smart_object`] copies straight back over the
+    /// pixels and so must be kept exactly the same size as them.
+    fn remap_rgba(&mut self, remap: impl Fn(&[u8]) -> Vec<u8>) {
+        self.pixels = remap(&self.pixels);
+        if let Some(smart) = &mut self.smart {
+            smart.source = remap(&smart.source);
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -2322,6 +2334,88 @@ pub enum ReferencePoint {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+/// Where the old canvas sits inside a new one — Image > Canvas Size's
+/// anchor, resolved to a pixel offset: `dx`/`dy` is where old pixel
+/// `(0, 0)` lands in the new canvas, negative when that side is cropped
+/// away. See [`Document::resize_canvas`] for the anchor semantics.
+#[derive(Debug, Clone, Copy)]
+struct CanvasPlacement {
+    old_width: u32,
+    old_height: u32,
+    new_width: u32,
+    new_height: u32,
+    dx: i64,
+    dy: i64,
+}
+
+impl CanvasPlacement {
+    fn new(
+        old_width: u32,
+        old_height: u32,
+        new_width: u32,
+        new_height: u32,
+        anchor: ReferencePoint,
+    ) -> Self {
+        let grow_x = i64::from(new_width) - i64::from(old_width);
+        let grow_y = i64::from(new_height) - i64::from(old_height);
+        let dx = match anchor {
+            ReferencePoint::TopLeft | ReferencePoint::Left | ReferencePoint::BottomLeft => 0,
+            ReferencePoint::Top | ReferencePoint::Center | ReferencePoint::Bottom => grow_x / 2,
+            ReferencePoint::TopRight | ReferencePoint::Right | ReferencePoint::BottomRight => {
+                grow_x
+            }
+        };
+        let dy = match anchor {
+            ReferencePoint::TopLeft | ReferencePoint::Top | ReferencePoint::TopRight => 0,
+            ReferencePoint::Left | ReferencePoint::Center | ReferencePoint::Right => grow_y / 2,
+            ReferencePoint::BottomLeft | ReferencePoint::Bottom | ReferencePoint::BottomRight => {
+                grow_y
+            }
+        };
+        Self {
+            old_width,
+            old_height,
+            new_width,
+            new_height,
+            dx,
+            dy,
+        }
+    }
+
+    /// The part of the new canvas the old content covers — never empty,
+    /// since every anchor keeps at least the anchored corner's pixel.
+    fn landed(&self) -> Rect {
+        let x0 = self.dx.max(0);
+        let y0 = self.dy.max(0);
+        let x1 = (self.dx + i64::from(self.old_width)).min(i64::from(self.new_width));
+        let y1 = (self.dy + i64::from(self.old_height)).min(i64::from(self.new_height));
+        Rect {
+            x0: x0 as u32,
+            y0: y0 as u32,
+            x1: x1 as u32,
+            y1: y1 as u32,
+        }
+    }
+
+    /// `buffer`, an old-canvas-sized plane of `channels` bytes per pixel,
+    /// rebuilt at the new size: every byte `fill` except the old content
+    /// copied to where it lands.
+    fn place(&self, buffer: &[u8], channels: usize, fill: u8) -> Vec<u8> {
+        let landed = self.landed();
+        let (old_width, new_width) = (self.old_width as usize, self.new_width as usize);
+        let mut placed = vec![fill; new_width * self.new_height as usize * channels];
+        let sx0 = (i64::from(landed.x0) - self.dx) as usize;
+        let sy0 = (i64::from(landed.y0) - self.dy) as usize;
+        let run = (landed.x1 - landed.x0) as usize * channels;
+        for row in 0..(landed.y1 - landed.y0) as usize {
+            let src = ((sy0 + row) * old_width + sx0) * channels;
+            let dst = ((landed.y0 as usize + row) * new_width + landed.x0 as usize) * channels;
+            placed[dst..dst + run].copy_from_slice(&buffer[src..src + run]);
+        }
+        placed
+    }
 }
 
 /// Edit > Content-Aware Scale's options bar.
@@ -10174,8 +10268,8 @@ impl Document {
     pub fn rotate_document_90(&mut self, clockwise: bool) {
         let (old_width, old_height) = (self.width, self.height);
         let (new_width, new_height) = (old_height, old_width);
-        for layer in &mut self.layers {
-            let mut rotated = vec![0u8; new_width as usize * new_height as usize * CHANNELS];
+        let rotated = |plane: &[u8], channels: usize| -> Vec<u8> {
+            let mut out = vec![0u8; new_width as usize * new_height as usize * channels];
             for new_y in 0..new_height {
                 for new_x in 0..new_width {
                     let (old_x, old_y) = if clockwise {
@@ -10183,27 +10277,17 @@ impl Document {
                     } else {
                         (old_width - 1 - new_y, new_x)
                     };
-                    let src = (old_y as usize * old_width as usize + old_x as usize) * CHANNELS;
-                    let dst = (new_y as usize * new_width as usize + new_x as usize) * CHANNELS;
-                    rotated[dst..dst + CHANNELS]
-                        .copy_from_slice(&layer.pixels[src..src + CHANNELS]);
+                    let src = (old_y as usize * old_width as usize + old_x as usize) * channels;
+                    let dst = (new_y as usize * new_width as usize + new_x as usize) * channels;
+                    out[dst..dst + channels].copy_from_slice(&plane[src..src + channels]);
                 }
             }
-            layer.pixels = rotated;
+            out
+        };
+        for layer in &mut self.layers {
+            layer.remap_rgba(|pixels| rotated(pixels, CHANNELS));
             if let Some(mask) = &layer.mask {
-                let mut rotated_mask = vec![0u8; new_width as usize * new_height as usize];
-                for new_y in 0..new_height {
-                    for new_x in 0..new_width {
-                        let (old_x, old_y) = if clockwise {
-                            (new_y, old_height - 1 - new_x)
-                        } else {
-                            (old_width - 1 - new_y, new_x)
-                        };
-                        rotated_mask[(new_y * new_width + new_x) as usize] =
-                            mask[(old_y * old_width + old_x) as usize];
-                    }
-                }
-                layer.mask = Some(rotated_mask);
+                layer.mask = Some(rotated(mask, 1));
             }
         }
         self.width = new_width;
@@ -10245,8 +10329,9 @@ impl Document {
 
     /// Crops the whole document — the canvas and every layer in it — to
     /// `rect`, which must lie within the canvas and cover at least one
-    /// pixel. Like [`Self::rotate_document_90`], the only other operation
-    /// that changes the canvas's own dimensions, this clears the active
+    /// pixel. Like [`Self::rotate_document_90`] and [`Self::resize_canvas`],
+    /// the other operations that change the canvas's own dimensions, this
+    /// clears the active
     /// selection and whatever `reselect` would have restored, since their
     /// bounds no longer mean anything. The defined pattern is kept.
     pub fn crop(&mut self, rect: Rect) -> Result<(), String> {
@@ -10259,22 +10344,18 @@ impl Document {
         }
         let (new_width, new_height) = (rect.x1 - rect.x0, rect.y1 - rect.y0);
         let old_width = self.width as usize;
-        for layer in &mut self.layers {
-            let mut cropped =
-                Vec::with_capacity(new_width as usize * new_height as usize * CHANNELS);
+        let cropped = |plane: &[u8], channels: usize| -> Vec<u8> {
+            let mut out = Vec::with_capacity(new_width as usize * new_height as usize * channels);
             for y in rect.y0..rect.y1 {
-                let start = (y as usize * old_width + rect.x0 as usize) * CHANNELS;
-                let end = start + new_width as usize * CHANNELS;
-                cropped.extend_from_slice(&layer.pixels[start..end]);
+                let start = (y as usize * old_width + rect.x0 as usize) * channels;
+                out.extend_from_slice(&plane[start..start + new_width as usize * channels]);
             }
-            layer.pixels = cropped;
+            out
+        };
+        for layer in &mut self.layers {
+            layer.remap_rgba(|pixels| cropped(pixels, CHANNELS));
             if let Some(mask) = &layer.mask {
-                let mut cropped_mask = Vec::with_capacity(new_width as usize * new_height as usize);
-                for y in rect.y0..rect.y1 {
-                    let start = y as usize * old_width + rect.x0 as usize;
-                    cropped_mask.extend_from_slice(&mask[start..start + new_width as usize]);
-                }
-                layer.mask = Some(cropped_mask);
+                layer.mask = Some(cropped(mask, 1));
             }
         }
         self.width = new_width;
@@ -10305,6 +10386,75 @@ impl Document {
             })
             .collect();
         Ok(())
+    }
+
+    /// Image > Canvas Size: the canvas becomes `new_width` × `new_height`
+    /// with the existing content held still at `anchor` — the third
+    /// operation, after [`Self::crop`] and [`Self::rotate_document_90`],
+    /// that changes the canvas's own dimensions, and the one that can grow
+    /// it. The old content's top-left lands at `dx` = 0 for a left-column
+    /// anchor, `(new − old) / 2` (integer division, so a one-pixel
+    /// remainder goes to the far side, and a shrink by one keeps the near
+    /// side) for a centre-column one, and `new − old` for a right-column
+    /// one; rows likewise. A negative offset crops that side away, so a
+    /// smaller size with a `Center` anchor is a centred crop. Every layer's
+    /// pixels (and a smart object's source) are rebuilt with the added
+    /// area transparent, a layer mask's added area revealing. Clears the
+    /// selection and everything else `crop` clears, and shifts the guides
+    /// by the offset, dropping those pushed off the canvas. Returns where
+    /// the old content sits in the new canvas. The same size as now is a
+    /// no-op, returning the whole canvas and touching nothing — not even
+    /// the selection. Errors for a zero dimension.
+    pub fn resize_canvas(
+        &mut self,
+        new_width: u32,
+        new_height: u32,
+        anchor: ReferencePoint,
+    ) -> Result<Rect, String> {
+        if new_width == 0 || new_height == 0 {
+            return Err(format!(
+                "A {new_width}x{new_height} canvas would be empty; both dimensions must be at least 1."
+            ));
+        }
+        let placement =
+            CanvasPlacement::new(self.width, self.height, new_width, new_height, anchor);
+        let landed = placement.landed();
+        if new_width == self.width && new_height == self.height {
+            return Ok(landed);
+        }
+        for layer in &mut self.layers {
+            layer.remap_rgba(|pixels| placement.place(pixels, CHANNELS, 0));
+            if let Some(mask) = &layer.mask {
+                layer.mask = Some(placement.place(mask, 1, 255));
+            }
+        }
+        self.width = new_width;
+        self.height = new_height;
+        self.selection = None;
+        self.last_selection = None;
+        self.saved_selections.clear();
+        self.channels.clear();
+        self.spots.clear();
+        self.count_marks.clear();
+        self.notes.clear();
+        self.current_path = None;
+        self.artboards.clear();
+        self.guides = self
+            .guides
+            .iter()
+            .filter_map(|guide| {
+                let (offset, limit) = match guide.orientation {
+                    GuideOrientation::Vertical => (placement.dx, new_width),
+                    GuideOrientation::Horizontal => (placement.dy, new_height),
+                };
+                let shifted = i64::from(guide.position) + offset;
+                (0..=i64::from(limit)).contains(&shifted).then_some(Guide {
+                    orientation: guide.orientation,
+                    position: shifted as u32,
+                })
+            })
+            .collect();
+        Ok(landed)
     }
 
     /// Camera Raw Filter > Geometry > Constrain Crop: crops the document
@@ -22714,14 +22864,10 @@ impl Document {
     /// selection — a subject's own inverse selection — rather than a
     /// separate model, exactly the same tool `content_aware_fill` and
     /// `content_aware_move` already are for their own Photoshop-menu
-    /// siblings. Generative Expand is a documented scope cut for a
-    /// different reason: it needs new canvas pixels to select in the
-    /// first place, and this app's canvas has always been a single
-    /// fixed size (see the Artboard Tool's own note) — a real
-    /// prerequisite this method doesn't touch, independent of this
-    /// model. Returns the selection's bounding box; errors with nothing
-    /// selected, on a locked or unknown layer, or if the bundled model
-    /// fails to run.
+    /// siblings, and [`Self::generative_expand`] is the same model again
+    /// over the new pixels [`Self::resize_canvas`] adds. Returns the
+    /// selection's bounding box; errors with nothing selected, on a
+    /// locked or unknown layer, or if the bundled model fails to run.
     pub fn generative_fill(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
         let bits = self.selected_bits()?;
         let (width, height) = (self.width, self.height);
@@ -22740,6 +22886,70 @@ impl Document {
         layer.pixels =
             crate::generative_fill::generative_fill_rgba(&layer.pixels, width, height, &bits)?;
         Ok(Some(bounds))
+    }
+
+    /// Filter > Generative Expand: [`Self::resize_canvas`] to
+    /// `new_width` × `new_height` at `anchor`, then layer `id`'s newly
+    /// added area — every pixel outside where the old content landed — is
+    /// filled by the same real on-device model [`Self::generative_fill`]
+    /// runs, inferred from the old content beside it, and made opaque
+    /// (the model never touches alpha, and the added area starts
+    /// transparent, so its content would otherwise be invisible). Every
+    /// other layer just gets the transparent extension. Like
+    /// [`Self::generative_fill`], this writes the layer's pixels only: a
+    /// smart object's embedded source gets the transparent extension, so
+    /// re-rendering it from that source (a later transform) drops the
+    /// generated area, as it drops any filter run over the rendered
+    /// pixels. Nothing is changed unless the whole thing succeeds: the
+    /// layer is checked, the
+    /// model is run over the expanded layer on its own, and only then is
+    /// the canvas resized. Returns where the old content sits in the new
+    /// canvas. Errors on a locked or unknown layer, if the new size is not
+    /// at least the current one in both axes and larger in one, or if the
+    /// bundled model fails to run.
+    pub fn generative_expand(
+        &mut self,
+        id: LayerId,
+        new_width: u32,
+        new_height: u32,
+        anchor: ReferencePoint,
+    ) -> Result<Rect, String> {
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        if new_width < self.width
+            || new_height < self.height
+            || (new_width == self.width && new_height == self.height)
+        {
+            return Err(
+                "Generative Expand needs a larger canvas than the current one.".to_string(),
+            );
+        }
+        let placement =
+            CanvasPlacement::new(self.width, self.height, new_width, new_height, anchor);
+        let landed = placement.landed();
+        let outside: Vec<bool> = (0..new_height)
+            .flat_map(|y| {
+                (0..new_width).map(move |x| {
+                    !((landed.x0..landed.x1).contains(&x) && (landed.y0..landed.y1).contains(&y))
+                })
+            })
+            .collect();
+        let expanded = placement.place(&layer.pixels, CHANNELS, 0);
+        let mut filled = crate::generative_fill::generative_fill_rgba(
+            &expanded, new_width, new_height, &outside,
+        )?;
+        for (pixel, _) in filled
+            .chunks_exact_mut(CHANNELS)
+            .zip(&outside)
+            .filter(|(_, &added)| added)
+        {
+            pixel[3] = 255;
+        }
+        self.resize_canvas(new_width, new_height, anchor)?;
+        self.layer_mut(id)?.pixels = filled;
+        Ok(landed)
     }
 
     /// The Patch tool (Normal, Source mode): the active selection is the
@@ -49362,6 +49572,480 @@ colorspaces:
         };
         assert!(doc.crop(outside).is_err());
         assert_eq!((doc.width(), doc.height()), (3, 3));
+    }
+
+    #[test]
+    fn crop_keeps_a_smart_objects_source_document_sized() {
+        let (mut doc, id) = ramped_3x3();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.crop(Rect {
+            x0: 1,
+            y0: 0,
+            x1: 3,
+            y1: 2,
+        })
+        .unwrap();
+        #[rustfmt::skip]
+        let expected = vec![20, 0, 0, 255,  30, 0, 0, 255,
+                            50, 0, 0, 255,  60, 0, 0, 255];
+        assert_eq!(doc.layers()[0].smart.as_ref().unwrap().source, expected);
+        assert_eq!(doc.layers()[0].pixels, expected);
+        // Re-rendering from the source stays at the cropped size.
+        doc.set_smart_transform(id, FreeTransform::default())
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, expected);
+    }
+
+    #[test]
+    fn rotate_document_90_keeps_a_smart_objects_source_document_sized() {
+        let mut doc = Document::new(2, 3).unwrap();
+        let pixels: Vec<u8> = (1..=6u8).flat_map(|i| [i, 0, 0, 255]).collect();
+        let id = doc.add_layer("grid", &pixels, 2, 3).unwrap();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.rotate_document_90(true);
+        let expected: Vec<u8> = [5u8, 3, 1, 6, 4, 2]
+            .iter()
+            .flat_map(|&i| [i, 0, 0, 255])
+            .collect();
+        assert_eq!(doc.layers()[0].smart.as_ref().unwrap().source, expected);
+        assert_eq!(doc.layers()[0].pixels, expected);
+        doc.set_smart_transform(id, FreeTransform::default())
+            .unwrap();
+        assert_eq!((doc.width(), doc.height()), (3, 2));
+        assert_eq!(doc.layers()[0].pixels, expected);
+    }
+
+    #[test]
+    fn resize_canvas_grows_with_a_top_left_anchor() {
+        let (mut doc, id) = ramped_3x3();
+        let landed = doc.resize_canvas(5, 4, ReferencePoint::TopLeft).unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (5, 4));
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![10, 0, 0, 255,  20, 0, 0, 255,  30, 0, 0, 255,  0, 0, 0, 0,  0, 0, 0, 0,
+                 40, 0, 0, 255,  50, 0, 0, 255,  60, 0, 0, 255,  0, 0, 0, 0,  0, 0, 0, 0,
+                 70, 0, 0, 255,  80, 0, 0, 255,  90, 0, 0, 255,  0, 0, 0, 0,  0, 0, 0, 0,
+                  0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,    0, 0, 0, 0,  0, 0, 0, 0]
+        );
+        assert_eq!(pixel(&doc, id, 2, 2), [90, 0, 0, 255]);
+    }
+
+    #[test]
+    fn resize_canvas_grows_with_a_center_anchor() {
+        // 3x3 into 6x5: dx = (6 - 3) / 2 = 1, dy = (5 - 3) / 2 = 1, so the
+        // spare column goes to the right and the spare row to the bottom.
+        let (mut doc, id) = ramped_3x3();
+        let landed = doc.resize_canvas(6, 5, ReferencePoint::Center).unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 4,
+                y1: 4
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (6, 5));
+        assert_eq!(doc.layers()[0].pixels.len(), 6 * 5 * 4);
+        assert_eq!(pixel(&doc, id, 1, 1), [10, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 1), [30, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 3), [70, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 3, 3), [90, 0, 0, 255]);
+        for (x, y) in [
+            (0, 0),
+            (4, 0),
+            (5, 0),
+            (0, 4),
+            (4, 1),
+            (5, 3),
+            (2, 4),
+            (5, 4),
+        ] {
+            assert_eq!(pixel(&doc, id, x, y), [0, 0, 0, 0], "({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn resize_canvas_grows_with_a_bottom_right_anchor() {
+        let (mut doc, id) = ramped_3x3();
+        let landed = doc
+            .resize_canvas(4, 4, ReferencePoint::BottomRight)
+            .unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 4,
+                y1: 4
+            }
+        );
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![0, 0, 0, 0,   0, 0, 0, 0,     0, 0, 0, 0,     0, 0, 0, 0,
+                 0, 0, 0, 0,  10, 0, 0, 255,  20, 0, 0, 255,  30, 0, 0, 255,
+                 0, 0, 0, 0,  40, 0, 0, 255,  50, 0, 0, 255,  60, 0, 0, 255,
+                 0, 0, 0, 0,  70, 0, 0, 255,  80, 0, 0, 255,  90, 0, 0, 255]
+        );
+        assert_eq!(pixel(&doc, id, 1, 1), [10, 0, 0, 255]);
+    }
+
+    #[test]
+    fn resize_canvas_shrinks_with_a_bottom_right_anchor_like_a_crop() {
+        let (mut doc, _) = ramped_3x3();
+        let landed = doc
+            .resize_canvas(2, 2, ReferencePoint::BottomRight)
+            .unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (2, 2));
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![50, 0, 0, 255,  60, 0, 0, 255,
+                 80, 0, 0, 255,  90, 0, 0, 255]
+        );
+        let (mut cropped, _) = ramped_3x3();
+        cropped
+            .crop(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 3,
+                y1: 3,
+            })
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, cropped.layers()[0].pixels);
+    }
+
+    #[test]
+    fn resize_canvas_shrinks_with_a_center_anchor_truncating_toward_zero() {
+        // 3x3 into 2x2: dx = dy = (2 - 3) / 2 = 0 in integer division, so
+        // the far column and row are the ones dropped.
+        let (mut doc, _) = ramped_3x3();
+        let landed = doc.resize_canvas(2, 2, ReferencePoint::Center).unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 2,
+                y1: 2
+            }
+        );
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![10, 0, 0, 255,  20, 0, 0, 255,
+                 40, 0, 0, 255,  50, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn resize_canvas_extends_a_layer_mask_with_reveal_and_keeps_the_overlap() {
+        let (mut doc, id) = ramped_3x3();
+        doc.add_layer_mask(id, MaskSource::HideAll).unwrap();
+        doc.resize_canvas(4, 4, ReferencePoint::BottomRight)
+            .unwrap();
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].mask.as_ref().unwrap(),
+            &vec![255, 255, 255, 255,
+                  255,   0,   0,   0,
+                  255,   0,   0,   0,
+                  255,   0,   0,   0]
+        );
+        assert_eq!(doc.layers()[0].pixels.len(), 4 * 4 * 4);
+    }
+
+    #[test]
+    fn resize_canvas_keeps_a_smart_objects_source_document_sized() {
+        let (mut doc, id) = ramped_3x3();
+        doc.convert_to_smart_object(id).unwrap();
+        doc.resize_canvas(5, 4, ReferencePoint::TopLeft).unwrap();
+        let source = doc.layers()[0].smart.as_ref().unwrap().source.clone();
+        assert_eq!(source.len(), 5 * 4 * 4);
+        assert_eq!(source, doc.layers()[0].pixels);
+        assert_eq!(&source[0..4], &[10, 0, 0, 255]);
+        assert_eq!(&source[3 * 4..4 * 4], &[0, 0, 0, 0]);
+        doc.set_smart_transform(id, FreeTransform::default())
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, source);
+        assert_eq!(pixel(&doc, id, 2, 2), [90, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 4, 3), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn resize_canvas_shifts_the_guides_and_drops_those_pushed_off() {
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 0).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 2).unwrap();
+        doc.add_guide(GuideOrientation::Vertical, 4).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 0).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 1).unwrap();
+        doc.add_guide(GuideOrientation::Horizontal, 3).unwrap();
+        // 4x4 into 6x3 anchored bottom-right: dx = 2, dy = -1. The vertical
+        // guide at 4 lands on the new far edge, 6, and is kept there; the
+        // horizontal one at 0 is pushed above the canvas and dropped.
+        doc.resize_canvas(6, 3, ReferencePoint::BottomRight)
+            .unwrap();
+        assert_eq!(
+            guides_of(&doc),
+            vec![
+                (GuideOrientation::Vertical, 2),
+                (GuideOrientation::Vertical, 4),
+                (GuideOrientation::Vertical, 6),
+                (GuideOrientation::Horizontal, 0),
+                (GuideOrientation::Horizontal, 2)
+            ]
+        );
+    }
+
+    #[test]
+    fn resize_canvas_clears_the_selection_but_a_same_size_call_keeps_it() {
+        let (mut doc, _) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let landed = doc.resize_canvas(3, 3, ReferencePoint::Center).unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 3,
+                y1: 3
+            }
+        );
+        assert!(doc.selection().is_some());
+        assert_eq!(doc.layers()[0].pixels, before);
+        doc.resize_canvas(4, 3, ReferencePoint::Center).unwrap();
+        assert!(doc.selection().is_none());
+        assert_eq!((doc.width(), doc.height()), (4, 3));
+    }
+
+    #[test]
+    fn resize_canvas_rejects_a_zero_dimension() {
+        let (mut doc, _) = ramped_3x3();
+        assert!(doc.resize_canvas(0, 3, ReferencePoint::Center).is_err());
+        assert!(doc.resize_canvas(3, 0, ReferencePoint::Center).is_err());
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert_eq!(doc.layers()[0].pixels.len(), 3 * 3 * 4);
+    }
+
+    #[test]
+    fn generative_expand_fills_the_added_area_of_one_layer_with_a_real_model_run() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        let other = doc
+            .add_layer("second", &solid(3, 3, [1, 2, 3, 4]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(0.0, 0.0, 1.0, 1.0).unwrap();
+        let landed = doc
+            .generative_expand(id, 5, 5, ReferencePoint::Center)
+            .unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 4,
+                y1: 4
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (5, 5));
+        assert!(doc.selection().is_none());
+        assert_eq!(doc.layers()[0].pixels.len(), 5 * 5 * 4);
+        // A real model run, so only the structure is asserted — the old
+        // content and the other layer untouched, the added area opaque —
+        // never the model's own output.
+        for y in 0..5u32 {
+            for x in 0..5u32 {
+                let inside = (1..4).contains(&x) && (1..4).contains(&y);
+                if inside {
+                    let old = ((y - 1) * 3 + (x - 1)) as usize * 4;
+                    assert_eq!(pixel(&doc, id, x, y), before[old..old + 4], "({x}, {y})");
+                    assert_eq!(pixel(&doc, other, x, y), [1, 2, 3, 4], "({x}, {y})");
+                } else {
+                    assert_eq!(pixel(&doc, id, x, y)[3], 255, "({x}, {y})");
+                    assert_eq!(pixel(&doc, other, x, y), [0, 0, 0, 0], "({x}, {y})");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn generative_expand_rejects_the_same_size_and_any_shrink() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        for (width, height) in [(3, 3), (2, 3), (3, 2), (2, 2), (5, 2), (2, 5)] {
+            let err = doc
+                .generative_expand(id, width, height, ReferencePoint::Center)
+                .unwrap_err();
+            assert_eq!(
+                err,
+                "Generative Expand needs a larger canvas than the current one."
+            );
+        }
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn generative_expand_rejects_locked_and_unknown_layers_before_touching_the_canvas() {
+        let (mut doc, id) = ramped_3x3();
+        let before = doc.layers()[0].pixels.clone();
+        assert!(doc
+            .generative_expand(999, 5, 5, ReferencePoint::Center)
+            .is_err());
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        doc.set_locked(id, true).unwrap();
+        let err = doc
+            .generative_expand(id, 5, 5, ReferencePoint::Center)
+            .unwrap_err();
+        assert_eq!(err, "Layer \"base\" is locked.");
+        assert_eq!((doc.width(), doc.height()), (3, 3));
+        assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn resize_canvas_places_the_old_content_by_every_anchor() {
+        // 3x3 into 5x5: each column of anchors resolves dx to 0, 1 or 2 and
+        // each row resolves dy the same way, so all nine land somewhere
+        // different — a variant filed under the wrong arm would show.
+        let expected = [
+            (ReferencePoint::TopLeft, (0, 0)),
+            (ReferencePoint::Top, (1, 0)),
+            (ReferencePoint::TopRight, (2, 0)),
+            (ReferencePoint::Left, (0, 1)),
+            (ReferencePoint::Center, (1, 1)),
+            (ReferencePoint::Right, (2, 1)),
+            (ReferencePoint::BottomLeft, (0, 2)),
+            (ReferencePoint::Bottom, (1, 2)),
+            (ReferencePoint::BottomRight, (2, 2)),
+        ];
+        for (anchor, (dx, dy)) in expected {
+            let (mut doc, id) = ramped_3x3();
+            let landed = doc.resize_canvas(5, 5, anchor).unwrap();
+            assert_eq!(
+                landed,
+                Rect {
+                    x0: dx,
+                    y0: dy,
+                    x1: dx + 3,
+                    y1: dy + 3
+                },
+                "{anchor:?}"
+            );
+            assert_eq!((doc.width(), doc.height()), (5, 5));
+            assert_eq!(pixel(&doc, id, dx, dy), [10, 0, 0, 255], "{anchor:?}");
+            assert_eq!(
+                pixel(&doc, id, dx + 1, dy + 1),
+                [50, 0, 0, 255],
+                "{anchor:?}"
+            );
+            assert_eq!(
+                pixel(&doc, id, dx + 2, dy + 2),
+                [90, 0, 0, 255],
+                "{anchor:?}"
+            );
+            for y in 0..5 {
+                for x in 0..5 {
+                    let inside = (dx..dx + 3).contains(&x) && (dy..dy + 3).contains(&y);
+                    assert_eq!(
+                        pixel(&doc, id, x, y)[3] == 255,
+                        inside,
+                        "{anchor:?} ({x}, {y})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resize_canvas_grows_one_axis_while_shrinking_the_other() {
+        // 3x3 into 5x2 anchored bottom-right: dx = 2 pads the left, dy = -1
+        // drops the top row.
+        let (mut doc, _) = ramped_3x3();
+        let landed = doc
+            .resize_canvas(5, 2, ReferencePoint::BottomRight)
+            .unwrap();
+        assert_eq!(
+            landed,
+            Rect {
+                x0: 2,
+                y0: 0,
+                x1: 5,
+                y1: 2
+            }
+        );
+        assert_eq!((doc.width(), doc.height()), (5, 2));
+        #[rustfmt::skip]
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![0, 0, 0, 0,  0, 0, 0, 0,  40, 0, 0, 255,  50, 0, 0, 255,  60, 0, 0, 255,
+                 0, 0, 0, 0,  0, 0, 0, 0,  70, 0, 0, 255,  80, 0, 0, 255,  90, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn resize_canvas_clears_everything_a_crop_clears() {
+        let mut doc = Document::new(10, 10).unwrap();
+        doc.add_layer("base", &solid(10, 10, [1, 2, 3, 255]), 10, 10)
+            .unwrap();
+        doc.add_artboard(
+            "A",
+            Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5,
+            },
+        )
+        .unwrap();
+        doc.select_rectangle(0.0, 0.0, 4.0, 4.0).unwrap();
+        doc.save_selection("kept").unwrap();
+        doc.new_spot_channel("Spot", [255, 0, 0], 100.0).unwrap();
+        doc.add_channel("Alpha 1", vec![0u8; 100]).unwrap();
+        doc.deselect();
+        doc.add_count_mark(1, 1).unwrap();
+        doc.add_note(2, 2, "note").unwrap();
+        doc.freeform_pen(&[(0.0, 0.0), (3.0, 3.0)]).unwrap();
+        assert!(!doc.artboards().is_empty());
+        assert_eq!(doc.saved_selection_names(), vec!["kept".to_string()]);
+        assert_eq!(doc.spots().len(), 1);
+        assert_eq!(doc.channels().len(), 1);
+        assert_eq!(doc.count_marks().len(), 1);
+        assert_eq!(doc.notes().len(), 1);
+        assert!(doc.current_path().is_some());
+
+        doc.resize_canvas(12, 8, ReferencePoint::Center).unwrap();
+        assert_eq!((doc.width(), doc.height()), (12, 8));
+        assert!(doc.artboards().is_empty());
+        assert!(doc.saved_selection_names().is_empty());
+        assert!(doc.spots().is_empty());
+        assert!(doc.channels().is_empty());
+        assert!(doc.count_marks().is_empty());
+        assert!(doc.notes().is_empty());
+        assert!(doc.current_path().is_none());
+        assert!(doc.selection().is_none());
+        assert_eq!(doc.reselect().unwrap_err(), "Nothing to reselect.");
     }
 
     #[test]

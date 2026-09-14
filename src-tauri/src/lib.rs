@@ -565,13 +565,14 @@ fn open_document(state: State<'_, AppState>, path: String) -> Result<Snapshot, S
     replace_open_document(&state, document)
 }
 
-/// Create a blank `width` x `height` document with one fully transparent
-/// layer to paint on immediately, replacing whatever was open. Kept separate
-/// from the `#[tauri::command]` wrapper below so it can be unit-tested
-/// directly, the same way [`export`] is.
-fn create_new_document(state: &AppState, width: u32, height: u32) -> Result<Snapshot, String> {
-    let mut document = Document::new(width, height)?;
-    let byte_len = document.buffer_len() as u64;
+/// Refuses a `width` x `height` canvas whose single RGBA8 layer buffer
+/// would be over [`MAX_NEW_DOCUMENT_BYTES`] — in `u64`, before anything
+/// that size is allocated, so an absurd size is an error rather than an
+/// allocation failure. Shared by [`create_new_document`] and by the two
+/// commands that can grow an open canvas, [`resize_canvas`] and
+/// [`generative_expand`].
+fn check_canvas_bytes(width: u32, height: u32) -> Result<(), String> {
+    let byte_len = u64::from(width) * u64::from(height) * CHANNELS as u64;
     if byte_len > MAX_NEW_DOCUMENT_BYTES {
         return Err(format!(
             "{width}x{height} would be {:.1} MB, which is over the {} MB limit.",
@@ -579,6 +580,16 @@ fn create_new_document(state: &AppState, width: u32, height: u32) -> Result<Snap
             MAX_NEW_DOCUMENT_BYTES / (1024 * 1024)
         ));
     }
+    Ok(())
+}
+
+/// Create a blank `width` x `height` document with one fully transparent
+/// layer to paint on immediately, replacing whatever was open. Kept separate
+/// from the `#[tauri::command]` wrapper below so it can be unit-tested
+/// directly, the same way [`export`] is.
+fn create_new_document(state: &AppState, width: u32, height: u32) -> Result<Snapshot, String> {
+    check_canvas_bytes(width, height)?;
+    let mut document = Document::new(width, height)?;
     let blank = vec![0u8; document.buffer_len()];
     document.add_layer("Layer 1", &blank, width, height)?;
     replace_open_document(state, document)
@@ -1388,6 +1399,43 @@ fn rotate_document_90(state: State<'_, AppState>, clockwise: bool) -> Result<Sna
 #[tauri::command]
 fn constrain_crop(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| document.constrain_crop(id).map(|_| None))
+}
+
+/// Image > Canvas Size: resize the canvas to `width` x `height` with the
+/// existing content held at `anchor`, the added area transparent. Refused
+/// before anything is touched when the new canvas would be over the same
+/// memory limit a new document is.
+#[tauri::command]
+fn resize_canvas(
+    state: State<'_, AppState>,
+    width: u32,
+    height: u32,
+    anchor: document::ReferencePoint,
+) -> Result<Snapshot, String> {
+    check_canvas_bytes(width, height)?;
+    edit_checkpointed(&state, |document| {
+        document.resize_canvas(width, height, anchor).map(|_| None)
+    })
+}
+
+/// Filter > Generative Expand: grow the canvas to `width` x `height` at
+/// `anchor` and fill layer `id`'s added area with the generative fill
+/// model. Refused before anything is touched when the new canvas would be
+/// over the same memory limit a new document is.
+#[tauri::command]
+fn generative_expand(
+    state: State<'_, AppState>,
+    id: LayerId,
+    width: u32,
+    height: u32,
+    anchor: document::ReferencePoint,
+) -> Result<Snapshot, String> {
+    check_canvas_bytes(width, height)?;
+    edit_checkpointed(&state, |document| {
+        document
+            .generative_expand(id, width, height, anchor)
+            .map(|_| None)
+    })
 }
 
 /// Edit > Copy: captures layer `id`'s pixels — within the active selection,
@@ -6654,6 +6702,8 @@ pub fn run() {
             rotate_layer_180,
             rotate_document_90,
             constrain_crop,
+            resize_canvas,
+            generative_expand,
             copy,
             copy_merged,
             apply_image,
@@ -7404,6 +7454,28 @@ mod tests {
         // over MAX_NEW_DOCUMENT_BYTES (64 MB) without actually allocating it.
         let err = create_new_document(&state, 1 << 16, 1 << 16).unwrap_err();
         assert!(err.contains("over the"), "{err}");
+    }
+
+    #[test]
+    fn the_canvas_byte_limit_is_checked_in_u64_without_allocating() {
+        // 4096 x 4096 x 4 is exactly 64 MB, the limit itself, so it passes;
+        // one more row is over it; and the 1 << 16 square that would
+        // overflow a u32 byte count is refused with the same message
+        // create_new_document gives, so resize_canvas and
+        // generative_expand refuse it before the document is touched.
+        check_canvas_bytes(4096, 4096).unwrap();
+        check_canvas_bytes(1, 1).unwrap();
+        let err = check_canvas_bytes(4096, 4097).unwrap_err();
+        assert_eq!(
+            err,
+            "4096x4097 would be 64.0 MB, which is over the 64 MB limit."
+        );
+        let err = check_canvas_bytes(1 << 16, 1 << 16).unwrap_err();
+        assert!(err.contains("over the 64 MB limit"), "{err}");
+        assert_eq!(
+            err,
+            create_new_document(&AppState::default(), 1 << 16, 1 << 16).unwrap_err()
+        );
     }
 
     #[test]

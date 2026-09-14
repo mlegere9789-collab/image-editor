@@ -191,11 +191,14 @@ with no divergence — final loss 0.242 hole-region L1, 0.585 perceptual.
   Generate Similar's own "give me another variation" has no real
   meaning for this model as built — a documented, not silently dropped,
   scope cut.
-- **Generative Expand needs a real prerequisite this model doesn't
-  provide:** this app's canvas has always been a single fixed size (see
-  the Artboard Tool's own documented scope cut), so there is no new
-  canvas border to select and fill in the first place, independent of
-  this model's own capability.
+- **Generative Expand runs this same model over a whole added border
+  at once** (`Document::generative_expand`, built on the Image > Canvas
+  Size resize that came later): the context window there is effectively
+  the entire new canvas, resized to the model's 128×128 input, so a large
+  expansion of a large photograph is filled from a heavily downscaled
+  view of it and comes back correspondingly soft. Small expansions of
+  textured content are the case that works well; a wide new sky is the
+  same weak case as above, only larger.
 
 See `src-tauri/src/generative_fill.rs` for the real integration, and
 `src-tauri/models/train_generative_fill/` for the exact scripts (and the

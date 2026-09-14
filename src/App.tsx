@@ -1232,6 +1232,13 @@ export default function App() {
   const [casUsePosition, setCasUsePosition] = useState(false);
   const [casX, setCasX] = useState(0);
   const [casY, setCasY] = useState(0);
+  // Image > Canvas Size / Generative Expand: one dialog, the checkbox picks
+  // which command OK runs.
+  const [showCanvasSizeDialog, setShowCanvasSizeDialog] = useState(false);
+  const [canvasSizeWidth, setCanvasSizeWidth] = useState(1);
+  const [canvasSizeHeight, setCanvasSizeHeight] = useState(1);
+  const [canvasSizeAnchor, setCanvasSizeAnchor] = useState<ReferencePoint>("center");
+  const [canvasSizeGenerative, setCanvasSizeGenerative] = useState(false);
   const [freeTransform, setFreeTransform] = useState({
     widthPercent: 100,
     heightPercent: 100,
@@ -3124,6 +3131,39 @@ export default function App() {
     casUsePosition,
     casX,
     casY,
+  ]);
+
+  const openCanvasSizeDialog = useCallback(
+    (generative: boolean) => {
+      setCanvasSizeWidth(document?.width ?? 1);
+      setCanvasSizeHeight(document?.height ?? 1);
+      setCanvasSizeGenerative(generative && selectedId !== null);
+      setShowCanvasSizeDialog(true);
+    },
+    [document, selectedId],
+  );
+
+  const applyCanvasSize = useCallback(async () => {
+    const width = Math.max(1, Math.round(canvasSizeWidth));
+    const height = Math.max(1, Math.round(canvasSizeHeight));
+    if (canvasSizeGenerative && selectedId !== null) {
+      await runCommand("generative_expand", {
+        id: selectedId,
+        width,
+        height,
+        anchor: canvasSizeAnchor,
+      });
+    } else {
+      await runCommand("resize_canvas", { width, height, anchor: canvasSizeAnchor });
+    }
+    setShowCanvasSizeDialog(false);
+  }, [
+    runCommand,
+    selectedId,
+    canvasSizeWidth,
+    canvasSizeHeight,
+    canvasSizeAnchor,
+    canvasSizeGenerative,
   ]);
 
   const applyFreeTransform = useCallback(async () => {
@@ -7472,6 +7512,7 @@ export default function App() {
     { label: "Brightness Contrast", activate: () => setShowBrightnessContrastDialog(true) },
     { label: "Camera Raw", activate: () => setShowCameraRawDialog(true) },
     { label: "Camera Raw Saturation", activate: () => setShowCameraRawSaturationDialog(true) },
+    { label: "Canvas Size", activate: () => openCanvasSizeDialog(false) },
     { label: "Content-Aware Scale", activate: () => setShowCasDialog(true) },
     { label: "Chalk & Charcoal", activate: () => setShowChalkAndCharcoalDialog(true) },
     { label: "Channel Mixer", activate: () => setShowChannelMixerDialog(true) },
@@ -7508,6 +7549,7 @@ export default function App() {
     { label: "Free Transform", activate: () => setShowFreeTransformDialog(true) },
     { label: "Fresco", activate: () => setShowFrescoDialog(true) },
     { label: "Gaussian Blur", activate: () => setShowGaussianBlurDialog(true) },
+    { label: "Generative Expand", activate: () => openCanvasSizeDialog(true) },
     { label: "Geometry", activate: () => setShowGeometryDialog(true) },
     { label: "Glass", activate: () => setShowGlassDialog(true) },
     { label: "Glowing Edges", activate: () => setShowGlowingEdgesDialog(true) },
@@ -8492,6 +8534,22 @@ export default function App() {
             title="Image > Image Rotation > 90° Counter Clockwise"
           >
             Rotate 90° CCW
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => openCanvasSizeDialog(false)}
+            disabled={busy || !hasDocument}
+            title="Image > Canvas Size: grow or shrink the canvas around an anchor; new pixels are transparent"
+          >
+            Canvas Size…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => openCanvasSizeDialog(true)}
+            disabled={busy || !hasDocument || selectedId === null}
+            title="Generative Expand (AI): grow the canvas and fill the new area of the selected layer with this project's own on-device model — no prompt, no endpoint"
+          >
+            Generative Expand…
           </button>
           <button
             className="button button--quiet"
@@ -17839,6 +17897,88 @@ export default function App() {
                 Cancel
               </button>
               <button className="button" onClick={applyContentAwareScale} disabled={busy} title="Commit Transform">
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showCanvasSizeDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCanvasSizeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Canvas Size"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Image &gt; Canvas Size</h2>
+            <p className="modal__hint">
+              Sets the canvas to the new size with the existing content pinned to the
+              anchor: growing adds transparent pixels on the far sides, shrinking crops
+              them. Generative Expand fills the new area of the selected layer with the
+              on-device model — softer than Adobe&apos;s, best on textured content, weak
+              on large uniform areas like open sky.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Width</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={canvasSizeWidth}
+                onChange={(event) => setCanvasSizeWidth(Number(event.target.value))}
+              />
+              <span className="control__label">Height</span>
+              <input
+                type="number"
+                min={1}
+                step={1}
+                value={canvasSizeHeight}
+                onChange={(event) => setCanvasSizeHeight(Number(event.target.value))}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Anchor</span>
+              <select
+                value={canvasSizeAnchor}
+                onChange={(event) => setCanvasSizeAnchor(event.target.value as ReferencePoint)}
+              >
+                <option value="topLeft">Top left</option>
+                <option value="top">Top</option>
+                <option value="topRight">Top right</option>
+                <option value="left">Left</option>
+                <option value="center">Center</option>
+                <option value="right">Right</option>
+                <option value="bottomLeft">Bottom left</option>
+                <option value="bottom">Bottom</option>
+                <option value="bottomRight">Bottom right</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={canvasSizeGenerative}
+                disabled={selectedId === null}
+                onChange={(event) => setCanvasSizeGenerative(event.target.checked)}
+              />
+              <span className="control__label">
+                Generative Expand (AI): fill the new area on the selected layer
+              </span>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCanvasSizeDialog(false)}
+                title="Cancel"
+              >
+                Cancel
+              </button>
+              <button className="button" onClick={applyCanvasSize} disabled={busy} title="OK">
                 OK
               </button>
             </div>
