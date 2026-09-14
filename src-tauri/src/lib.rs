@@ -1982,9 +1982,10 @@ fn transform_to_bounds(
     y0: u32,
     x1: u32,
     y1: u32,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.transform_to_bounds(id, Rect { x0, y0, x1, y1 })
+        document.transform_to_bounds_with(id, Rect { x0, y0, x1, y1 }, interpolation)
     })
 }
 
@@ -6447,8 +6448,23 @@ fn adaptive_wide_angle(
 
 /// Edit > Transform > Rotate layer `id` by `degrees` (positive clockwise).
 #[tauri::command]
-fn rotate(state: State<'_, AppState>, id: LayerId, degrees: f32) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.rotate(id, degrees))
+fn rotate(
+    state: State<'_, AppState>,
+    id: LayerId,
+    degrees: f32,
+    interpolation: Option<document::Interpolation>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| match interpolation {
+        Some(interpolation) => document.free_transform(
+            id,
+            document::FreeTransform {
+                degrees,
+                interpolation: Some(interpolation),
+                ..document::FreeTransform::default()
+            },
+        ),
+        None => document.rotate(id, degrees),
+    })
 }
 
 /// Edit > Transform > Scale layer `id` to `width_percent` x `height_percent`.
@@ -6458,9 +6474,19 @@ fn scale(
     id: LayerId,
     width_percent: f32,
     height_percent: f32,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.scale(id, width_percent, height_percent)
+    edit_checkpointed(&state, |document| match interpolation {
+        Some(interpolation) => document.free_transform(
+            id,
+            document::FreeTransform {
+                width_percent,
+                height_percent,
+                interpolation: Some(interpolation),
+                ..document::FreeTransform::default()
+            },
+        ),
+        None => document.scale(id, width_percent, height_percent),
     })
 }
 
@@ -6471,9 +6497,19 @@ fn skew(
     id: LayerId,
     horizontal_degrees: f32,
     vertical_degrees: f32,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.skew(id, horizontal_degrees, vertical_degrees)
+    edit_checkpointed(&state, |document| match interpolation {
+        Some(interpolation) => document.free_transform(
+            id,
+            document::FreeTransform {
+                skew_horizontal: horizontal_degrees,
+                skew_vertical: vertical_degrees,
+                interpolation: Some(interpolation),
+                ..document::FreeTransform::default()
+            },
+        ),
+        None => document.skew(id, horizontal_degrees, vertical_degrees),
     })
 }
 

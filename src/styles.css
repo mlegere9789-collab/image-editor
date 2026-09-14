@@ -1052,6 +1052,21 @@ body {
   touch-action: none;
 }
 
+/* Rotate zones: a square just outside each corner handle; dragging one
+   turns the box about its centre. */
+.transform-rotate {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: grab;
+}
+.transform-rotate--nw { left: -22px; top: -22px; }
+.transform-rotate--ne { right: -22px; top: -22px; }
+.transform-rotate--se { right: -22px; bottom: -22px; }
+.transform-rotate--sw { left: -22px; bottom: -22px; }
+
 .transform-handle--nw { left: 0; top: 0; cursor: nwse-resize; }
 .transform-handle--n { left: 50%; top: 0; cursor: ns-resize; }
 .transform-handle--ne { left: 100%; top: 0; cursor: nesw-resize; }

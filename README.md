@@ -20577,6 +20577,66 @@ by the user, to be revisited when they say so. Section C of
 scope-cut backlog (D), pain points (G) and UI (H), and the finished
 generative model when its training run ends.
 
+## Phase 344 — Transforms: one resample, bicubic, and rotating from the handles
+
+The first of `docs/PLAN_TO_100.md`'s section D — the documented scope
+cuts reopened, largest first — and the Transform family's three at
+once. Since Phases 136–139 every transform here resampled
+nearest-neighbour, and Free Transform ran its stages one after
+another, so a scale followed by a rotate rounded twice; Photoshop
+composes one affine, resamples once, and offers Bicubic, Bilinear and
+Nearest Neighbor. `FreeTransform` gained `interpolation:
+Option<Interpolation>`: with a method, `free_transform_combined`
+composes the same four stages — scale, rotate, skew about the pivot,
+then the move — into one inverse mapping (each stage inverted exactly
+as its own function inverts itself, unrounded) and resamples the layer
+once by that method; `None` keeps the earlier sequential path
+byte-for-byte, so Transform Again replays an old transform exactly.
+`sample_interpolated` is the sampler: nearest as before; bilinear and
+bicubic (Keys' cubic convolution with a = −0.5, Catmull-Rom, the
+"Bicubic" Photoshop means) as weighted sums of the 2×2 or 4×4
+neighbourhood **premultiplied by alpha**, a tap off the canvas
+contributing nothing, the result un-premultiplied — so a transparent
+neighbour lends no colour to an edge and a rotated shape is
+anti-aliased without a dark fringe. Scale, Rotate and Skew take the
+same option and route through the combined path; Show Transform
+Controls' handle drag (`transform_to_bounds_with`) resamples once too,
+its scale about the bounds' top-left edge and its move composed. On
+the canvas, four rotate zones sit just outside the corner handles: a
+drag there turns the box about its centre (Shift snapping to 15°) and
+commits a Free Transform rotation at the chosen method. The Move
+tool's options bar and the Free Transform dialog carry the
+Interpolation choice — Bicubic by default, and "Sequential" for the
+old path.
+
+**Verified two ways.** `cargo test`: 1815 total (1808 lib + 7
+pipeline, up from 1813) — the combined path at Nearest with a single
+stage set is byte-for-byte that stage's own call, for rotate, scale,
+skew and move; with every stage set it differs from the sequence on
+some pixels (one rounding instead of four) but agrees on most; the
+identity at every method is the exact identity; a horizontal ramp
+scaled 200% about its left edge reads the exact midpoints under
+bilinear and under bicubic alike (a line is reproduced by
+Catmull-Rom); an opaque red square rotated 45° by bicubic has a soft,
+anti-aliased edge and not one pixel with a darkened colour; the handle
+path at bicubic keeps the target's corners and fills its interior; and
+a zero scale or a 90° skew is refused on the combined path as on the
+old one. `cargo fmt --check`, `cargo clippy --all-targets -- -D
+warnings` and `npm run build` clean. Live Xvfb verification: the same
+documented gap; the rotate zones end in a Tauri command.
+
+Honest limitations: the combined path samples at pixel centres, so a
+content edge that lands between two pixels gives the outer one a
+little alpha — the half-pixel truth of point-sampled interpolation,
+not a bug; the canvas still does not grow for a rotation, so corners
+past its edge are clipped; Distort, Perspective and Warp keep their
+own nearest resampling for now; and Photoshop's Bicubic Smoother and
+Bicubic Sharper variants are not offered.
+
+Three scope cuts close (Free Transform's single resample, the
+Transform family's bicubic option, rotation from the on-canvas
+controls); 612/618 unchanged.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

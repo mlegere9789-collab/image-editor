@@ -393,6 +393,9 @@ export type ColorRange =
 
 /** Mirrors `ReferencePoint` / `ContentAwareScale` in
  * src-tauri/src/document.rs: Edit > Content-Aware Scale's options bar. */
+/** Mirrors `Interpolation` in src-tauri/src/document.rs: a transform's resampling. */
+export type Interpolation = "nearest" | "bilinear" | "bicubic";
+
 export type ReferencePoint =
   | "topLeft"
   | "top"

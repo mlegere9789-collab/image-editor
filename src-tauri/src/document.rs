@@ -3375,6 +3375,85 @@ fn average_samples(
 /// resampling primitive behind the Distort filters; nearest-neighbour
 /// rather than bilinear is the same hard-edged scope cut
 /// [`motion_blur_at`] makes.
+/// Keys' cubic convolution kernel with `a = -0.5` (Catmull-Rom), the
+/// "Bicubic" Photoshop's Interpolation menu means.
+fn cubic_weight(t: f32) -> f32 {
+    let t = t.abs();
+    if t < 1.0 {
+        1.5 * t * t * t - 2.5 * t * t + 1.0
+    } else if t < 2.0 {
+        -0.5 * t * t * t + 2.5 * t * t - 4.0 * t + 2.0
+    } else {
+        0.0
+    }
+}
+
+/// One RGBA sample of `source` at the fractional position `(sx, sy)` by
+/// `interpolation`: nearest as [`sample_nearest`] rounds; bilinear and
+/// bicubic as premultiplied weighted sums of the 2×2 or 4×4 neighbouring
+/// pixels, a tap outside the canvas contributing nothing (transparent),
+/// the result un-premultiplied and rounded. Fully transparent where the
+/// position itself is outside the canvas.
+fn sample_interpolated(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (sx, sy): (f32, f32),
+    interpolation: Interpolation,
+) -> [u8; CHANNELS] {
+    if sx < -0.5 || sy < -0.5 || sx >= width as f32 - 0.5 || sy >= height as f32 - 0.5 {
+        return [0; CHANNELS];
+    }
+    if interpolation == Interpolation::Nearest {
+        return sample_nearest(source, doc_width, (width, height), (sx, sy));
+    }
+    let (x0, y0) = (sx.floor(), sy.floor());
+    let (fx, fy) = (sx - x0, sy - y0);
+    let (x0, y0) = (x0 as i64, y0 as i64);
+    let (taps, offset): (i64, i64) = match interpolation {
+        Interpolation::Bilinear => (2, 0),
+        _ => (4, 1),
+    };
+    let weight = |t: f32| -> f32 {
+        match interpolation {
+            Interpolation::Bilinear => (1.0 - t.abs()).max(0.0),
+            _ => cubic_weight(t),
+        }
+    };
+    let mut acc = [0.0f32; CHANNELS];
+    for j in 0..taps {
+        let y = y0 - offset + j;
+        let wy = weight(fy - (j - offset) as f32);
+        if y < 0 || y >= height || wy == 0.0 {
+            continue;
+        }
+        for i in 0..taps {
+            let x = x0 - offset + i;
+            let wx = weight(fx - (i - offset) as f32);
+            if x < 0 || x >= width || wx == 0.0 {
+                continue;
+            }
+            let base = (y as usize * doc_width + x as usize) * CHANNELS;
+            let a = source[base + 3] as f32 / 255.0;
+            let w = wx * wy;
+            for c in 0..3 {
+                acc[c] += w * source[base + c] as f32 * a;
+            }
+            acc[3] += w * a;
+        }
+    }
+    let alpha = acc[3].clamp(0.0, 1.0);
+    if alpha <= 0.0 {
+        return [0; CHANNELS];
+    }
+    let mut out = [0u8; CHANNELS];
+    for c in 0..3 {
+        out[c] = (acc[c] / alpha).round().clamp(0.0, 255.0) as u8;
+    }
+    out[3] = (alpha * 255.0).round() as u8;
+    out
+}
+
 fn sample_nearest(
     source: &[u8],
     doc_width: usize,
@@ -22959,6 +23038,18 @@ impl Document {
         id: LayerId,
         target: Rect,
     ) -> Result<Option<Rect>, String> {
+        self.transform_to_bounds_with(id, target, None)
+    }
+
+    /// [`Self::transform_to_bounds`] resampled once by `interpolation`
+    /// when one is given: the scale about the bounds' top-left edge and
+    /// the move as one mapping.
+    pub fn transform_to_bounds_with(
+        &mut self,
+        id: LayerId,
+        target: Rect,
+        interpolation: Option<Interpolation>,
+    ) -> Result<Option<Rect>, String> {
         if target.x1 <= target.x0 || target.y1 <= target.y0 {
             return Err(
                 "The transform target must be at least one pixel wide and tall.".to_string(),
@@ -22979,6 +23070,27 @@ impl Document {
         }
         let (bw, bh) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
         let (tw, th) = (target.x1 - target.x0, target.y1 - target.y0);
+        if let Some(interpolation) = interpolation {
+            let (width, height) = (self.width as i64, self.height as i64);
+            let doc_width = self.width as usize;
+            let (px, py) = (bounds.x0 as f32 - 0.5, bounds.y0 as f32 - 0.5);
+            let (fx, fy) = (tw as f32 / bw as f32, th as f32 / bh as f32);
+            let (dx, dy) = (
+                target.x0 as f32 - bounds.x0 as f32,
+                target.y0 as f32 - bounds.y0 as f32,
+            );
+            self.filter_pixels(id, move |source, row, col| {
+                let sx = px + (col as f32 - dx - px) / fx;
+                let sy = py + (row as f32 - dy - py) / fy;
+                sample_interpolated(source, doc_width, (width, height), (sx, sy), interpolation)
+            })?;
+            return Ok(Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: self.width,
+                y1: self.height,
+            }));
+        }
         if (bw, bh) != (tw, th) {
             let pivot = (bounds.x0 as f32 - 0.5, bounds.y0 as f32 - 0.5);
             self.scale_about(
@@ -23737,6 +23849,15 @@ impl Document {
         } else {
             transform.height_percent
         };
+        if let Some(interpolation) = transform.interpolation {
+            return self.free_transform_combined(
+                id,
+                transform,
+                height_percent,
+                pivot,
+                interpolation,
+            );
+        }
         if (transform.width_percent, height_percent)
             != (neutral.width_percent, neutral.height_percent)
         {
@@ -23775,6 +23896,80 @@ impl Document {
         if (dx, dy) != (0, 0) {
             touched = self.translate(id, dx, dy)?;
         }
+        if transform != neutral {
+            self.last_transform = Some(transform);
+        }
+        Ok(touched)
+    }
+
+    /// [`Self::free_transform`] with an Interpolation: the same stages --
+    /// scale, rotate, skew about the pivot, then the move -- composed into
+    /// one inverse mapping and resampled once by `interpolation`, so a
+    /// scale followed by a rotate rounds once, not twice. With
+    /// [`Interpolation::Nearest`] and a single stage set this is
+    /// byte-for-byte that stage's own call, since the mapping is the same;
+    /// the difference is only that nothing is rounded between stages. The
+    /// stages' own validation and the move's arithmetic are unchanged.
+    fn free_transform_combined(
+        &mut self,
+        id: LayerId,
+        transform: FreeTransform,
+        height_percent: f32,
+        pivot: Option<(f32, f32)>,
+        interpolation: Interpolation,
+    ) -> Result<Option<Rect>, String> {
+        let neutral = FreeTransform::default();
+        if !(transform.width_percent.is_finite() && height_percent.is_finite())
+            || transform.width_percent <= 0.0
+            || height_percent <= 0.0
+        {
+            return Err("Scale percentages must be finite and greater than zero.".to_string());
+        }
+        if !transform.degrees.is_finite() {
+            return Err("Rotate angle must be a finite number of degrees.".to_string());
+        }
+        let in_range = |a: f32| a.is_finite() && a.abs() < 90.0;
+        if !(in_range(transform.skew_horizontal) && in_range(transform.skew_vertical)) {
+            return Err("Skew angles must be finite and between -89 and 89 degrees.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = pivot.unwrap_or(((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0));
+        let (mut dx, mut dy) = (transform.offset_x, transform.offset_y);
+        if let Some((x, y)) = transform.position {
+            let (jx, jy) = if transform.relative {
+                (x, y)
+            } else {
+                (x - cx, y - cy)
+            };
+            dx += jx.round() as i32;
+            dy += jy.round() as i32;
+        }
+        let (fx, fy) = (transform.width_percent / 100.0, height_percent / 100.0);
+        let (sin, cos) = transform.degrees.to_radians().sin_cos();
+        let (th, tv) = (
+            transform.skew_horizontal.to_radians().tan(),
+            transform.skew_vertical.to_radians().tan(),
+        );
+        let touched = self.filter_pixels(id, move |source, row, col| {
+            // Undo the move, then the skew, the rotation and the scale --
+            // each exactly as its own stage inverts itself, unrounded.
+            let (x, y) = (col as f32 - dx as f32, row as f32 - dy as f32);
+            let sy1 = y - tv * (x - cx);
+            let sx1 = x - th * (sy1 - cy);
+            let (rx, ry) = (sx1 - cx, sy1 - cy);
+            let sx2 = cx + cos * rx + sin * ry;
+            let sy2 = cy - sin * rx + cos * ry;
+            let sx3 = cx + (sx2 - cx) / fx;
+            let sy3 = cy + (sy2 - cy) / fy;
+            sample_interpolated(
+                source,
+                doc_width,
+                (width, height),
+                (sx3, sy3),
+                interpolation,
+            )
+        })?;
         if transform != neutral {
             self.last_transform = Some(transform);
         }
@@ -25184,6 +25379,24 @@ pub struct FreeTransform {
     /// Maintain Aspect Ratio: the height percentage follows the width.
     #[serde(default)]
     pub maintain_aspect: bool,
+    /// Photoshop's Interpolation option: with a value, the stages are
+    /// composed into one affine mapping and the layer is resampled once,
+    /// by that method; `None` is the earlier behaviour -- each stage
+    /// resampled nearest-neighbour in turn, byte-for-byte the per-stage
+    /// calls -- kept so Transform Again repeats an old transform exactly.
+    #[serde(default)]
+    pub interpolation: Option<Interpolation>,
+}
+
+/// Photoshop's Interpolation menu for a transform: Nearest Neighbor,
+/// Bilinear, Bicubic. Bilinear and bicubic sample premultiplied by
+/// alpha, so a transparent neighbour lends no colour to an edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Interpolation {
+    Nearest,
+    Bilinear,
+    Bicubic,
 }
 
 impl Default for FreeTransform {
@@ -25200,6 +25413,7 @@ impl Default for FreeTransform {
             position: None,
             relative: false,
             maintain_aspect: false,
+            interpolation: None,
         }
     }
 }
@@ -45243,6 +45457,243 @@ mod tests {
             vec![vec![40, 50, 60], vec![70, 80, 90], vec![0, 0, 0]]
         );
         assert_eq!(pixel(&doc, id, 1, 2), [0, 0, 0, 0]);
+    }
+
+    /// A 12×12 layer of varied opaque colour with a transparent ring.
+    fn textured_layer() -> (Document, LayerId) {
+        let mut doc = Document::new(12, 12).unwrap();
+        let mut pixels = vec![0u8; 12 * 12 * CHANNELS];
+        for y in 0..12u32 {
+            for x in 0..12u32 {
+                if (2..10).contains(&x) && (2..10).contains(&y) {
+                    let base = ((y * 12 + x) as usize) * CHANNELS;
+                    pixels[base..base + 4].copy_from_slice(&[
+                        (x * 23) as u8,
+                        (y * 19) as u8,
+                        ((x * y) % 256) as u8,
+                        255,
+                    ]);
+                }
+            }
+        }
+        let id = doc.add_layer("t", &pixels, 12, 12).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn a_combined_nearest_transform_with_one_stage_is_that_stage() {
+        for (stage, transform) in [
+            (
+                "rotate",
+                FreeTransform {
+                    degrees: 30.0,
+                    ..FreeTransform::default()
+                },
+            ),
+            (
+                "scale",
+                FreeTransform {
+                    width_percent: 150.0,
+                    height_percent: 60.0,
+                    ..FreeTransform::default()
+                },
+            ),
+            (
+                "skew",
+                FreeTransform {
+                    skew_horizontal: 20.0,
+                    skew_vertical: -10.0,
+                    ..FreeTransform::default()
+                },
+            ),
+            (
+                "move",
+                FreeTransform {
+                    offset_x: 2,
+                    offset_y: -1,
+                    ..FreeTransform::default()
+                },
+            ),
+        ] {
+            let (mut sequential, id) = textured_layer();
+            sequential.free_transform(id, transform).unwrap();
+            let (mut combined, id2) = textured_layer();
+            combined
+                .free_transform(
+                    id2,
+                    FreeTransform {
+                        interpolation: Some(Interpolation::Nearest),
+                        ..transform
+                    },
+                )
+                .unwrap();
+            assert_eq!(
+                sequential.layer(id).unwrap().pixels,
+                combined.layer(id2).unwrap().pixels,
+                "{stage}"
+            );
+        }
+        // Every stage at once: the combined mapping rounds once, so it
+        // differs from the sequence -- but agrees with it on most pixels.
+        let all = FreeTransform {
+            width_percent: 130.0,
+            height_percent: 80.0,
+            degrees: 25.0,
+            skew_horizontal: 10.0,
+            offset_x: 1,
+            ..FreeTransform::default()
+        };
+        let (mut sequential, id) = textured_layer();
+        sequential.free_transform(id, all).unwrap();
+        let (mut combined, id2) = textured_layer();
+        combined
+            .free_transform(
+                id2,
+                FreeTransform {
+                    interpolation: Some(Interpolation::Nearest),
+                    ..all
+                },
+            )
+            .unwrap();
+        let (a, b) = (
+            &sequential.layer(id).unwrap().pixels,
+            &combined.layer(id2).unwrap().pixels,
+        );
+        let differing = a
+            .chunks_exact(4)
+            .zip(b.chunks_exact(4))
+            .filter(|(p, q)| p != q)
+            .count();
+        assert!(
+            differing > 0 && differing < 60,
+            "{differing} of 144 pixels differ"
+        );
+        assert!(combined.view().can_transform_again);
+    }
+
+    #[test]
+    fn bilinear_and_bicubic_resampling_are_exact_where_they_should_be() {
+        // Identity at every method is the identity.
+        for interpolation in [
+            Interpolation::Nearest,
+            Interpolation::Bilinear,
+            Interpolation::Bicubic,
+        ] {
+            let (mut doc, id) = textured_layer();
+            let before = doc.layer(id).unwrap().pixels.clone();
+            doc.free_transform(
+                id,
+                FreeTransform {
+                    interpolation: Some(interpolation),
+                    ..FreeTransform::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(doc.layer(id).unwrap().pixels, before, "{interpolation:?}");
+        }
+        // A horizontal ramp scaled 200% about the left edge: bilinear reads
+        // the ramp at half-pixel positions, which on a linear ramp is the
+        // exact midpoint; bicubic (Catmull-Rom) reproduces a line as well.
+        let mut doc = Document::new(16, 4).unwrap();
+        let ramp: Vec<u8> = (0..16 * 4)
+            .flat_map(|i| [((i % 16) * 16) as u8, 100, 50, 255])
+            .collect();
+        let id = doc.add_layer("ramp", &ramp, 16, 4).unwrap();
+        for interpolation in [Interpolation::Bilinear, Interpolation::Bicubic] {
+            let mut d = doc.clone();
+            d.free_transform(
+                id,
+                FreeTransform {
+                    width_percent: 200.0,
+                    reference: Some(ReferencePoint::TopLeft),
+                    interpolation: Some(interpolation),
+                    ..FreeTransform::default()
+                },
+            )
+            .unwrap();
+            // Output x reads source x/2: x=6 -> 3 (48), x=7 -> 3.5 -> 56.
+            assert_eq!(pixel(&d, id, 6, 1), [48, 100, 50, 255], "{interpolation:?}");
+            assert_eq!(pixel(&d, id, 7, 1), [56, 100, 50, 255], "{interpolation:?}");
+            assert_eq!(pixel(&d, id, 9, 2), [72, 100, 50, 255], "{interpolation:?}");
+        }
+        // Premultiplied sampling: an opaque red square rotated 45° by bicubic
+        // has soft alpha at its edge but never a darkened colour.
+        let mut doc = Document::new(24, 24).unwrap();
+        let mut square = vec![0u8; 24 * 24 * CHANNELS];
+        for y in 6..18 {
+            for x in 6..18 {
+                square[(y * 24 + x) * CHANNELS..(y * 24 + x) * CHANNELS + 4]
+                    .copy_from_slice(&[255, 0, 0, 255]);
+            }
+        }
+        let id = doc.add_layer("red", &square, 24, 24).unwrap();
+        doc.free_transform(
+            id,
+            FreeTransform {
+                degrees: 45.0,
+                interpolation: Some(Interpolation::Bicubic),
+                ..FreeTransform::default()
+            },
+        )
+        .unwrap();
+        let pixels = &doc.layer(id).unwrap().pixels;
+        let soft = pixels
+            .chunks_exact(4)
+            .filter(|p| p[3] > 0 && p[3] < 255)
+            .count();
+        assert!(
+            soft > 20,
+            "a rotated edge is anti-aliased: {soft} soft pixels"
+        );
+        for p in pixels.chunks_exact(4).filter(|p| p[3] > 0) {
+            assert!(
+                p[0] >= 250 && p[1] <= 5 && p[2] <= 5,
+                "no dark fringe: {p:?}"
+            );
+        }
+        // The handle path: doubling the bounds with bicubic keeps the
+        // corners in place and fills the target with soft interior values.
+        let (mut doc, id) = textured_layer();
+        let target = Rect {
+            x0: 1,
+            y0: 1,
+            x1: 11,
+            y1: 11,
+        };
+        doc.transform_to_bounds_with(id, target, Some(Interpolation::Bicubic))
+            .unwrap();
+        // The content's edge lands between pixels 0 and 1, so the pixel
+        // outside it takes a little soft alpha and the one inside is solid.
+        let bounds = doc.layer_bounds(id).unwrap().unwrap();
+        assert!(
+            bounds.x0 <= 1 && bounds.y0 <= 1 && bounds.x1 >= 10 && bounds.y1 >= 10,
+            "{bounds:?}"
+        );
+        assert!(pixel(&doc, id, 0, 0)[3] < 40, "{:?}", pixel(&doc, id, 0, 0));
+        assert_eq!(pixel(&doc, id, 2, 2)[3], 255);
+        assert_eq!(pixel(&doc, id, 9, 9)[3], 255);
+        // Bad values are refused on the combined path too.
+        let (mut doc, id) = textured_layer();
+        assert!(doc
+            .free_transform(
+                id,
+                FreeTransform {
+                    width_percent: 0.0,
+                    interpolation: Some(Interpolation::Bicubic),
+                    ..FreeTransform::default()
+                }
+            )
+            .is_err());
+        assert!(doc
+            .free_transform(
+                id,
+                FreeTransform {
+                    skew_horizontal: 90.0,
+                    interpolation: Some(Interpolation::Bilinear),
+                    ..FreeTransform::default()
+                }
+            )
+            .is_err());
     }
 
     #[test]

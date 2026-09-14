@@ -10,6 +10,7 @@ import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import type {
   Adjustment,
+  Interpolation,
   ApplyBlend,
   ApplyChannel,
   ApplyMask,
@@ -1426,6 +1427,15 @@ export default function App() {
   // dragging one previews a new rectangle and, on release, scales the
   // layer's content onto it.
   const [showTransformControls, setShowTransformControls] = useState(false);
+  // Photoshop's Interpolation option for every transform: the combined
+  // single-resample path at this method (Bicubic by default), or
+  // "sequential" for the earlier per-stage nearest-neighbour path.
+  const [transformInterpolation, setTransformInterpolation] = useState<Interpolation | "sequential">("bicubic");
+  const interpolationArg = transformInterpolation === "sequential" ? null : transformInterpolation;
+  // Rotating from the transform controls: a drag started just outside a
+  // corner handle turns the box about its centre and commits a rotation.
+  const [controlRotation, setControlRotation] = useState<number | null>(null);
+  const rotateDrag = useRef<{ centerX: number; centerY: number; startAngle: number } | null>(null);
   const [controlBounds, setControlBounds] = useState<{
     x0: number;
     y0: number;
@@ -3002,9 +3012,9 @@ export default function App() {
 
   const applyRotate = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("rotate", { id: selectedId, degrees: rotateDegrees });
+    await runCommand("rotate", { id: selectedId, degrees: rotateDegrees, interpolation: interpolationArg });
     setShowRotateDialog(false);
-  }, [runCommand, selectedId, rotateDegrees]);
+  }, [runCommand, selectedId, rotateDegrees, interpolationArg]);
 
   const applyMoveSelection = useCallback(async () => {
     await runCommand("move_selection", {
@@ -3253,9 +3263,10 @@ export default function App() {
       id: selectedId,
       widthPercent: scaleWidthPercent,
       heightPercent: scaleHeightPercent,
+      interpolation: interpolationArg,
     });
     setShowScaleDialog(false);
-  }, [runCommand, selectedId, scaleWidthPercent, scaleHeightPercent]);
+  }, [runCommand, selectedId, scaleWidthPercent, scaleHeightPercent, interpolationArg]);
 
   const applySkew = useCallback(async () => {
     if (selectedId === null) return;
@@ -3263,9 +3274,10 @@ export default function App() {
       id: selectedId,
       horizontalDegrees: skewHorizontal,
       verticalDegrees: skewVertical,
+      interpolation: interpolationArg,
     });
     setShowSkewDialog(false);
-  }, [runCommand, selectedId, skewHorizontal, skewVertical]);
+  }, [runCommand, selectedId, skewHorizontal, skewVertical, interpolationArg]);
 
   const setFreeTransformField = useCallback(
     (key: keyof typeof freeTransform, value: number) => {
@@ -3342,6 +3354,7 @@ export default function App() {
       position: ftUsePosition ? [ftX, ftY] : null,
       relative: ftRelative,
       maintainAspect: ftMaintainAspect,
+      interpolation: interpolationArg,
     };
     await runCommand("free_transform", { id: selectedId, transform });
     setShowFreeTransformDialog(false);
@@ -3355,6 +3368,7 @@ export default function App() {
     ftY,
     ftRelative,
     ftMaintainAspect,
+    interpolationArg,
   ]);
 
   const openDistortDialog = useCallback(() => {
@@ -7410,9 +7424,76 @@ export default function App() {
       if (x0 === drag.start.x0 && y0 === drag.start.y0 && x1 === drag.start.x1 && y1 === drag.start.y1) {
         return;
       }
-      void runCommand("transform_to_bounds", { id: selectedId, x0, y0, x1, y1 });
+      void runCommand("transform_to_bounds", { id: selectedId, x0, y0, x1, y1, interpolation: interpolationArg });
     },
-    [draggedRect, selectedId, runCommand],
+    [draggedRect, selectedId, runCommand, interpolationArg],
+  );
+
+  /** The pointer's angle about a screen-space centre, in degrees. */
+  const rotateAngleAt = useCallback(
+    (event: React.PointerEvent<HTMLElement>, center: { x: number; y: number }) =>
+      (Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180) / Math.PI,
+    [],
+  );
+
+  const startRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      if (!controlBounds || !document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const center = {
+        x: rect.left + ((controlBounds.x0 + controlBounds.x1) / 2 / document.width) * rect.width,
+        y: rect.top + ((controlBounds.y0 + controlBounds.y1) / 2 / document.height) * rect.height,
+      };
+      rotateDrag.current = { centerX: center.x, centerY: center.y, startAngle: rotateAngleAt(event, center) };
+      setControlRotation(0);
+    },
+    [controlBounds, document, rotateAngleAt],
+  );
+
+  const moveRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = rotateDrag.current;
+      if (!drag) return;
+      let degrees = rotateAngleAt(event, { x: drag.centerX, y: drag.centerY }) - drag.startAngle;
+      if (event.shiftKey) degrees = Math.round(degrees / 15) * 15;
+      setControlRotation(degrees);
+    },
+    [rotateAngleAt],
+  );
+
+  const endRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = rotateDrag.current;
+      rotateDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      const degrees = controlRotation;
+      setControlRotation(null);
+      if (!drag || selectedId === null || degrees === null || Math.abs(degrees) < 0.05) return;
+      void runCommand("free_transform", {
+        id: selectedId,
+        transform: {
+          widthPercent: 100,
+          heightPercent: 100,
+          degrees: Math.round(degrees * 10) / 10,
+          skewHorizontal: 0,
+          skewVertical: 0,
+          offsetX: 0,
+          offsetY: 0,
+          reference: "center",
+          position: null,
+          relative: false,
+          maintainAspect: false,
+          interpolation: interpolationArg ?? "nearest",
+        },
+      });
+    },
+    [controlRotation, selectedId, runCommand, interpolationArg],
   );
 
   const canPaint = document !== null && selectedId !== null;
@@ -12404,6 +12485,20 @@ export default function App() {
               Show Transform Controls
             </label>
           )}
+          {tool === "move" && (
+            <label className="tools__slider" title="Interpolation: how every transform resamples -- Photoshop's Bicubic by default; Sequential is the earlier per-stage nearest-neighbour path">
+              Interpolation
+              <select
+                value={transformInterpolation}
+                onChange={(event) => setTransformInterpolation(event.target.value as Interpolation | "sequential")}
+              >
+                <option value="bicubic">Bicubic</option>
+                <option value="bilinear">Bilinear</option>
+                <option value="nearest">Nearest Neighbor</option>
+                <option value="sequential">Sequential (per stage)</option>
+              </select>
+            </label>
+          )}
           {tool === "magneticLasso" && (
             <>
               <label className="tools__slider">
@@ -16717,6 +16812,19 @@ export default function App() {
                 <option value="bottomLeft">Bottom left</option>
                 <option value="bottom">Bottom</option>
                 <option value="bottomRight">Bottom right</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Interpolation</span>
+              <select
+                value={transformInterpolation}
+                onChange={(event) => setTransformInterpolation(event.target.value as Interpolation | "sequential")}
+                title="Bicubic, Bilinear or Nearest Neighbor resample the composed transform once; Sequential is the earlier per-stage nearest-neighbour path"
+              >
+                <option value="bicubic">Bicubic (one resample)</option>
+                <option value="bilinear">Bilinear (one resample)</option>
+                <option value="nearest">Nearest Neighbor (one resample)</option>
+                <option value="sequential">Sequential (nearest per stage)</option>
               </select>
             </label>
             <label className="control control--row">
@@ -27618,8 +27726,26 @@ export default function App() {
               {showTransformControls && tool === "move" && controlBounds && (
                 <div
                   className="transform-box"
-                  style={overlayStyle(controlPreview ?? controlBounds, document)}
+                  style={{
+                    ...overlayStyle(controlPreview ?? controlBounds, document),
+                    transform: controlRotation !== null ? `rotate(${controlRotation}deg)` : undefined,
+                  }}
                 >
+                  {["nw", "ne", "se", "sw"].map((corner) => (
+                    <div
+                      key={`rotate-${corner}`}
+                      className={`transform-rotate transform-rotate--${corner}`}
+                      role="slider"
+                      aria-label={`Rotate from the ${corner} corner`}
+                      aria-valuenow={Math.round(controlRotation ?? 0)}
+                      tabIndex={-1}
+                      title="Drag to rotate about the centre (Shift snaps to 15°)"
+                      onPointerDown={startRotateDrag}
+                      onPointerMove={moveRotateDrag}
+                      onPointerUp={endRotateDrag}
+                      onPointerCancel={endRotateDrag}
+                    />
+                  ))}
                   {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((handle) => (
                     <div
                       key={handle}
