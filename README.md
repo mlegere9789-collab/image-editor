@@ -5,34 +5,34 @@ LegeLabs umbrella.
 
 ## Status
 
-- **Phase 0** — Tauri + Rust + React shell that opens and displays a PNG. *Done.*
-- **Phase 1** — the document model and compositor. *Done, described below.*
+- **Phase 0** — Tauri + Rust + React shell that opens and displays a PNG. _Done._
+- **Phase 1** — the document model and compositor. _Done, described below._
 - **Phase 2** — composite delivery over a custom protocol instead of base64 IPC.
-  *Done, described below.*
-- **Phase 3** — brush and eraser tools: the first per-pixel edits. *Done,
-  described below.*
+  _Done, described below._
+- **Phase 3** — brush and eraser tools: the first per-pixel edits. _Done,
+  described below._
 - **Phase 4** — **Export PNG…**: the app can finally save what you made.
-  *Done, described below.*
-- **Phase 5** — undo/redo. *Done, described below.*
+  _Done, described below._
+- **Phase 5** — undo/redo. _Done, described below._
 - **Phase 6** — dirty-region recompositing: a stroke only recomposites the
-  pixels it touched. *Done, described below.*
+  pixels it touched. _Done, described below._
 - **Phase 7** — **Save Project… / Open Project…**: a layered project file
   format that round-trips the full editable document, not just a flattened
-  PNG. *Done, described below.*
+  PNG. _Done, described below._
 - **Phase 8** — **New…**: start a blank document at a chosen size instead of
-  needing to open a file first. *Done, described below.*
+  needing to open a file first. _Done, described below._
 - **Phase 9** — **Rect Select / Ellipse Select / Select All / Invert /
   Reselect**: the first selection tools — paint/erase strokes are now
   confined to the active selection, which can cover the whole canvas, be
-  inverted, or be restored after deselecting. *Done, described below. Part
+  inverted, or be restored after deselecting. _Done, described below. Part
   of a much larger [full-parity roadmap](docs/PHOTOSHOP_PARITY.md) — see
-  that file for what's next.*
+  that file for what's next._
 - **Phase 10** — **Lock / Merge Visible / Flatten Image / Merge Down /
   Eyedropper / Paint Bucket / Gradient**: a per-layer toggle that blocks
   paint/erase strokes onto that layer's pixels, three ways to collapse the
   layer stack, a tool that picks up the color under the pointer, one that
   flood-fills a connected region with it, and one that blends between two
-  colors along a dragged line. *Done, described below.*
+  colors along a dragged line. _Done, described below._
 
 ## Phase 1: document model and compositor
 
@@ -137,7 +137,7 @@ you drag across the canvas.
   regardless of how long the drag has run; the stroke is many small edits,
   not one command holding a growing point list.
 
-One thing this does *not* do yet: recomposite only the dirty region instead
+One thing this does _not_ do yet: recomposite only the dirty region instead
 of the whole document on every stroke segment (Phase 2's deferred note — now
 that there's an actual per-pixel edit tool, this is the next natural
 candidate). Phase 6 adds it.
@@ -179,7 +179,7 @@ Ctrl/Cmd+Shift+Z / Ctrl+Y), backed by whole-document snapshots kept in Rust.
   an opacity drag sends many small IPC calls (one per pointer move); auto-
   checkpointing each one would fragment a single stroke into dozens of undo
   steps. Instead the frontend calls a dedicated `checkpoint` command once, at
-  the *start* of a gesture, and the gesture's own edit commands
+  the _start_ of a gesture, and the gesture's own edit commands
   (`paint_stroke`, `erase_stroke`, `set_layer_opacity`) use a plain,
   non-checkpointing `edit()` helper. Discrete one-shot commands (add a layer,
   toggle visibility, change blend mode, reorder, delete) checkpoint
@@ -201,7 +201,7 @@ Ctrl/Cmd+Shift+Z / Ctrl+Y), backed by whole-document snapshots kept in Rust.
 
 ## Phase 6: dirty-region recompositing
 
-Every edit through Phase 5 re-flattened the *entire* document, every time —
+Every edit through Phase 5 re-flattened the _entire_ document, every time —
 including once per pointer-move during a brush stroke, dozens of times over
 one drag. Deferred at the end of Phase 2 as future work, and again at the end
 of Phase 3 once there was finally a per-pixel edit tool to make "dirty
@@ -223,7 +223,7 @@ region" mean something narrower than "the whole layer."
   the PNG-encoded bytes. `snapshot()` takes an `Option<Rect>`: given one, and
   a cached buffer whose dimensions match the current document, it patches
   just that rect via `recomposite_region` instead of calling `flatten`.
-  Every edit that is *not* a stroke (opacity, visibility, blend mode, adding/
+  Every edit that is _not_ a stroke (opacity, visibility, blend mode, adding/
   removing/reordering a layer) can change any pixel in the composite, so
   those still pass `None` and get a full flatten — as does undo/redo, and
   opening a document (which also replaces the cache outright, so a
@@ -235,8 +235,8 @@ region" mean something narrower than "the whole layer."
   segment's rect is a small fraction of the total pixel count.
 
 **Verified two ways.** `composite.rs` gained tests asserting a region
-recomposite matches a full flatten *inside* the rect and leaves pixels
-*outside* it untouched (with a sentinel value nothing real could produce, so
+recomposite matches a full flatten _inside_ the rect and leaves pixels
+_outside_ it untouched (with a sentinel value nothing real could produce, so
 any stray write is unmistakable); `lib.rs` gained tests for `snapshot`'s
 three paths — a region patch, the no-cache-yet fallback, and the
 dimension-mismatch fallback. Every one of Phase 1-5's existing tests also
@@ -252,7 +252,7 @@ used stays correct alongside the new region path.
 
 ## Phase 7: project files
 
-**Export PNG…** (Phase 4) only ever wrote the *flattened* composite —
+**Export PNG…** (Phase 4) only ever wrote the _flattened_ composite —
 opening that file back up gives you a single fresh layer, not the document
 you actually built. **Save Project…** / **Open Project…** close that gap: a
 project file round-trips the full editable document — layer order, name,
@@ -291,7 +291,7 @@ than a panic or silent data loss. Live under Xvfb: opened a document, added
 a second layer, set it to 60% opacity and Multiply, saved a project file,
 then reloaded it — the reloaded document showed exactly two layers (not
 duplicated — an early version of the verification probe raced under React
-StrictMode's double-effect in dev and *did* duplicate them, caught before
+StrictMode's double-effect in dev and _did_ duplicate them, caught before
 this ever reached real code) with the opacity, blend mode, and composite all
 matching what was saved.
 
@@ -373,7 +373,7 @@ draws from.
 **A real regression, caught only by testing.** Wrapping the canvas `<img>`
 in a positioning `<div>` for the selection overlay caused WebKitGTK to
 render its own native "image selected" highlight — a solid color tint over
-the *entire* image — on any click-drag, unrelated to this app's own
+the _entire_ image — on any click-drag, unrelated to this app's own
 selection state entirely. `user-select: none` / `-webkit-user-drag: none`
 on the wrapper and image fixed it. Caught by live interaction, not unit
 tests, since nothing about the pixel data was wrong — the composite itself
@@ -394,7 +394,7 @@ revealing an actual bug — confirmed by bypassing pointer simulation
 entirely with a direct `invoke()` sequence (`new_document` →
 `select_rectangle` → `checkpoint` → `paint_stroke`) through the real running
 app: the resulting screenshot showed a stroke drawn across the full canvas
-width but visibly painted *only* inside the selection's bounds, pixel-exact
+width but visibly painted _only_ inside the selection's bounds, pixel-exact
 with what the Rust confinement tests already predicted.
 
 **Select All / Invert.** `Selection` gained one field, `inverted: bool`
@@ -413,7 +413,7 @@ outline, so an inverted selection reads visually as "everywhere but this."
 Verified the same two ways as the rest of this phase: `document.rs` gained
 tests for `select_all`, for inverting with nothing selected being an error,
 for a double-invert returning to the original selection, and for an
-inverted selection confining a stroke to *outside* its bounds. Live,
+inverted selection confining a stroke to _outside_ its bounds. Live,
 through the real running app under Xvfb: single-click UI verification
 (New…, Select All, Invert) confirmed the buttons enable/disable correctly
 and the full-canvas outline appears; a direct `invoke()` trace of
@@ -529,7 +529,7 @@ close.
 
 **Flatten Image.** The same `flatten_subset`/`composite_layers_pixel`
 groundwork Merge Visible needed made this the smaller of the two: unlike
-Merge Visible, Flatten Image composites *every* layer regardless of
+Merge Visible, Flatten Image composites _every_ layer regardless of
 visibility (so it's just `composite::flatten`, not a computed subset) and
 discards every layer afterward rather than sparing hidden ones — the whole
 stack becomes one new layer named `"Background"`, matching what Photoshop
@@ -562,7 +562,7 @@ caller already filtered to exactly the visible ones), `merge_down` filters
 its two candidate layers through `contributes()` first, so a hidden or
 zero-opacity layer among the two contributes nothing — the same rule
 `flatten` itself applies, rather than a special case just for this
-command. The merged layer takes the name of the layer it merged *into*
+command. The merged layer takes the name of the layer it merged _into_
 (the one below), matching Photoshop's own Merge Down. `merge_down` is a
 new `edit_checkpointed` command taking the layer id to merge, alongside a
 **Merge Down** button in the layers panel's per-layer controls, disabled
@@ -738,8 +738,8 @@ it. The existing `Selection { shape, bounds, inverted }` representation
 (no mask) turned out to be exactly the right fit for this one: neither
 command needed any new state.
 
-The one subtlety worth calling out: for an *inverted* selection —
-everywhere except the shape — growing the *selected* area means shrinking
+The one subtlety worth calling out: for an _inverted_ selection —
+everywhere except the shape — growing the _selected_ area means shrinking
 the excluded shape, the opposite of what growing a normal selection's
 bounds does. `resize_selection_bounds` flips `delta`'s sign against the
 shape's own bounds whenever `selection.inverted` is set, so Expand and
@@ -832,8 +832,7 @@ re-deriving this loop a third time.
 `threshold` is a new `edit_checkpointed` command taking the layer id and
 `level`. The frontend adds a **Threshold…** toolbar button next to Invert
 Colors, opening a small modal (same `modal-overlay`/`modal` pattern as
-Expand/Contract) with a single `level` slider (`1..=255`, defaulting to
-128) and a live numeric readout, styled like the brush Size/Flow sliders.
+Expand/Contract) with a single `level` slider (`1..=255`, defaulting to 128) and a live numeric readout, styled like the brush Size/Flow sliders.
 
 **Verified two ways.** New `document.rs` tests cover the core
 above/below-level split against hand-picked luma values, confirming the
@@ -1459,12 +1458,12 @@ tests already proved algebraically.
 `clippy`, and `npm run build` all clean.
 
 **Border.** Select > Modify > Border turns a selection into a band hugging
-the *inside* of its own edge, excluding the interior beyond that band —
+the _inside_ of its own edge, excluding the interior beyond that band —
 the classic "picture frame" selection, useful for painting an outline
 around a shape without touching its middle. Photoshop's own Border
 straddles the original edge (extending outward too, into fresh canvas
 area that would need re-clamping) and feathers the result; this
-hard-edged selection system instead keeps the shape's *outer* boundary
+hard-edged selection system instead keeps the shape's _outer_ boundary
 exactly where it was and only carves a same-shaped hole out of the
 interior — a deliberate scope cut that still produces the same everyday
 "frame a selection" effect without growing the bounding box. Once the
@@ -1475,12 +1474,12 @@ original shape, not the current ring — it does not stack into a border
 of a border. An error if nothing is selected, or the width is zero.
 
 Rather than a new `SelectionShape` variant, Border is a new `border:
-Option<u32>` field directly on `Selection`, composing with *any* shape
+Option<u32>` field directly on `Selection`, composing with _any_ shape
 — `Rectangle`, `Ellipse`, or the `RoundedRectangle` Smooth added — since
 containment only needed a small refactor: the shape-matching logic
 inside `Selection::contains` was pulled out into a free `shape_contains(shape,
 bounds, px, py)` function, and border containment is just "inside the
-shape at the selection's own bounds, but *not* inside that same shape
+shape at the selection's own bounds, but _not_ inside that same shape
 re-tested against a `shrink_rect`-shrunk copy of those bounds." A
 `RoundedRectangle`'s radius is defensively re-clamped inside
 `shape_contains` itself (not only at creation) since a Border-shrunk
@@ -1520,7 +1519,7 @@ exactly as the unit tests already proved algebraically.
 Layer > Rasterize converts a vector, text, or smart-object layer into an
 ordinary pixel layer. Every `Layer` in this app has been a document-sized
 RGBA8 pixel buffer since Phase 1 — there is no vector, text, shape, or
-smart-object layer type to convert *from* (the same fact `PIXEL LAYER`
+smart-object layer type to convert _from_ (the same fact `PIXEL LAYER`
 in `docs/PHOTOSHOP_PARITY.md` already records as trivially true) — so
 `Document::rasterize_layer` is always a genuine no-op. Rather than
 leaving this unimplemented or checking the parity box off with only a
@@ -1762,13 +1761,13 @@ each other.
 ## Phase 18 — Edit > Copy / Cut / Paste (and Paste Special > Paste in Place)
 
 Every prior increment either read a layer's pixels in place or rewrote
-them in place; this one is the first to move pixels *between* layers
+them in place; this one is the first to move pixels _between_ layers
 and hold them somewhere outside the document entirely between the two
 halves of the gesture. A new opaque `document::Clipboard` type — a
 sub-rectangle's worth of RGBA8 pixels plus the document coordinates it
 was captured from — is threaded through three new
 `Document` methods and stashed on `AppState` in `lib.rs`
-(`clipboard: Mutex<Option<Clipboard>>`), deliberately *not* on
+(`clipboard: Mutex<Option<Clipboard>>`), deliberately _not_ on
 `Document` itself: a real clipboard survives undo, redo, and even
 switching to a different document, none of which anything `Document`
 tracks does, so it needed to live one level up, alongside (but
@@ -1797,12 +1796,12 @@ new top layer, positioned at the exact document coordinates it was
 copied from. This app has no scrollable viewport to paste into the
 middle of — the canvas is always shown at its own document
 coordinates — so a plain Paste landing back at the original position
-*is* Paste Special > Paste in Place, and both menu items are backed by
+_is_ Paste Special > Paste in Place, and both menu items are backed by
 the same one command; Paste Into and Paste Outside are not (they'd
-need clipping the paste to a *second* selection, not just placing it),
+need clipping the paste to a _second_ selection, not just placing it),
 and stay unchecked in `docs/PHOTOSHOP_PARITY.md`. Because the
 clipboard outlives the document it was copied from, pasting is clipped
-per-pixel against whatever document is open *now*, which can have
+per-pixel against whatever document is open _now_, which can have
 different dimensions than the one at copy time — after a 90° rotation
 (Phase 17), say, or after opening a different image. `paste` cannot
 fail: a paste that lands partly or fully outside the current canvas
@@ -1831,7 +1830,7 @@ succeeding; cutting clearing exactly the selected pixels and reporting
 that rect dirty, with the untouched pixels around it spot-checked;
 cutting a locked layer failing and leaving it byte-for-byte unchanged;
 pasting landing a copied region at its original coordinates on a
-brand-new top layer; pasting clipping correctly into a *smaller*
+brand-new top layer; pasting clipping correctly into a _smaller_
 current document (exercising both the row-break and column-skip
 clipping paths in one test); and pasting a clipboard whose origin is
 now entirely outside the current canvas producing an all-transparent
@@ -1978,7 +1977,7 @@ value can be hand-derived from its position alone: the centre pixel's
 full 3×3 window averages back to its own original value (450⁄9 = 50,
 exactly, since the grid is symmetric around the centre); the top-left
 corner's edge-clamped window comes out to 210⁄9 = 23 (asserting the
-*truncating*, not rounding, integer division); the bottom-right
+_truncating_, not rounding, integer division); the bottom-right
 corner comes out to 690⁄9 = 76; and the uniformly-255 alpha channel
 survives the average exactly, confirming it really is blurred through
 the same code path as the colour channels rather than being special-
@@ -2031,7 +2030,7 @@ logic: previously the only special case was `selectAfter: "top"`
 (select whatever ends up topmost), which is wrong here whenever the
 duplicated layer wasn't already the top one. `runCommand` now also
 accepts `selectAfter: { above: <id> }`, which finds where `<id>` (the
-layer that was just duplicated) ended up in the *new* layer list and
+layer that was just duplicated) ended up in the _new_ layer list and
 selects whatever landed directly above it — exactly the newly created
 duplicate, by construction, regardless of where in the stack the
 original sat. The frontend adds a **Duplicate Layer** button to the
@@ -2133,13 +2132,13 @@ takes any iterator of `(x, y)` coordinates and does the summing and
 dividing, and `box_blur_at` now just builds a square iterator and
 hands it off (a pure refactor — the existing box-blur tests pass
 unmodified with their exact same hand-derived values). The new
-`motion_blur_at` builds a *line* of coordinates instead: `2 * distance
-+ 1` samples at integer steps from `-distance` to `distance` along
-`(cos(angle), sin(angle))`, each offset rounded to the nearest whole
+`motion_blur_at` builds a _line_ of coordinates instead: `2 \* distance
+
+- 1`samples at integer steps from`-distance`to`distance`along`(cos(angle), sin(angle))`, each offset rounded to the nearest whole
 pixel (not a true anti-aliased line — the same hard-edged, no-
 antialiasing scope cut this project's selection system already makes)
 and clamped to the layer's own edges exactly like `box_blur_at`'s
-square window is.
+  square window is.
 
 `Document::motion_blur(id, angle, distance)` walks the active
 selection (or the whole layer) and, for every pixel, replaces it with
@@ -2147,7 +2146,7 @@ selection (or the whole layer) and, for every pixel, replaces it with
 premultiplied, the same scope cut `box_blur` and `unsharp_mask` both
 already make. `angle` is in degrees, 0° horizontal, matching
 Photoshop's own dial; `distance` behaves like `box_blur`'s own
-`radius` (how far the line extends on *each* side of the pixel, so the
+`radius` (how far the line extends on _each_ side of the pixel, so the
 streak is `2 * distance + 1` pixels long) rather than Photoshop's
 single "total streak length" number — the same "close enough, not a
 pixel-for-pixel port of Photoshop's maths" simplification `box_blur`'s
@@ -2170,8 +2169,8 @@ everything else is untouched; zero-distance, non-finite-angle, locked-
 layer, and unknown-layer error cases round out the seven tests, all
 passing on first run. Live under Xvfb: opened the bundled gradient
 sample and applied **Motion Blur…** at its defaults (0°, 10px) — every
-*vertical* white grid line between tiles was smeared away completely
-along the horizontal blur direction, while every *horizontal* grid
+_vertical_ white grid line between tiles was smeared away completely
+along the horizontal blur direction, while every _horizontal_ grid
 line stayed perfectly sharp, visually confirming the blur really is
 directional rather than a disguised box blur.
 
@@ -2193,7 +2192,7 @@ Paste, is that they never go through the clipboard — the user's real
 clipboard contents survive, and nothing the user previously copied can
 leak in. That fell out almost for free from Phase 18's design: the
 clipboard lives on `AppState` in `lib.rs`, not on `Document`, and
-`Document::copy` / `Document::cut` merely *return* a `Clipboard` value —
+`Document::copy` / `Document::cut` merely _return_ a `Clipboard` value —
 storing it is the Tauri command's job. So `Document::new_layer_via_copy`
 is literally `self.copy(id)?` followed by `self.paste(&clipboard, name)`,
 and `new_layer_via_cut` is `self.cut(id)?` followed by the same `paste`,
@@ -2216,7 +2215,7 @@ named "Layer via Copy" / "Layer via Cut", Photoshop's own defaults.
 **Verified two ways.** Six new `document.rs` tests: via-copy produces a
 new layer holding exactly the selected region (transparent outside it)
 while the source layer is byte-for-byte untouched; via-cut produces the
-same new layer *and* clears the selected region on the source (with the
+same new layer _and_ clears the selected region on the source (with the
 exact dirty rect asserted), leaving the unselected pixels alone; via-copy
 succeeding on a locked layer versus via-cut refusing one and leaving the
 layer count and pixels unchanged; and the unknown-layer error for each.
@@ -2240,13 +2239,13 @@ that already exist. Phases 20 and 22 built the two general tools —
 `box_blur(radius)` and `unsharp_mask(radius, amount, threshold)` — and
 each preset is one call into them with Photoshop's own intent baked in:
 
-| Preset | Built as | Photoshop's description |
-| --- | --- | --- |
-| Blur | `box_blur(1)` | "softens by one pixel" |
-| Blur More | `box_blur(3)` | "three to four times stronger than Blur" |
-| Sharpen | `unsharp_mask(1, 0.5, 0)` | a light, everywhere boost |
-| Sharpen More | `unsharp_mask(1, 1.0, 0)` | "a stronger Sharpen" |
-| Sharpen Edges | `unsharp_mask(1, 1.0, 20)` | "sharpens only where there's an edge" |
+| Preset        | Built as                   | Photoshop's description                  |
+| ------------- | -------------------------- | ---------------------------------------- |
+| Blur          | `box_blur(1)`              | "softens by one pixel"                   |
+| Blur More     | `box_blur(3)`              | "three to four times stronger than Blur" |
+| Sharpen       | `unsharp_mask(1, 0.5, 0)`  | a light, everywhere boost                |
+| Sharpen More  | `unsharp_mask(1, 1.0, 0)`  | "a stronger Sharpen"                     |
+| Sharpen Edges | `unsharp_mask(1, 1.0, 20)` | "sharpens only where there's an edge"    |
 
 Sharpen Edges is the interesting one: Photoshop's "leave smooth areas
 alone" behaviour is precisely what Unsharp Mask's threshold already
@@ -2270,8 +2269,7 @@ really lands on the intended parameters rather than merely "does
 something": Blur reproduces the box-blur corner value 23; Sharpen the
 unsharp-mask corner value 4 and bottom-right 97; Sharpen More the
 full-strength 0 (clamped) and 104; Sharpen Edges leaves both corners at
-10 and 90 because their |diff| of 13 and 14 sit under the threshold of
-20. Blur More is the one genuinely new derivation: at radius 3 on the
+10 and 90 because their |diff| of 13 and 14 sit under the threshold of 20. Blur More is the one genuinely new derivation: at radius 3 on the
 3×3 ramped layer, offsets −3..=3 clamp onto row/column 0 four times, 1
 once and 2 twice (per-axis weights 4/1/2, 49 samples), so the top-left
 corner is 10·(3·5·7 + 7·5 + 49)/49 = 1890/49 = 38, and the centre's
@@ -2290,7 +2288,7 @@ doing its job on real content.
 
 ## Phase 26 — Filter > Noise > Median / Despeckle / Dust & Scratches
 
-The first *rank* filter, and a different kind of neighbourhood operation
+The first _rank_ filter, and a different kind of neighbourhood operation
 from every blur so far: instead of averaging a window, a median filter
 sorts it and keeps the middle sample. That one change is why it does
 what blurs can't — an isolated speck (dust, a hot pixel,
@@ -2310,7 +2308,7 @@ neighbourhood median only when it differs from that median by at least
 a real speck differs a lot and is removed, fine low-contrast texture
 differs only slightly and is left alone. `Document::median(id, radius)`
 is that with a threshold of 0 (replace everything), and is implemented
-*on top of* `dust_and_scratches` rather than the other way round for
+_on top of_ `dust_and_scratches` rather than the other way round for
 that reason. `Document::despeckle(id)` is `median` at radius 1: a 3×3
 median is the textbook implementation of Photoshop's own description
 of Despeckle ("detects edges and blurs everything except them"). All
@@ -2525,8 +2523,7 @@ stays 20; Minimum with only (2, 2) selected changes it to 50 while the
 centre keeps its original 50. High Pass at radius 1 reuses the
 box-blur test's already-verified local means (23, 50, 76) to expect
 `10 − 23 + 128 = 115`, `50 − 50 + 128 = 128`, `90 − 76 + 128 = 142`,
-with the flat green channel collapsing to 128 and alpha untouched at
-255. Offset by (1, 0) rotates each row right — 10, 20, 30 → 30, 10, 20
+with the flat green channel collapsing to 128 and alpha untouched at 255. Offset by (1, 0) rotates each row right — 10, 20, 30 → 30, 10, 20
 — and by (0, 1) moves the bottom row to the top (70, 80, 90 above 10,
 20, 30). A second Offset test pins the wrap arithmetic: shifting by
 (3, −3) on a 3×3 layer is pixel-for-pixel identical to the original,
@@ -2707,7 +2704,7 @@ built outward from the centre by the ratio `C(2n, n+k+1) / C(2n, n+k)
 = (n − k) / (n + k + 1)`, so nothing overflows however large the radius
 and tails that underflow to zero simply drop out; `sigma = 1` gives
 exactly `[1 4 6 4 1] / 16`. The blur is separable and runs as two
-passes: every row of the *whole* layer is blurred horizontally into a
+passes: every row of the _whole_ layer is blurred horizontally into a
 scratch buffer — the whole layer, not just the selection, because the
 second pass reads rows above and below the selected pixels — and then
 each selected pixel is blurred vertically from that buffer through the
@@ -2785,7 +2782,7 @@ nearest-valued in-bounds neighbour, so the corner 10 (neighbours 20,
 takes the first, giving 20, 10, 20 / 50, 40, 50 / 80, 70, 80 — and the
 seed is shown to play no part. Two documents diffused with the same
 seed are identical; with only pixel (1, 0) selected it receives the
-*first* draw pair and takes its left neighbour's 10 while everything
+_first_ draw pair and takes its left neighbour's 10 while everything
 else stays put and the dirty rect is that one pixel; a locked layer and
 an unknown id error without touching pixels. All passing on first run.
 Live under Xvfb on the bundled gradient sample: **Normal** turned the
@@ -2823,8 +2820,7 @@ the two sliders.
 (10..90 by tens) at radius 1, every weight written out by hand. At
 threshold 25 the centre 50 admits only 40, 50 and 60 (weights 15, 25,
 15), so `(15·40 + 25·50 + 15·60) / 55 = 50`; the top-left corner 10,
-whose clamped window holds four 10s (weight 25 each), two 20s (weight
-15) and a 40 and a 50 that fall outside, gives `1600 / 130 = 12.3 →
+whose clamped window holds four 10s (weight 25 each), two 20s (weight 15) and a 40 and a 50 that fall outside, gives `1600 / 130 = 12.3 →
 12` — far less pull than the box blur's 23 on the same window, which is
 the whole point of the filter; the 20 beside it gives `(2·15·10 +
 2·25·20 + 2·15·30 + 5·40) / 115 = 20.9 → 21`. The flat green channel
@@ -2869,7 +2865,7 @@ sliders, defaulting to Photoshop's 2 / 6 / 5.
 **Verified two ways.** Four new `document.rs` tests on the 3×3 red ramp
 (10..90 by tens), building on the Sobel values the Find Edges test
 already derived by hand. With width 1, brightness 5 and smoothness 1
-the result *is* the Sobel L1 magnitude: 160 in the corners, 200
+the result _is_ the Sobel L1 magnitude: 160 in the corners, 200
 mid-top and mid-bottom, a clamped 255 across the middle row (the
 mid-top pixel, for instance, has `Gx = (30 + 60 + 60) − (10 + 20 + 40)
 = 80` and `Gy = (40 + 100 + 60) − (10 + 40 + 30) = 120`); the flat
@@ -2954,7 +2950,7 @@ rounded to the nearest whole pixel and clamped to the layer so
 positions off the edge repeat the edge pixel — Photoshop's "Repeat Edge
 Pixels". Nearest-neighbour rather than bilinear is the same hard-edged
 scope cut Motion Blur makes. Every Distort filter is then just a
-formula for *where each output pixel pulls from*, run through the
+formula for _where each output pixel pulls from_, run through the
 `filter_pixels` skeleton, so whole pixels move, alpha included.
 
 **Ripple** pulls each pixel from a sinusoidally displaced position:
@@ -3044,8 +3040,7 @@ half-axes are 4.5 and the pixels along the middle row sit at `ρ = 2/9,
 (5, 4) reads `4 + 5/12 = 4.42` → (4, 4) = 44, (6, 4) reads `4 + 2 ·
 7/12 = 5.17` → 54, (7, 4) reads `4 + 3 · 0.75 = 6.25` → 64 and (8, 4)
 reads `4 + 4 · 11/12 = 7.67` → 84 — the middle stretched outward —
-while the centre and the corners (ρ > 1) keep 44 and 0 and alpha stays
-255. Pinch +100 % scales by `1.75 − 0.75ρ` instead: (5, 4) reads `4 +
+while the centre and the corners (ρ > 1) keep 44 and 0 and alpha stays 255. Pinch +100 % scales by `1.75 − 0.75ρ` instead: (5, 4) reads `4 +
 19/12 = 5.58` → 64, (6, 4) reads 6.83 → 74, (7, 4) reads 7.75 → 84 and
 (8, 4) reads 8.33, clamped to the edge → 84. Every position was worked
 by hand as a fraction and cross-checked with a scripted evaluation of
@@ -3130,8 +3125,8 @@ Auditing the earlier Pixelate batch left this one unshipped: the filter
 that reduces a photo to a grid of solid-colour circular dots, echoing a
 colour newspaper print. `Document::color_halftone(id, max_radius)` gives
 each colour channel its own square screen of `2 · max_radius`-pixel
-cells — but instead of Photoshop's four *rotated* screens (one angle per
-channel), the three channels here get three *offset* screens: R at
+cells — but instead of Photoshop's four _rotated_ screens (one angle per
+channel), the three channels here get three _offset_ screens: R at
 `(0, 0)`, G at `(max_radius, 0)`, B at `(0, max_radius)`. A rotated grid
 would need anti-aliased circles to look right at the radii this dialog
 allows, and this project has consistently favoured exact, hand-checkable
@@ -3139,7 +3134,7 @@ integer arithmetic over that (the same trade-off Motion Blur, Ripple and
 Twirl already made with nearest-neighbour sampling) — offsetting the
 grids instead still keeps the three screens from stacking exactly, which
 is all the rotation is really for. For each cell, the channel's
-*average* value over every pixel in that cell becomes a dot centred on
+_average_ value over every pixel in that cell becomes a dot centred on
 the cell, with the dot's area proportional to that average — a circle's
 area grows with the square of its radius, so "area ∝ average" becomes
 the single integer inequality `(dx² + dy²) · 255 ≤ max_radius² ·
@@ -3259,7 +3254,7 @@ per-site averaging were pulled out into three shared free functions —
 `jittered_sites`, `nearest_site` and `voronoi_site_averages` — so
 `Document::pointillize(id, cell_size, background, seed)` is now a thin
 wrapper: it builds the same sites and averages Crystallize would, then
-for each selected pixel checks whether it's within its *nearest* site's
+for each selected pixel checks whether it's within its _nearest_ site's
 radius (so neighbouring dots can never overlap, even when their sites
 land closer together than `cell_size` apart, since a pixel only belongs
 to a dot when that dot's site is also its nearest one); inside, the
@@ -3315,7 +3310,7 @@ draws three values per generator from the seeded `XorShift32` generator
 `amplitude_min..=amplitude_max`, and a phase offset in `0..wavelength` —
 the same style of seeded draw every randomised filter here uses. Every
 pixel's horizontal displacement is `horizontal_scale / 100` times the
-*sum*, over every generator, of `amplitude · sin(2π · (y + phase) /
+_sum_, over every generator, of `amplitude · sin(2π · (y + phase) /
 wavelength)`; its vertical displacement is the same sum over `x` instead
 of `y`, scaled by `vertical_scale / 100` — the same axis-swap Ripple
 uses, now with several waves layered together instead of one. Sampling
@@ -3414,7 +3409,7 @@ original, unsheared grid.
 ## Phase 45 — Filter > Render > Clouds and Difference Clouds
 
 The first Render filters, and the first filters in this project that
-*generate* content rather than transform what's already there. Both share
+_generate_ content rather than transform what's already there. Both share
 `clouds_field(width, height, seed)`, a fractal value-noise field in `[0,
 1]` — a documented, hand-checkable approximation of Photoshop's own
 undocumented, proprietary cloud renderer, not a port of it. Four octaves
@@ -3438,7 +3433,7 @@ the seed, standing in for Photoshop's own unseeded randomness) are this
 filter's only real parameters. `Document::difference_clouds` reuses the
 exact same noise field and foreground/background lerp to get a "cloud
 colour", but instead of replacing the pixel it combines that colour with
-the layer's *existing* one via the Difference blend formula, `|existing −
+the layer's _existing_ one via the Difference blend formula, `|existing −
 cloud|`, on the three colour channels only — alpha is left untouched,
 since Difference is a colour blend. Repeated applications of Difference
 Clouds fold the pattern back on itself, which is Photoshop's own
@@ -3522,20 +3517,17 @@ seeded `XorShift32` generator, then averaged vertically down each column
 streaks, so this is the natural way to get a fibrous, woven look rather
 than Clouds' soft blobs. `variance` (Photoshop's own 1..=100 range)
 scales how far each raw draw can stray from grey before smoothing: `0.5
-+ (n − 0.5) · variance / 100`, so 100 passes the full `[0, 1)` draw
+
+- (n − 0.5) · variance / 100`, so 100 passes the full `[0, 1)`draw
 through unscaled and 1 collapses nearly everything to a flat 0.5 — low
 variance means long, uniform fibres once smoothed; high variance means
-short, choppy ones, matching Photoshop's own description of the control.
-`strength` (Photoshop's own 1..=64 range) is the radius of the vertical
-box average taken independently down each column, `2 · strength + 1`
-samples with edge repeat past the top and bottom; a higher strength
-smooths further, stretching the fibres out. The resulting `[0, 1]`
-fraction is lerped, channel by channel including alpha, between
-`background` and `foreground`, replacing every selected pixel outright
-the same way `clouds` does. A **Fibers…** dialog exposes both of
+short, choppy ones, matching Photoshop's own description of the control.`strength`(Photoshop's own 1..=64 range) is the radius of the vertical
+box average taken independently down each column,`2 · strength + 1`samples with edge repeat past the top and bottom; a higher strength
+smooths further, stretching the fibres out. The resulting`[0, 1]`fraction is lerped, channel by channel including alpha, between`background`and`foreground`, replacing every selected pixel outright
+the same way `clouds`does. A **Fibers…** dialog exposes both of
 Photoshop's own numeric controls (Variance, Strength) plus the
-Foreground/Background colour pickers `clouds` and `difference_clouds`
-already use.
+Foreground/Background colour pickers`clouds`and`difference_clouds`
+  already use.
 
 **Verified two ways.** Four new `document.rs` tests, all grounded in a
 Python port of `fibers`'s exact arithmetic (same `XorShift32` sequence,
@@ -4120,7 +4112,7 @@ Composes two operations this project already has, rather than a new
 low-level algorithm: `Self::posterize` to flatten colour into `levels`
 (Photoshop's own `2..=6` range for this filter, narrower than standalone
 Posterize's own dialog) bands, then a dark outline drawn wherever the
-*posterized* result itself has a strong edge. `Document::poster_edges(id,
+_posterized_ result itself has a strong edge. `Document::poster_edges(id,
 edge_thickness, edge_intensity, levels)` measures that outline with the
 same [`sobel_at`] detector `find_edges` uses, widened by the same
 [`extreme_at`] neighbourhood-maximum `colored_pencil`'s own
@@ -4132,7 +4124,7 @@ posterize left it, and a fully-edged pixel at maximum intensity goes to
 black. Alpha is untouched. Both the `posterize` pre-pass and the
 darkening pass independently respect the selection, so a pixel outside
 it is left completely untouched by either step — but because the edge
-map is measured on the *mixed* result when only part of the layer is
+map is measured on the _mixed_ result when only part of the layer is
 selected (some pixels posterized, some not), a partial-selection
 application can draw outline pixels along the selection's own boundary
 in addition to the image's real edges, a documented consequence of
@@ -4251,7 +4243,7 @@ inverted into a median radius, `15 − brush_detail`, so a high Brush
 Detail (more of the original preserved) gives a small radius and a low
 one gives heavy smoothing. `shadow_intensity` (Photoshop's own `0..=10`
 range) scales a self-referential darkening term: `factor = 1 −
-(shadow_intensity / 10) · (1 − luma / 255)`, using the *smoothed*
+(shadow_intensity / 10) · (1 − luma / 255)`, using the _smoothed_
 pixel's own ITU-R BT.601 luma, so a bright pixel keeps nearly all its
 value while a dark one is pulled further toward black. Alpha is
 untouched. A new **Watercolor…** dialog exposes Brush Detail and Shadow
@@ -4348,7 +4340,7 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 ## Phase 62 — Filter Gallery > Brush Strokes > Ink Outlines
 
 Pushes each pixel toward black in proportion to its own edge strength
-and toward white in proportion to how *flat* it is, drawing dark ink
+and toward white in proportion to how _flat_ it is, drawing dark ink
 lines along detail while washing out everything in between — the same
 [`sobel_at`]/[`extreme_at`] edge-and-dilate machinery
 `colored_pencil`/`neon_glow`/`poster_edges` already use, combined into a
@@ -4434,7 +4426,7 @@ position (`10`), the second clamps to `(0, 1)` (`40`) — averaging to
 no-op (every draw resolves to the pixel itself regardless of
 smoothness). A fourth confines the fixture to a one-pixel selection —
 which, since `filter_pixels` skips the seeded draw entirely for
-unselected pixels, makes the *selected* pixel the first to consume the
+unselected pixels, makes the _selected_ pixel the first to consume the
 generator's own draws, landing on `10` rather than its own original
 value `20`, a real change worked out by hand rather than assumed. A
 fifth confirms an out-of-range spray radius or smoothness and a
@@ -4597,7 +4589,7 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 
 Repaints each pixel with one of two diagonal `motion_blur_at` passes —
 the same "\" and "/" strokes `crosshatch` already computes — chosen by
-the *original* pixel's own luma against a threshold, rather than
+the _original_ pixel's own luma against a threshold, rather than
 combined by taking the darker of the two. `Document::angled_strokes(id,
 direction_balance, stroke_length, sharpness)`: `direction_balance`
 (Photoshop's own `0..=100` range) sets that threshold as `255 *
@@ -4663,7 +4655,7 @@ built from two `motion_blur_at` passes at right angles to each other —
 the same directional line-sampling helper `motion_blur` and
 `crosshatch` already use. The first pass streaks the whole layer along
 the chosen direction's own axis; the second re-blurs that streaked
-result along the *perpendicular* axis, thickening each streak into a
+result along the _perpendicular_ axis, thickening each streak into a
 stroke with some width rather than a single-pixel-wide line. Two 1-D
 passes at right angles approximate, rather than exactly reproduce, a
 true 2-D rectangular average — a documented simplification, not a port
@@ -4688,21 +4680,20 @@ direction `1` (Horizontal), stroke length `2` (first-pass half-length
 radius-1 pass, so each row streaks to the same values that test already
 established (row 0 to `[13, 20, 26]`, row 1 to `[43, 50, 56]`, row 2 to
 `[73, 80, 86]`, every one an integer-truncating division like `(10 + 10
-+ 20) / 3 = 13`); at spray radius `0` the second pass is a no-op, so
+
+- 20. / 3 = 13`); at spray radius `0`the second pass is a no-op, so
 that streaked grid is the final output. A second test raises spray
-radius to `5` (second-pass half-length `1`), blurring that same
+radius to`5`(second-pass half-length`1`), blurring that same
 streaked grid vertically: column `0` (`13, 43, 73`) averages
-top-to-bottom to `(23, 43, 63)`, column `1` (`20, 50, 80`) to `(30, 50,
-70)`, column `2` (`26, 56, 86`) to `(36, 56, 76)` — all nine divisions
+top-to-bottom to `(23, 43, 63)`, column `1` (`20, 50, 80`) to `(30, 50, 70)`, column `2` (`26, 56, 86`) to `(36, 56, 76)`— all nine divisions
 come out exactly even, no rounding ambiguity. A third confirms
-direction `3` (Vertical) selects the vertical axis instead, reusing
-`motion_blur`'s own already-verified ninety-degree column values
+direction`3`(Vertical) selects the vertical axis instead, reusing`motion_blur`'s own already-verified ninety-degree column values
 (`20, 40, 60`) directly. A fourth confines the fixture to a one-pixel
 selection at `(0, 0)`, whose combined two-pass value (`23`) differs
 from its own untouched original (`10`), a real, hand-verified change.
-A fifth confirms out-of-range stroke length, spray radius, and an
-unrecognised direction, plus a locked/unknown layer, all error. All
-five passed on the first run.
+      A fifth confirms out-of-range stroke length, spray radius, and an
+      unrecognised direction, plus a locked/unknown layer, all error. All
+      five passed on the first run.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous fourteen: this session's
@@ -4757,10 +4748,11 @@ the whole fixture to its own original values exactly, since the erosion
 pass then contributes nothing to the blend. A third raises contrast to
 `40` (maximum), rescaling to `brightness_contrast`'s own domain as
 `255` and giving `factor = 259 * 510 / (255 * 4) = 129.5` exactly:
-`129.5 * (200 - 128) + 128 = 9452`, clamped to `255`, and `129.5 * (50
-- 128) + 128 = -9973`, clamped to `0` — both so far past their clamp
+`129.5 * (200 - 128) + 128 = 9452`, clamped to `255`, and `129.5 \* (50
+
+- 128. - 128 = -9973`, clamped to `0`— both so far past their clamp
 boundary that no rounding rule could change the outcome. A fourth
-raises stroke width to `10` (erosion radius `2`), wide enough that
+raises stroke width to`10`(erosion radius`2`), wide enough that
 every column's neighbourhood on this 4-wide fixture reaches a
 50-valued column, eroding the whole row to `50`. A fifth confines the
 fixture to a one-pixel selection. A sixth confirms out-of-range stroke
@@ -4824,14 +4816,14 @@ to `10` (threshold `127.5`) with intensity `10` (factor `1.0`): column
 `0`'s smudged luma `200` clears the threshold, `t = (200 - 127.5) /
 127.5 = 0.568627...`, pushing it to `200 + 55 * 0.568627 = 231.27 ->
 231`; column `1`'s `150` clears it too, `t = 0.176471...`, pushing `150
-+ 105 * 0.176471 = 168.53 -> 169`; columns `2` and `3` (`100` and `50`)
+
+- 105 \* 0.176471 = 168.53 -> 169`; columns `2`and`3` (`100`and`50`)
 both fall below the threshold and pass through unchanged — cross-checked
-against an independent Python script emulating `f32` arithmetic via
-`struct.pack`/`unpack` round-tripping. A third confines the fixture to
-a one-pixel selection. A fourth confirms out-of-range stroke length,
-highlight area, and intensity, plus a locked/unknown layer, all error.
-All four passed on the first run, matching the Python reference
-exactly.
+against an independent Python script emulating `f32`arithmetic via`struct.pack`/`unpack` round-tripping. A third confines the fixture to
+  a one-pixel selection. A fourth confirms out-of-range stroke length,
+  highlight area, and intensity, plus a locked/unknown layer, all error.
+  All four passed on the first run, matching the Python reference
+  exactly.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous sixteen: this session's
@@ -5186,17 +5178,15 @@ bright/dark cliff fixture `ink_outlines`/`poster_edges`/
 rows (`[200, 150, 100, 50]` and `[170, 140, 110, 80]`) directly. At
 brush size `8` (radius `1`, dim `1 - (8/40)*0.3 = 0.94`) and texture
 coverage `40` (blend factor `1.0`, discarding the blur entirely): `200
-* 0.94 = 188.0` exactly and `50 * 0.94 = 47.0` exactly, both clean
-with no rounding needed. A second test drops texture coverage to `0`
-(pure blur) at the same brush size, dimming the radius-1 row to `188`,
-`141`, `94`, `47` — all four exact. A third raises brush size to `16`
-(radius `2`, deeper dim `0.88`), dimming the radius-2 row to `150`,
-`123`, `97`, `70` (`170 * 0.88 = 149.6 -> 150`, etc.) — cross-checked
-against an independent Python script emulating `f32` arithmetic via
-`struct.pack`/`unpack` round-tripping. A fourth confines the fixture
-to a one-pixel selection. A fifth confirms out-of-range brush size and
-texture coverage, plus a locked/unknown layer, all error. All five
-passed on the first run, matching the Python reference exactly.
+
+- 0.94 = 188.0`exactly and`50 _ 0.94 = 47.0`exactly, both clean
+with no rounding needed. A second test drops texture coverage to`0`(pure blur) at the same brush size, dimming the radius-1 row to`188`,
+`141`, `94`, `47`— all four exact. A third raises brush size to`16`(radius`2`, deeper dim `0.88`), dimming the radius-2 row to `150`,
+`123`, `97`, `70` (`170 _ 0.88 = 149.6 -> 150`, etc.) — cross-checked
+against an independent Python script emulating `f32`arithmetic via`struct.pack`/`unpack` round-tripping. A fourth confines the fixture
+  to a one-pixel selection. A fifth confirms out-of-range brush size and
+  texture coverage, plus a locked/unknown layer, all error. All five
+  passed on the first run, matching the Python reference exactly.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous twenty-two: this session's
@@ -5731,9 +5721,9 @@ confirming contrast genuinely scales the grain rather than being
 ignored. A third confines the fixture to a one-pixel selection at
 column `2` — a genuine test correction was needed here mid-design: an
 initial draft assumed the selected pixel would still receive the
-*third* draw (the one column `2` gets in an unselected run), when
+_third_ draw (the one column `2` gets in an unselected run), when
 `filter_pixels` actually skips the seeded draw entirely for unselected
-pixels, making the selected pixel the *first* to consume the
+pixels, making the selected pixel the _first_ to consume the
 generator's own draws instead, landing on black rather than white — the
 same architectural fact `spatter`'s own selection test already
 documents, caught this time before the phase landed rather than after.
@@ -5775,11 +5765,12 @@ identical table `plaster` already has (`0`=90° Top, `1`=45° Top Right,
 Left, `6`=180° Left, `7`=135° Top Left); `detail` (Photoshop's own
 `0..=15` range) linearly scales the relief's contribution from none at
 `0` (a flat mid-grey plate) to double strength at `15` (`detail / 15.0
-* 2.0`) — a documented simplification of Photoshop's own detail
+
+- 2.0`) — a documented simplification of Photoshop's own detail
 control, which also sharpens fine edges rather than only scaling
 contrast. Alpha untouched. A new **Bas Relief…** dialog exposes Detail,
-Smoothness, and Light Direction controls, the last a `<select>` of the
-same 8 compass options `plaster`'s own dialog already offers.
+Smoothness, and Light Direction controls, the last a `<select>`of the
+same 8 compass options`plaster`'s own dialog already offers.
 
 **Verified two ways.** Five new `document.rs` tests, reusing the same
 bright/dark cliff fixture `ink_outlines`/`poster_edges`/
@@ -5964,18 +5955,17 @@ project started the Sketch gallery to keep colour rather than reduce
 to grayscale. `Document::diffuse_glow(id, graininess, glow_amount,
 clear_amount, seed)`: `graininess` (Photoshop's own `0..=10` range)
 scales a seeded `XorShift32` draw added to each pixel's own standard-
-weighted luma before the glow calculation, `draw * (graininess / 10.0
-* 64.0)` — the same per-pixel draw `note_paper` and `reticulation`
-already use; `glow_amount` and `clear_amount` (both Photoshop's own
-`0..=20` range) combine into a single glow strength, `(glow_amount /
-20.0) * (1.0 - clear_amount / 20.0) * (grained_luma / 255.0)`, clamped
-to `0.0..=1.0` — `clear_amount` scales the overall strength down
+weighted luma before the glow calculation, `draw \* (graininess / 10.0
+
+- 64.0)`— the same per-pixel draw`note_paper`and`reticulation`already use;`glow_amount`and`clear_amount`(both Photoshop's own`0..=20`range) combine into a single glow strength,`(glow_amount /
+  20.0) _ (1.0 - clear_amount / 20.0) _ (grained_luma / 255.0)`, clamped
+to `0.0..=1.0`—`clear_amount`scales the overall strength down
 rather than Photoshop's own more nuanced clipping of the glow's own
 tone range, a documented simplification. Each RGB channel is pushed
-toward white by that strength, `v + (255.0 - v) * strength`; alpha
-untouched. Confined to the selection the same way every other seeded
-filter in this project is. A new **Diffuse Glow…** dialog exposes
-Graininess, Glow Amount, and Clear Amount sliders.
+toward white by that strength,`v + (255.0 - v) \* strength`; alpha
+  untouched. Confined to the selection the same way every other seeded
+  filter in this project is. A new **Diffuse Glow…** dialog exposes
+  Graininess, Glow Amount, and Clear Amount sliders.
 
 **Verified two ways.** Five new `document.rs` tests, reusing the same
 bright/dark cliff fixture every Sketch filter shares (4x4, columns 0-1
@@ -5997,8 +5987,8 @@ giving `76`; column `3` grains to a clamped `0` offset, leaving `50`
 unchanged. A fourth confines the fixture to a single-pixel selection at
 `(1, 0)` — the same architectural fact `spatter`'s own selection test
 already documents, since `filter_pixels` skips the draw entirely for
-unselected pixels, making the sole selected pixel consume the *first*
-draw rather than the *second* it would get unselected, landing on the
+unselected pixels, making the sole selected pixel consume the _first_
+draw rather than the _second_ it would get unselected, landing on the
 same `215` column `0`'s own unselected test computes, a real change
 from its own original `200`. A fifth confirms out-of-range graininess,
 glow amount, and clear amount, plus a locked/unknown layer, all error.
@@ -6059,7 +6049,7 @@ pixels resample at positions that round (clamped to the layer) to
 from their own original `20`, `30`, `40`. A second test confirms
 distortion `0` is a true no-op regardless of the drawn offsets. A third
 narrows smoothness to `2` (four `2×2` cells instead of one), so column
-`2` now draws from the *third* and *fourth* `XorShift32` draws instead
+`2` now draws from the _third_ and _fourth_ `XorShift32` draws instead
 of the first cell's own first two, resampling back to its own original
 `30` unchanged — a real, hand-computed difference from the single-cell
 test's own column `2` result of `10`, not a coincidental match. A
@@ -6124,8 +6114,8 @@ wavelength change, since both runs share the identical ninth draw
 (`next_unit` roughly `-0.066179`). A fourth confines the fixture to a
 single-pixel selection at column `1`, confirming the same architectural
 fact `spatter`'s own selection test already documents: the sole
-selected pixel consumes the *first* two draws rather than the *third
-and fourth* it would get unselected, landing on a genuinely different
+selected pixel consumes the _first_ two draws rather than the _third
+and fourth_ it would get unselected, landing on a genuinely different
 result (`10`) than the unselected first test's own column `1` (`30`).
 A fifth confirms out-of-range ripple size and magnitude, plus a
 locked/unknown layer, all error. All five tests passed after one
@@ -6244,8 +6234,8 @@ intensity `0` and contrast `0` together are a true no-op. A fourth
 confines the fixture to a single-pixel selection at `(1, 0)` — the
 same architectural fact `spatter`'s own selection test already
 documents, since `filter_pixels` skips the draw entirely for
-unselected pixels, making the sole selected pixel consume the *first*
-draw rather than the *second* it would get unselected, landing on a
+unselected pixels, making the sole selected pixel consume the _first_
+draw rather than the _second_ it would get unselected, landing on a
 genuinely different result (`72`) than the unselected first test's own
 column `1` (`76`). A fifth confirms out-of-range intensity and
 contrast, plus a locked/unknown layer, all error. All five tests
@@ -6278,8 +6268,8 @@ themselves are later visited in) scaled by `max_offset` (Photoshop's
 own `0..=99` percent range, of the cell's own side length) and rounded
 to a whole pixel. Unlike `glass`, which always resamples via
 `sample_nearest`'s own edge-clamping, a shifted tile only shows through
-where its slid content still originates from *within that same cell's
-own original footprint*; anywhere the shift would pull from outside
+where its slid content still originates from _within that same cell's
+own original footprint_; anywhere the shift would pull from outside
 it, the pixel falls back to the layer's own unaltered original —
 Photoshop's own "Unaltered Image" fill option, the only one of its
 four fill choices (Background Color, Foreground Color, Inverse Image,
@@ -6443,7 +6433,7 @@ solid border drawn wherever a pixel sits within `border_thickness`
 pixels of a cell boundary — detected, rather than by computing the
 true distance to the second-nearest site, by checking whether the
 pixel `border_thickness` away in each of the four cardinal directions
-(edge-clamped) belongs to a *different* cell, a documented
+(edge-clamped) belongs to a _different_ cell, a documented
 approximation of the true geometric Voronoi edge that keeps the check
 a handful of extra `nearest_site` lookups rather than a second
 distance computation. `light_intensity` (Photoshop's own `0..=10`
@@ -6825,7 +6815,7 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 The mirror image of `outer_glow` — instead of fading a glow outward
 from the edge into transparent space, this blends an already-opaque
 pixel toward `color` in proportion to how close it sits to the
-*nearest transparent pixel* (the same Chebyshev-distance search
+_nearest transparent pixel_ (the same Chebyshev-distance search
 `outer_glow` and `stroke_outline` already share, just looking for the
 opposite alpha). A pixel whose own nearest transparent neighbour is
 `d` pixels away (`d < size`) blends toward `color` by `(1.0 - d /
@@ -6952,7 +6942,7 @@ pattern-asset library or file-loading UI to draw from, so a procedural
 two-colour checkerboard is a documented scope cut standing in for it,
 the same kind of substitution `mosaic_tiles` and `stained_glass`
 already make for their own procedural cell grids. `scale` is a pixel
-cell size (Photoshop's own dialog is a `1..=100` *percent* scale of
+cell size (Photoshop's own dialog is a `1..=100` _percent_ scale of
 the pattern asset's own size; this project substitutes a direct
 `1..=250` pixel size, the same parameter substitution `mosaic_tiles`'s
 own `tile_size` already makes); `opacity` is Photoshop's own `0..=100`
@@ -7016,7 +7006,7 @@ angle table (`0`=90°Top through `7`=135°TopLeft): `toward` on the
 light's own near side, `away` on its far side, reusing `emboss` /
 `plaster` / `bas_relief`'s own `away − toward` relief convention.
 `shade = (away_height − toward_height) * (strength / 100.0)` is
-*added* to each of the pixel's own RGB channels — not used to replace
+_added_ to each of the pixel's own RGB channels — not used to replace
 them the way `bas_relief`'s own flattened grey relief does, since
 Bevel & Emboss is meant to shade existing artwork, not flatten it —
 then clamped to `0..=255`; alpha and every already-transparent pixel
@@ -7085,7 +7075,7 @@ image of `drop_shadow`, reusing its exact offset math (`dx`/`dy` from
 anticlockwise" convention `emboss`/`plaster` already use) and its exact
 edge-clamped box-average-over-`size` window (truncating integer
 division, the same shape `box_blur_at` uses). The two differences: the
-window averages each sampled pixel's own *inverse* alpha (`255 -
+window averages each sampled pixel's own _inverse_ alpha (`255 -
 alpha`, how much background shows through) instead of its alpha, and
 the result is applied only to already-opaque pixels instead of only to
 already-transparent ones. An opaque pixel whose own `(row - dy, col -
@@ -7243,7 +7233,7 @@ for a real pattern swatch. Each of the two sample points (`toward` and
 `bevel_height_at` value whenever it falls on an even checkerboard
 cell, `0` on an odd one, before `relief = away − toward` is taken — so
 the bump only has a visible effect where the two sample points land on
-*different* cells. Where a `light_direction`/`scale` combination puts
+_different_ cells. Where a `light_direction`/`scale` combination puts
 both samples on the same cell — `scale = 1` under any of this
 project's eight compass directions, since the two samples sit a whole
 2-pixel span apart and a 1-pixel checkerboard always returns to the
@@ -7306,7 +7296,7 @@ previously documented as a deferred gap ("needs a bump map this
 project doesn't have the machinery for"), but the last three phases'
 own height-field and checkerboard-cell work turned out to build
 exactly that machinery. Unlike every Layer Style filter shipped so
-far, Texturizer is a *global*, alpha-agnostic filter — Photoshop's own
+far, Texturizer is a _global_, alpha-agnostic filter — Photoshop's own
 version shades the whole layer's content regardless of transparency,
 the same way `plaster`, `grain`, and `emboss` already apply globally
 here rather than only near an alpha edge. The implementation composes
@@ -7421,7 +7411,7 @@ hand-computed difference confirming the actual property distinguishing
 the two filters. A third test, on a genuinely flat `(128, 128, 128)`
 solid layer (chosen deliberately over a per-channel-different flat
 layer like `(10, 20, 30)` solid, which is flat for `auto_tone`'s own
-per-channel view but is *not* flat for `auto_contrast`'s own shared
+per-channel view but is _not_ flat for `auto_contrast`'s own shared
 view, since its shared low `10` and high `30` still genuinely differ —
 a real distinction this test's own comment documents, caught by the
 test suite itself when an earlier draft used exactly that fixture and
@@ -7712,7 +7702,7 @@ in the source's own narrower distribution for a real, hand-computed
 compression, `[125, 125, 175, 175]`, distinct from the ratio-`1` test's
 own plain shift. A fourth flattens the target channel to a single
 value (`std 0`), landing every pixel exactly on the source's own mean
-regardless of its own original value. A fifth flattens the *source*
+regardless of its own original value. A fifth flattens the _source_
 channel instead, collapsing every target pixel onto the source's own
 flat value — a real, distinct outcome from the flat-target case. A
 sixth confines a single pixel to a selection. A seventh confirms
@@ -7909,7 +7899,7 @@ copy, add the difference back in, amplified" shape and its very same
 `box_blur_at` low-pass, but fixes the radius at a large `40` instead of
 a user-adjustable one — Photoshop's own Clarity slider works this way
 internally too, at a fixed large radius the dialog never exposes,
-boosting *local* (midtone) contrast rather than fine edge detail the
+boosting _local_ (midtone) contrast rather than fine edge detail the
 way a small-radius sharpen does. Unlike `unsharp_mask`, `amount` here
 is signed (Photoshop's own `-100..=100` Clarity range, clamped rather
 than erroring): positive values boost local contrast exactly like a
@@ -7978,7 +7968,7 @@ separate Amount/Hue sliders for each colour — picking defensible
 purple/green hue-range boundaries without a strong photographic
 reference risks fabricating Photoshop's own exact thresholds, the same
 fabrication risk already documented for Color Lookup and Auto Color.
-Rather than inventing those boundaries, this desaturates near *any*
+Rather than inventing those boundaries, this desaturates near _any_
 high-contrast edge instead of only purple/green ones — a broader but
 honestly-scoped substitute. `amount` is Photoshop's own `0..=100`
 per-colour Amount range, applied once rather than separately per
@@ -8032,17 +8022,18 @@ at up to `blur_radius`, ramping smoothly in between — the classic
 distance stay fully sharp, `blend = 0`) and a `blur_radius`-row
 transition beyond it (`blend = (distance - half_height) / blur_radius`,
 clamped to `0.0..=1.0`, reaching a full blur at `blur_radius` rows past
-the sharp band); the final colour is `original * (1 - blend) + blurred
-* blend` per RGB channel, alpha untouched. Photoshop's own version lets
+the sharp band); the final colour is `original \* (1 - blend) + blurred
+
+- blend`per RGB channel, alpha untouched. Photoshop's own version lets
 the sharp band run at any angle and gives each of its two feather
 rings an independently draggable width, plus a separate Distortion
 slider; here the band is always horizontal and the feather width is
-tied directly to `blur_radius` — both documented scope cuts, along
-with Field Blur and Iris Blur (Blur Gallery siblings with their own
-arbitrary-point or elliptical falloff shapes, not this one's single
-horizontal band). A new **Tilt-Shift…** dialog exposes Focus Row,
-Sharp Band Half-Height, and Blur Radius, defaulting the focus row to
-the canvas's own vertical centre when the dialog opens.
+tied directly to`blur_radius` — both documented scope cuts, along
+  with Field Blur and Iris Blur (Blur Gallery siblings with their own
+  arbitrary-point or elliptical falloff shapes, not this one's single
+  horizontal band). A new **Tilt-Shift…** dialog exposes Focus Row,
+  Sharp Band Half-Height, and Blur Radius, defaulting the focus row to
+  the canvas's own vertical centre when the dialog opens.
 
 **Verified two ways.** Four new `document.rs` tests, reusing the
 box-blur suite's own `ramped_3x3` fixture. Focus row `1`, half-height
@@ -8139,7 +8130,7 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 `field_blur(id, x1, y1, radius1, x2, y2, radius2)` (two pins only)
 completes this project's own Blur Gallery trio alongside Tilt-Shift and
 Iris Blur, but with a genuinely different mechanism: rather than
-blending toward one *fixed* blur radius past a hard zone boundary, the
+blending toward one _fixed_ blur radius past a hard zone boundary, the
 blur radius itself varies continuously across the whole image. A pixel
 exactly at a pin's own position uses that pin's own `radius` outright;
 every other pixel's own blur radius is an inverse-distance-weighted
@@ -8206,7 +8197,7 @@ Rust tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 own Blur Gallery quartet (Tilt-Shift, Iris Blur, Field Blur, and now
 Spin Blur), and is a direct sibling of `radial_blur` (Phase 113) rather
 than of the other three: it reuses `radial_blur`'s own three-sample
-averaging shape exactly, but *rotates* each pixel's own offset from a
+averaging shape exactly, but _rotates_ each pixel's own offset from a
 centre point instead of scaling it — the classic spinning-wheel motion
 blur. A pixel's own `(dx, dy)` offset from `(center_x, center_y)` is
 rotated by three angles symmetric around `0°` — `-angle/2`, `0°`, and
@@ -8275,27 +8266,27 @@ from a separate input (a chosen alpha channel, a layer mask, or the
 layer's transparency); this project's own version uses the layer's own
 alpha channel directly as that depth map, so no second input needs to
 be plumbed through. Each pixel's own blur radius is `round(depth / 255
-* max_radius)`, where `depth` is the pixel's own alpha byte — or `255 -
-alpha` when `invert` is set, matching Photoshop's own Invert checkbox
-on the depth map — and the result is run through the same edge-clamped
-`box_blur_at` primitive `box_blur`/`tilt_shift`/`iris_blur`/
-`field_blur` already share. Only the RGB channels are written back;
+
+- max_radius)`, where `depth`is the pixel's own alpha byte — or`255 -
+  alpha`when`invert`is set, matching Photoshop's own Invert checkbox
+on the depth map — and the result is run through the same edge-clamped`box_blur_at`primitive`box_blur`/`tilt_shift`/`iris_blur`/
+`field_blur`already share. Only the RGB channels are written back;
 alpha itself is left byte-for-byte untouched, since it *is* the depth
 map driving the blur and must survive unchanged for the effect to mean
 anything (the same alpha-untouched convention the three Blur Gallery
 filters already keep for their own reasons). Fully transparent pixels
-(depth `0`) always get radius `0` and stay exactly sharp; fully opaque
-ones blur at the full `max_radius`. `max_radius` is validated against
-Photoshop's own Lens Blur Radius range, `0..=100`. Photoshop's own
-Lens Blur also shapes its blur kernel by an adjustable iris (blade
-count, curvature, rotation), adds specular highlights past a
-brightness threshold, and can layer a film-grain pass back in
-afterward; this project's own flat, alpha-driven box blur is a
-documented scope cut, trading that richer bokeh simulation for one
-exactly hand-verifiable mechanism built entirely from an
-already-tested primitive. A new **Lens Blur…** dialog exposes the
-Radius slider and an Invert checkbox, with a one-line hint explaining
-that the layer's own alpha is the depth map.
+(depth`0`) always get radius `0`and stay exactly sharp; fully opaque
+ones blur at the full`max_radius`. `max_radius`is validated against
+Photoshop's own Lens Blur Radius range,`0..=100`. Photoshop's own
+  Lens Blur also shapes its blur kernel by an adjustable iris (blade
+  count, curvature, rotation), adds specular highlights past a
+  brightness threshold, and can layer a film-grain pass back in
+  afterward; this project's own flat, alpha-driven box blur is a
+  documented scope cut, trading that richer bokeh simulation for one
+  exactly hand-verifiable mechanism built entirely from an
+  already-tested primitive. A new **Lens Blur…** dialog exposes the
+  Radius slider and an Invert checkbox, with a one-line hint explaining
+  that the layer's own alpha is the depth map.
 
 **Verified two ways.** Six new `document.rs` tests on a new
 `depth_ramped_3x3` fixture: `ramped_3x3`'s own R-only ramp (`10` to
@@ -8795,18 +8786,18 @@ untouched Darks band and above — reproduce exactly, all nine pixels
 checked at once. Highlights `-100` moves the knot at `224` down to `192`,
 flattening `192..224` onto `192` (`200 → 192`, `224 → 192`) and
 stretching `224..255` from `192` back up to the fixed `255` (`240 → 192
-+ 16/31 × 63 = 224.5 → 225`), while `190` below the band is untouched.
-With every slider at `+100`, a row of the eight knot inputs `32, 64, 96,
-128, 160, 192, 224, 255` comes back as `64, 64, 128, 128, 192, 192, 255,
-255` — each centre reaching its upper boundary, each boundary
-unmoved. All-zero sliders are a byte-for-byte identity, and `9999`
-clamps to the same result as `100`. A one-pixel selection confines the
+
+- 16/31 × 63 = 224.5 → 225`), while `190`below the band is untouched.
+With every slider at`+100`, a row of the eight knot inputs `32, 64, 96,
+  128, 160, 192, 224, 255`comes back as`64, 64, 128, 128, 192, 192, 255,
+  255`— each centre reaching its upper boundary, each boundary
+unmoved. All-zero sliders are a byte-for-byte identity, and`9999`clamps to the same result as`100`. A one-pixel selection confines the
 lift and a locked/unknown layer errors. All five passed on the first
 run, every value cross-checked against an independent Python port of
-the nine-knot interpolation emulating Rust's `f32` arithmetic and
-rounding via `struct.pack`/`unpack` round-tripping — which also
+the nine-knot interpolation emulating Rust's `f32`arithmetic and
+rounding via`struct.pack`/`unpack` round-tripping — which also
 confirmed the zero curve reproduces all 256 inputs and the all-`+100`
-curve is monotonic across the whole range.
+  curve is monotonic across the whole range.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous eighty-one: this session's
@@ -9206,19 +9197,20 @@ middle output pixel of the top row inside the trapezoid, reading the
 source's own top-middle `20`: `[[0, 20, 0], [40, 50, 60], [70, 80,
 90]]`. On `ramped_4x4` with the top edge inset one pixel a side, the
 solved destination-to-source map is `x → 3x + y - 3`, `y → 3y / (0.6667y
-+ 1)`, so output `(1, 0)` reads `(0, 0) = 10`, `(2, 0)` reads `(3, 0) =
-40`, `(1, 1)` reads `(1, 1.8 → 2) = 100`, and the whole bottom half
+
+- 1)`, so output `(1, 0)`reads`(0, 0) = 10`, `(2, 0)`reads`(3, 0) =
+  40`, `(1, 1)`reads`(1, 1.8 → 2) = 100`, and the whole bottom half
 reads the source's bottom row — `[[0, 10, 40, 0], [0, 100, 110, 0],
 [130, 140, 150, 160], [130, 140, 150, 160]]`, the perspective
 compression a row-by-row scaling could never produce. A keystone with
 a tall left edge gives `[[10, 10, 0, 0], [50, 50, 60, 40], [90, 90, 100,
 160], [130, 130, 0, 0]]`. A one-pixel selection confines the rewrite;
-collinear corners, four coincident corners, a `NaN` coordinate, a locked
+collinear corners, four coincident corners, a `NaN`coordinate, a locked
 layer, and an unknown layer all error. All six passed on the first run,
 every grid cross-checked against an independent Python implementation
 of the same eight-equation solve — written first, with the identical
-pivoting order, so its `f64` arithmetic is bit-for-bit the Rust
-solver's — and the same rounding rule.
+pivoting order, so its`f64` arithmetic is bit-for-bit the Rust
+  solver's — and the same rounding rule.
 
 Live interactive verification under Xvfb was not attempted this
 phase, for the same reason as the previous eighty-eight: this session's
@@ -9375,7 +9367,7 @@ tests, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`,
 
 ## Phase 145 — Pattern Stamp tool
 
-The Pattern Stamp is the first new *tool* (as opposed to a menu
+The Pattern Stamp is the first new _tool_ (as opposed to a menu
 command) in many phases, and it costs very little because the brush
 already does almost all the work. `Stroke` gains a third variant,
 `PatternStamp { opacity }`: `Document::stroke` builds the same
@@ -9792,17 +9784,17 @@ fmt`, `clippy`, and `npm run build` all clean.
 pixel of layer `id`, wherever it sits, whose colour lies within the
 selection's own colour range widened by `tolerance` — the same
 per-channel RGBA range Phase 151's Grow uses (`min − tolerance ..= max
-+ tolerance` over the pixels already selected, via the shared
-`selected_bits` and `colour_range_of` helpers), without Grow's
-adjacency requirement. Similar is to Grow exactly what the Magic
-Wand's non-contiguous mode is to its contiguous one, and it takes its
-tolerance from the Wand's options the same way; a new **Similar**
-button beside Grow reads the Wand's Tolerance slider. Every pixel
-already selected defines the range and so stays selected. As with
-Grow, the range is fixed from the selection as it stood, repeating the
-command recomputes it from the larger selection, and the result is
-always a pixel-mask selection. Nothing selected, or an unknown layer,
-errors and leaves the selection intact.
+
+- tolerance`over the pixels already selected, via the shared`selected_bits`and`colour_range_of` helpers), without Grow's
+  adjacency requirement. Similar is to Grow exactly what the Magic
+  Wand's non-contiguous mode is to its contiguous one, and it takes its
+  tolerance from the Wand's options the same way; a new **Similar**
+  button beside Grow reads the Wand's Tolerance slider. Every pixel
+  already selected defines the range and so stays selected. As with
+  Grow, the range is fixed from the selection as it stood, repeating the
+  command recomputes it from the larger selection, and the result is
+  always a pixel-mask selection. Nothing selected, or an unknown layer,
+  errors and leaves the selection intact.
 
 **Verified two ways.** Five new `document.rs` tests, every expected
 pixel read off its fixture and the full set reproduced by an
@@ -9900,7 +9892,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 Paste Into: the clipboard becomes a new top layer centred on the active
 selection's bounding box exactly as Paste Into centres it (the box's
 top-left plus half the size difference, truncated toward zero), but
-only the pixels that fall *outside* the selection's shape are kept, so
+only the pixels that fall _outside_ the selection's shape are kept, so
 the pasted content surrounds the selection instead of filling it. The
 two commands now share one private `paste_against_selection` routine
 that differs in a single comparison, which makes their relationship
@@ -10171,8 +10163,9 @@ merged composite of every visible layer — onto the target layer with a
 blend mode and an opacity in percent, as if the source were a layer
 stacked on top of the target and merged down. Per channel it is the
 same W3C source-over math the canvas composite uses (`Cs′ = (1 − αb)·Cs
-+ αb·B(Cb, Cs)`, `αo = αs + αb(1 − αs)`, `Co = (αs·Cs′ + αb·Cb(1 −
-αs)) / αo`, with `αs` the source alpha scaled by the opacity), so the
+
+- αb·B(Cb, Cs)`, `αo = αs + αb(1 − αs)`, `Co = (αs·Cs′ + αb·Cb(1 −
+  αs)) / αo`, with `αs`the source alpha scaled by the opacity), so the
 result is exactly what stacking and merging would show. *Invert*
 inverts the source's colour (not its alpha) before blending. *Preserve
 Transparency* keeps the target's coverage exactly: colour mixes toward
@@ -10180,16 +10173,16 @@ the blended value by the source's effective alpha, with the backdrop
 treated as opaque for the blend, but alpha never changes, so fully
 transparent target pixels stay untouched — Lock Transparent Pixels, in
 effect, and this project's explicit definition of an option Photoshop
-documents only by outcome. It runs through `filter_pixels`, so it is
-confined to the selection and reads the source from a snapshot (a
-layer may be applied to itself). It errors on a locked or unknown
-target, an unknown source, or an opacity over 100. Photoshop's
-single-channel sources, its mask options (Mask, Mask Layer, Mask
-Channel, Transparency Mask, Mask Invert), and its live preview are
-documented scope cuts. A new **Apply Image…** dialog beside Copy
-Merged offers a Source drop-down (Merged plus every layer, top to
-bottom), all twelve blend modes, an Opacity field, and the two
-checkboxes.
+documents only by outcome. It runs through`filter_pixels`, so it is
+  confined to the selection and reads the source from a snapshot (a
+  layer may be applied to itself). It errors on a locked or unknown
+  target, an unknown source, or an opacity over 100. Photoshop's
+  single-channel sources, its mask options (Mask, Mask Layer, Mask
+  Channel, Transparency Mask, Mask Invert), and its live preview are
+  documented scope cuts. A new **Apply Image…** dialog beside Copy
+  Merged offers a Source drop-down (Merged plus every layer, top to
+  bottom), all twelve blend modes, an Opacity field, and the two
+  checkboxes.
 
 **Verified two ways.** Five new `document.rs` tests on a new
 `apply_image_fixture` — `ramped_3x3` under a "target" layer of opaque
@@ -10419,7 +10412,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 ## Phase 164 — Sharpen tool
 
 `Stroke::Sharpen { strength }` is the Blur tool's opposite and shares
-its machinery: each covered pixel's R, G, and B move *away* from the
+its machinery: each covered pixel's R, G, and B move _away_ from the
 radius-1 box blur of the pre-stroke layer by `strength` percent scaled
 by the brush's coverage — the unsharp-mask formula `original +
 (original − blurred) · amount`, rounded and clamped, with no threshold
@@ -11007,7 +11000,7 @@ skipped. It reads the same pre-stroke snapshot the Blur, Sharpen, and
 (now) Clone strokes share, which is what keeps a stroke from cloning
 pixels it has itself just written: cloning from the left column into
 the middle and right columns in one stroke gives the right column the
-middle's *original* values. The offset is the Alt-clicked sampling
+middle's _original_ values. The offset is the Alt-clicked sampling
 source minus the stroke's first point, and the frontend keeps it
 across strokes until the source is reset — Photoshop's Aligned mode,
 its default; the non-aligned mode and Sample All Layers are documented
@@ -11096,7 +11089,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 
 `Stroke::Smudge { strength }` drags colour along the stroke: each
 pixel the brush covers moves toward the pre-stroke pixel one segment
-step *behind* it — the pixel at `p − (b − a)`, rounded, for the
+step _behind_ it — the pixel at `p − (b − a)`, rounded, for the
 stroke's last segment `a → b` — by `strength` percent scaled by the
 brush's coverage, all four channels, so the colour under the brush's
 trailing edge is carried forward. This is the project's own explicit
@@ -11288,7 +11281,7 @@ truncating division), the surrounding and presumably unblemished
 pixels, mixed in by the brush's coverage. Alpha is untouched and fully
 transparent pixels are skipped. Reading the ring from the pre-stroke
 snapshot means a drag over a blemish replaces every pixel with its
-*original* surroundings, never with pixels the stroke has already
+_original_ surroundings, never with pixels the stroke has already
 rewritten. Photoshop's Content-Aware and Create Texture types and
 Sample All Layers are documented scope cuts. A new **Spot Healing**
 tool button sits beside the Healing Brush; it needs no source.
@@ -11350,7 +11343,7 @@ right column patched from off the canvas is untouched, and on
 `depth_ramped_3x3` a transparent source leaves the centre alone while
 an opaque one keeps its alpha `128`. The two left columns patched from
 one pixel right give `[[13, 24, 30], [43, 54, 60], [73, 84, 90]]` —
-column 0 built from column 1's *original* values, proving the snapshot
+column 0 built from column 1's _original_ values, proving the snapshot
 read. Nothing selected errors with "Nothing is selected", a zero drag
 returns `None`, and an unknown or locked layer errors with the pixels
 intact. All five passed on the first run.
@@ -11467,7 +11460,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 `Stroke::Remove` is the Spot Healing Brush with one change that makes
 it behave like a removal rather than a touch-up: each covered pixel
 takes the ring mean of the pre-stroke layer computed only over ring
-samples the stroke itself does *not* cover — `stroke` already has the
+samples the stroke itself does _not_ cover — `stroke` already has the
 whole stroke's coverage map before it paints, so the arm can ask, for
 each of the sixteen ring samples, whether it lies under the brush. An
 object brushed over in one stroke is therefore filled from outside the
@@ -11494,7 +11487,7 @@ its `0.7929` coverage mixes `10` toward `58` to `48`. On
 keeps alpha `128`. A one-column selection confines the removal to its
 first stripe pixel, and a locked layer errors. Four of the five passed
 on the first run: the selection test expected that pixel to become
-`100`, but only *selected* pixels carry coverage, so the unselected
+`100`, but only _selected_ pixels carry coverage, so the unselected
 stripe pixel at `(2, 1)` — which the clamped ring reaches from column
 0 — is not excluded, and the fifteen remaining samples average
 `(14 × 100 + 200) / 15 = 106`. The Python model, given the same
@@ -11524,7 +11517,7 @@ whose centre lies inside the box — the same `+0.5` pixel-centre rule
 the selection shapes use, through `shape_contains` with
 `SelectionShape::RoundedRectangle` when `radius` is non-zero — is
 overwritten. The optional `fill` is a flat colour; the optional
-`stroke` is a `(colour, width)` band hugging the *inside* of the edge,
+`stroke` is a `(colour, width)` band hugging the _inside_ of the edge,
 built the way Select > Modify > Border is built (the shape minus the
 same shape shrunk by `width` on every side), so a width that swallows
 the whole box strokes the whole shape. The stroke wins where the two
@@ -11640,7 +11633,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 tool in its Pixels mode: a straight line `weight` pixels wide from one
 drag end to the other, painted in a flat colour. A pixel is painted
 when its centre lies inside the line's rectangle — its perpendicular
-distance to the segment is at most `weight / 2` *and* its projection
+distance to the segment is at most `weight / 2` _and_ its projection
 along the segment falls between the two ends. The second condition is
 what gives the line Photoshop's butt caps: a pixel centre within half
 the weight of an endpoint but past it is left alone, where the brush
@@ -12019,7 +12012,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 `Document::levels_black_point(id, x, y)` and `levels_white_point` are
 the Black Point and White Point eyedroppers both the Levels and the
 Curves dialogs carry. Clicking a pixel makes it pure black (or white)
-by setting *each channel's* input black (or white) point to the
+by setting _each channel's_ input black (or white) point to the
 pixel's own value in that channel — the way Photoshop neutralises a
 bluish shadow rather than merely darkening it — through a new private
 `levels_per_channel(id, input_black, input_white)`, which is `levels`'s
@@ -12126,7 +12119,7 @@ gamma that puts its mean on the mean of the three — the Gray Point
 eyedropper applied to the average colour instead of a clicked pixel —
 so an overall cast is removed. The eyedropper's step was lifted into a
 private `neutralize_channels(id, values)` both share. Its target is now
-the *exact* mean of the three values rather than a rounded one: three
+the _exact_ mean of the three values rather than a rounded one: three
 equal values — a neutral colour — must be a no-op, and a rounded target
 was leaving a hair of gamma behind. Phase 197's numbers are unaffected,
 since its fixture's mean was the integer `150`. Photoshop's
@@ -12234,7 +12227,7 @@ sharpened into speckle; Photoshop's own Protect Detail is an
 undisclosed halo-and-noise suppressor, and a fixed contrast threshold
 (Unsharp Mask's Threshold at 8) is this project's explicit stand-in.
 **Sample All Layers** measures the sharpening on the pre-stroke
-*composite* rather than the layer alone — `stroke` now builds that
+_composite_ rather than the layer alone — `stroke` now builds that
 composite with `composite_pixel` before the layer is mutably borrowed,
 only when the option is on — and paints the resulting change onto the
 current layer's own pre-stroke value, so a sharpen stroke on an empty
@@ -12664,11 +12657,11 @@ tolerance)` are Photoshop's Object Selection tool in its Rectangle and
 Lasso modes, built on one private finder that is this project's
 explicit stand-in for Photoshop's neural detection. Within the dragged
 region — a marquee-normalised box, or the even-odd polygon through a
-freehand outline — the *background* is taken to be the most common
+freehand outline — the _background_ is taken to be the most common
 colour of the region's border ring (its pixels with a 4-neighbour
 outside the region or off the canvas; ties go to the lower colour),
 every region pixel outside that colour ± `tolerance` per channel is
-foreground, and the *object* is the largest 4-connected foreground
+foreground, and the _object_ is the largest 4-connected foreground
 component. The result is always a hard-edged mask combined with the
 current selection per `mode`. A region with no pixels, or one in which
 no foreground pixel is found, errors. Photoshop's Object Finder (hover
@@ -12766,7 +12759,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 ## Phase 211 — Mask All Objects
 
 `Document::mask_all_objects(id, tolerance)` is Select > Mask All
-Objects. The Object Selection finder now returns *every* 4-connected
+Objects. The Object Selection finder now returns _every_ 4-connected
 foreground component on the whole canvas — against the canvas edge's
 most common colour, within the Tolerance — largest first (ties by
 first pixel), through a new `foreground_components` that the Object
@@ -12884,7 +12877,7 @@ half was split out as `move_layer_pixels` so the loop and the old
 single-layer path are the same code. Moving an unlinked layer never
 disturbs the linked set. The layer panel gains a link checkbox beside
 the lock, through a `set_layer_linked` command. Photoshop's Select
-Linked Layers and its per-layer link *groups* are documented scope
+Linked Layers and its per-layer link _groups_ are documented scope
 cuts.
 
 **Verified two ways.** Five new `document.rs` tests on three `3×3`
@@ -13074,7 +13067,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 Every `Layer` gains a `clipped` flag — Layer > Create Clipping Mask —
 set by `set_clipped`, which refuses the bottom layer since it has
 nothing to clip to. The compositor now takes the layers as a slice
-rather than an iterator and, for a clipped layer, finds its *base* —
+rather than an iterator and, for a clipped layer, finds its _base_ —
 the nearest unclipped layer below it in the slice — and scales the
 clipped layer's alpha by the base's own transparency at that pixel
 (not by the base's opacity), so the layer shows only where the base
@@ -13172,20 +13165,21 @@ fmt`, `clippy`, and `npm run build` all clean.
 ## Phase 219 — Vector masks
 
 `Document::add_vector_mask(id, points, reveal)` is Layer > Vector Mask
+
 > Current Path: the polygon through `points` is rasterised — pixel
-centres inside it by the even-odd rule, the Polygonal Lasso's own
-test, after consecutive duplicate points are dropped — into the same
-8-bit mask a layer mask uses, white inside and black outside, or the
-reverse with `reveal` false, replacing any mask the layer had. From
-then on it *is* a layer mask: it composites, applies, deletes, turns,
-and crops exactly as Phase 218's do. A path needs three or more
-distinct points and must enclose at least one pixel centre. Keeping
-the path editable as vectors, and holding a vector mask beside a
-separate pixel mask, are documented scope cuts. A **Vector Mask** tool
-button reuses the lasso's trail capture and preview: draw a closed
-path on the canvas and pointer-up sends it through an
-`add_vector_mask` command, Alt hiding the inside instead of revealing
-it.
+> centres inside it by the even-odd rule, the Polygonal Lasso's own
+> test, after consecutive duplicate points are dropped — into the same
+> 8-bit mask a layer mask uses, white inside and black outside, or the
+> reverse with `reveal` false, replacing any mask the layer had. From
+> then on it _is_ a layer mask: it composites, applies, deletes, turns,
+> and crops exactly as Phase 218's do. A path needs three or more
+> distinct points and must enclose at least one pixel centre. Keeping
+> the path editable as vectors, and holding a vector mask beside a
+> separate pixel mask, are documented scope cuts. A **Vector Mask** tool
+> button reuses the lasso's trail capture and preview: draw a closed
+> path on the canvas and pointer-up sends it through an
+> `add_vector_mask` command, Alt hiding the inside instead of revealing
+> it.
 
 **Verified two ways.** Five new `document.rs` tests through
 `composite_pixel`, every mask reasoned out from the even-odd rule. On
@@ -13227,7 +13221,7 @@ an `adjustment` (`add_adjustment_layer(name, adjustment)`, re-tuned by
 `set_adjustment`) has a fully transparent pixel buffer that is never
 composited; instead the compositor, on reaching it, reshapes the
 backdrop's colour by the adjustment and blends the result in at the
-layer's *strength* — its opacity, through its mask, and through a
+layer's _strength_ — its opacity, through its mask, and through a
 clipping base's transparency, exactly as a pixel layer's alpha would
 be scaled — leaving the backdrop's alpha alone, so an adjustment over
 nothing does nothing. Threshold and Posterize keep their dialog
@@ -13822,7 +13816,7 @@ The mode family completes with the three modes that are ways of
 seeing the pixels rather than of changing them. `cmyk_of(rgb)` is the
 naive, profile-free ink split — `K = 1 − max(r, g, b)` and each ink
 `(1 − channel − K) / (1 − K)`, zero for black — and `lab_of(rgb)` the
-standard sRGB linearisation, D65 XYZ matrix, and CIE L*a*b* with its
+standard sRGB linearisation, D65 XYZ matrix, and CIE L*a*b\* with its
 cube-root function and linear toe, scaled to bytes (`L × 2.55`, `a`
 and `b` rounded and offset by `128`). `ChannelView` gains Cyan,
 Magenta, Yellow, Black (drawn light where there is little ink, as
@@ -14126,7 +14120,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 The Move tool gains Show Transform Controls. `transform_to_bounds(id,
 target)` is the drag's end: it scales the layer's opaque bounds by
 `target / bounds` per axis through `scale_about` with the pivot on the
-bounds' top-left *edge* (index `x0 − 0.5`, so that edge itself stays
+bounds' top-left _edge_ (index `x0 − 0.5`, so that edge itself stays
 put under nearest-neighbour resampling — a pixel-centre pivot would
 let rounding creep the block one column outward) and then moves it
 by the difference of the two top-left corners; a target equal to the
@@ -14649,20 +14643,21 @@ composite view overprints every spot channel in order
 (`spot_preview`): per pixel with density `d` and solidity `s`, each
 colour channel becomes the mix `multiply + (opaque − multiply) · s` of
 the pure overprint `base · (1 − d · (1 − ink))` and the opaque ink `base
-+ (ink − base) · d`, a transparent pixel printing on white paper and
+
+- (ink − base) · d`, a transparent pixel printing on white paper and
 becoming as opaque as the ink; the canvas PNG, the composite thumbnail,
-and `channel_image(Composite)` all show it, a spot channel's own view
+and `channel_image(Composite)`all show it, a spot channel's own view
 is its density as black-is-ink grey, and exports carry no spot ink, as
-Photoshop's flattened exports don't. `merge_spot_channel` flattens the
+Photoshop's flattened exports don't.`merge_spot_channel`flattens the
 image and prints one channel's ink into the layer left, then removes
-it. `spot_library` is Color Libraries: twelve conventional ink names
+it.`spot_library`is Color Libraries: twelve conventional ink names
 with approximate sRGB screen colours — no vendor swatch books ship. The
 Channels panel lists spot channels under the alpha channels with a
 swatch, Options (…), ↑ / ↓ for the overprinting order, Merge, and
 delete, gives every alpha channel a **Spot** button, and adds **New
 Spot Channel…**; one dialog serves New, Options, and Convert with Name,
-Color, a Library list, and a Solidity slider. Solidity out of `0..=100`,
-a taken or blank name, and unknown channels are refused.
+Color, a Library list, and a Solidity slider. Solidity out of`0..=100`,
+  a taken or blank name, and unknown channels are refused.
 
 **Verified two ways.** Five new `document.rs` tests, every byte traced
 by hand and cross-checked by an independent `f32` Python port of the
@@ -15252,17 +15247,18 @@ of it (Chebyshev, `0..=10`) is at least `255 · (100 − range) / 100`,
 so In-Focus Range `100` takes everything and `0` only the hardest
 edges, and `select_focus_area_with` combines those bits with the
 selection by mode, refusing an empty result. `sky_bits(id)` is Select
+
 > Sky's finder: a pixel is sky-coloured when blue is its strongest
-channel and its luma is at least `80`, or when every channel is `200`
-or more (a cloud), and it is sky when it is joined to the top edge
-through sky-coloured pixels, 4-connected — so a blue lake below the
-horizon is not sky — and `select_sky_with` combines them by mode,
-refusing a skyless picture. A **Frame…** dialog draws a box or
-elliptical frame and places the selected layer into a chosen frame;
-**Focus Area…** has In-Focus Range and Spread; **Select Sky** is one
-click, all three honouring the selection mode. Photoshop's frame
-resizing and placing from files, Focus Area's Image Noise Level and
-Soften Edge, and Select Sky's trained model are documented scope cuts.
+> channel and its luma is at least `80`, or when every channel is `200`
+> or more (a cloud), and it is sky when it is joined to the top edge
+> through sky-coloured pixels, 4-connected — so a blue lake below the
+> horizon is not sky — and `select_sky_with` combines them by mode,
+> refusing a skyless picture. A **Frame…** dialog draws a box or
+> elliptical frame and places the selected layer into a chosen frame;
+> **Focus Area…** has In-Focus Range and Spread; **Select Sky** is one
+> click, all three honouring the selection mode. Photoshop's frame
+> resizing and placing from files, Focus Area's Image Noise Level and
+> Soften Edge, and Select Sky's trained model are documented scope cuts.
 
 **Verified two ways.** Five new `document.rs` tests, every mask byte
 and bit traced by hand. A frame over `(1, 1)`–`(3, 3)` on 4×4 masks
@@ -15376,20 +15372,21 @@ combined with the current selection per mode, an index past the list
 refused with the count. The Object Selection options gain an **Object
 Finder** button that lists the objects as buttons to select, turning
 into **Refresh objects**, with a close. `define_brush_tip(id)` is Edit
+
 > Define Brush Preset: the layer's opaque bounds captured as a
-`BrushTip` of coverages, each pixel's darkness times its alpha —
-`(255 − luma) / 255 · alpha / 255`, black opaque paint covering fully
-and white or transparent not at all — the way Photoshop reads a
-defined brush from a grayscale image; an empty layer or an all-white
-one is refused. `tip_stroke(id, points, color, spacing)` paints with
-it: the tip is stamped at every point and every `spacing` pixels
-along the segments between them, its centre on the point, each pixel
-taking the greatest tip coverage of any stamp that reaches it, times
-the selection's coverage, and the colour is laid `source-over` like
-the Brush at its alpha times that coverage. A **Define Brush Preset**
-button joins Define Pattern, and a **Tip** checkbox with a Spacing
-slider switches the Brush tool to the tip. Photoshop's tip scaling,
-angle, roundness, scatter, and texture are documented scope cuts.
+> `BrushTip` of coverages, each pixel's darkness times its alpha —
+> `(255 − luma) / 255 · alpha / 255`, black opaque paint covering fully
+> and white or transparent not at all — the way Photoshop reads a
+> defined brush from a grayscale image; an empty layer or an all-white
+> one is refused. `tip_stroke(id, points, color, spacing)` paints with
+> it: the tip is stamped at every point and every `spacing` pixels
+> along the segments between them, its centre on the point, each pixel
+> taking the greatest tip coverage of any stamp that reaches it, times
+> the selection's coverage, and the colour is laid `source-over` like
+> the Brush at its alpha times that coverage. A **Define Brush Preset**
+> button joins Define Pattern, and a **Tip** checkbox with a Spacing
+> slider switches the Brush tool to the tip. Photoshop's tip scaling,
+> angle, roundness, scatter, and texture are documented scope cuts.
 
 **Verified two ways.** Five new `document.rs` tests, every box and
 coverage traced by hand. On a black 7×6 canvas with a 2×2 red block at
@@ -15734,7 +15731,7 @@ used elsewhere for undo-adjacent snapshots), runs the real
 `apply_image_with` on that throwaway clone with the caller's exact
 arguments, and returns the clone's resulting layer pixels. The original
 document is never touched, and the preview can never drift from what OK
-would actually apply, because it *is* what OK would actually apply,
+would actually apply, because it _is_ what OK would actually apply,
 just thrown away afterward. This is the same shape Color Range's own
 Selection Preview already established — `color_range_bits` is a
 read-only sibling of the selection command it previews for, drawn into
@@ -15921,7 +15918,7 @@ circular brush: every destination pixel within `radius` of `(cx, cy)`
 is inverse-mapped to a source pixel by a falloff strongest at the
 centre and zero at the edge, `f(d) = 1 − (d / radius)²`; a pixel at or
 past the radius is untouched. Twirl rotates the offset from centre by
-`−strength° · f(d)` — the *inverse* of rotating it forward that much,
+`−strength° · f(d)` — the _inverse_ of rotating it forward that much,
 exact because rotation never changes distance from the centre, so
 undoing it is just the same rotation backward; a negative strength
 twirls the other way, Photoshop's Twirl Counter Clockwise living on the
@@ -15965,8 +15962,8 @@ confirmed in a Python script computing the same falloff, rotation, and
 rescale in `f32` (trig via `math.sin`/`math.cos`, which is not
 guaranteed bit-identical to Rust's own `sin_cos` — but every one of
 these three roundings lands more than a tenth of a pixel clear of its
-`.5` boundary, so the two implementations agreeing on the *rounded
-integer* pixel, which is all these tests actually assert, does not
+`.5` boundary, so the two implementations agreeing on the _rounded
+integer_ pixel, which is all these tests actually assert, does not
 depend on matching to the last bit). A fourth test confines the tool to
 an active selection — a marker well inside the brush radius but outside
 a small selection rectangle stays untouched. A fifth exercises every
@@ -16121,7 +16118,7 @@ captured once via `invoke` the moment the Liquify dialog opens (before
 any tool has touched it) and held in a ref for the rest of that
 session — a documented simplification in place of true document-level
 session state. `liquify_reconstruct(id, cx, cy, radius, amount,
-original)` then blends the layer's *current* pixels back toward that
+original)` then blends the layer's _current_ pixels back toward that
 captured `original`, colour and alpha alike, within the same circular
 brush and falloff every other Liquify tool already shares,
 `f(d) = 1 − (d / radius)²`: each channel moves `(amount / 100) · f(d)`
@@ -16496,7 +16493,7 @@ fmt`, `clippy`, and `npm run build` all clean.
 Two of the "39th System" bucket's app-chrome items that turned out to
 be genuinely buildable without a dockable-panel rewrite, because
 neither actually needs one: both are per-installation preferences
-about *this app's own* fixed toolbar and its own fixed shortcut list,
+about _this app's own_ fixed toolbar and its own fixed shortcut list,
 not about rearranging windows.
 
 **Custom Toolbar** scopes to exactly what Photoshop's own Customize
@@ -16728,15 +16725,14 @@ Surface Blur's own, sharing its Radius/Threshold controls plus a new
 Amount slider; it is also reachable through Phase 278's Discover search.
 
 **Verified two ways.** Five new `document.rs` tests. A dedicated
-`skin_ramped_3x3` fixture shifts `ramped_3x3`'s own R ramp (10, 20, ...,
-90) into skin-tone range (100, 110, ..., 180) with G and B held flat —
+`skin_ramped_3x3` fixture shifts `ramped_3x3`'s own R ramp (10, 20, ..., 90) into skin-tone range (100, 110, ..., 180) with G and B held flat —
 since Surface Blur's weights depend only on differences between
 samples, an additive shift changes nothing about the math, so the
 already-hand-derived corner value from `surface_blur_averages_only_
 within_the_threshold` (12) carries over unchanged, shifted: blending
 the corner 50% from 100 toward 102 lands exactly on 101, no rounding
 ambiguity — independently confirmed in Python emulating Rust f32
-arithmetic. A second test confirms the *unshifted* `ramped_3x3` (G = 0
+arithmetic. A second test confirms the _unshifted_ `ramped_3x3` (G = 0
 fails `is_skin_tone` everywhere) is left completely byte-for-byte
 untouched even at Amount 100. A third confirms Amount 100 over an
 all-skin-toned layer matches `surface_blur` exactly — no fresh
@@ -16826,8 +16822,7 @@ shared 9x9 fixture — the same 9-pixel row (values 0, 100 x6, 200) repeated
 on every row, so vertical clamped sampling never mixes in a different
 value and an interior row (row 4: `row % 8 == 4`) isolates column as the
 only variable in whether a pixel counts as a block edge. Hand-derived and
-independently cross-checked: column 0's clamped 3x3 average is (0 + 0 +
-100) x3 repeats / 9 = 33; column 7's is (100 + 100 + 200) x3 / 9 = 133;
+independently cross-checked: column 0's clamped 3x3 average is (0 + 0 + 100) x3 repeats / 9 = 33; column 7's is (100 + 100 + 200) x3 / 9 = 133;
 column 8's is (100 + 200 + 200) x3 / 9 = 166; columns 1 through 6 stay
 untouched at strength 100. A second test confirms partial blending at
 strength 50 truncates as Rust integer division does: (33 − 0) × 50 / 100
@@ -16924,7 +16919,7 @@ Playwright browser session is exactly the right tool for it: it exercised
 the Skin Smoothing dialog with the Output dropdown switched to New Layer
 and confirmed the exact sequence Photoshop's own Output control should
 produce — a `duplicate_layer` call for the original layer's id, followed
-by a `skin_smoothing` call against the *new* layer's id (one higher, the
+by a `skin_smoothing` call against the _new_ layer's id (one higher, the
 next id after the original in this test's fixture) rather than the
 original — while the Current Layer default (already covered by every
 earlier Neural Filter phase's own Playwright verification) continued to
@@ -16956,7 +16951,7 @@ always does. No new Rust code once again: `add_layer_mask` needed no
 changes at all to be composed this way, the same "reuse over
 duplication" shape every output-destination phase in this project uses.
 Smart Filter and New Document outputs stay a documented scope cut: this
-app has no Smart Filter/adjustment-layer wrapping to attach a *live*
+app has no Smart Filter/adjustment-layer wrapping to attach a _live_
 filter reference to, and Smart Filter's whole distinguishing feature
 (the filter staying editable after the fact) is exactly what this app's
 architecture cannot offer honestly.
@@ -16986,7 +16981,7 @@ composition of already-tested commands).
 A second look at an earlier session's own "documented scope cut" found it
 did not need to stay one: Liquify Mesh only looked like it needed real
 interactivity because Photoshop's own version is a live overlay on a
-mouse drag. This project's own Puppet Warp already proved a *static*
+mouse drag. This project's own Puppet Warp already proved a _static_
 preview of the pending deformation is a real, honest version of a mesh
 overlay — its own "Show Mesh" checkbox draws exactly that, recomputed
 whenever the pins move. Liquify Mesh reuses the identical idea for
@@ -17002,7 +16997,7 @@ associated function the per-pixel resampling code now calls instead of
 inlining (all 24 pre-existing Liquify tests still pass unchanged).
 
 `liquify_mesh(tool, cx, cy, radius, dx, dy, strength, spacing)` then
-grids the whole canvas and displaces every vertex by the *pending* tool's
+grids the whole canvas and displaces every vertex by the _pending_ tool's
 transform, run forward instead of backward. Forward Warp previews
 exactly — `(dx, dy) · f(d)` added straight to the vertex, the same
 falloff `f(d) = 1 − (d / radius)²` every Liquify tool shares. A radial
@@ -17031,7 +17026,7 @@ hand-derives Forward Warp's push at three vertices of that same grid: at
 the far corner `(0, 0)`, `d² = 200` and `radius² = 225` are both exact
 integers, so `falloff = 1 − 200/225 = 1/9` exactly, landing the preview
 on the clean fraction `(2/3, -4/9)`; the exact centre vertex previews at
-the full, unscaled push. A third proves Twirl's preview is the *exact*
+the full, unscaled push. A third proves Twirl's preview is the _exact_
 functional inverse of its own already-tested pixel offset by feeding the
 previewed point back through `liquify_radial_offset` at the identical
 falloff and confirming it lands back on the original vertex to within
@@ -17058,7 +17053,7 @@ that changing Radius re-fetches the mesh. `cargo fmt`,
 
 Another wall that turned out not to be one: Adaptive Wide Angle's own
 locally-varying constraint solver is genuinely out of reach, but
-Vanishing Point's *defining* behaviour — content scaling correctly as it
+Vanishing Point's _defining_ behaviour — content scaling correctly as it
 is cloned across a receding plane — is exactly what `homography` (Edit >
 Perspective Warp's own eight-coefficient projective solver, unchanged)
 already computes, just applied between a different pair of point sets.
@@ -17088,11 +17083,11 @@ by hand) against a real, non-degenerate trapezoid plane — a top edge
 twice as wide as its bottom, an actual receding perspective rather than a
 plain rectangle. The first confirms a clone lands exactly on the source
 colour at the target itself. The second is the real test of the
-mechanism: cloning from the plane's *wide* end to its *narrow* end, the
-pixel one image-pixel to the right of the target samples from *one and a
-half* image-pixels to the right of the source — Python-verified exactly,
+mechanism: cloning from the plane's _wide_ end to its _narrow_ end, the
+pixel one image-pixel to the right of the target samples from _one and a
+half_ image-pixels to the right of the source — Python-verified exactly,
 `(11.5, 2.0)`, nearest-neighbour rounding it to the pixel two right of
-source rather than one — because a flattened-space step is a *larger*
+source rather than one — because a flattened-space step is a _larger_
 image-space step where the plane is wide. An ordinary clone stamp, which
 just copies a flat `(dx, dy)` offset, would have sampled the pixel
 immediately next to source instead; this is the one hand-verified proof
@@ -17117,7 +17112,7 @@ A third wall this session reconsidered and found unnecessary: Select
 People's own doc comment called Individual Person Selection a scope cut
 needing "real per-instance segmentation this heuristic cannot give." That
 is true for two people who touch or overlap in frame — but most photos
-where picking out "an individual person" matters have several *separate*
+where picking out "an individual person" matters have several _separate_
 people, each already its own 4-connected skin-toned component under the
 finder Select People already runs. Nothing about the finder needed to
 change; it just needed to stop throwing every component away except the
@@ -17164,7 +17159,7 @@ A fourth wall this session reconsidered: Workspaces sits in the same
 "39th System" app-chrome bucket Phase 275's own Custom Toolbar and
 Keyboard Shortcuts customization already proved buildable without a
 dockable-panel rewrite. Photoshop's own Workspace switches between saved
-panel *layouts*; this app has no panels, but it does already have two
+panel _layouts_; this app has no panels, but it does already have two
 real, per-installation UI customizations of its own — `hiddenTools` and
 `keyBindings` — and a Workspace is honestly just a named, saved
 combination of those two, exactly the same "reduce to what this app's
@@ -17172,7 +17167,7 @@ own architecture actually has" move Phase 275 already made twice.
 
 A new `Workspace = { name, hiddenTools, keyBindings }` type, kept as an
 array in `localStorage` under `legelabs.workspaces`, alongside the two
-settings it bundles. Save Workspace captures the *current* `hiddenTools`
+settings it bundles. Save Workspace captures the _current_ `hiddenTools`
 and `keyBindings` under a typed name (overwriting a workspace of the same
 name rather than duplicating it); Load restores both from a saved
 workspace, writing straight back to `hiddenTools`' and `keyBindings`' own
@@ -17203,7 +17198,7 @@ A fifth wall this session reconsidered: this app's `AppState` holds one
 document at a time — genuinely no in-memory multi-document or tab
 support, so New Document output could not open the filtered result as a
 literal second document the way Photoshop's own does. But the real,
-user-facing *point* of New Document output is that the result lands as
+user-facing _point_ of New Document output is that the result lands as
 its own independent artifact rather than altering what is already open —
 and this app already has exactly the mechanism for that: exporting to a
 file. New Document is honestly reduced to "export the filtered result to
@@ -17314,7 +17309,7 @@ Workspaces and Custom Menus — pure frontend, no Rust code touched. A
 Playwright browser session confirmed the real mechanism, not just the
 visual one: turning Lock Workspace on writes `true` to its own
 `localStorage` key, the first tool's own checkbox comes back `disabled`,
-and a *forced* click on it anyway (bypassing Playwright's own
+and a _forced_ click on it anyway (bypassing Playwright's own
 actionability check) leaves `hiddenTools` completely unset in
 `localStorage` — proof the guard lives in the mutator itself, not only
 in a disabled attribute a determined user could route around. Turning
@@ -17331,7 +17326,7 @@ unaffected and still clean.
 
 The first real crack in the ICC colour management bucket, found the
 same way Liquify Mesh and Vanishing Point already were this session: it
-does not need the full architecture the *rest* of the bucket does
+does not need the full architecture the _rest_ of the bucket does
 (profile embedding on import/export, a Color Settings dialog, mismatch
 warnings). Two real, standard, published RGB working spaces — sRGB and
 Adobe RGB (1998), which happen to share the D65 white point, so
@@ -17402,7 +17397,7 @@ Select People and Skin Smoothing.
 
 `Document::face_bbox(id)` reuses the private `people_components` skin-tone
 connected-component finder Select People already built, and returns the
-bounding box of the *largest* component on the layer — an honest,
+bounding box of the _largest_ component on the layer — an honest,
 documented limitation: it finds the largest skin-toned region, not
 specifically a face, so a hand or an arm in frame can win over a face
 that happens to be smaller in the source image. `Document::face_landmarks(id)`
@@ -17565,7 +17560,7 @@ fmt`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, and
 
 Select People — Person Components and Select People — Hair Selection
 both flip to shipped. Select and Mask's own Refine Hair — a
-decontaminating edge-refinement pass over an *existing* selection's own
+decontaminating edge-refinement pass over an _existing_ selection's own
 border, a genuinely different operation from a fresh selection — stays
 a documented scope cut. This closes out all four of the items this
 session had briefly, wrongly, called permanently out of reach: Real
@@ -17671,7 +17666,7 @@ document's profile. Colour never moves between spaces except through
 an explicit `assign_profile`/`convert_to_profile` call the user
 themselves runs (README Phase 292). That is Don't Color Manage's own
 behaviour by construction, not merely one matching option among
-several this app happens to also support — this app is *always* in
+several this app happens to also support — this app is _always_ in
 that mode for compositing and export, with Assign/Convert Profile as
 the one deliberate, on-demand exception.
 
@@ -17724,7 +17719,7 @@ the reopened document to whichever profile it was saved under, never
 calls `convert_to_profile`, and has no mismatch-detection branch to
 silently convert down at all. There was no "policy choice" to
 implement — the one thing `decode` does with a saved profile already
-*is* Preserve.
+_is_ Preserve.
 
 Preserve Embedded Profiles flips to shipped. This app's own project
 file remains the one persistence format able to carry a profile to
@@ -18058,7 +18053,7 @@ and collapses exactly like a single panel always has.
 Grouping itself reuses `DockablePanel`'s existing drag handle rather
 than adding a second gesture: `onDropOnPanel`, a new optional prop,
 fires from the grip's own `pointerup` handler when `document.elementFromPoint`
-at the release coordinates lands inside a *different* panel's own
+at the release coordinates lands inside a _different_ panel's own
 `data-panel-id` element (a new attribute every `DockablePanel` now
 carries) instead of the usual dock-zone/float logic. The dropped-onto
 panel becomes the group's own leader; the dragged one joins as a
@@ -18080,7 +18075,7 @@ before landing:
 1. **The ungroup button (`⤢`) was unreachable from the group's own
    leader tab.** `TabbedPanelGroup`'s ungroup button always targets
    whichever tab is currently active — but `panelGroupOf` only ever
-   holds *follower* keys; the leader itself is a value other entries
+   holds _follower_ keys; the leader itself is a value other entries
    point at, never a key of its own. `ungroupPanel`'s original
    `delete next[id]` is a silent no-op when `id` is the leader, so
    clicking Ungroup while looking at the leader's own tab did nothing
@@ -18139,7 +18134,7 @@ panels in a zone: drag it and the panel above grows or shrinks to an
 explicit pixel height, read fresh off that panel's own real rendered
 height at the start of each drag (not off whatever height was last
 saved, which is unset on the very first resize a zone ever gets — the
-same reasoning `DockablePanel`'s own grip already applies to *its* drag
+same reasoning `DockablePanel`'s own grip already applies to _its_ drag
 origin). The last panel in a zone is never given an explicit height of
 its own; it always takes `flex: 1 1 0` and absorbs whatever space is
 left, the standard "last pane fills the rest" convention every
@@ -18157,7 +18152,7 @@ One real bug caught by this phase's own live verification, fixed before
 landing: the very first version gave every non-last panel's own
 `.dockable-panel` a flat `height: 100%` so its content could stretch and
 `.panel`'s existing `overflow-y: auto` would do the scrolling. That
-works once a panel has an explicit, definite height — but *before* any
+works once a panel has an explicit, definite height — but _before_ any
 drag, an untouched panel's own dock-zone slot is sized by
 `flex-basis: auto`, meaning its height is itself derived from its
 content's natural size. `height: 100%` against a parent whose height
@@ -18168,7 +18163,7 @@ nothing. The Layers panel rendered as a 28px sliver instead of its real
 ~540px of content the instant this phase's own CSS landed, caught by
 literally the first live measurement taken before ever attempting a
 drag. Fixed by only ever applying the stretch-to-fill treatment
-(`.dock-zone__slot--fill`) to a slot that already has a *definite*
+(`.dock-zone__slot--fill`) to a slot that already has a _definite_
 size — explicitly dragged/saved, or the always-fill last slot — leaving
 an untouched, auto-sized slot exactly the plain content-sized box Panel
 Docking always rendered.
@@ -18256,15 +18251,14 @@ Black Point Compensation, the standard linear rescale that keeps a
 source profile's own black from washing out (or clipping) against a
 destination whose own black point differs. `apply_black_point_compensation`
 implements the real formula — `X' = X * scale + offset`, `scale = (Xw
-- Xk_dst) / (Xw - Xk_src)`, `offset = Xk_dst - Xk_src * scale` — on the
+
+- Xk_dst) / (Xw - Xk_src)`, `offset = Xk_dst - Xk_src \* scale`— on the
 CIE XYZ intermediate every conversion already passes through, between
-the existing gamma-decode-and-matrix-in step (now its own
-`profile_to_xyz`) and matrix-out step (`xyz_to_profile_linear`).
-`black_point_xyz` measures a profile's own black point by actually
-converting its `[0, 0, 0]` rather than assuming it, and a new `bpc: bool`
-threads through `convert_to_profile`/`convert_to_profile_dithered` down
-to `convert_profile_pixel`, exposed as a real checkbox next to Use
-Dither in the toolbar.
+the existing gamma-decode-and-matrix-in step (now its own`profile_to_xyz`) and matrix-out step (`xyz_to_profile_linear`).
+`black_point_xyz`measures a profile's own black point by actually
+converting its`[0, 0, 0]`rather than assuming it, and a new`bpc: bool`threads through`convert_to_profile`/`convert_to_profile_dithered`down
+to`convert_profile_pixel`, exposed as a real checkbox next to Use
+  Dither in the toolbar.
 
 Traced through by hand before writing a line of UI: both sRGB and Adobe
 RGB (1998) use a pure power-law (sRGB with a short linear toe below
@@ -18296,10 +18290,10 @@ underlying maths; this project has exactly one implementation and no
 second, independently engineered one to switch to. Rendering Intent's
 four options only diverge given real, profile-specific gamut-compression
 tables this project's own matrix-only profiles carry none of — what
-this app already does unconditionally *is* Relative Colorimetric,
+this app already does unconditionally _is_ Relative Colorimetric,
 Absolute Colorimetric would be byte-identical to it here (both profiles
 share the same D65 white point, and Absolute differs from Relative only
-by *not* correcting for a white-point mismatch that does not exist
+by _not_ correcting for a white-point mismatch that does not exist
 between them), and Perceptual/Saturation would need fabricated
 compression curves. A dropdown mixing two renamed-but-identical options
 with two invented ones would be worse than not building one — unlike
@@ -18330,7 +18324,7 @@ second choice: Convert to Working Space, which fires a genuine,
 automatic `convert_to_profile` call — the exact same command Edit >
 Convert to Profile itself calls, not a parallel code path — immediately
 after a project with a real, differing profile finishes loading. A
-second new setting, `defaultWorkingSpace`, is what it converts *into*;
+second new setting, `defaultWorkingSpace`, is what it converts _into_;
 both get their own controls in a new Color Settings row of the toolbar,
 next to Use Black Point Compensation.
 
@@ -18372,7 +18366,7 @@ Color Management Policies and Convert to Working Space flip to shipped,
 and Working Spaces' own umbrella flips alongside them — this project
 models exactly one working-space type, RGB, and RGB's own working space
 is now fully covered between the existing toolbar select (the
-*document's* current one) and this phase's own new one (the *preferred*
+_document's_ current one) and this phase's own new one (the _preferred_
 one a mismatched project converts into) (562/618).
 
 ## Phase 314 — Profile Mismatch Warnings
@@ -18389,7 +18383,7 @@ established scope — a passive statement of fact, the same shape Missing
 Profile Warning already is next to Ask When Opening's own dialog.
 
 The one real layout decision: `.notice` is a centered card meant to
-*replace* the canvas (the "No image open" placeholder, the error state)
+_replace_ the canvas (the "No image open" placeholder, the error state)
 — reusing it here would fight an actually-open document rather than sit
 alongside it. A new `.color-mismatch-banner`, a slim full-width strip
 between the toolbar and the canvas with its own dismiss button, coexists
@@ -18413,7 +18407,7 @@ genuine, distinct algorithm rather than a decorative label. Getting
 there needed a real, honest gap closed first: sRGB and Adobe RGB (1998),
 this project's only two working spaces until now, share the identical
 D65 white point their own matrices are built on, which makes Relative
-and Absolute Colorimetric *definitionally* the same transform between
+and Absolute Colorimetric _definitionally_ the same transform between
 them — real colour science, not an excuse, but it meant there was no
 way to prove the two intents were actually implemented differently
 rather than merely both defaulting to the same thing. ProPhoto RGB
@@ -18432,10 +18426,11 @@ chromatic-adaptation transform, `adapt_to_connection_space`/
 `adapt_from_connection_space` — the identity for sRGB/Adobe RGB
 (already D65), a real matrix multiply for ProPhoto. `profile_to_xyz`/
 `xyz_to_profile_linear` split into `_native` variants (each profile's
-own matrix into *its own* native white, D50 or D65) plus this new
+own matrix into _its own_ native white, D50 or D65) plus this new
 adaptation step, rather than baking D65 into the matrix stage itself.
 
 **The four intents**, built on that split:
+
 - **Relative Colorimetric** — this project's own original, still-default
   behaviour: adapt source white onto the connection space, then convert.
 - **Absolute Colorimetric** — skip that adaptation entirely, reinterpreting
@@ -18456,7 +18451,7 @@ adaptation step, rather than baking D65 into the matrix stage itself.
   shifting hue. A genuine, if simplified, technique — this project's own
   profiles are parametric matrices, with no per-profile perceptual LUT
   to draw a fuller one from.
-- **Saturation** — the same mechanism, compressing toward a *different*
+- **Saturation** — the same mechanism, compressing toward a _different_
   anchor: the out-of-gamut colour's own BT.601 luma instead of a fixed
   grey, better preserving each colour's own apparent lightness. A real,
   distinct algorithm from Perceptual, confirmed to actually produce a
@@ -18531,7 +18526,7 @@ the real interpolation error a coarse LUT actually has:
 
 - sRGB `(51, 51, 51)` → Adobe RGB (1998), grid-aligned on every channel:
   both engines land on exactly `(54, 54, 54)` — zero interpolation
-  error, because the queried point *is* a grid vertex.
+  error, because the queried point _is_ a grid vertex.
 - sRGB `(10, 20, 30)` → Adobe RGB (1998), off the grid on every channel:
   Analytic lands on `(21, 27, 35)`; LookupTable lands on `(29, 35, 42)` —
   a real, visible divergence, not a rounding-noise coincidence.
@@ -18623,7 +18618,7 @@ Device Profile all flip to shipped (570/618).
 
 A real parser and transform engine for the actual, published OpenColorIO
 config YAML syntax (`ocio.rs`) — not a separate hand-built system for
-ACES specifically, since the real, published ACES config *is* an OCIO
+ACES specifically, since the real, published ACES config _is_ an OCIO
 config using the same real transform types this module applies, the
 same way real Photoshop's own OCIO integration treats ACES as just one
 config among many rather than a special case.
@@ -18648,7 +18643,7 @@ successfully — the config isn't rejected — into
 exactly what's missing if that specific transform is ever actually
 applied. `Config::colorspace(name)` looks up one real named colour
 space; `convert(config, from, to, rgb)` composes `from`'s own real
-`to_reference` (identity if it has none — a real colour space *is* the
+`to_reference` (identity if it has none — a real colour space _is_ the
 reference space by OCIO's own convention) with `to`'s own real
 `from_reference`, refusing to guess a missing inverse rather than
 silently producing a wrong one.
@@ -19090,7 +19085,7 @@ rediscover from scratch:
 - **Style Transfer.** The ONNX Model Zoo's own `fast_neural_style`
   models (`mosaic-9.onnx` and its siblings) are real and really
   fetchable, but confirmed — by grepping `tract-onnx` and `tract-hir`'s
-  own source, not just by one failing run — to have *zero* `Upsample`
+  own source, not just by one failing run — to have _zero_ `Upsample`
   op implementation at any level. Every one of them was exported at
   ONNX opset 9, which encodes their `nn.Upsample` layers as the
   deprecated `Upsample` op rather than its modern `Resize`
@@ -19122,7 +19117,7 @@ rediscover from scratch:
   mid-session.
 - **Photo Restoration.** Xintao Wang's real, official
   `RealESRGAN_x4plus.pth` (BSD-3-Clause, confirmed against the
-  repository's own `LICENSE`) *is* genuinely fetchable — its GitHub
+  repository's own `LICENSE`) _is_ genuinely fetchable — its GitHub
   Release asset resolved and downloaded correctly — and its real
   architecture (fetched directly from BasicSR's own
   `rrdbnet_arch.py`/`arch_util.py`: nearest-neighbour
@@ -19195,7 +19190,7 @@ connections to line up), runs one dynamic-shape inference pass through
 the bundled network — confirmed in an isolated test harness to run
 correctly at several arbitrary sizes before touching this project, not
 just the one it was trained at — crops the predicted Cb/Cr back to the
-original size, and recombines it with the *input's own, unmodified*
+original size, and recombines it with the _input's own, unmodified_
 luma (Colorize never touches brightness or detail, only synthesizes
 colour) and the input's own alpha. `Document::colorize` wires this into
 a single layer via the existing `filter_pixels` helper, so it respects
@@ -19438,7 +19433,7 @@ item with a real answer, and the fourth this project trained itself.
 
 **Research note: Smart Portrait and Makeup Transfer, investigated in
 full, not assumed impossible.** Landscape Mixer worked because real,
-appropriately-licensed *landscape* photography turned out to be
+appropriately-licensed _landscape_ photography turned out to be
 reachable through this sandbox's one reliable channel (a permissively
 licensed GitHub repository's own committed content). The same search
 was run, in the same depth, for face data — Smart Portrait and Makeup
@@ -19574,7 +19569,7 @@ Stable Diffusion — a comparable model, not even Firefly's own larger
 one — took roughly 150,000-200,000 A100 GPU-hours to train (~$600,000 at
 market cloud pricing); a CPU-only sandbox with no GPU at all is on the
 order of 4-5 orders of magnitude slower at this kind of workload, which
-puts one equivalent training run at somewhere around 17 CPU-*years* of
+puts one equivalent training run at somewhere around 17 CPU-_years_ of
 continuous compute — not "would take a long time," a different tool
 entirely, the same way more time doesn't make a bicycle cross an ocean.
 Layered on top: a text-conditioned model needs paired image/caption data
@@ -19586,8 +19581,7 @@ distorted hands/fingers, and it needs a live connection and a Creative
 Cloud subscription for every single generation — no offline mode at any
 tier. What a small, from-scratch model genuinely can do instead — a real
 capability, different in kind, not a lesser version of the same one —
-is context-only hallucination: [Context Encoders (Pathak et al., CVPR
-2016)](https://openaccess.thecvf.com/content_cvpr_2016/papers/Pathak_Context_Encoders_Feature_CVPR_2016_paper.pdf)
+is context-only hallucination: [Context Encoders (Pathak et al., CVPR 2016)](https://openaccess.thecvf.com/content_cvpr_2016/papers/Pathak_Context_Encoders_Feature_CVPR_2016_paper.pdf)
 established that an encoder-decoder trained self-supervised to
 reconstruct a masked region from its own surroundings learns a real
 visual prior with no text, no labels, no captions needed at all — the
@@ -19601,7 +19595,7 @@ cleanly (loss fell smoothly over 22 epochs) but produced a real,
 diagnosed failure: a small, uniform hole next to strongly-coloured
 context (clear sky next to a warm sunset) still came back a flat,
 wrong-coloured patch. Checked for a pipeline bug first, not assumed —
-the network's own *unmasked*-region reconstruction was visibly correct,
+the network's own _unmasked_-region reconstruction was visibly correct,
 which pointed at the three downsamples-to-a-16×16-bottleneck losing the
 fine local colour cue this kind of fill needs, not a bug. U-Net-style
 skip connections (Ronneberger, Fischer & Brox, MICCAI 2015) are the
@@ -19698,7 +19692,7 @@ The shape doesn't quite fit the existing per-pixel match arms, though,
 and that's worth explaining rather than papering over: Remove, Heal, and
 Clone each compute their own pixel's replacement independently, reading
 only that pixel's own neighbourhood or its own source offset. Generative
-Fill's model needs the *whole* hole at once — it's a single real
+Fill's model needs the _whole_ hole at once — it's a single real
 inference run over a context window, not a per-pixel formula. So
 `camera_raw_retouch` builds the spot's own coverage mask (every pixel
 where `coverage_at(px, py) * selection > 0`, exactly the same condition
@@ -19849,7 +19843,7 @@ with a new seed for a different plausible result, and this project's
 model had no seed to vary — the same masked input always gave the same
 output. Adding a noise input is the obvious move and, on its own, would
 have shipped a lie: a network trained only with reconstruction losses
-learns to *ignore* a noise input, because for a given context the
+learns to _ignore_ a noise input, because for a given context the
 loss-optimal fill is one fixed answer (the conditional mean) whatever
 the noise says, so two seeds would come back byte-identical. This phase
 gives the model a noise plane as its fifth input channel and fine-tunes
@@ -19900,7 +19894,7 @@ plane's shape, determinism per seed, and standard-normal mean/variance;
 and Generate Similar's actual contract on the real model — two seeds
 give different fills of the same hole, the same seed repeats
 byte-for-byte, and nothing outside the hole moves (asserting a model
-property is deliberate here: it *is* the feature). `document.rs` gained
+property is deliberate here: it _is_ the feature). `document.rs` gained
 2: the record is set by a fill, `generate_similar` changes only that
 hole, works repeatedly, keeps alpha, and is invalidated by a canvas
 resize; and after an expand a variation keeps the added area opaque and
@@ -19943,7 +19937,7 @@ start, printed once, never stored in clear); documents as one file per
 saved version, never overwritten, addressed by bare name for one's own
 and `owner/name` for shared ones; shares as `edit` (save new versions,
 share for review) or `view` (open only), enforced on every call, with a
-document the caller has no access to reading as *not found* so its
+document the caller has no access to reading as _not found_ so its
 existence is not revealed; review links as 128 random bits pinned to
 the version current when they were made, so later saves never change
 what a reviewer sees, taking comments from anyone with the link (a
@@ -20040,11 +20034,11 @@ through the router.
 The client's **Libraries…** dialog lists every library the user can
 see (shared ones with their owner and role), creates new ones, shows
 the chosen library's assets with a swatch for colours, and offers
-*Use* on each — a colour becomes the brush colour, a gradient or
+_Use_ on each — a colour becomes the brush colour, a gradient or
 adjustment lands in the document's own preset list through the
 existing `save_gradient_preset`/`save_adjustment_preset` commands, a
 graphic is fetched and placed through `add_layer_from_bytes` like a
-pasted screenshot — and, with edit access, *Remove*, plus *Add* from
+pasted screenshot — and, with edit access, _Remove_, plus _Add_ from
 the brush colour, the selected layer, or any of the document's
 gradient and adjustment presets. The owner shares or deletes the
 library from the same dialog. The three service dialogs moved to a
@@ -20057,7 +20051,7 @@ colour asset, graphic by PUT, blob fetched back byte-for-byte, the
 count in the listing, a refused kind, delete asset, delete library).
 The built frontend in Playwright's Chromium against the running
 server: Libraries… created "Brand", added the brush colour as "Studio
-white", shared it with `ana` as Can edit, and *Use* on the colour
+white", shared it with `ana` as Can edit, and _Use_ on the colour
 succeeded; the server's own `/libraries/1/assets` then held `{ "hex":
 "#ffffff" }` under that name and `/libraries/1/shares` held `ana,
 edit`. `cargo fmt --check` and `cargo clippy --all-targets -- -D
@@ -20113,9 +20107,9 @@ serves it as `font/ttf` — a second request never touches the network.
 Any `.ttf`/`.otf` the operator drops in `<data-dir>/fonts/local/` is
 listed and served under its file name. The client's **Fonts…**
 dialog searches the catalogue by family or category, chooses Regular
-or Bold and italic, and *Activate* fetches through the server and
+or Bold and italic, and _Activate_ fetches through the server and
 hands the bytes to `register_font`; the **Type** dialog gained a
-*Face* select — the built-in bitmap or any activated face — with the
+_Face_ select — the built-in bitmap or any activated face — with the
 size limit following the choice, and defaults to Open Sans at 32
 pixels.
 
@@ -20138,7 +20132,7 @@ Lato Bold Italic from Google Fonts through this sandbox's proxy in
 0.7 s (`file` reports a TrueType font, 74,836 bytes), served the
 cached copy in 15 ms byte-identical, and 404s an unknown family; the
 built frontend in Playwright's Chromium listed all 142 families,
-filtered "lato" to one row, and *Activate* fetched
+filtered "lato" to one row, and _Activate_ fetched
 `/fonts/Lato/file?weight=700&italic=false` (200) before stopping at
 `register_font`, the one step that needs Tauri's IPC. `cargo fmt
 --check` and `cargo clippy --all-targets -- -D warnings` clean in
@@ -20180,9 +20174,9 @@ chosen one as a scaled canvas — every item a box at its own position,
 an image as its thumbnail (fetched once into an object URL, since an
 `<img>` cannot carry the bearer token), a note or prompt as its text —
 where items are dragged into place with pointer capture and the move
-is sent on release. Below it, the item list offers *Place* (an image
+is sent on release. Below it, the item list offers _Place_ (an image
 into the document as a new layer through `add_layer_from_bytes`),
-*Use prompt* (into Generative Fill's prompt) and *Remove*; *Pin* adds
+_Use prompt_ (into Generative Fill's prompt) and _Remove_; _Pin_ adds
 a note, a prompt, the flattened document (a new `export_composite_bytes`
 command, `export_png`'s bytes returned instead of written) or the
 selected layer; the owner shares or deletes the board.
@@ -20227,7 +20221,7 @@ background colour. The cloud path is a real, heavier segmentation on
 image-editor-server, `server/src/segment.rs`: GrabCut's iterated
 graph cuts (Rother, Kolmogorov & Blake, SIGGRAPH 2004), reimplemented.
 The two-pixel canvas edge is the background as the heuristic assumes,
-but as a colour *model* — five k-means clusters with per-cluster
+but as a colour _model_ — five k-means clusters with per-cluster
 variance, the paper's Gaussian mixtures with isotropic components —
 and a pixel starts as subject when that model finds it less likely
 than the ring's own 98th-percentile pixel by a margin that grows with
@@ -20256,8 +20250,7 @@ checks its size against the canvas. The client's **Select Subject
 posts it at the current tolerance, and lands the mask per the
 selection mode.
 
-**Verified three ways.** `cargo test` in `server/`: 22 tests (17 →
-22) — the max-flow against three hand-computed graphs (a 5-unit cut
+**Verified three ways.** `cargo test` in `server/`: 22 tests (17 → 22) — the max-flow against three hand-computed graphs (a 5-unit cut
 with its source side, a 1-unit bottleneck, an undirected edge with an
 unreachable branch, and no path at all); the colour model separating
 two colours; a noisy blob (±20 per channel on both sides) recovered
@@ -20449,11 +20442,11 @@ reference unchanged, an empty prompt denoises unconditionally, and
 `generate_rgb` now shares the loop (`ddim`). Everything else is what
 each row needs around that.
 
-**Reference Images** is the Generate Image dialog's *Reference* select
+**Reference Images** is the Generate Image dialog's _Reference_ select
 and strength slider: `Document::reference_image` resizes the chosen
 layer's colour to the model's size, edits it, Super Zooms the result
 to 192×192 as a new layer, and records the reference and strength on
-the `GeneratedLayer`, so *Regenerate* redoes it from the same layer at
+the `GeneratedLayer`, so _Regenerate_ redoes it from the same layer at
 the next seed — and says so if that layer is gone. **Prompt to Edit**
 is `Document::prompt_to_edit`: the context window around the
 selection (Generative Fill's own margin, `crop_window`) is taken to
@@ -20518,7 +20511,7 @@ from External Services (or the server's `ANTHROPIC_API_KEY`), a system
 prompt that describes the open document (size, layers, which is
 selected, whether there is a selection), and the conversation so far in
 the API's own shape, and returns the reply's text and its tool calls as
-*actions*. The app runs each action through `runCommand` — the same
+_actions_. The app runs each action through `runCommand` — the same
 undoable, checkpointed path a click takes, the selected layer filled
 in where the command takes one — and reports each result back as a
 `tool_result`, round after round, until a reply carries no actions. A
@@ -20534,8 +20527,7 @@ each action's result as a quiet note), takes the next message on Enter,
 and starts a new conversation on request; External Services gained the
 key field.
 
-**Verified three ways.** `cargo test` in `server/`: 27 tests (22 →
-27) — the catalogue's names are unique and every schema is a closed
+**Verified three ways.** `cargo test` in `server/`: 27 tests (22 → 27) — the catalogue's names are unique and every schema is a closed
 object; the system prompt describes a document's size, a hidden
 selected layer and the selection, and the request body carries the
 model, the fallbacks and no explicit thinking configuration; a
@@ -20681,7 +20673,7 @@ defined pattern, a guide, a note, a count mark, a gradient preset, a
 saved selection and an active selection round-trips with every record
 equal to the original (mask bytes, text, shape, the whole smart
 object, the pattern, guides, notes, marks, presets, selections), and
-the generated record follows its layer to a *different* id because a
+the generated record follows its layer to a _different_ id because a
 layer removed before saving shifts every id on reload; a second save
 of the reloaded document is byte-for-byte the same length (a stable
 format); a version-1 file written exactly as the old writer laid it
@@ -20815,9 +20807,10 @@ command has always named its place in its `title`, in the form
 turns that convention into the model: `menuPath` reads the menu path
 above the command (the button's own text is the command), folds titles
 that start at a submenu (`Filter Gallery > Artistic > …`, `Neural Filters
+
 > …`, `Camera Raw Filter > …`, `Color Settings > …`) under their
 Photoshop menu, files the Blur Gallery as Photoshop's own `Filter > Blur
-Gallery`, and names no menu for tools, contextual buttons, and prose that
+> Gallery`, and names no menu for tools, contextual buttons, and prose that
 merely mentions one ("Load an alpha channel made by Image >
 Calculations"). `buildMenuTree` folds the entries into the ten top-level
 menus in Photoshop's order, nests submenus to any depth where their
@@ -20826,13 +20819,13 @@ first command sits, orders each menu the way Photoshop's own reads
 Levels, Curves, … for Image > Adjustments; and so on, anything a menu
 carries beyond the known order following in the toolbar's order), reads
 the `(Ctrl/Cmd+…)` hint out of each title as the shortcut column, and
-leaves out the commands Edit > Menus hides, pruning any submenu that
-empties.
+> leaves out the commands Edit > Menus hides, pruning any submenu that
+> empties.
 
 `src/MenuBar.tsx` is the view: `toolbarEntries` reads the commands off the
 toolbar's buttons — label, title, `disabled`, `aria-pressed` for toggles
 — and choosing a menu item clicks the button, so the button's handler,
-availability, and state *are* the command's. The toolbar stays the one
+availability, and state _are_ the command's. The toolbar stays the one
 registry of what the app does; the menu bar is a view over it, rebuilt
 after every render while a menu is open (a signature check keeps an
 unchanged toolbar from re-rendering), so a command that just became
@@ -20980,18 +20973,18 @@ recorded. Playback resolves the token to the layer selected at that
 moment and refuses a step that needs one when nothing is selected.
 
 **The panel** (Window > Actions): name an action and press Record; the
-status bar shows "● Recording *name* — n steps", and every command run
-from then on is appended and written to disk *before* anything else
+status bar shows "● Recording _name_ — n steps", and every command run
+from then on is appended and written to disk _before_ anything else
 happens — `save_action` is called from inside `runCommand` the instant
 the command's result lands — so a recording is never only in memory.
 Insert Stop adds a pause with a message; Stop Recording ends it. Play
 runs the action's steps through `runCommand` in turn, aimed at the
-selected layer, showing "Playing *name* i/n" in the progress strip
+selected layer, showing "Playing _name_ i/n" in the progress strip
 (Phase 349) with Cancel; a Stop step opens a dialog with its message and
 Continue / Stop; the first failing step, a Stop answered Stop, or Cancel
 ends playback. Batch (File > Automate > Batch) asks for a folder of PNGs
 and a folder for results, then opens each file, plays the action, and
-exports the flattened result under the source's name — "Batch *name*
+exports the flattened result under the source's name — "Batch _name_
 i/n" in the strip, cancellable between files. Delete removes an action;
 deleting the one being recorded stops the recording. The selected
 action's steps are listed underneath, each described by its command and
@@ -21013,16 +21006,17 @@ and throws without one; the non-recordable set; step descriptions and
 Batch's output names on both path styles. Then the built app in
 Chromium (`vite preview` + Playwright, the Tauri bridge stubbed with an
 in-memory action store and the real `DocumentView`): File > New…; Window
+
 > Actions; Record "Soften" → the status bar reads `● Recording "Soften"
 — 0 steps`; Image > Adjustments > Invert Colors from the menu bar → `1
 step`, the stub's store holding `invert_colors` with `id: "$selected"`;
-Insert Stop "Look at it" → the steps list reads `invert_colors | Stop:
+> Insert Stop "Look at it" → the steps list reads `invert_colors | Stop:
 Look at it` and the store has both; Stop Recording clears the
-indicator; Play runs `invert_colors(id=1)`, shows "Playing Soften 1/2 |
-Cancel" while the Stop dialog reads "Look at it" with Stop / Continue,
-and Continue finishes with the strip gone and no error; Play again with
-Stop at the prompt runs only the first step; Delete empties the list.
-The Xvfb live-verification gap from the previous phases stands.
+> indicator; Play runs `invert_colors(id=1)`, shows "Playing Soften 1/2 |
+> Cancel" while the Stop dialog reads "Look at it" with Stop / Continue,
+> and Continue finishes with the strip gone and no error; Play again with
+> Stop at the prompt runs only the first step; Delete empties the list.
+> The Xvfb live-verification gap from the previous phases stands.
 
 **1827 Rust tests total** (1823 → 1827: 1820 lib + 7 pipeline). **Frontend tests: 13** (9 → 13).
 
@@ -21085,8 +21079,7 @@ around the hole into it. This phase builds the synthesis.
 
 **Mechanism.** `src-tauri/src/inpaint.rs` is PatchMatch (Barnes,
 Shechtman, Finkelstein & Goldman, SIGGRAPH 2009) inside the
-coarse-to-fine vote-and-refine loop of Wexler, Shechtman & Irani (PAMI
-2007) — the method Photoshop's own fill descends from. An image pyramid
+coarse-to-fine vote-and-refine loop of Wexler, Shechtman & Irani (PAMI 2007) — the method Photoshop's own fill descends from. An image pyramid
 halves the layer while it stays at least two patches wide (a coarse
 pixel is hole if any child is, and a source only if every child is), at
 most five levels. At the coarsest level the hole is first filled by
@@ -21201,10 +21194,8 @@ counter-clockwise from the angle; Scale divides them all, Reverse reads
 relief 1 and blends 75 % toward white — (216, 229, 241) — and the right
 edge 75 % toward black — (25, 38, 50) — with the transparent corner
 untouched; Direction Down swaps them; Altitude 60° and Depth 50 % each
-halve the relief to (158, 189, 221); the corner pixel reads (158, 189,
-221) under Chisel Hard and (182, 206, 229) under Smooth (field 1 rounded
-to 2 sin π/4); Chisel Soft's 3×3 blur gives the left edge (155, 187,
-219) from window means of 0.5 and 13/9; Soften moves the edge. On an
+halve the relief to (158, 189, 221); the corner pixel reads (158, 189, 221) under Chisel Hard and (182, 206, 229) under Smooth (field 1 rounded
+to 2 sin π/4); Chisel Soft's 3×3 blur gives the left edge (155, 187, 219) from window means of 0.5 and 13/9; Soften moves the edge. On an
 8×8 block, Outer Bevel paints the pixel one out on the lit side white at
 full alpha and its far-side twin black, leaves the plateau and the
 distant surround alone; Emboss paints the lit-side pixel white at 128
@@ -21499,11 +21490,11 @@ build (a release build would not fit the sandbox's disk), with the
 diffusion model's training sharing the cores, so the absolute numbers
 are pessimistic and the ratios are what count:
 
-| Step | Before | After |
-| --- | --- | --- |
-| Flatten (one thread → four bands) | 6.01 s | 2.82 s |
-| Encode the preview (default deflate → fast, unfiltered) | 9.20 s | 2.92 s |
-| Bytes handed to the webview | 12.9 MB | 48.0 MB |
+| Step                                                    | Before  | After   |
+| ------------------------------------------------------- | ------- | ------- |
+| Flatten (one thread → four bands)                       | 6.01 s  | 2.82 s  |
+| Encode the preview (default deflate → fast, unfiltered) | 9.20 s  | 2.92 s  |
+| Bytes handed to the webview                             | 12.9 MB | 48.0 MB |
 
 The two together take an edit's turnaround on that document from 15.2 s
 to 5.7 s; the preview's larger byte count crosses an in-process
@@ -21813,8 +21804,7 @@ Diagonal Lines ink exactly where `(x + y) mod 4 < 2`; Circle inks
 (3, 3) and (2, 3) inside ring 0, leaves (3, 0) and (1, 3) as paper, and
 inks (0, 0) at r 4.95 in ring 1's inner two pixels; Dot and Line
 equal the old types. `tiles_fill_the_uncovered_pixels_three_ways`
-with a seed whose first tile slides by (1, 0): the uncovered pixel (0,
-0) reads its own 0 under Unaltered Image, 255 under Inverse Image and
+with a seed whose first tile slides by (1, 0): the uncovered pixel (0, 0) reads its own 0 under Unaltered Image, 255 under Inverse Image and
 the given colour under Color, pixel (1, 0) reads pixel (0, 0) under
 all three, and Unaltered Image equals `tiles`. In Chromium against the
 built frontend: Filter > Stylize > Extrude… shows Type (Blocks), Size,
@@ -22075,20 +22065,21 @@ on a red surface the plastic highlight puts 60 into green and blue
 texture channel of a red-flat, green-ramped layer equals no bump at
 all while Green bumps; the defaults equal `lighting_effects`; a 91°
 cone errors. In Chromium against the built frontend: Filter > Render
+
 > Lens Flare… shows Lens Type (50-300mm Zoom) and Movie Prime sends
-`lens_flare_with` with `lens: "moviePrime"`; Lighting Effects… shows
-Light Type (Point), Gloss, Metallic, Texture Channel and White is
-high, Spot reveals Aim X, Aim Y and Cone, and Apply sends
-`lighting_effects_with` with `lightType: "spot", cone: 30, gloss: 60,
+> `lens_flare_with` with `lens: "moviePrime"`; Lighting Effects… shows
+> Light Type (Point), Gloss, Metallic, Texture Channel and White is
+> high, Spot reveals Aim X, Aim Y and Cone, and Apply sends
+> `lighting_effects_with` with `lightType: "spot", cone: 30, gloss: 60,
 metallic: 40, texture: "blue", whiteIsHigh: false`; Infinite keeps Aim
-and hides Cone; every dialog closes on Apply. On the real app under
-Xvfb, on the recovered brush-stroke document: Lens Flare… with Movie
-Prime on the transparent layer changed nothing visible (the screen
-lightens colour, and alpha stays), so Filter > Render > Clouds… first
-made the layer opaque; Lens Flare… again, Movie Prime at the canvas
-centre, applied through the real IPC, drew the white core, its halo
-and the long horizontal streak across the clouds; nine screenshots
-checked by eye.
+> and hides Cone; every dialog closes on Apply. On the real app under
+> Xvfb, on the recovered brush-stroke document: Lens Flare… with Movie
+> Prime on the transparent layer changed nothing visible (the screen
+> lightens colour, and alpha stays), so Filter > Render > Clouds… first
+> made the layer opaque; Lens Flare… again, Movie Prime at the canvas
+> centre, applied through the real IPC, drew the white core, its halo
+> and the long horizontal streak across the clouds; nine screenshots
+> checked by eye.
 
 Tests: 1868 Rust (1866 → 1868), 22 frontend.
 
@@ -22264,8 +22255,7 @@ Tests: 1875 Rust (1873 → 1875), 22 frontend.
 ## Phase 373 — Sample All Layers for the neighbourhood tools
 
 Six tool rows of section D carried the same scope cut: Photoshop's
-Sample All Layers, which the Sharpen tool alone honoured since Phase
-200. `Document::stroke_sampling` now gives the option to every tool
+Sample All Layers, which the Sharpen tool alone honoured since Phase 200. `Document::stroke_sampling` now gives the option to every tool
 that reads its surroundings — Blur, Smudge, Clone Stamp, Healing
 Brush, Spot Healing Brush and Mixer Brush: with the flag the stroke
 reads the pre-stroke composite of every visible layer instead of the
@@ -22739,7 +22729,7 @@ One dialog row of section D. `Document::replace_color_with` takes
 `targets: &[[u8; 3]]`, one colour or more — Photoshop's plus-
 eyedropper, which adds another sampled colour to the mask on each
 click rather than replacing the one target. A pixel's own strength is
-the *largest* of every target's own Chebyshev-distance strength (the
+the _largest_ of every target's own Chebyshev-distance strength (the
 same formula `replace_color` already used per target), so the mask is
 the union of every sampled colour's own fuzzy range: a pixel close to
 any one target is shifted, at whichever target's own strength is
@@ -22829,6 +22819,65 @@ clean; all 30 frontend tests (the existing 22 plus these 8) pass.
 
 Tests: 1894 Rust (unchanged — no backend command changed shape), 30
 frontend (22 → 30).
+
+## Phase 386 — The Type tool's own on-canvas editing
+
+The Horizontal/Vertical Type Tool row's own remaining scope cut: "on-canvas
+typing" — Photoshop's actual gesture for the tool, click the picture and
+type directly onto it, rather than a modal dialog with a textarea and X/Y
+fields. The real scalable-font work itself (`fontdue`, real kerning, the
+Fonts… catalogue) already shipped in Phases 253 and 337; this closes the
+interaction gap around it. A new `"type"` tool joins the toolbar (`Type`,
+distinct from the existing `Type…` dialog button, which stays for precise
+numeric entry and — for now — is still the way to re-edit an existing text
+layer's own type in place); with it selected, clicking the canvas opens a
+plain `<textarea>` overlay right at that point, sized close to its content
+via `rows`/`cols` computed from the typed text rather than the browser's
+oversized default box. Typing edits it live; clicking elsewhere commits it
+as a real `add_text_layer` call (in the dialog's own Size/Vertical/Font
+settings and the brush colour) and, if the Type tool is still selected,
+opens a fresh empty editor at the new point — exactly the click-type-click
+rhythm Photoshop's own tool has. Escape cancels without creating anything.
+Blank text (nothing typed, or everything deleted) also discards rather than
+leaving an empty layer behind. Two pieces of real logic are pulled into
+`typeInlineEdit.ts`, pure and unit-tested: `shouldCommitTypeEdit` (is there
+anything worth keeping) and `inlineFontSizePx` (the overlay's on-screen
+font size, scaled by the canvas's own displayed size the same way every
+other on-canvas control already tracks it, so the live preview roughly
+matches the committed layer's real size at any zoom).
+
+One real bug surfaced and fixed building this, not just a design choice:
+the click that opens the editor is itself a `pointerdown` on the canvas
+`<img>`, which is not a focusable element — the browser's own default
+mousedown behaviour is to shift focus away in that case, which raced with
+and immediately lost against the freshly mounted textarea's own
+`autoFocus`, closing the editor the instant it opened. Fixed with
+`event.preventDefault()` on that pointerdown, matching the same technique
+toolbars use to keep a mousedown on one of their own buttons from stealing
+focus from a contentEditable region. Documented scope, for now: clicking
+on top of an existing text layer starts a _new_ one rather than opening
+that layer for in-place editing — the dialog remains the way to change an
+existing layer's own type.
+
+**Verified.** Three unit tests in `typeInlineEdit.test.ts`, hand-computed:
+`shouldCommitTypeEdit` keeps "Hello" and " Hello ", discards "", " ",
+and "\n\t "; `inlineFontSizePx` at a 400px-displayed 800px document halves
+a 32px document font to 16 real screen pixels, holds it at 1:1 shown
+native size, and doubles it at a 2x zoom, falling back to the unscaled size
+when either dimension is not yet measurable. `npm run build` and `npx tsc
+--noEmit` clean; all 33 frontend tests (30 plus these 3) pass. On the real
+app under Xvfb: selected Type from the toolbar, clicked the canvas — the
+editor box appeared exactly there; typed "Real App Test", visible live in
+the box; clicked elsewhere — a real "Real Ap…" text layer appeared in the
+Layers panel (2 layers total) rendered on the canvas through the genuine
+`add_text_layer`/`fontdue` path, and a fresh empty editor opened at the new
+point; typed "Should Cancel" into it and pressed Escape — the editor closed
+with the layer count unchanged at 2 and no trace of the cancelled text,
+confirming both the commit-by-click-away and the Escape-cancels paths
+against the real backend, not a stub.
+
+Tests: 1894 Rust (unchanged — no backend command changed shape), 33
+frontend (30 → 33).
 
 ## Prerequisites
 

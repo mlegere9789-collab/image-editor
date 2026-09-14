@@ -20,7 +20,12 @@
   --accent-wash: rgb(76 141 255 / 14%);
 
   color-scheme: dark;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   font-size: 14px;
 }
 
@@ -165,7 +170,9 @@ body {
   display: flex;
   flex-direction: column;
 }
-.dock-zone__slot--fill > .dockable-panel:not(.dockable-panel--collapsed) > .panel {
+.dock-zone__slot--fill
+  > .dockable-panel:not(.dockable-panel--collapsed)
+  > .panel {
   flex: 1 1 0;
   min-height: 0;
 }
@@ -503,7 +510,11 @@ body {
     linear-gradient(45deg, transparent 75%, var(--canvas-check) 75%),
     linear-gradient(-45deg, transparent 75%, var(--canvas-check) 75%);
   background-size: 20px 20px;
-  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+  background-position:
+    0 0,
+    0 10px,
+    10px -10px,
+    -10px 0;
 }
 
 .canvas-wrap {
@@ -596,8 +607,16 @@ body {
     linear-gradient(0deg, #fff 50%, transparent 50%),
     linear-gradient(0deg, #fff 50%, transparent 50%);
   background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
-  background-size: 8px 1.5px, 8px 1.5px, 1.5px 8px, 1.5px 8px;
-  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  background-size:
+    8px 1.5px,
+    8px 1.5px,
+    1.5px 8px,
+    1.5px 8px;
+  background-position:
+    0 0,
+    0 100%,
+    0 0,
+    100% 0;
   animation: marching-ants 0.5s linear infinite;
 }
 
@@ -1042,7 +1061,8 @@ body {
   max-width: 100%;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background-image: linear-gradient(var(--border) 1px, transparent 1px),
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
     linear-gradient(90deg, var(--border) 1px, transparent 1px);
   background-size: 32px 32px;
   overflow: hidden;
@@ -1154,19 +1174,84 @@ body {
   touch-action: none;
   cursor: grab;
 }
-.transform-rotate--nw { left: -22px; top: -22px; }
-.transform-rotate--ne { right: -22px; top: -22px; }
-.transform-rotate--se { right: -22px; bottom: -22px; }
-.transform-rotate--sw { left: -22px; bottom: -22px; }
+.transform-rotate--nw {
+  left: -22px;
+  top: -22px;
+}
+.transform-rotate--ne {
+  right: -22px;
+  top: -22px;
+}
+.transform-rotate--se {
+  right: -22px;
+  bottom: -22px;
+}
+.transform-rotate--sw {
+  left: -22px;
+  bottom: -22px;
+}
 
-.transform-handle--nw { left: 0; top: 0; cursor: nwse-resize; }
-.transform-handle--n { left: 50%; top: 0; cursor: ns-resize; }
-.transform-handle--ne { left: 100%; top: 0; cursor: nesw-resize; }
-.transform-handle--e { left: 100%; top: 50%; cursor: ew-resize; }
-.transform-handle--se { left: 100%; top: 100%; cursor: nwse-resize; }
-.transform-handle--s { left: 50%; top: 100%; cursor: ns-resize; }
-.transform-handle--sw { left: 0; top: 100%; cursor: nesw-resize; }
-.transform-handle--w { left: 0; top: 50%; cursor: ew-resize; }
+.transform-handle--nw {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.transform-handle--n {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.transform-handle--ne {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.transform-handle--e {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.transform-handle--se {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.transform-handle--s {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.transform-handle--sw {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.transform-handle--w {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+
+/* The Type tool's on-canvas editor: a plain, borderless, auto-growing
+   textarea sitting right where the user clicked, in the brush colour, at
+   an on-screen font size approximating what the committed layer will
+   render at (typeInlineEdit.ts's own `inlineFontSizePx`). It is not
+   meant to look like a UI control -- just the text being typed. */
+.type-inline-editor {
+  position: absolute;
+  min-width: 2ch;
+  min-height: 1.2em;
+  padding: 0;
+  margin: 0;
+  border: 1px dashed #4cc2ff;
+  background: transparent;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  font-family: inherit;
+  line-height: 1.2;
+  white-space: pre;
+}
 
 .guide-line {
   position: absolute;
@@ -1760,7 +1845,9 @@ body {
   box-sizing: border-box;
   border: 2px solid rgb(255 255 255 / 85%);
   border-radius: 50%;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 40%), inset 0 0 0 1px rgb(0 0 0 / 40%);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 40%),
+    inset 0 0 0 1px rgb(0 0 0 / 40%);
   cursor: ew-resize;
   touch-action: none;
   z-index: 5;

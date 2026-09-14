@@ -18,6 +18,7 @@ import {
   rotateDragToDegrees,
   scaledBounds,
 } from "./freeTransformHandles";
+import { inlineFontSizePx, shouldCommitTypeEdit } from "./typeInlineEdit";
 import {
   BRUSH_TOOLS,
   optionsRule,
@@ -2139,6 +2140,18 @@ export default function App() {
   // Open Sans by default) or null for the built-in 5×7 bitmap face.
   const [typeFont, setTypeFont] = useState<string | null>("Open Sans");
   const [activatedFonts, setActivatedFonts] = useState<string[]>(["Open Sans"]);
+  // The Type tool's on-canvas editing (the "type" tool): clicking the
+  // canvas opens this instead of the Type… dialog, at the clicked point.
+  // Only ever creates a new text layer -- editing an existing one in
+  // place, by clicking on top of it, stays on the dialog for now (see
+  // README Phase 386). `typeCancelRef` distinguishes "blurred because the
+  // user pressed Escape" from every other blur, which commits.
+  const [typeEditing, setTypeEditing] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
+  const typeCancelRef = useRef(false);
   // Fonts (Adobe Fonts' open equivalent): image-editor-server's catalogue
   // of open-licensed families, each one click from activation.
   const [showFontsDialog, setShowFontsDialog] = useState(false);
@@ -6692,6 +6705,35 @@ export default function App() {
     setShowTypeDialog(false);
   }, [runCommand, selectedId, currentText]);
 
+  /** The on-canvas editor's own commit: blurring for any reason but
+   * Escape (tracked by `typeCancelRef`, set right before an Escape-driven
+   * blur) turns non-blank text into a real text layer, at the brush
+   * colour and the dialog's own Size/Vertical/Font settings. */
+  const commitTypeEditing = useCallback(async () => {
+    if (typeCancelRef.current) {
+      typeCancelRef.current = false;
+      setTypeEditing(null);
+      return;
+    }
+    const editing = typeEditing;
+    setTypeEditing(null);
+    if (!editing || !shouldCommitTypeEdit(editing.text)) return;
+    const [r, g, b] = hexToRgb(brushColor);
+    const text: TextLayer = {
+      text: editing.text,
+      x: editing.x,
+      y: editing.y,
+      size: typeSize,
+      color: [r, g, b, 255],
+      vertical: typeVertical,
+      font: typeFont,
+    };
+    await runCommand("add_text_layer", {
+      name: editing.text.split("\n")[0].slice(0, 24) || "Type",
+      text,
+    });
+  }, [typeEditing, brushColor, typeSize, typeVertical, typeFont, runCommand]);
+
   /** The polygon the Custom Shape field describes: one `x,y` per line. */
   const parsedCustomPoints = useCallback((): [number, number][] => {
     return customPoints
@@ -10152,6 +10194,7 @@ export default function App() {
   const isPaintBucket = tool === "paintBucket";
   const isMagicWand = tool === "magicWand";
   const isGradient = tool === "gradient";
+  const isType = tool === "type";
   // The pixel-mode shape tools share one drag, preview, and options bar.
   const isRectangle =
     tool === "rectangle" ||
@@ -10486,6 +10529,20 @@ export default function App() {
         setLevelsEyedropper(null);
         return;
       }
+      if (isType) {
+        // The click that opens the on-canvas editor would otherwise also
+        // run the browser's own default mousedown behaviour -- shifting
+        // focus away from whatever has it, since the canvas <img> itself
+        // is not a focusable element -- which loses the editor's own
+        // `autoFocus` the instant it mounts, a tick after this handler
+        // returns. Suppressing that default is what makes the freshly
+        // rendered textarea actually keep the focus it asks for.
+        event.preventDefault();
+        if (typeEditing) void commitTypeEditing();
+        const [x, y] = toDocPoint(event, document);
+        setTypeEditing({ x: Math.round(x), y: Math.round(y), text: "" });
+        return;
+      }
       if (isEyedropper) {
         sampleColorAt(event);
         return;
@@ -10742,6 +10799,9 @@ export default function App() {
       runCommand,
       colorRangeSampling,
       curveOnImage,
+      isType,
+      typeEditing,
+      commitTypeEditing,
     ],
   );
 
@@ -36081,10 +36141,21 @@ export default function App() {
             Vector Mask
           </button>
           <button
+            className={`button button--quiet${isType ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isType}
+            onClick={() => setTool("type")}
+            data-tool="type"
+            data-tooltip-name="Type"
+            data-tooltip="Type tool: click the canvas and type directly onto it — Escape cancels, clicking away commits a new text layer in the brush colour"
+          >
+            Type
+          </button>
+          <button
             className="button button--quiet"
             onClick={openTypeDialog}
             disabled={busy || !hasDocument}
-            title="Horizontal / Vertical Type tool: a text layer in the built-in 5×7 face, in the brush colour"
+            title="Type… dialog: precise X/Y, Size, Vertical and Font, and the way to edit an existing text layer's own type"
           >
             Type…
           </button>
@@ -36563,6 +36634,47 @@ export default function App() {
                     </div>
                   );
                 })()}
+              {typeEditing && document && (
+                <textarea
+                  autoFocus
+                  className="type-inline-editor"
+                  aria-label="Type tool: on-canvas text"
+                  rows={Math.max(1, typeEditing.text.split("\n").length)}
+                  cols={Math.max(
+                    4,
+                    ...typeEditing.text.split("\n").map((line) => line.length),
+                  )}
+                  style={{
+                    left: percentOf(typeEditing.x, document.width),
+                    top: percentOf(typeEditing.y, document.height),
+                    color: brushColor,
+                    fontSize: `${inlineFontSizePx(
+                      typeSize,
+                      canvasWrapRef.current?.getBoundingClientRect().width ??
+                        document.width,
+                      document.width,
+                    )}px`,
+                    writingMode: typeVertical ? "vertical-rl" : undefined,
+                  }}
+                  value={typeEditing.text}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    setTypeEditing((editing) =>
+                      editing
+                        ? { ...editing, text: event.target.value }
+                        : editing,
+                    )
+                  }
+                  onBlur={() => void commitTypeEditing()}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      typeCancelRef.current = true;
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              )}
               {(showFieldBlurDialog ||
                 showIrisBlurDialog ||
                 showTiltShiftDialog) &&

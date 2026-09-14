@@ -802,7 +802,8 @@ export type Tool =
   | "selectColumn"
   | "eyedropper"
   | "paintBucket"
-  | "gradient";
+  | "gradient"
+  | "type";
 
 /** One report from a long command: `done` of `total` units of `stage`. */
 export type ProgressEvent = {
