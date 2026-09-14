@@ -279,6 +279,35 @@ impl LensType {
     }
 }
 
+/// The Dodge and Burn tools' Range: which tones a stroke reaches.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ToneRange {
+    /// Weighted by `1 − luma`: full in the darks, nothing in the lights.
+    Shadows,
+    /// Every tone alike — the tools' original response.
+    #[default]
+    Midtones,
+    /// Weighted by `luma`: full in the lights, nothing in the darks.
+    Highlights,
+}
+
+/// The Dodge, Burn and Sponge tools' extra options, Photoshop's Range,
+/// Protect Tones and Vibrance — see [`Document::stroke_toned`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ToneOptions {
+    pub range: ToneRange,
+    /// Dodge and Burn move only the HSL lightness, keeping hue and
+    /// saturation, and stop short of pure white and black (lightness
+    /// capped at 0.98 and 0.02) so highlights and shadows never clip.
+    pub protect_tones: bool,
+    /// The Sponge scales its change by how far the pixel's saturation is
+    /// from the end it moves toward, so nearly saturated colours saturate
+    /// little and nearly grey ones desaturate little.
+    pub vibrance: bool,
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18537,7 +18566,15 @@ impl Document {
         radius: f32,
         stroke: Stroke<'_>,
     ) -> Result<Option<Rect>, String> {
-        self.stroke_inner(id, points, radius, stroke, None, false)
+        self.stroke_inner(
+            id,
+            points,
+            radius,
+            stroke,
+            None,
+            false,
+            ToneOptions::default(),
+        )
     }
 
     /// [`Self::stroke`] with Photoshop's Sample All Layers for the tools
@@ -18555,7 +18592,34 @@ impl Document {
         stroke: Stroke<'_>,
         sample_all_layers: bool,
     ) -> Result<Option<Rect>, String> {
-        self.stroke_inner(id, points, radius, stroke, None, sample_all_layers)
+        self.stroke_inner(
+            id,
+            points,
+            radius,
+            stroke,
+            None,
+            sample_all_layers,
+            ToneOptions::default(),
+        )
+    }
+
+    /// [`Self::stroke`] with the Dodge, Burn and Sponge tools' options:
+    /// Range weights a Dodge or Burn dab by the pixel's luma (Shadows by
+    /// `1 − luma`, Highlights by `luma`, Midtones not at all — the
+    /// original response); Protect Tones moves only the HSL lightness,
+    /// keeping hue and saturation, and caps it at 0.98 and 0.02 so nothing
+    /// clips; Vibrance scales the Sponge's change by the saturation's
+    /// distance from the end it moves toward. Other tools ignore them;
+    /// the defaults are `stroke`.
+    pub fn stroke_toned(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke<'_>,
+        tone: ToneOptions,
+    ) -> Result<Option<Rect>, String> {
+        self.stroke_inner(id, points, radius, stroke, None, false, tone)
     }
 
     /// [`Self::stroke`] laid down dab by dab under `dynamics` (Brush
@@ -18573,9 +18637,18 @@ impl Document {
         dynamics: &BrushDynamics,
     ) -> Result<Option<Rect>, String> {
         dynamics.validate()?;
-        self.stroke_inner(id, points, radius, stroke, Some(dynamics), false)
+        self.stroke_inner(
+            id,
+            points,
+            radius,
+            stroke,
+            Some(dynamics),
+            false,
+            ToneOptions::default(),
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn stroke_inner(
         &mut self,
         id: LayerId,
@@ -18584,6 +18657,7 @@ impl Document {
         stroke: Stroke<'_>,
         dynamics: Option<&BrushDynamics>,
         sample_all_layers: bool,
+        tone: ToneOptions,
     ) -> Result<Option<Rect>, String> {
         if points.is_empty() {
             return Ok(None);
@@ -19049,9 +19123,30 @@ impl Document {
                         if layer.pixels[base + 3] == 0 {
                             continue;
                         }
-                        let amount = f32::from(exposure) / 100.0 * c;
+                        let px = &mut layer.pixels[base..base + 3];
+                        let luma = (0.299 * f32::from(px[0])
+                            + 0.587 * f32::from(px[1])
+                            + 0.114 * f32::from(px[2]))
+                            / 255.0;
+                        let weight = match tone.range {
+                            ToneRange::Shadows => 1.0 - luma,
+                            ToneRange::Midtones => 1.0,
+                            ToneRange::Highlights => luma,
+                        };
+                        let amount = f32::from(exposure) / 100.0 * c * weight;
                         let lighten = matches!(stroke, Stroke::Dodge { .. });
-                        for slot in layer.pixels[base..base + 3].iter_mut() {
+                        if tone.protect_tones {
+                            let (h, s, l) = rgb_to_hsl(px[0], px[1], px[2]);
+                            let l = if lighten {
+                                (l + (1.0 - l) * amount).min(0.98_f32.max(l))
+                            } else {
+                                (l * (1.0 - amount)).max(0.02_f32.min(l))
+                            };
+                            let (r, g, b) = hsl_to_rgb(h, s, l);
+                            px.copy_from_slice(&[r, g, b]);
+                            continue;
+                        }
+                        for slot in px.iter_mut() {
                             let cb = to_unit(*slot);
                             *slot = to_byte(if lighten {
                                 cb + (1.0 - cb) * amount
@@ -19073,6 +19168,11 @@ impl Document {
                         if s <= 0.0 {
                             continue;
                         }
+                        let amount = if tone.vibrance {
+                            amount * if saturate { 1.0 - s } else { s }
+                        } else {
+                            amount
+                        };
                         let s = if saturate {
                             s + (1.0 - s) * amount
                         } else {
@@ -46325,6 +46425,122 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn dodge_burn_range_protect_tones_and_sponge_vibrance() {
+        // One red-orange pixel, 200/100/50, luma 0.487.
+        let dab = |stroke: Stroke<'static>, tone: ToneOptions| {
+            let mut doc = Document::new(1, 1).unwrap();
+            let id = doc.add_layer("p", &[200, 100, 50, 255], 1, 1).unwrap();
+            doc.stroke_toned(id, &[(0.5, 0.5)], 0.5, stroke, tone)
+                .unwrap();
+            let p = &doc.layers()[0].pixels;
+            [p[0], p[1], p[2]]
+        };
+        let tone = |range: ToneRange, protect_tones: bool, vibrance: bool| ToneOptions {
+            range,
+            protect_tones,
+            vibrance,
+        };
+        // Midtones at exposure 50 is the old dodge: each channel halfway to
+        // white. Shadows weights it by 0.513, Highlights by 0.487.
+        assert_eq!(
+            dab(
+                Stroke::Dodge { exposure: 50 },
+                tone(ToneRange::Midtones, false, false)
+            ),
+            [228, 178, 153]
+        );
+        assert_eq!(
+            dab(
+                Stroke::Dodge { exposure: 50 },
+                tone(ToneRange::Shadows, false, false)
+            ),
+            [214, 140, 103]
+        );
+        assert_eq!(
+            dab(
+                Stroke::Dodge { exposure: 50 },
+                tone(ToneRange::Highlights, false, false)
+            ),
+            [213, 138, 100]
+        );
+        // Burn in the Highlights range: each channel scaled by 1 − 0.2435.
+        assert_eq!(
+            dab(
+                Stroke::Burn { exposure: 50 },
+                tone(ToneRange::Highlights, false, false)
+            ),
+            [151, 76, 38]
+        );
+        // Protect Tones keeps the hue: the plain dodge pulls the colour
+        // toward white (the green-to-red ratio grows), the protected one
+        // keeps (g − b) / (r − b) at a third while getting lighter.
+        let plain = dab(
+            Stroke::Dodge { exposure: 50 },
+            tone(ToneRange::Midtones, false, false),
+        );
+        let kept = dab(
+            Stroke::Dodge { exposure: 50 },
+            tone(ToneRange::Midtones, true, false),
+        );
+        let ratio = |p: [u8; 3]| (p[1] as f32 - p[2] as f32) / (p[0] as f32 - p[2] as f32);
+        assert!((ratio(kept) - 1.0 / 3.0).abs() < 0.05, "{kept:?}");
+        assert!(ratio(plain) > 0.33, "{plain:?}");
+        assert!(kept[0] > 200 && kept[1] > 100 && kept[2] > 50);
+        // Full exposure protected never reaches pure white or black.
+        let bright = dab(
+            Stroke::Dodge { exposure: 100 },
+            tone(ToneRange::Midtones, true, false),
+        );
+        assert!(bright.iter().all(|&v| v < 255), "{bright:?}");
+        let dark = dab(
+            Stroke::Burn { exposure: 100 },
+            tone(ToneRange::Midtones, true, false),
+        );
+        assert!(dark.iter().any(|&v| v > 0), "{dark:?}");
+        assert_eq!(
+            dab(
+                Stroke::Dodge { exposure: 100 },
+                tone(ToneRange::Midtones, false, false)
+            ),
+            [255, 255, 255]
+        );
+        // Sponge at full flow: plain saturating reaches full saturation,
+        // Vibrance scales the move by 1 − s (0.4 of the way, s 0.6 → 0.76).
+        let saturation = |p: [u8; 3]| rgb_to_hsl(p[0], p[1], p[2]).1;
+        let full = dab(
+            Stroke::Sponge {
+                flow: 100,
+                saturate: true,
+            },
+            tone(ToneRange::Midtones, false, false),
+        );
+        let vibrant = dab(
+            Stroke::Sponge {
+                flow: 100,
+                saturate: true,
+            },
+            tone(ToneRange::Midtones, false, true),
+        );
+        assert!((saturation(full) - 1.0).abs() < 0.02, "{full:?}");
+        assert!((saturation(vibrant) - 0.76).abs() < 0.03, "{vibrant:?}");
+        // Desaturating with Vibrance scales by s: 0.6 · (1 − 0.6) = 0.24.
+        let drained = dab(
+            Stroke::Sponge {
+                flow: 100,
+                saturate: false,
+            },
+            tone(ToneRange::Midtones, false, true),
+        );
+        assert!((saturation(drained) - 0.24).abs() < 0.03, "{drained:?}");
+        // The defaults are stroke.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("p", &[200, 100, 50, 255], 1, 1).unwrap();
+        doc.stroke(id, &[(0.5, 0.5)], 0.5, Stroke::Dodge { exposure: 50 })
+            .unwrap();
+        assert_eq!(&doc.layers()[0].pixels[..3], &plain);
     }
 
     #[test]

@@ -1268,6 +1268,9 @@ export default function App() {
   const [decontaminate, setDecontaminate] = useState(false);
   const [decontaminateAmount, setDecontaminateAmount] = useState(100);
   const [spongeSaturate, setSpongeSaturate] = useState(false);
+  const [spongeVibrance, setSpongeVibrance] = useState(false);
+  const [toneRange, setToneRange] = useState("midtones");
+  const [protectTones, setProtectTones] = useState(false);
   const [symmetry, setSymmetry] = useState<Symmetry | "off">("off");
   // The Polygonal Lasso's vertices so far, or the Lasso's drag trail, in
   // document coordinates; the trail also lives in a ref so pointer moves
@@ -9501,6 +9504,8 @@ export default function App() {
           points,
           radius: brushSize,
           exposure: Math.round(brushOpacity * 100),
+          range: toneRange,
+          protectTones,
         });
       } else if (tool === "sponge") {
         void runCommand("sponge_stroke", {
@@ -9509,6 +9514,7 @@ export default function App() {
           radius: brushSize,
           flow: Math.round(brushOpacity * 100),
           saturate: spongeSaturate,
+          vibrance: spongeVibrance,
         });
       } else if (tool === "backgroundEraser") {
         void runCommand("background_erase_stroke", {
@@ -9681,6 +9687,9 @@ export default function App() {
       sharpenProtectDetail,
       sharpenSampleAll,
       sampleAllLayers,
+      toneRange,
+      protectTones,
+      spongeVibrance,
       channelView,
     ],
   );
@@ -15098,21 +15107,58 @@ export default function App() {
               </select>
             </label>
           )}
+          {(tool === "dodge" || tool === "burn") && (
+            <>
+              <label className="tools__slider">
+                Range
+                <select
+                  value={toneRange}
+                  disabled={!canPaint}
+                  aria-label="Tone range"
+                  onChange={(event) => setToneRange(event.target.value)}
+                >
+                  <option value="shadows">Shadows</option>
+                  <option value="midtones">Midtones</option>
+                  <option value="highlights">Highlights</option>
+                </select>
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={protectTones}
+                  disabled={!canPaint}
+                  onChange={(event) => setProtectTones(event.target.checked)}
+                />
+                Protect Tones
+              </label>
+            </>
+          )}
           {tool === "sponge" && (
-            <label className="tools__slider">
-              Mode
-              <select
-                value={spongeSaturate ? "saturate" : "desaturate"}
-                disabled={!canPaint}
-                aria-label="Sponge mode"
-                onChange={(event) =>
-                  setSpongeSaturate(event.target.value === "saturate")
-                }
-              >
-                <option value="desaturate">Desaturate</option>
-                <option value="saturate">Saturate</option>
-              </select>
-            </label>
+            <>
+              <label className="tools__slider">
+                Mode
+                <select
+                  value={spongeSaturate ? "saturate" : "desaturate"}
+                  disabled={!canPaint}
+                  aria-label="Sponge mode"
+                  onChange={(event) =>
+                    setSpongeSaturate(event.target.value === "saturate")
+                  }
+                >
+                  <option value="desaturate">Desaturate</option>
+                  <option value="saturate">Saturate</option>
+                </select>
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={spongeVibrance}
+                  disabled={!canPaint}
+                  onChange={(event) => setSpongeVibrance(event.target.checked)}
+                />
+                Vibrance
+              </label>
+            </>
           )}
           {isPolygonLasso && (
             <>

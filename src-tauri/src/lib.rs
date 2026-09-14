@@ -4293,9 +4293,21 @@ fn dodge_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     exposure: u8,
+    range: Option<document::ToneRange>,
+    protect_tones: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Dodge { exposure })
+        document.stroke_toned(
+            id,
+            &points,
+            radius,
+            Stroke::Dodge { exposure },
+            document::ToneOptions {
+                range: range.unwrap_or_default(),
+                protect_tones: protect_tones.unwrap_or(false),
+                vibrance: false,
+            },
+        )
     })
 }
 
@@ -4308,9 +4320,21 @@ fn burn_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     exposure: u8,
+    range: Option<document::ToneRange>,
+    protect_tones: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Burn { exposure })
+        document.stroke_toned(
+            id,
+            &points,
+            radius,
+            Stroke::Burn { exposure },
+            document::ToneOptions {
+                range: range.unwrap_or_default(),
+                protect_tones: protect_tones.unwrap_or(false),
+                vibrance: false,
+            },
+        )
     })
 }
 
@@ -4324,9 +4348,20 @@ fn sponge_stroke(
     radius: f32,
     flow: u8,
     saturate: bool,
+    vibrance: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Sponge { flow, saturate })
+        document.stroke_toned(
+            id,
+            &points,
+            radius,
+            Stroke::Sponge { flow, saturate },
+            document::ToneOptions {
+                range: document::ToneRange::Midtones,
+                protect_tones: false,
+                vibrance: vibrance.unwrap_or(false),
+            },
+        )
     })
 }
 

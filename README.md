@@ -22297,6 +22297,45 @@ and softened it further; three screenshots checked by eye.
 
 Tests: 1876 Rust (1875 → 1876), 22 frontend.
 
+## Phase 374 — Dodge and Burn's Range and Protect Tones, the Sponge's Vibrance
+
+Three tool rows of section D. `Document::stroke_toned` takes a
+`ToneOptions` beside the stroke: Range weights a Dodge or Burn dab by
+the pixel's luma — Shadows by `1 − luma`, Highlights by `luma`,
+Midtones not at all, the tools' original response and the default;
+Protect Tones moves only the HSL lightness, keeping hue and
+saturation, and caps it at 0.98 and 0.02 so highlights and shadows
+never clip; Vibrance scales the Sponge's change by the saturation's
+distance from the end it moves toward, so nearly saturated colours
+saturate little and nearly grey ones desaturate little. The three
+stroke commands take the options, and the options bar shows Range and
+Protect Tones for Dodge and Burn and Vibrance beside the Sponge's Mode.
+
+**Verified.** One Rust test,
+`dodge_burn_range_protect_tones_and_sponge_vibrance`, on a red-orange
+pixel 200/100/50 (luma 0.487): Dodge at exposure 50 reads 228/178/153
+in the Midtones range (the old response, each channel halfway to
+white), 214/140/103 in Shadows (weighted by 0.513) and 213/138/100 in
+Highlights (by 0.487); Burn at 50 in Highlights reads 151/76/38;
+Protect Tones keeps the green-to-red ratio at a third while
+lightening where the plain dodge pulls it toward white, and full
+exposure protected never reaches pure white or black; the Sponge at
+full flow saturates to 1.0 plain and to 0.76 with Vibrance (0.4 of the
+way from 0.6), and desaturates to 0.24 with it; the defaults equal
+`stroke`. In Chromium against the built frontend: choosing Dodge shows
+Range (Shadows/Midtones/Highlights) and Protect Tones in the options
+bar, and a drag with Shadows and Protect Tones sends `dodge_stroke`
+with `range: "shadows", protectTones: true`; Burn with Highlights sends
+`range: "highlights"`; the Sponge shows Vibrance beside its Mode and no
+Range, and sends `vibrance: true`. On the real app under Xvfb, on the
+recovered document: picking the Dodge tool puts Range (Midtones) and
+Protect Tones in the options bar; with Shadows chosen and Protect
+Tones ticked, a drag along the tilt-shifted stroke ran through the
+real IPC and lifted its greyed, blurred end while its white middle
+stayed white; three screenshots checked by eye.
+
+Tests: 1877 Rust (1876 → 1877), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
