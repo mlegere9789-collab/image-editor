@@ -22336,6 +22336,53 @@ stayed white; three screenshots checked by eye.
 
 Tests: 1877 Rust (1876 → 1877), 22 frontend.
 
+## Phase 375 — The lasso tools' Anti-alias and Feather, the Magic Wand's Anti-alias and Sample All Layers
+
+Three tool rows of section D. `Document::select_polygon_soft` and
+`select_lasso_soft` take the lasso tools' Anti-alias: the polygon's
+coverage of each pixel is measured on a 4×4 grid of sub-samples across
+the pixel square and stored as the mask's soft edge (`hits · 255 / 16`,
+rounded), the pixel selected outright when at least half its samples
+fall inside, so `Selection::coverage` blends the outline's edge pixels
+by their coverage. `select_magic_wand_with` takes the Wand's two
+options: Anti-alias stores the 3×3 edge-clamped box blur of the
+mask's bits as its soft edge (`hits · 255 / 9`), the hard bits
+unchanged; Sample All Layers matches colours on the composite of every
+visible layer rather than the selected layer alone. The three commands
+take the options; the options bar shows Feather and Anti-alias for the
+Lasso and Polygonal Lasso — Feather chaining Select > Modify > Feather
+after each new selection, as the marquees already do — and Anti-alias
+and Sample All Layers for the Magic Wand.
+
+**Verified.** Two Rust tests. `lasso_anti_alias_stores_edge_coverage`:
+the triangle x + y < 4 on a 4×4 canvas leaves pixel (0, 2) fully inside
+(soft 255, selected), (0, 3) and (1, 2) straddling the diagonal with 6
+of 16 sub-samples inside (soft 96, not selected outright) and (2, 2)
+out (0); coverage reads 96/255 at (0, 3) and 1 at (0, 2); without
+Anti-alias the mask has no soft edge, and the Lasso's trail through the
+same raster gives the same 96. `magic_wand_anti_alias_and_sample_all_layers`:
+a red centre on blue at tolerance 0 selects the one pixel, and with
+Anti-alias every pixel's soft coverage is its 3×3 share of that hit,
+255/9 → 28; a transparent layer over a red-left, blue-elsewhere layer
+selects all nine pixels from a click alone and exactly the red column
+with Sample All Layers. In Chromium against the built frontend: the
+Magic Wand's options bar shows Anti-alias (on) and Sample All Layers
+(off) and a click sends `select_magic_wand` with those defaults, then
+`antiAlias: false, sampleAllLayers: true` after toggling; the Lasso and
+Polygonal Lasso show Feather and Anti-alias, a drag sends `select_lasso`
+with `antiAlias: true` and no feather call, and with Anti-alias off and
+Feather 5 sends `antiAlias: false` followed by `feather_selection` with
+radius 5; closing a polygon on its first vertex sends `select_polygon`
+the same way. On the real app under Xvfb, on the recovered document:
+picking the Magic Wand put Anti-alias (ticked) and Sample All Layers in
+the options bar, and a click on the stroke's white middle selected it
+through the real IPC, the marching ants framing the mask; picking the
+Lasso put Mode, Feather and Anti-alias in the bar, and with Feather 8 a
+freehand loop below the stroke became a selection whose ants framed
+the loop; four screenshots checked by eye.
+
+Tests: 1879 Rust (1877 → 1879), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

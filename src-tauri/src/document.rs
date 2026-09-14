@@ -6965,6 +6965,23 @@ impl Document {
         mode: SelectionMode,
         points: &[(f32, f32)],
     ) -> Result<(), String> {
+        self.select_polygon_soft(mode, points, false)
+    }
+
+    /// [`Self::select_polygon_with`] with the lasso tools' Anti-alias: the
+    /// polygon's coverage of each pixel is measured on a 4×4 grid of
+    /// sub-samples across the pixel square, stored as the mask's soft
+    /// edge (`hits · 255 / 16`, rounded) with the pixel selected outright
+    /// when at least half its samples fall inside — so the outline's edge
+    /// pixels blend by their coverage, as [`Selection::coverage`] reads a
+    /// soft mask. Combining with an existing selection keeps only the
+    /// hard bits, as the bitmap combination always has.
+    pub fn select_polygon_soft(
+        &mut self,
+        mode: SelectionMode,
+        points: &[(f32, f32)],
+        anti_alias: bool,
+    ) -> Result<(), String> {
         if points.len() < 3 {
             return Err("A polygon needs at least three points.".to_string());
         }
@@ -6973,16 +6990,32 @@ impl Document {
         }
         let (width, height) = (self.width, self.height);
         let mut bits = Vec::with_capacity(width as usize * height as usize);
+        let mut soft = Vec::with_capacity(if anti_alias { bits.capacity() } else { 0 });
         for y in 0..height {
             for x in 0..width {
-                bits.push(point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, points));
+                if anti_alias {
+                    let mut hits = 0u32;
+                    for j in 0..4 {
+                        for i in 0..4 {
+                            let sx = x as f32 + (i as f32 + 0.5) / 4.0;
+                            let sy = y as f32 + (j as f32 + 0.5) / 4.0;
+                            if point_in_polygon(sx, sy, points) {
+                                hits += 1;
+                            }
+                        }
+                    }
+                    bits.push(hits >= 8);
+                    soft.push(((hits * 255 + 8) / 16) as u8);
+                } else {
+                    bits.push(point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, points));
+                }
             }
         }
         let mask = SelectionMask {
             width,
             height,
             bits,
-            soft: None,
+            soft: if anti_alias { Some(soft) } else { None },
         };
         let bounds = mask
             .bounds()
@@ -7014,6 +7047,17 @@ impl Document {
         mode: SelectionMode,
         trail: &[(f32, f32)],
     ) -> Result<(), String> {
+        self.select_lasso_soft(mode, trail, false)
+    }
+
+    /// [`Self::select_lasso_with`] with Anti-alias, as
+    /// [`Self::select_polygon_soft`] gives the Polygonal Lasso.
+    pub fn select_lasso_soft(
+        &mut self,
+        mode: SelectionMode,
+        trail: &[(f32, f32)],
+        anti_alias: bool,
+    ) -> Result<(), String> {
         let mut distinct: Vec<(f32, f32)> = Vec::with_capacity(trail.len());
         for &point in trail {
             if distinct.last() != Some(&point) {
@@ -7023,7 +7067,7 @@ impl Document {
         if distinct.len() < 3 {
             return Err("A lasso needs to enclose an area.".to_string());
         }
-        self.select_polygon_with(mode, &distinct)
+        self.select_polygon_soft(mode, &distinct, anti_alias)
     }
 
     /// The Move tool's Auto-Select (Layer): the topmost visible layer with
@@ -7608,6 +7652,27 @@ impl Document {
         tolerance: u8,
         contiguous: bool,
     ) -> Result<(), String> {
+        self.select_magic_wand_with(id, x, y, tolerance, contiguous, false, false)
+    }
+
+    /// [`Self::select_magic_wand`] with Photoshop's Anti-alias and Sample
+    /// All Layers. Sample All Layers matches colours on the composite of
+    /// every visible layer rather than layer `id` alone (the layer still
+    /// has to exist). Anti-alias softens the mask's edge: the mask's soft
+    /// coverage is the 3×3 edge-clamped box blur of its bits (`hits · 255
+    /// / 9`, truncated), the hard bits unchanged, so
+    /// [`Selection::coverage`] blends the edge pixels.
+    #[allow(clippy::too_many_arguments)]
+    pub fn select_magic_wand_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        tolerance: u8,
+        contiguous: bool,
+        anti_alias: bool,
+        sample_all_layers: bool,
+    ) -> Result<(), String> {
         let (width, height) = (self.width, self.height);
         if x >= width || y >= height {
             return Err(format!(
@@ -7615,8 +7680,41 @@ impl Document {
             ));
         }
         let layer = self.layer(id)?;
-        let bits = wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous);
-        self.set_mask_selection(bits)
+        let bits = if sample_all_layers {
+            let this: &Document = self;
+            let mut pixels = Vec::with_capacity(this.buffer_len());
+            for py in 0..height {
+                for px in 0..width {
+                    pixels.extend_from_slice(&crate::composite::composite_pixel(this, px, py));
+                }
+            }
+            wand_bits(&pixels, width, height, x, y, tolerance, contiguous)
+        } else {
+            wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous)
+        };
+        if !anti_alias {
+            return self.set_mask_selection(bits);
+        }
+        let (w, h) = (width as i64, height as i64);
+        let soft: Vec<u8> = (0..h)
+            .flat_map(|py| {
+                let bits = &bits;
+                (0..w).map(move |px| {
+                    let mut hits = 0u32;
+                    for dy in -1..=1 {
+                        for dx in -1..=1 {
+                            let sx = (px + dx).clamp(0, w - 1);
+                            let sy = (py + dy).clamp(0, h - 1);
+                            if bits[(sy * w + sx) as usize] {
+                                hits += 1;
+                            }
+                        }
+                    }
+                    (hits * 255 / 9) as u8
+                })
+            })
+            .collect();
+        self.set_mask_selection_soft(bits, soft)
     }
 
     /// The Magic Eraser tool: erases to transparency every pixel of layer
@@ -8081,11 +8179,25 @@ impl Document {
     /// Installs a canvas-sized pixel-mask selection, or errors (leaving the
     /// current selection alone) when the mask selects nothing.
     fn set_mask_selection(&mut self, bits: Vec<bool>) -> Result<(), String> {
+        self.set_mask_selection_with_soft(bits, None)
+    }
+
+    /// [`Self::set_mask_selection`] with a soft coverage byte per pixel,
+    /// the mask's anti-aliased edge — see [`SelectionMask::soft`].
+    fn set_mask_selection_soft(&mut self, bits: Vec<bool>, soft: Vec<u8>) -> Result<(), String> {
+        self.set_mask_selection_with_soft(bits, Some(soft))
+    }
+
+    fn set_mask_selection_with_soft(
+        &mut self,
+        bits: Vec<bool>,
+        soft: Option<Vec<u8>>,
+    ) -> Result<(), String> {
         let mask = SelectionMask {
             width: self.width,
             height: self.height,
             bits,
-            soft: None,
+            soft,
         };
         let Some(bounds) = mask.bounds() else {
             return Err("No pixels are within range of that colour.".to_string());
@@ -46425,6 +46537,115 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn lasso_anti_alias_stores_edge_coverage() {
+        // The triangle x + y < 4 on a 4×4 canvas. Pixel (0, 2) is fully
+        // inside (all 16 sub-samples), (0, 3) and (1, 2) straddle the
+        // diagonal (6 of 16 → soft 96, not selected outright), (2, 2) is out.
+        let mut doc = Document::new(4, 4).unwrap();
+        doc.select_polygon_soft(
+            SelectionMode::New,
+            &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)],
+            true,
+        )
+        .unwrap();
+        let selection = doc.selection.clone().unwrap();
+        let mask = selection.mask.as_ref().unwrap();
+        let soft = mask.soft.as_ref().unwrap();
+        assert_eq!(soft[2 * 4], 255);
+        assert_eq!(soft[3 * 4], 96);
+        assert_eq!(soft[2 * 4 + 1], 96);
+        assert_eq!(soft[2 * 4 + 2], 0);
+        assert!(mask.bits[2 * 4] && !mask.bits[3 * 4] && !mask.bits[2 * 4 + 2]);
+        // Coverage reads the soft edge: 96/255 at (0, 3), full at (0, 2).
+        assert!((selection.coverage(0.5, 3.5) - 96.0 / 255.0).abs() < 1e-3);
+        assert!((selection.coverage(0.5, 2.5) - 1.0).abs() < 1e-3);
+        // Without anti-alias the mask is hard and has no soft edge; the
+        // lasso's trail goes through the same raster.
+        let mut hard = Document::new(4, 4).unwrap();
+        hard.select_lasso_soft(
+            SelectionMode::New,
+            &[(0.0, 0.0), (0.0, 0.0), (4.0, 0.0), (0.0, 4.0)],
+            false,
+        )
+        .unwrap();
+        assert!(hard.selection.unwrap().mask.unwrap().soft.is_none());
+        let mut soft_lasso = Document::new(4, 4).unwrap();
+        soft_lasso
+            .select_lasso_soft(
+                SelectionMode::New,
+                &[(0.0, 0.0), (4.0, 0.0), (0.0, 4.0)],
+                true,
+            )
+            .unwrap();
+        let soft_lasso = soft_lasso.selection.unwrap();
+        let soft_mask = soft_lasso.mask.as_ref().unwrap();
+        assert_eq!(soft_mask.soft.as_ref().unwrap()[3 * 4], 96);
+    }
+
+    #[test]
+    fn magic_wand_anti_alias_and_sample_all_layers() {
+        // A red centre on blue, tolerance 0: only the centre matches; with
+        // Anti-alias every pixel's soft coverage is its 3×3 share of that
+        // one hit, 255 / 9 → 28, the hard bits unchanged.
+        let mut px = solid(3, 3, [0, 0, 255, 255]);
+        px[16..19].copy_from_slice(&[255, 0, 0]);
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("p", &px, 3, 3).unwrap();
+        doc.select_magic_wand_with(id, 1, 1, 0, true, true, false)
+            .unwrap();
+        let selection = doc.selection.clone().unwrap();
+        let mask = selection.mask.as_ref().unwrap();
+        assert_eq!(mask.bits.iter().filter(|&&b| b).count(), 1);
+        assert!(mask.bits[4]);
+        let soft = mask.soft.as_ref().unwrap();
+        assert!(soft.iter().all(|&v| v == 28), "{soft:?}");
+        assert!((selection.coverage(0.5, 0.5) - 28.0 / 255.0).abs() < 1e-3);
+        // Sample All Layers: a transparent top layer over a bottom layer
+        // that is red on the left column and blue elsewhere. Alone, every
+        // transparent pixel matches the click; sampling all layers the
+        // click at (0, 0) selects the red column only.
+        let mut bottom = solid(3, 3, [0, 0, 255, 255]);
+        for y in 0..3 {
+            bottom[(y * 3) * 4..(y * 3) * 4 + 3].copy_from_slice(&[255, 0, 0]);
+        }
+        let mut doc = Document::new(3, 3).unwrap();
+        doc.add_layer("b", &bottom, 3, 3).unwrap();
+        let top = doc.add_layer("t", &[0u8; 36], 3, 3).unwrap();
+        doc.select_magic_wand_with(top, 0, 0, 0, true, false, false)
+            .unwrap();
+        assert_eq!(
+            doc.selection
+                .as_ref()
+                .unwrap()
+                .mask
+                .as_ref()
+                .unwrap()
+                .bits
+                .iter()
+                .filter(|&&b| b)
+                .count(),
+            9
+        );
+        doc.select_magic_wand_with(top, 0, 0, 0, true, false, true)
+            .unwrap();
+        let bits = &doc.selection.as_ref().unwrap().mask.as_ref().unwrap().bits;
+        assert_eq!(bits.iter().filter(|&&b| b).count(), 3);
+        assert!(bits[0] && bits[3] && bits[6] && !bits[1]);
+        // The defaults are select_magic_wand.
+        let mut a = Document::new(3, 3).unwrap();
+        let ida = a.add_layer("p", &px, 3, 3).unwrap();
+        a.select_magic_wand(ida, 1, 1, 0, true).unwrap();
+        let mut b = Document::new(3, 3).unwrap();
+        let idb = b.add_layer("p", &px, 3, 3).unwrap();
+        b.select_magic_wand_with(idb, 1, 1, 0, true, false, false)
+            .unwrap();
+        assert_eq!(
+            a.selection.unwrap().mask.unwrap().bits,
+            b.selection.unwrap().mask.unwrap().bits
+        );
     }
 
     #[test]

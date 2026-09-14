@@ -1833,6 +1833,8 @@ export default function App() {
   // Clone Stamp, Healing Brush, Spot Healing Brush and Mixer Brush.
   const [sampleAllLayers, setSampleAllLayers] = useState(false);
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
+  const [magicWandAntiAlias, setMagicWandAntiAlias] = useState(true);
+  const [magicWandSampleAll, setMagicWandSampleAll] = useState(false);
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
   const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
@@ -9919,9 +9921,19 @@ export default function App() {
         y: Math.floor(y),
         tolerance: magicWandTolerance,
         contiguous: magicWandContiguous,
+        antiAlias: magicWandAntiAlias,
+        sampleAllLayers: magicWandSampleAll,
       });
     },
-    [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous],
+    [
+      document,
+      selectedId,
+      runCommand,
+      magicWandTolerance,
+      magicWandContiguous,
+      magicWandAntiAlias,
+      magicWandSampleAll,
+    ],
   );
 
   const isMagicEraser = tool === "magicEraser";
@@ -9976,10 +9988,18 @@ export default function App() {
   const closeLasso = useCallback(
     (mode: SelectionMode) => {
       if (lassoPoints.length < 3) return;
-      void runCommand("select_polygon", { points: lassoPoints, mode });
+      void runCommand("select_polygon", {
+        points: lassoPoints,
+        mode,
+        antiAlias: marqueeAntiAlias,
+      }).then(() =>
+        marqueeFeather > 0
+          ? runCommand("feather_selection", { radius: marqueeFeather })
+          : undefined,
+      );
       setLassoPoints([]);
     },
-    [runCommand, lassoPoints],
+    [runCommand, lassoPoints, marqueeAntiAlias, marqueeFeather],
   );
 
   useEffect(() => {
@@ -10807,7 +10827,15 @@ export default function App() {
                 : event.altKey
                   ? "subtract"
                   : selectionMode;
-          void runCommand("select_lasso", { trail, mode });
+          void runCommand("select_lasso", {
+            trail,
+            mode,
+            antiAlias: marqueeAntiAlias,
+          }).then(() =>
+            marqueeFeather > 0
+              ? runCommand("feather_selection", { radius: marqueeFeather })
+              : undefined,
+          );
         }
         return;
       }
@@ -15201,10 +15229,10 @@ export default function App() {
               </select>
             </label>
           )}
-          {isMarqueeTool && (
+          {(isMarqueeTool || isPolygonLasso || isLasso) && (
             <label
               className="tools__slider"
-              title="Feather: soften the edge of each new marquee by this many pixels"
+              title="Feather: soften the edge of each new selection by this many pixels"
             >
               Feather
               <input
@@ -15226,10 +15254,10 @@ export default function App() {
               px
             </label>
           )}
-          {tool === "selectEllipse" && (
+          {(tool === "selectEllipse" || isPolygonLasso || isLasso) && (
             <label
               className="tools__slider"
-              title="Anti-alias: give the ellipse's edge fractional coverage instead of a hard pixel step"
+              title="Anti-alias: give the selection's edge fractional coverage instead of a hard pixel step"
             >
               <input
                 type="checkbox"
@@ -15317,6 +15345,28 @@ export default function App() {
                   }
                 />
                 Contiguous
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={magicWandAntiAlias}
+                  disabled={!canPaint}
+                  onChange={(event) =>
+                    setMagicWandAntiAlias(event.target.checked)
+                  }
+                />
+                Anti-alias
+              </label>
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={magicWandSampleAll}
+                  disabled={!canPaint}
+                  onChange={(event) =>
+                    setMagicWandSampleAll(event.target.checked)
+                  }
+                />
+                Sample All Layers
               </label>
             </>
           )}

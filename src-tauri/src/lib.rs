@@ -769,10 +769,11 @@ fn select_polygon(
     state: State<'_, AppState>,
     points: Vec<(f32, f32)>,
     mode: Option<document::SelectionMode>,
+    anti_alias: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         let mode = mode.unwrap_or(document::SelectionMode::New);
-        document.select_polygon_with(mode, &points)?;
+        document.select_polygon_soft(mode, &points, anti_alias.unwrap_or(false))?;
         Ok(None)
     })
 }
@@ -784,10 +785,11 @@ fn select_lasso(
     state: State<'_, AppState>,
     trail: Vec<(f32, f32)>,
     mode: Option<document::SelectionMode>,
+    anti_alias: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         let mode = mode.unwrap_or(document::SelectionMode::New);
-        document.select_lasso_with(mode, &trail)?;
+        document.select_lasso_soft(mode, &trail, anti_alias.unwrap_or(false))?;
         Ok(None)
     })
 }
@@ -980,6 +982,7 @@ fn select_circle(
 /// Magic Wand: replace the selection with every pixel of layer `id` within
 /// `tolerance` of the pixel at `(x, y)`, contiguous or not.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn select_magic_wand(
     state: State<'_, AppState>,
     id: LayerId,
@@ -987,9 +990,19 @@ fn select_magic_wand(
     y: u32,
     tolerance: u8,
     contiguous: bool,
+    anti_alias: Option<bool>,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.select_magic_wand(id, x, y, tolerance, contiguous)?;
+        document.select_magic_wand_with(
+            id,
+            x,
+            y,
+            tolerance,
+            contiguous,
+            anti_alias.unwrap_or(false),
+            sample_all_layers.unwrap_or(false),
+        )?;
         Ok(None)
     })
 }
