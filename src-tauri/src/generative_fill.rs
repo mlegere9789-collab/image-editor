@@ -190,18 +190,58 @@ fn resize_plane(plane: &[f32], src_w: usize, src_h: usize, dst_w: usize, dst_h: 
     out
 }
 
+/// The model's fifth input channel: one standard-normal value per model
+/// pixel, drawn deterministically from `seed` (splitmix64, then
+/// Box–Muller) so the same seed always means the same fill and the next
+/// seed a different one. The network was fine-tuned to respond to this
+/// plane rather than ignore it — see `models/GENERATIVE_FILL_NOTICE.md`.
+fn noise_plane(seed: u64) -> Vec<f32> {
+    let mut state = seed;
+    let mut next = move || {
+        state = state.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = state;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    };
+    // (0, 1): the top 53 bits, offset by half a step, so ln never sees 0.
+    let mut unit = move || ((next() >> 11) as f64 + 0.5) / (1u64 << 53) as f64;
+    (0..MODEL_SIZE * MODEL_SIZE)
+        .map(|_| {
+            let (u1, u2) = (unit(), unit());
+            ((-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()) as f32
+        })
+        .collect()
+}
+
 /// Real, context-only generative fill: every pixel where `mask` is
 /// `true` is replaced by the bundled network's own hallucinated content,
 /// inferred from a real window of the surrounding pixels; every other
 /// pixel (including alpha, everywhere) is returned byte-for-byte
-/// unchanged. Errs if `pixels`/`mask` don't match `width`/`height`,
-/// either dimension is zero, `mask` selects nothing, or the bundled
-/// model fails to load or run.
+/// unchanged. Seed 0 — the one fixed draw every plain fill uses, so a
+/// fill is reproducible; [`generative_fill_rgba_seeded`] is the same
+/// with a chosen seed, Generate Similar's own entry point. Errs if
+/// `pixels`/`mask` don't match `width`/`height`, either dimension is
+/// zero, `mask` selects nothing, or the bundled model fails to load or
+/// run.
 pub fn generative_fill_rgba(
     pixels: &[u8],
     width: u32,
     height: u32,
     mask: &[bool],
+) -> Result<Vec<u8>, String> {
+    generative_fill_rgba_seeded(pixels, width, height, mask, 0)
+}
+
+/// [`generative_fill_rgba`] with a chosen `seed` for the model's noise
+/// plane: a different seed is a different plausible fill of the same
+/// hole from the same context.
+pub fn generative_fill_rgba_seeded(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    mask: &[bool],
+    seed: u64,
 ) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 {
         return Err("Generative Fill needs a non-empty image.".to_string());
@@ -249,12 +289,15 @@ pub fn generative_fill_rgba(
             crop_channels[3][y * crop_w + x] = if masked { 1.0 } else { 0.0 };
         }
     }
-    let mut input = vec![0f32; 4 * MODEL_SIZE * MODEL_SIZE];
+    // RGB, mask, then the seed's noise plane — five channels, the last
+    // already model-sized so it is never resized.
+    let mut input = vec![0f32; 5 * MODEL_SIZE * MODEL_SIZE];
     for (c, plane) in crop_channels.iter().enumerate() {
         let resized = resize_plane(plane, crop_w, crop_h, MODEL_SIZE, MODEL_SIZE);
         input[c * MODEL_SIZE * MODEL_SIZE..(c + 1) * MODEL_SIZE * MODEL_SIZE]
             .copy_from_slice(&resized);
     }
+    input[4 * MODEL_SIZE * MODEL_SIZE..].copy_from_slice(&noise_plane(seed));
 
     let model_bytes: &[u8] = include_bytes!("../models/generative_fill.onnx");
     let model = tract_onnx::onnx()
@@ -264,7 +307,7 @@ pub fn generative_fill_rgba(
         .map_err(|err| format!("Could not load the bundled Generative Fill model: {err}"))?;
 
     let tensor: Tensor =
-        tract_ndarray::Array4::from_shape_vec((1, 4, MODEL_SIZE, MODEL_SIZE), input)
+        tract_ndarray::Array4::from_shape_vec((1, 5, MODEL_SIZE, MODEL_SIZE), input)
             .map_err(|err| format!("Could not shape Generative Fill's input: {err}"))?
             .into();
     let result = model
@@ -368,6 +411,58 @@ mod tests {
         for (idx, &masked) in mask.iter().enumerate() {
             if !masked {
                 assert_eq!(out[idx * 4..idx * 4 + 3], pixels[idx * 4..idx * 4 + 3]);
+            }
+        }
+    }
+
+    #[test]
+    fn noise_plane_is_model_sized_standard_normal_and_seed_deterministic() {
+        let a = noise_plane(7);
+        assert_eq!(a.len(), MODEL_SIZE * MODEL_SIZE);
+        assert_eq!(a, noise_plane(7));
+        assert_ne!(a, noise_plane(8));
+        let mean = a.iter().map(|&v| v as f64).sum::<f64>() / a.len() as f64;
+        let var = a.iter().map(|&v| (v as f64 - mean).powi(2)).sum::<f64>() / a.len() as f64;
+        assert!(mean.abs() < 0.05, "mean {mean}");
+        assert!((var - 1.0).abs() < 0.1, "variance {var}");
+    }
+
+    #[test]
+    fn a_different_seed_is_a_different_fill_of_the_same_hole_and_a_seed_repeats_exactly() {
+        // This is Generate Similar's whole contract, so it is asserted on
+        // the real model: the noise plane must actually change the fill.
+        let width = 32u32;
+        let height = 32u32;
+        let mut pixels = vec![0u8; (width * height * 4) as usize];
+        for i in 0..(width * height) as usize {
+            let (x, y) = (i % width as usize, i / width as usize);
+            pixels[i * 4] = (x * 8) as u8;
+            pixels[i * 4 + 1] = (y * 8) as u8;
+            pixels[i * 4 + 2] = ((x + y) * 4) as u8;
+            pixels[i * 4 + 3] = 255;
+        }
+        let mut mask = vec![false; (width * height) as usize];
+        for y in 10..22 {
+            for x in 10..22 {
+                mask[(y * width + x) as usize] = true;
+            }
+        }
+        let first = generative_fill_rgba_seeded(&pixels, width, height, &mask, 1).unwrap();
+        let again = generative_fill_rgba_seeded(&pixels, width, height, &mask, 1).unwrap();
+        let second = generative_fill_rgba_seeded(&pixels, width, height, &mask, 2).unwrap();
+        assert_eq!(first, again);
+        let differing = mask
+            .iter()
+            .enumerate()
+            .filter(|&(idx, &masked)| {
+                masked && first[idx * 4..idx * 4 + 3] != second[idx * 4..idx * 4 + 3]
+            })
+            .count();
+        assert!(differing > 0, "two seeds gave byte-identical fills");
+        // Outside the hole both are the untouched original.
+        for (idx, &masked) in mask.iter().enumerate() {
+            if !masked {
+                assert_eq!(second[idx * 4..idx * 4 + 4], pixels[idx * 4..idx * 4 + 4]);
             }
         }
     }

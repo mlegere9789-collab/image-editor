@@ -83,7 +83,7 @@ matching encoder stage's own higher-resolution features before its
 convolution — the same `ConvInstanceReLU`/`ResidualBlock` building
 blocks `style_transfer.onnx`/`landscape_mixer.onnx` already use, so it
 lowers through ONNX ops `tract` (this project's Rust inference engine)
-can run. Input is 4 channels: RGB with the hole zeroed out, plus a
+can run. Input is 5 channels: RGB with the hole zeroed out, one channel of per-pixel Gaussian noise (the seed — see "Generate Similar" below), plus a
 1-channel mask (1 inside the hole, 0 outside) — the standard
 context-encoder input recipe, so the network can tell "this pixel is
 genuinely black" from "this pixel needs to be invented."
@@ -130,6 +130,59 @@ The honest tradeoff that remains regardless: real, context-aware, but
 visibly softer/blurrier fills than a true GAN or diffusion model would
 produce — no adversarial or diffusion objective is sharpening
 high-frequency texture here.
+
+## Generate Similar: the seeded model
+
+The bundled model is the seeded, 5-channel one; every plain Generative
+Fill / Expand / Remove runs it at seed 0, and Generate Similar runs it
+again over the same hole at the next seed. Getting a genuinely different
+fill per seed needed more than a noise channel, and it's worth being
+exact about why: a network trained only with reconstruction losses
+learns to *ignore* a noise input, because for a given context the
+loss-optimal answer is one fixed fill (the conditional mean) whatever
+the noise says — two seeds would come back byte-identical and the
+feature would be a lie. `train_similar.py` therefore fine-tunes with a
+mode-seeking regularizer (the ratio term from Mao, Lee, Tseng, Ma & Yang,
+"Mode Seeking Generative Adversarial Networks for Diverse Image
+Synthesis", CVPR 2019 — loss-agnostic; no discriminator is involved):
+two noise draws are run through the network on the same context, and
+the loss rewards distance between the two fills in proportion to the
+distance between the two draws. The reconstruction terms keep every
+sample a plausible fill; the mode-seeking term keeps the samples apart.
+
+**Warm-started, and proven faithful.** Rather than 3+ hours from
+scratch, the fine-tune starts from the shipped 4-channel model's own
+weights, read straight out of its ONNX with the `onnx` package's
+protobuf parsing (no `torch.load` of anything downloaded) — the
+exporter had kept the module paths as initializer names, so all 78
+tensors map one-to-one. The first convolution is widened to 5 inputs
+with the new channel's weights zero-initialised, and that was checked
+before any training: the widened network on a random input with random
+noise matched the original to a max absolute difference of exactly 0.0.
+
+**Tuned against a measurement, not a guess.** `fidelity_check.py`
+scores hole-region L1 against ground truth (0-255) on four held-out
+holes, shipped model vs seeded checkpoint. At a mode-seeking weight of
+0.02, four epochs held diversity at ~14/255 but fidelity drifted from
+the shipped model's 15.0 to 17.8 and was still rising — the term was
+winning. Halved to 0.01 and resumed from that checkpoint; 20 further
+epochs. The final model, averaged over four seeds: **15.86 vs 14.98** —
+a random variation costs about 6% fidelity on average; the **best of
+four variations scores 14.17**, better than the shipped deterministic
+fill, which is the number that matters when a user is picking between
+results. Per-epoch diversity — mean |seed A − seed B| inside the hole —
+settled at **~10/255**: clearly visible, still recognisably the same
+fill.
+
+**What a variation is, and isn't.** The hole's previous contents are
+never seen by the model (the mask zeroes them), so each variation is
+drawn from the surrounding context, not from the last result. The
+variation is texture- and tone-level — a different plausible surface,
+not a different object; a small context-encoder trained without a
+discriminator does not invent alternative *content*. The seed's noise
+plane is generated deterministically in Rust (splitmix64, Box–Muller;
+`generative_fill::noise_plane`, unit-tested for mean and variance), so
+the same seed always reproduces the same fill.
 
 ## Training data
 
@@ -187,10 +240,13 @@ with no divergence — final loss 0.242 hole-region L1, 0.585 perceptual.
   case after 40 real epochs of training. Selections over detailed,
   textured content are the reliable case; a large clear-sky selection is
   the case to expect a visible patch on.
-- **One deterministic result per selection.** No noise input, so
-  Generate Similar's own "give me another variation" has no real
-  meaning for this model as built — a documented, not silently dropped,
-  scope cut.
+- **Variations vary in texture and tone, not in content.** Generate
+  Similar draws a genuinely different plausible fill per seed (~10/255
+  mean difference inside the hole, see above), but from the same small
+  context-encoder — it will not propose a different object where there
+  was none. The clear-blue-sky hole is the case where a random
+  variation costs the most fidelity (9.1 → 12.0 mean-of-4), the same
+  weak case as above.
 - **Generative Expand runs this same model over a whole added border
   at once** (`Document::generative_expand`, built on the Image > Canvas
   Size resize that came later): the context window there is effectively

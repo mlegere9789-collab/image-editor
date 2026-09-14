@@ -40,8 +40,25 @@ recipe and its honest limitations). To reproduce the training run:
 4. `python3 train_generative_fill.py` — trains `InpaintNet` from random
    initial weights (no pretrained checkpoint of any kind is loaded)
    against real (photo, random-hole-mask) pairs built entirely from
-   those real photographs, self-supervised, saves `inpaint_net.pt`.
-5. `python3 export_generative_fill_onnx.py` — exports the just-trained
-   weights to `generative_fill.onnx` (ONNX opset 13), the file bundled
-   at `../generative_fill.onnx` and embedded into this project's Rust
+   those real photographs, self-supervised, saves `inpaint_net.pt`. This
+   is the 4-channel model (RGB + mask) that shipped first.
+5. `python3 train_similar.py` — fine-tunes that model into the seeded
+   5-channel one the app bundles now (RGB + mask + a per-pixel noise
+   plane), for Generate Similar: warm-started straight from the shipped
+   `../generative_fill.onnx`'s own weights (read with the `onnx`
+   package's protobuf parsing, not `torch.load` of a downloaded file),
+   first convolution widened to 5 inputs with the new channel zeroed,
+   then trained with a mode-seeking regularizer so a different noise
+   draw gives a different plausible fill. Saves `inpaint_net_seeded.pt`
+   every 2 epochs; `--resume` continues from it. The log's `diversity`
+   column (mean |seed A − seed B| inside the hole, 0-255) is the number
+   that says the feature is real.
+6. `python3 fidelity_check.py [checkpoint]` — hole-region L1 against
+   ground truth on four held-out holes, shipped model vs the seeded
+   checkpoint, in 0-255 units: the measurement the mode-seeking weight
+   was tuned against (see `train_similar.py`'s own docstring).
+7. `python3 export_generative_fill_onnx.py` — exports
+   `inpaint_net_seeded.pt` to `generative_fill.onnx` (ONNX opset 13,
+   fixed 1×5×128×128 input), the file bundled at
+   `../generative_fill.onnx` and embedded into this project's Rust
    binary via `include_bytes!` in `src-tauri/src/generative_fill.rs`.

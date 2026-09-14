@@ -19840,6 +19840,90 @@ Generative Expand flips to shipped (595/618). Canvas Size itself is a
 real, tested, undoable feature the app didn't have before, moving no
 count only because the audit never listed it.
 
+## Phase 334 — Generate Similar
+
+The last Generative Fill family item with a real path, and the one
+Phase 331's own notice called out as needing a change to the model
+rather than a button: Adobe's Generate Similar re-samples a prior fill
+with a new seed for a different plausible result, and this project's
+model had no seed to vary — the same masked input always gave the same
+output. Adding a noise input is the obvious move and, on its own, would
+have shipped a lie: a network trained only with reconstruction losses
+learns to *ignore* a noise input, because for a given context the
+loss-optimal fill is one fixed answer (the conditional mean) whatever
+the noise says, so two seeds would come back byte-identical. This phase
+gives the model a noise plane as its fifth input channel and fine-tunes
+it with a mode-seeking regularizer (the ratio term from Mao et al., CVPR
+2019 — loss-agnostic, no discriminator): two noise draws run on the same
+context, and the loss rewards distance between the two fills in
+proportion to the distance between the draws, while the reconstruction
+terms keep every sample a plausible fill.
+
+The fine-tune warm-starts from the shipped model's own weights, read
+straight out of its ONNX with the `onnx` package's protobuf parsing —
+the exporter had kept the module paths as initializer names, all 78
+map one-to-one — with the first convolution widened to 5 inputs and the
+new channel zero-initialised. That was proven before any training: the
+widened network on a random input with random noise matched the original
+to a max absolute difference of exactly 0.0. The weight on the
+mode-seeking term was then tuned against a real measurement rather than
+guessed: `fidelity_check.py` scores hole-region L1 against ground truth
+on four held-out holes. At 0.02, diversity sat at ~14/255 but fidelity
+drifted from the shipped model's 15.0 to 17.8 over four epochs and was
+still rising — the term was winning — so it was halved to 0.01 and
+resumed from that checkpoint for 20 more epochs. Final, averaged over
+four seeds: 15.86 vs 14.98 (a random variation costs ~6%), best of four
+14.17 (better than the shipped deterministic fill — the number that
+matters when a user picks between results); per-epoch diversity settled
+at ~10/255, clearly visible and still recognisably the same fill.
+
+The bundled `generative_fill.onnx` is now that seeded model, so one
+model serves Generative Fill, Generate Background, Generative Expand,
+Camera Raw's Generative Remove and Generate Similar: the first four run
+it at seed 0 (`generative_fill_rgba` is now a seed-0 wrapper over
+`generative_fill_rgba_seeded`), so a plain fill stays reproducible. The
+seed's noise plane is generated in Rust (`noise_plane`: splitmix64 then
+Box–Muller, unit-tested for mean and variance), so the same seed always
+means the same fill. `Document` remembers the most recent generative
+fill or expand — layer, document-sized hole, whether the added area was
+made opaque, and how many variations have been drawn — and
+`generate_similar()` re-runs exactly that hole at the next seed; the
+hole's previous contents are never seen by the model (the mask zeroes
+them), so a variation is drawn from the context, not from the last
+result. An expand's added area is made opaque again. Anything that
+changes the canvas's dimensions clears the record, and
+`DocumentView.can_generate_similar` gates a "Generate Similar (AI)"
+button next to Generative Fill (AI) and a palette entry.
+
+**Verified two ways.** `generative_fill.rs` gained 2 tests: the noise
+plane's shape, determinism per seed, and standard-normal mean/variance;
+and Generate Similar's actual contract on the real model — two seeds
+give different fills of the same hole, the same seed repeats
+byte-for-byte, and nothing outside the hole moves (asserting a model
+property is deliberate here: it *is* the feature). `document.rs` gained
+2: the record is set by a fill, `generate_similar` changes only that
+hole, works repeatedly, keeps alpha, and is invalidated by a canvas
+resize; and after an expand a variation keeps the added area opaque and
+the old content untouched byte-for-byte, and a lock is respected. `cargo
+test`: 1800 total (1793 lib + 7 pipeline, up from 1796/1789). `cargo fmt
+--check` and `cargo clippy --all-targets -- -D warnings` clean. `npm run
+build` clean. The full qualitative sweep from Phase 331 was re-run on
+the seeded model at three seeds each — same characteristics, genuinely
+different fills — and the ocean and city holes score as well as or
+better than before; the clear-sky road hole is where a random variation
+costs the most (9.1 → 12.0 mean-of-4), the same weak case as before.
+
+Honest limitations: variations differ in texture and tone, not in
+content — a small context-encoder trained without a discriminator does
+not propose a different object where there was none, and won't; the
+plain fill's fidelity is within ~6% of the previous deterministic
+model's on average rather than identical, a deliberate trade for a
+real Generate Similar.
+
+Generate Similar flips to shipped (596/618). Every remaining row in the
+Generative Fill family now needs real text-to-image generation or a
+hosted service.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

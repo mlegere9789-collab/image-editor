@@ -149,6 +149,10 @@ pub struct Document {
     /// or `free_transform`), kept for `transform_again` (Edit > Transform
     /// > Again) to repeat. Travels with the document through undo/redo.
     last_transform: Option<FreeTransform>,
+    /// The most recent generative fill or expand, for `generate_similar`
+    /// (Generate Similar) to re-draw with a new seed. Travels with the
+    /// document through undo/redo like `last_transform`.
+    last_generation: Option<LastGeneration>,
     /// The pattern most recently captured by `define_pattern` (Edit >
     /// Define Pattern), for pattern fills to tile. Photoshop keeps patterns
     /// as application-wide presets; here the one defined pattern lives on
@@ -2336,6 +2340,22 @@ pub enum ReferencePoint {
     BottomRight,
 }
 
+/// What the most recent [`Document::generative_fill`] or
+/// [`Document::generative_expand`] generated, so
+/// [`Document::generate_similar`] can draw another variation of exactly
+/// that: the layer, the document-sized hole it filled, whether the hole
+/// was made opaque (an expand's added area), and how many variations
+/// have been drawn so far — the next one's seed. Cleared by anything
+/// that changes the canvas's dimensions, since the mask would no longer
+/// line up.
+#[derive(Debug, Clone)]
+struct LastGeneration {
+    id: LayerId,
+    mask: Vec<bool>,
+    opaque: bool,
+    variation: u64,
+}
+
 /// Where the old canvas sits inside a new one — Image > Canvas Size's
 /// anchor, resolved to a pixel offset: `dx`/`dy` is where old pixel
 /// `(0, 0)` lands in the new canvas, negative when that side is cropped
@@ -4217,6 +4237,10 @@ pub struct DocumentView {
     pub selection: Option<SelectionView>,
     /// Whether `reselect` has something to restore right now.
     pub can_reselect: bool,
+    /// Whether `generate_similar` has a generation to vary right now: a
+    /// generative fill or expand happened on this canvas at this size and
+    /// its layer still exists.
+    pub can_generate_similar: bool,
     /// Whether `transform_again` has a transform to repeat right now.
     pub can_transform_again: bool,
     /// Whether `define_pattern` has captured a pattern for fills to tile.
@@ -4283,6 +4307,7 @@ impl Document {
             selection: None,
             last_selection: None,
             last_transform: None,
+            last_generation: None,
             pattern: None,
             brush_tip: None,
             current_path: None,
@@ -4333,6 +4358,10 @@ impl Document {
             layers: self.layers.iter().map(Layer::view).collect(),
             selection: self.selection.clone(),
             can_reselect: self.last_selection.is_some(),
+            can_generate_similar: self.last_generation.as_ref().is_some_and(|last| {
+                last.mask.len() == self.width as usize * self.height as usize
+                    && self.layers.iter().any(|layer| layer.id == last.id)
+            }),
             can_transform_again: self.last_transform.is_some(),
             has_pattern: self.pattern.is_some(),
             saved_selections: self.saved_selection_names(),
@@ -10301,6 +10330,7 @@ impl Document {
         self.notes.clear();
         self.current_path = None;
         self.artboards.clear();
+        self.last_generation = None;
         // A guide is a boundary line, so it turns with the picture: a
         // vertical one at x = c becomes horizontal at y = c clockwise (or
         // at old_width − c counter-clockwise), and a horizontal one at
@@ -10369,6 +10399,7 @@ impl Document {
         self.notes.clear();
         self.current_path = None;
         self.artboards.clear();
+        self.last_generation = None;
         // Guides ride along with the pixels they sit between; those left
         // outside the crop are dropped.
         self.guides = self
@@ -10439,6 +10470,7 @@ impl Document {
         self.notes.clear();
         self.current_path = None;
         self.artboards.clear();
+        self.last_generation = None;
         self.guides = self
             .guides
             .iter()
@@ -22885,6 +22917,12 @@ impl Document {
         }
         layer.pixels =
             crate::generative_fill::generative_fill_rgba(&layer.pixels, width, height, &bits)?;
+        self.last_generation = Some(LastGeneration {
+            id,
+            mask: bits,
+            opaque: false,
+            variation: 0,
+        });
         Ok(Some(bounds))
     }
 
@@ -22949,7 +22987,71 @@ impl Document {
         }
         self.resize_canvas(new_width, new_height, anchor)?;
         self.layer_mut(id)?.pixels = filled;
+        self.last_generation = Some(LastGeneration {
+            id,
+            mask: outside,
+            opaque: true,
+            variation: 0,
+        });
         Ok(landed)
+    }
+
+    /// Filter > Generate Similar: another variation of the most recent
+    /// [`Self::generative_fill`] or [`Self::generative_expand`] — the same
+    /// layer, the same hole, the same real on-device model, drawn again
+    /// with the next seed. The model takes a per-pixel noise plane as its
+    /// fifth input and was fine-tuned to actually respond to it (see
+    /// `models/GENERATIVE_FILL_NOTICE.md`), so each seed is a genuinely
+    /// different plausible fill, not a re-run of the same one; the hole's
+    /// own previous contents are never seen by the model (the mask zeroes
+    /// them), so a variation is drawn from the surrounding context, not
+    /// from the last variation. An expand's added area is made opaque
+    /// again. Returns the hole's bounding box. Errors with nothing
+    /// generated yet, if the canvas changed size since (the mask would no
+    /// longer line up), or on a locked or since-removed layer.
+    pub fn generate_similar(&mut self) -> Result<Rect, String> {
+        let Some(last) = self.last_generation.clone() else {
+            return Err("Nothing has been generated yet to make a variation of.".to_string());
+        };
+        let (width, height) = (self.width, self.height);
+        if last.mask.len() != width as usize * height as usize {
+            return Err(
+                "The last generation was on a differently sized canvas; generate again first."
+                    .to_string(),
+            );
+        }
+        let bounds = SelectionMask {
+            width,
+            height,
+            bits: last.mask.clone(),
+            soft: None,
+        }
+        .bounds()
+        .ok_or_else(|| "The last generation covered no pixels.".to_string())?;
+        let variation = last.variation + 1;
+        let layer = self.layer_mut(last.id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let mut filled = crate::generative_fill::generative_fill_rgba_seeded(
+            &layer.pixels,
+            width,
+            height,
+            &last.mask,
+            variation,
+        )?;
+        if last.opaque {
+            for (pixel, _) in filled
+                .chunks_exact_mut(CHANNELS)
+                .zip(&last.mask)
+                .filter(|(_, &added)| added)
+            {
+                pixel[3] = 255;
+            }
+        }
+        layer.pixels = filled;
+        self.last_generation = Some(LastGeneration { variation, ..last });
+        Ok(bounds)
     }
 
     /// The Patch tool (Normal, Source mode): the active selection is the
@@ -35355,6 +35457,66 @@ mod tests {
             assert_eq!(doc.layers()[0].pixels[idx..idx + 4], subject_before[i]);
         }
         assert_eq!((doc.width(), doc.height()), (7, 7));
+    }
+
+    #[test]
+    fn generate_similar_redraws_only_the_last_fills_hole_until_the_canvas_changes_size() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(!doc.view().can_generate_similar);
+        let err = doc.generate_similar().unwrap_err();
+        assert!(err.contains("Nothing has been generated"), "{err}");
+
+        doc.select_rectangle(1.0, 1.0, 2.0, 2.0).unwrap();
+        doc.generative_fill(id).unwrap();
+        assert!(doc.view().can_generate_similar);
+        let after_fill = doc.layers()[0].pixels.clone();
+
+        let rect = doc.generate_similar().unwrap();
+        assert_eq!(
+            rect,
+            Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2
+            }
+        );
+        let after_similar = doc.layers()[0].pixels.clone();
+        for i in (0..9).filter(|&i| i != 4) {
+            assert_eq!(
+                after_fill[i * 4..i * 4 + 4],
+                after_similar[i * 4..i * 4 + 4]
+            );
+        }
+        // Each call is the next seed; alpha is never touched by a plain fill.
+        doc.generate_similar().unwrap();
+        assert!(doc.layers()[0].pixels.chunks_exact(4).all(|p| p[3] == 255));
+
+        doc.resize_canvas(4, 4, ReferencePoint::TopLeft).unwrap();
+        assert!(!doc.view().can_generate_similar);
+        let err = doc.generate_similar().unwrap_err();
+        assert!(err.contains("Nothing has been generated"), "{err}");
+    }
+
+    #[test]
+    fn generate_similar_keeps_an_expands_added_area_opaque_and_respects_a_lock() {
+        let (mut doc, id) = ramped_3x3();
+        doc.generative_expand(id, 5, 5, ReferencePoint::Center)
+            .unwrap();
+        assert!(doc.view().can_generate_similar);
+        doc.generate_similar().unwrap();
+        for y in 0..5u32 {
+            for x in 0..5u32 {
+                let p = pixel(&doc, id, x, y);
+                assert_eq!(p[3], 255, "({x}, {y}) alpha");
+                if (1..4).contains(&x) && (1..4).contains(&y) {
+                    let expected_red = 10 + 10 * ((y - 1) * 3 + (x - 1)) as u8;
+                    assert_eq!(p, [expected_red, 0, 0, 255], "old content at ({x}, {y})");
+                }
+            }
+        }
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.generate_similar().is_err());
     }
 
     #[test]

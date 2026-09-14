@@ -1073,6 +1073,14 @@ fn generative_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, 
     edit_checkpointed(&state, |document| document.generative_fill(id))
 }
 
+/// Filter > Generate Similar: draw the most recent generative fill or
+/// expand again with the next seed — a different plausible result over
+/// the same hole. A whole, discrete action, so it checkpoints itself.
+#[tauri::command]
+fn generate_similar(state: State<'_, AppState>) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.generate_similar().map(Some))
+}
+
 /// Select > Transform Selection: scale, rotate, and move the selection
 /// outline about its own centre without touching pixels.
 #[tauri::command]
@@ -7039,6 +7047,7 @@ pub fn run() {
             content_aware_move,
             content_aware_fill,
             generative_fill,
+            generate_similar,
             transform_selection,
             save_selection,
             load_selection,

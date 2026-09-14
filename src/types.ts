@@ -181,6 +181,8 @@ export type DocumentView = {
   selection: Selection | null;
   /** Whether Select > Reselect has something to restore right now. */
   canReselect: boolean;
+  /** Whether Filter > Generate Similar has a generative fill/expand to vary right now. */
+  canGenerateSimilar: boolean;
   /** Whether Edit > Transform > Again has a transform to repeat right now. */
   canTransformAgain: boolean;
   /** Whether Edit > Define Pattern has captured a pattern for fills to tile. */

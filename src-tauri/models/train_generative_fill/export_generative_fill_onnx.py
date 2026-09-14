@@ -22,13 +22,14 @@ import torch
 
 from inpaint_net import InpaintNet
 
-model = InpaintNet()
-state = torch.load("inpaint_net.pt", map_location="cpu", weights_only=True)
+model = InpaintNet(in_channels=5)
+state = torch.load("inpaint_net_seeded.pt", map_location="cpu", weights_only=True)
 model.load_state_dict(state)
 model.eval()
 
-# 4 channels: RGB (hole zeroed) + a 1-channel hole mask.
-dummy = torch.zeros(1, 4, 128, 128, dtype=torch.float32)
+# 5 channels: RGB (hole zeroed), a 1-channel hole mask, and the seed's
+# per-pixel noise plane (train_similar.py's fine-tune).
+dummy = torch.zeros(1, 5, 128, 128, dtype=torch.float32)
 with torch.no_grad():
     ref = model(dummy)
 print("reference output shape:", tuple(ref.shape))
@@ -37,7 +38,7 @@ torch.onnx.export(
     model,
     dummy,
     "generative_fill.onnx",
-    input_names=["masked_rgb_and_mask"],
+    input_names=["masked_rgb_mask_and_noise"],
     output_names=["filled"],
     opset_version=13,
     do_constant_folding=True,

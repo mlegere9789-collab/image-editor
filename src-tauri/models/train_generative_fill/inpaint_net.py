@@ -83,15 +83,19 @@ class UpsampleConvInstanceReLU(nn.Module):
 
 
 class InpaintNet(nn.Module):
-    """4-channel (RGB + hole mask) in, 3-channel (RGB) out. The caller
-    (`generative_fill.rs`) is responsible for compositing: keeping every
-    known pixel exactly as it was and taking this network's prediction
-    only inside the masked region, so a bug or a low-confidence guess
-    here can never corrupt pixels outside the fill target."""
+    """`in_channels` in (4 = RGB with the hole zeroed + hole mask, the
+    original model; 5 = those plus one channel of per-pixel Gaussian
+    noise, the seeded model `train_similar.py` fine-tunes so Generate
+    Similar can draw a different plausible fill per seed), 3-channel
+    (RGB) out. The caller (`generative_fill.rs`) is responsible for
+    compositing: keeping every known pixel exactly as it was and taking
+    this network's prediction only inside the masked region, so a bug or
+    a low-confidence guess here can never corrupt pixels outside the
+    fill target."""
 
-    def __init__(self):
+    def __init__(self, in_channels=4):
         super().__init__()
-        self.down1 = ConvInstanceReLU(4, 32, 9, 1)
+        self.down1 = ConvInstanceReLU(in_channels, 32, 9, 1)
         self.down2 = ConvInstanceReLU(32, 64, 3, 2)
         self.down3 = ConvInstanceReLU(64, 128, 3, 2)
         self.down4 = ConvInstanceReLU(128, 256, 3, 2)

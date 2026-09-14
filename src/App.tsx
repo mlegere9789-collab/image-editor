@@ -2494,6 +2494,7 @@ export default function App() {
   );
   const hasSelection = document?.selection != null;
   const canReselect = document?.canReselect ?? false;
+  const canGenerateSimilar = document?.canGenerateSimilar ?? false;
 
   const invertColors = useCallback(() => {
     if (selectedId === null) return;
@@ -7549,6 +7550,7 @@ export default function App() {
     { label: "Free Transform", activate: () => setShowFreeTransformDialog(true) },
     { label: "Fresco", activate: () => setShowFrescoDialog(true) },
     { label: "Gaussian Blur", activate: () => setShowGaussianBlurDialog(true) },
+    { label: "Generate Similar", activate: () => void runCommand("generate_similar") },
     { label: "Generative Expand", activate: () => openCanvasSizeDialog(true) },
     { label: "Geometry", activate: () => setShowGeometryDialog(true) },
     { label: "Glass", activate: () => setShowGlassDialog(true) },
@@ -8485,6 +8487,14 @@ export default function App() {
             title="Filter > Generative Fill (AI) — this project's own on-device model hallucinates the selection from its surroundings; no text prompt, no provider endpoint needed. Filter > Generative Fill… opens the prompt-driven, external-provider version instead."
           >
             Generative Fill (AI)
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void runCommand("generate_similar")}
+            disabled={busy || !canGenerateSimilar}
+            title="Filter > Generate Similar (AI) — another variation of the last Generative Fill or Generative Expand, same hole, next seed"
+          >
+            Generate Similar (AI)
           </button>
           <button
             className="button button--quiet"
