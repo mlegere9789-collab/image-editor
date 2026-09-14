@@ -22205,6 +22205,62 @@ anti-aliased edge; four screenshots checked by eye.
 
 Tests: 1873 Rust (1871 → 1873), 22 frontend.
 
+## Phase 372 — Blur options: Path Blur's end speed and curved path, Lens Blur's iris and specular highlights
+
+Two more Blur scope cuts of section D.
+
+**Path Blur** (`PathBlur` gains `endSpeed` and `curved`, both optional
+so saved Actions still play): Photoshop's per-endpoint speed — the
+streak length runs linearly along the arc from Speed at the path's
+start to End Speed at its end, a Separate End Speed checkbox and
+slider in the dialog; and Curved Path, the points becoming the anchors
+of a Catmull-Rom curve through them (the end points repeated as their
+own neighbours), flattened into eight legs per span — the smooth path
+Photoshop's own Bézier handles draw, without the handles.
+
+**Lens Blur** (`lens_blur_with`; Iris Shape, Blade Curvature, Rotation,
+Specular Brightness and Specular Threshold in the dialog): the kernel
+is a square, as before, or a regular polygon of 3 to 9 blades with
+circumradius the pixel's own radius, turned by Rotation, its sides
+bowed toward the circle by Blade Curvature — a sample counts when it
+lies within the circumradius and within every side's apothem, the
+apothem moved toward the circumradius by the curvature, so four blades
+unturned are the diamond and four turned 45° the square. Specular
+Highlights: before the blur, every channel of a pixel whose luma
+exceeds the threshold is raised by `2 · (luma − threshold) ·
+brightness`, so bright points bloom into their kernels; the average
+truncates as `average_samples` does.
+
+**Verified.** Two Rust tests. `path_blur_end_speed_and_curved_path`: a
+bright pixel on a 16-wide row under a path along it spreads over three
+pixels (85) at speed 1, and to a seven-pixel streak (36) at pixel 8
+when the speed rises to 5 at the end; two points bend into the same
+straight line; a V-shaped path over a short vertical bar streaks
+differently curved and straight; a flat layer stays flat; an end speed
+of 0 errors. `lens_blur_iris_and_specular_highlights` on an opaque
+ramp at radius 2: four unturned blades equal the Diamond shape blur,
+four turned 45° equal the box blur of radius 1, no blades equal
+`lens_blur`, and six blades differ from both; a white point on black
+under the radius-1 square reads 28 (255 / 9), and 40 with threshold
+200 and full brightness (lifted to 365 before the blur), its
+neighbours too, while a threshold of 255 leaves 28; two blades error.
+In Chromium against the built frontend: Filter > Blur > Lens Blur…
+shows Iris Shape (Square), Blade Curvature, Rotation, Specular
+Brightness and Specular Threshold (255) after the depth-map inversion,
+and Hexagon with 30, 15°, 50 and 200 sends `lens_blur_with` with
+`blades: 6, bladeCurvature: 30, rotation: 15, specularBrightness: 50,
+threshold: 200`; Blur Gallery > Path Blur… shows Separate End Speed
+and Curved Path after Centered Blur, the checkbox reveals an End Speed
+slider, and Apply sends `path_blur` with `endSpeed: 40, curved: true`;
+every dialog closes on Apply. On the real app under Xvfb, on the
+recovered document: Filter > Blur > Lens Blur… shows the five new
+controls, and Hexagon (6) at radius 2, applied through the real IPC in
+under ten seconds, smoothed the grain left on the opaque stroke by the
+earlier phases (its alpha the depth map) and left the transparent
+canvas alone; three screenshots checked by eye.
+
+Tests: 1875 Rust (1873 → 1875), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

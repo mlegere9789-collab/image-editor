@@ -2327,6 +2327,11 @@ export default function App() {
   const [showLensBlurDialog, setShowLensBlurDialog] = useState(false);
   const [lensBlurRadius, setLensBlurRadius] = useState(15);
   const [lensBlurInvert, setLensBlurInvert] = useState(false);
+  const [lensBlurBlades, setLensBlurBlades] = useState(0);
+  const [lensBlurCurvature, setLensBlurCurvature] = useState(0);
+  const [lensBlurRotation, setLensBlurRotation] = useState(0);
+  const [lensBlurSpecular, setLensBlurSpecular] = useState(0);
+  const [lensBlurThreshold, setLensBlurThreshold] = useState(255);
   const [showTwirlDialog, setShowTwirlDialog] = useState(false);
   const [twirlAngle, setTwirlAngle] = useState(50);
   const [showPinchDialog, setShowPinchDialog] = useState(false);
@@ -8619,13 +8624,28 @@ export default function App() {
 
   const applyLensBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("lens_blur", {
+    await runCommand("lens_blur_with", {
       id: selectedId,
       maxRadius: lensBlurRadius,
       invert: lensBlurInvert,
+      blades: lensBlurBlades,
+      bladeCurvature: lensBlurCurvature,
+      rotation: lensBlurRotation,
+      specularBrightness: lensBlurSpecular,
+      threshold: lensBlurThreshold,
     });
     setShowLensBlurDialog(false);
-  }, [runCommand, selectedId, lensBlurRadius, lensBlurInvert]);
+  }, [
+    runCommand,
+    selectedId,
+    lensBlurRadius,
+    lensBlurInvert,
+    lensBlurBlades,
+    lensBlurCurvature,
+    lensBlurRotation,
+    lensBlurSpecular,
+    lensBlurThreshold,
+  ]);
 
   const applyLensFlare = useCallback(async () => {
     if (selectedId === null) return;
@@ -34456,6 +34476,49 @@ export default function App() {
               />
               <span className="control__label">Centered Blur</span>
             </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={pathBlur.endSpeed != null}
+                onChange={(event) =>
+                  setPathBlur((o) => ({
+                    ...o,
+                    endSpeed: event.target.checked ? o.speed : null,
+                  }))
+                }
+              />
+              <span className="control__label">Separate End Speed</span>
+            </label>
+            {pathBlur.endSpeed != null && (
+              <label className="control">
+                <span className="control__label">
+                  End Speed
+                  <span className="control__value">{pathBlur.endSpeed}px</span>
+                </span>
+                <input
+                  type="range"
+                  min={1}
+                  max={200}
+                  value={pathBlur.endSpeed}
+                  onChange={(event) =>
+                    setPathBlur((o) => ({
+                      ...o,
+                      endSpeed: Number(event.target.value),
+                    }))
+                  }
+                />
+              </label>
+            )}
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={pathBlur.curved ?? false}
+                onChange={(event) =>
+                  setPathBlur((o) => ({ ...o, curved: event.target.checked }))
+                }
+              />
+              <span className="control__label">Curved Path</span>
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -34646,6 +34709,84 @@ export default function App() {
                 onChange={(event) => setLensBlurInvert(event.target.checked)}
               />
               <span className="control__label">Invert depth map</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Iris Shape</span>
+              <select
+                value={lensBlurBlades}
+                onChange={(event) =>
+                  setLensBlurBlades(Number(event.target.value))
+                }
+              >
+                <option value={0}>Square (box)</option>
+                <option value={3}>Triangle (3)</option>
+                <option value={4}>Square (4)</option>
+                <option value={5}>Pentagon (5)</option>
+                <option value={6}>Hexagon (6)</option>
+                <option value={7}>Heptagon (7)</option>
+                <option value={8}>Octagon (8)</option>
+                <option value={9}>Nonagon (9)</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Blade Curvature
+                <span className="control__value">{lensBlurCurvature}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lensBlurCurvature}
+                onChange={(event) =>
+                  setLensBlurCurvature(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Rotation
+                <span className="control__value">{lensBlurRotation}°</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={360}
+                value={lensBlurRotation}
+                onChange={(event) =>
+                  setLensBlurRotation(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Specular Brightness
+                <span className="control__value">{lensBlurSpecular}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={lensBlurSpecular}
+                onChange={(event) =>
+                  setLensBlurSpecular(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Specular Threshold
+                <span className="control__value">{lensBlurThreshold}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={255}
+                value={lensBlurThreshold}
+                onChange={(event) =>
+                  setLensBlurThreshold(Number(event.target.value))
+                }
+              />
             </label>
             <div className="modal__actions">
               <button

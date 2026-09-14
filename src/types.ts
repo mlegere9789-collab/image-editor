@@ -54,7 +54,11 @@ export type ApplyChannel = "rgb" | "red" | "green" | "blue" | "transparency";
 /** Mirrors `ApplyMask` in src-tauri/src/document.rs: Apply Image's Mask
  * group — a mask image (`null` = merged) read through one channel (RGB =
  * luma), optionally inverted. */
-export type ApplyMask = { source: number | null; channel: ApplyChannel; invert: boolean };
+export type ApplyMask = {
+  source: number | null;
+  channel: ApplyChannel;
+  invert: boolean;
+};
 
 /** Mirrors `ApplyBlend` in src-tauri/src/document.rs (serde internally
  * tagged by `kind`): Apply Image's Blending list — a layer blend mode, or
@@ -91,12 +95,41 @@ export type TextLayer = {
 /** Mirrors `ShapeSpec` / `ShapeLayer` in src-tauri/src/document.rs: a
  * shape layer's shape (serde tagged by `kind`) and paint. */
 export type ShapeSpec =
-  | { kind: "rectangle"; x0: number; y0: number; x1: number; y1: number; radius: number }
+  | {
+      kind: "rectangle";
+      x0: number;
+      y0: number;
+      x1: number;
+      y1: number;
+      radius: number;
+    }
   | { kind: "ellipse"; x0: number; y0: number; x1: number; y1: number }
   | { kind: "triangle"; x0: number; y0: number; x1: number; y1: number }
-  | { kind: "polygon"; cx: number; cy: number; x: number; y: number; sides: number }
-  | { kind: "star"; cx: number; cy: number; x: number; y: number; points: number; ratio: number }
-  | { kind: "line"; x0: number; y0: number; x1: number; y1: number; weight: number }
+  | {
+      kind: "polygon";
+      cx: number;
+      cy: number;
+      x: number;
+      y: number;
+      sides: number;
+    }
+  | {
+      kind: "star";
+      cx: number;
+      cy: number;
+      x: number;
+      y: number;
+      points: number;
+      ratio: number;
+    }
+  | {
+      kind: "line";
+      x0: number;
+      y0: number;
+      x1: number;
+      y1: number;
+      weight: number;
+    }
   | { kind: "custom"; points: [number, number][] };
 export type ShapeLayer = {
   spec: ShapeSpec;
@@ -147,10 +180,18 @@ export type Adjustment =
  * camelCase, fieldless variants so each serializes as a bare string) — a
  * real whole-image model run a smart object can remember and re-apply
  * non-destructively via `add_neural_smart_filter`. */
-export type NeuralFilterKind = "colorize" | "styleTransfer" | "photoRestoration" | "landscapeMixer";
+export type NeuralFilterKind =
+  | "colorize"
+  | "styleTransfer"
+  | "photoRestoration"
+  | "landscapeMixer";
 
 /** Mirrors `MaskSource` in src-tauri/src/document.rs. */
-export type MaskSource = "revealAll" | "hideAll" | "revealSelection" | "hideSelection";
+export type MaskSource =
+  | "revealAll"
+  | "hideAll"
+  | "revealSelection"
+  | "hideSelection";
 
 /** Mirrors `SelectionShape` in src-tauri/src/document.rs (serde camelCase).
  * `RoundedRectangle` is a struct variant, so serde's default external
@@ -183,8 +224,17 @@ export type Selection = {
 };
 
 /** Mirrors `RefineEdge` / `SelectAndMaskOutput` in src-tauri/src/document.rs. */
-export type RefineEdge = { smooth: number; feather: number; contrast: number; shiftEdge: number };
-export type SelectAndMaskOutput = "selection" | "layerMask" | "newLayer" | "newLayerWithMask";
+export type RefineEdge = {
+  smooth: number;
+  feather: number;
+  contrast: number;
+  shiftEdge: number;
+};
+export type SelectAndMaskOutput =
+  | "selection"
+  | "layerMask"
+  | "newLayer"
+  | "newLayerWithMask";
 
 /** Mirrors `DocumentView`. `layers` is bottom-to-top, as in the model. */
 export type DocumentView = {
@@ -259,13 +309,20 @@ export type ToolPreset = {
 };
 
 /** Mirrors `GradientPreset` in src-tauri/src/document.rs. */
-export type GradientPreset = { name: string; startColor: [number, number, number, number]; endColor: [number, number, number, number] };
+export type GradientPreset = {
+  name: string;
+  startColor: [number, number, number, number];
+  endColor: [number, number, number, number];
+};
 
 /** Mirrors `AdjustmentPreset` in src-tauri/src/document.rs. */
 export type AdjustmentPreset = { name: string; adjustment: Adjustment };
 
 /** Mirrors `Artboard` in src-tauri/src/document.rs. */
-export type Artboard = { name: string; rect: { x0: number; y0: number; x1: number; y1: number } };
+export type Artboard = {
+  name: string;
+  rect: { x0: number; y0: number; x1: number; y1: number };
+};
 
 /** Mirrors `PathAnchor` / `Path` in src-tauri/src/document.rs: the Pen
  * tool family's current work path. */
@@ -278,11 +335,18 @@ export type PathData = { anchors: PathAnchor[]; closed: boolean };
 
 /** Mirrors `SpotChannelView` in src-tauri/src/document.rs: a spot colour
  * channel's name, screen colour, and Solidity percent. */
-export type SpotChannelView = { name: string; color: [number, number, number]; solidity: number };
+export type SpotChannelView = {
+  name: string;
+  color: [number, number, number];
+  solidity: number;
+};
 
 /** Mirrors `Ink` in src-tauri/src/document.rs: a Duotone ink's colour and
  * curve points (darkness → coverage); an empty curve is the straight line. */
-export type Ink = { color: [number, number, number]; curve: [number, number][] };
+export type Ink = {
+  color: [number, number, number];
+  curve: [number, number][];
+};
 
 /** Mirrors `ColorMode` / `BitmapMethod` / `Palette` in
  * src-tauri/src/document.rs. */
@@ -295,7 +359,10 @@ export type ColorMode =
   | "cmyk"
   | "lab"
   | "multichannel";
-export type Palette = { kind: "exact" } | { kind: "uniform" } | { kind: "adaptive"; colors: number };
+export type Palette =
+  | { kind: "exact" }
+  | { kind: "uniform" }
+  | { kind: "adaptive"; colors: number };
 export type BitmapMethod = "threshold" | "patternDither" | "diffusionDither";
 
 /** Mirrors `ColorProfile` in src-tauri/src/document.rs: Edit > Assign
@@ -307,7 +374,11 @@ export type ColorProfile = "srgb" | "adobeRgb1998" | "proPhotoRgb";
 export type BitDepth = "eight" | "sixteen" | "thirtyTwo";
 
 /** Mirrors `RenderingIntent` in src-tauri/src/document.rs. */
-export type RenderingIntent = "relativeColorimetric" | "absoluteColorimetric" | "perceptual" | "saturation";
+export type RenderingIntent =
+  | "relativeColorimetric"
+  | "absoluteColorimetric"
+  | "perceptual"
+  | "saturation";
 
 /** Mirrors `ConversionEngine` in src-tauri/src/document.rs: Color Settings
  * > Conversion Engine. */
@@ -375,7 +446,10 @@ export interface ContentCredentialsManifest {
 
 /** Mirrors `ColorSample` / `ColorRange` in src-tauri/src/document.rs:
  * Select > Color Range's Select list (serde tagged by `kind`). */
-export type ColorSample = { color: [number, number, number]; position: [number, number] | null };
+export type ColorSample = {
+  color: [number, number, number];
+  position: [number, number] | null;
+};
 export type ColorRangePreset =
   | "reds"
   | "yellows"
@@ -388,7 +462,12 @@ export type ColorRangePreset =
   | "shadows"
   | "skinTones";
 export type ColorRange =
-  | { kind: "sampled"; samples: ColorSample[]; fuzziness: number; localized: number | null }
+  | {
+      kind: "sampled";
+      samples: ColorSample[];
+      fuzziness: number;
+      localized: number | null;
+    }
   | { kind: ColorRangePreset };
 
 /** Mirrors `ReferencePoint` / `ContentAwareScale` in
@@ -472,14 +551,31 @@ export type PathBlurOptions = {
   speed: number;
   taper: number;
   centered: boolean;
+  /** Speed at the path's end (Photoshop's per-endpoint speed); null keeps `speed`. */
+  endSpeed?: number | null;
+  /** Bend the path through its points (a Catmull-Rom curve). */
+  curved?: boolean;
 };
 
 /** Mirrors `CameraRawMask` in src-tauri/src/document.rs: Camera Raw
  * Filter's Masking (serde tagged by `kind`). */
 export type CameraRawMask =
   | { kind: "subject"; tolerance: number }
-  | { kind: "radial"; x0: number; y0: number; x1: number; y1: number; feather: number; invert: boolean }
-  | { kind: "colorRange"; color: [number, number, number]; fuzziness: number; invert: boolean };
+  | {
+      kind: "radial";
+      x0: number;
+      y0: number;
+      x1: number;
+      y1: number;
+      feather: number;
+      invert: boolean;
+    }
+  | {
+      kind: "colorRange";
+      color: [number, number, number];
+      fuzziness: number;
+      invert: boolean;
+    };
 
 /** Mirrors `RetouchSpot` / `RetouchMode` in src-tauri/src/document.rs:
  * one Camera Raw Remove / Heal / Clone / Generative Remove spot. */
@@ -496,7 +592,11 @@ export type RetouchSpot = {
 
 /** Mirrors `TargetedMode` in src-tauri/src/document.rs: Camera Raw's
  * Targeted Adjustment Tool. */
-export type TargetedMode = "parametricCurve" | "hue" | "saturation" | "luminance";
+export type TargetedMode =
+  | "parametricCurve"
+  | "hue"
+  | "saturation"
+  | "luminance";
 
 /** Mirrors `PuppetWarp` and friends in src-tauri/src/document.rs: Edit >
  * Puppet Warp's mode, density, expansion, and pins, and the mesh Show Mesh
@@ -506,7 +606,11 @@ export type PuppetMode = "rigid" | "normal" | "distort";
 /** Mirrors `LiquifyTool` in src-tauri/src/document.rs. */
 export type LiquifyTool = "twirl" | "pucker" | "bloat";
 export type PuppetDensity = "fewer" | "normal" | "more";
-export type PuppetPin = { source: [number, number]; target: [number, number]; depth: number };
+export type PuppetPin = {
+  source: [number, number];
+  target: [number, number];
+  depth: number;
+};
 export type PuppetWarpOptions = {
   mode: PuppetMode;
   density: PuppetDensity;
@@ -565,7 +669,11 @@ export type ChannelView =
 
 /** Mirrors `CalcSource` in src-tauri/src/document.rs: one of Image >
  * Calculations' two sources. */
-export type CalcSource = { layer: number | null; channel: ApplyChannel; invert: boolean };
+export type CalcSource = {
+  layer: number | null;
+  channel: ApplyChannel;
+  invert: boolean;
+};
 
 /** Mirrors `CalcResult` in src-tauri/src/document.rs. */
 export type CalcResult = "newDocument" | "newChannel" | "selection";

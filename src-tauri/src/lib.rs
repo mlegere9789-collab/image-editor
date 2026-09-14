@@ -3303,6 +3303,35 @@ fn load_custom_kernel(path: String) -> Result<(Vec<i32>, i32, i32), String> {
     Ok((kernel.to_vec(), scale, offset))
 }
 
+/// Filter > Blur > Lens Blur on layer `id` with its Iris (blades,
+/// curvature, rotation) and Specular Highlights (brightness, threshold).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn lens_blur_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    max_radius: u32,
+    invert: bool,
+    blades: u32,
+    blade_curvature: u32,
+    rotation: f32,
+    specular_brightness: u32,
+    threshold: u8,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.lens_blur_with(
+            id,
+            max_radius,
+            invert,
+            blades,
+            blade_curvature,
+            rotation,
+            specular_brightness,
+            threshold,
+        )
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -8347,6 +8376,7 @@ pub fn run() {
             reduce_noise_with,
             save_custom_kernel,
             load_custom_kernel,
+            lens_blur_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

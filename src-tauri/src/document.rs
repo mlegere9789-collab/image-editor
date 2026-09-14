@@ -1991,6 +1991,17 @@ pub struct PathBlur {
     /// Centered Blur: the streak straddles the pixel rather than running
     /// forward along the path from it.
     pub centered: bool,
+    /// Photoshop's per-endpoint speed: the streak length at the path's
+    /// end, the length running linearly from `speed` at the start to it
+    /// along the arc; `None` keeps `speed` throughout.
+    #[serde(default)]
+    pub end_speed: Option<u32>,
+    /// Bend the path: the points become the anchors of a Catmull-Rom
+    /// curve through them (the end points repeated as their own
+    /// neighbours), flattened into eight legs per span — the smooth
+    /// path Photoshop's own Bézier handles draw, without the handles.
+    #[serde(default)]
+    pub curved: bool,
 }
 
 /// Camera Raw Filter's Masking: where its adjustments apply — see
@@ -24799,6 +24810,8 @@ impl Document {
             speed,
             taper,
             centered,
+            end_speed,
+            curved,
         } = options;
         if points.len() < 2 {
             return Err("Path Blur needs a path of at least two points.".to_string());
@@ -24809,9 +24822,34 @@ impl Document {
         {
             return Err("Path Blur's points must be finite coordinates.".to_string());
         }
-        if *speed == 0 {
+        if *speed == 0 || *end_speed == Some(0) {
             return Err("Path Blur's Speed must be at least 1 pixel.".to_string());
         }
+        let bent: Vec<(f32, f32)>;
+        let points: &[(f32, f32)] = if *curved && points.len() >= 3 {
+            let last = points.len() as isize - 1;
+            let at = |k: isize| points[k.clamp(0, last) as usize];
+            let mut flat = vec![points[0]];
+            for i in 0..points.len() - 1 {
+                let i = i as isize;
+                let (p0, p1, p2, p3) = (at(i - 1), at(i), at(i + 1), at(i + 2));
+                for step in 1..=8 {
+                    let t = step as f32 / 8.0;
+                    let (t2, t3) = (t * t, t * t * t);
+                    let axis = |a: f32, b: f32, c: f32, d: f32| {
+                        0.5 * (2.0 * b
+                            + (c - a) * t
+                            + (2.0 * a - 5.0 * b + 4.0 * c - d) * t2
+                            + (3.0 * b - a - 3.0 * c + d) * t3)
+                    };
+                    flat.push((axis(p0.0, p1.0, p2.0, p3.0), axis(p0.1, p1.1, p2.1, p3.1)));
+                }
+            }
+            bent = flat;
+            &bent
+        } else {
+            points
+        };
         if !(taper.is_finite() && (0.0..=100.0).contains(taper)) {
             return Err("Path Blur's Taper must be between 0 and 100 percent.".to_string());
         }
@@ -24832,6 +24870,7 @@ impl Document {
             return Err("Path Blur's path must have some length.".to_string());
         }
         let speed = *speed as f32;
+        let end_speed = end_speed.map_or(speed, |s| s as f32);
         let taper = taper / 100.0;
         let centered = *centered;
         let (width, height) = (self.width as i64, self.height as i64);
@@ -24849,7 +24888,8 @@ impl Document {
             }
             let (_, (dx, dy), u) = best.expect("at least one segment");
             let factor = 1.0 - taper * (1.0 - 2.0 * u.min(1.0 - u));
-            let half = (speed * factor).round() as i64;
+            let speed_here = speed + (end_speed - speed) * u.clamp(0.0, 1.0);
+            let half = (speed_here * factor).round() as i64;
             let range = if centered { -half..=half } else { 0..=2 * half };
             let samples = range.map(|t| {
                 let sx = (col as i64 + (t as f32 * dx).round() as i64).clamp(0, width - 1) as usize;
@@ -25019,9 +25059,132 @@ impl Document {
         max_radius: u32,
         invert: bool,
     ) -> Result<Option<Rect>, String> {
+        self.lens_blur_with(id, max_radius, invert, 0, 0, 0.0, 0, 255)
+    }
+
+    /// [`Self::lens_blur`] with Photoshop's Iris and Specular Highlights.
+    /// `blades` (`3..=9`, or `0` for the square kernel `lens_blur` uses)
+    /// shapes each pixel's kernel as a regular polygon of that many sides
+    /// and circumradius `radius`, turned by `rotation` degrees, with
+    /// `blade_curvature` (`0..=100`) bowing its sides out toward the
+    /// circle — a sample counts when it lies within the circumradius and
+    /// within every side's apothem, the apothem itself moved toward the
+    /// circumradius by the curvature; four blades unturned are the
+    /// diamond, four turned 45° the square. Specular Highlights: before
+    /// the blur, every channel of a pixel whose luma exceeds `threshold`
+    /// is raised by `2 · (luma − threshold) · brightness / 100`, so bright
+    /// points bloom into their kernels the way real highlights do; the
+    /// average is then truncated as `average_samples` truncates. The
+    /// defaults — no blades, no brightness — are `lens_blur`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn lens_blur_with(
+        &mut self,
+        id: LayerId,
+        max_radius: u32,
+        invert: bool,
+        blades: u32,
+        blade_curvature: u32,
+        rotation: f32,
+        specular_brightness: u32,
+        threshold: u8,
+    ) -> Result<Option<Rect>, String> {
         if max_radius > 100 {
             return Err("Lens Blur radius must be between 0 and 100 pixels.".to_string());
         }
+        if blades != 0 && !(3..=9).contains(&blades) {
+            return Err(
+                "Lens Blur blades must be between 3 and 9 (or 0 for a square).".to_string(),
+            );
+        }
+        if blade_curvature > 100 || specular_brightness > 100 {
+            return Err(
+                "Lens Blur blade curvature and specular brightness must be between 0 and 100."
+                    .to_string(),
+            );
+        }
+        if !rotation.is_finite() {
+            return Err("Lens Blur rotation must be a number.".to_string());
+        }
+        if blades == 0 && specular_brightness == 0 {
+            return self.lens_blur_square(id, max_radius, invert);
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let boost = specular_brightness as f32 / 100.0;
+        let threshold = threshold as f32;
+        let curvature = blade_curvature as f32 / 100.0;
+        let normals: Vec<(f32, f32)> = (0..blades)
+            .map(|k| {
+                // Edge normals sit halfway between neighbouring vertices.
+                let a = rotation.to_radians()
+                    + std::f32::consts::TAU * (k as f32 + 0.5) / blades as f32;
+                let (s, c) = a.sin_cos();
+                (c, s)
+            })
+            .collect();
+        let apothem_ratio = if blades == 0 {
+            1.0
+        } else {
+            (std::f32::consts::PI / blades as f32).cos()
+        };
+        self.filter_pixels(id, move |source, row, col| {
+            let idx = (row as usize * doc_width + col as usize) * CHANNELS;
+            let alpha = source[idx + 3];
+            let depth = if invert { 255 - alpha } else { alpha };
+            let radius = ((depth as f32 / 255.0) * max_radius as f32).round() as i64;
+            let r = radius as f32;
+            let limit = r * (apothem_ratio * (1.0 - curvature) + curvature);
+            let mut sums = [0.0f32; 3];
+            let mut count = 0u32;
+            for dy in -radius..=radius {
+                for dx in -radius..=radius {
+                    let inside = if blades == 0 {
+                        true
+                    } else {
+                        let (fx, fy) = (dx as f32, dy as f32);
+                        fx * fx + fy * fy <= r * r + 1e-3
+                            && normals
+                                .iter()
+                                .all(|&(nx, ny)| fx * nx + fy * ny <= limit + 1e-3)
+                    };
+                    if !inside {
+                        continue;
+                    }
+                    let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
+                    let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
+                    let base = (sy * doc_width + sx) * CHANNELS;
+                    let (sr, sg, sb) = (
+                        source[base] as f32,
+                        source[base + 1] as f32,
+                        source[base + 2] as f32,
+                    );
+                    let luma = 0.299 * sr + 0.587 * sg + 0.114 * sb;
+                    let lift = if boost > 0.0 && luma > threshold {
+                        2.0 * (luma - threshold) * boost
+                    } else {
+                        0.0
+                    };
+                    sums[0] += sr + lift;
+                    sums[1] += sg + lift;
+                    sums[2] += sb + lift;
+                    count += 1;
+                }
+            }
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (sums[c] / count.max(1) as f32).floor().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = alpha;
+            out
+        })
+    }
+
+    fn lens_blur_square(
+        &mut self,
+        id: LayerId,
+        max_radius: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         self.filter_pixels(id, move |source, row, col| {
@@ -46105,6 +46268,137 @@ mod tests {
     }
 
     #[test]
+    fn path_blur_end_speed_and_curved_path() {
+        // A single bright pixel at x = 8 on a 16-wide row, the path along
+        // the row. Speed 1 everywhere spreads it over three pixels (85);
+        // speed 1 rising to 5 at the end reads 3 at x = 8 (u = 8/15), a
+        // seven-pixel streak: 36.
+        let mut row = vec![0u8; 16 * 4];
+        for x in 0..16 {
+            let v = if x == 8 { 255 } else { 0 };
+            row[x * 4..x * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+        }
+        let run = |end_speed: Option<u32>,
+                   points: Vec<(f32, f32)>,
+                   curved: bool,
+                   w: u32,
+                   h: u32,
+                   pixels: &[u8]| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("p", pixels, w, h).unwrap();
+            doc.path_blur(
+                id,
+                &PathBlur {
+                    points,
+                    speed: 1,
+                    taper: 0.0,
+                    centered: true,
+                    end_speed,
+                    curved,
+                },
+            )
+            .unwrap();
+            red_plane(&doc)
+        };
+        let line = vec![(0.5, 0.5), (15.5, 0.5)];
+        assert_eq!(run(None, line.clone(), false, 16, 1, &row)[8], 85);
+        assert_eq!(run(Some(5), line.clone(), false, 16, 1, &row)[8], 36);
+        // Two points bend into the same straight line.
+        assert_eq!(
+            run(None, line.clone(), true, 16, 1, &row),
+            run(None, line, false, 16, 1, &row)
+        );
+        // Three points in a V: the curved path rounds the apex and streaks
+        // a short vertical bar there differently from the sharp polyline's
+        // diagonals; both leave a flat layer flat.
+        let mut bar = solid(16, 16, [0, 0, 0, 255]);
+        for y in 7..=9 {
+            bar[(y * 16 + 8) * 4..(y * 16 + 8) * 4 + 3].copy_from_slice(&[255, 255, 255]);
+        }
+        let v = vec![(0.5, 0.5), (8.5, 8.5), (15.5, 0.5)];
+        assert_ne!(
+            run(None, v.clone(), true, 16, 16, &bar),
+            run(None, v.clone(), false, 16, 16, &bar)
+        );
+        let flat = solid(16, 16, [128, 128, 128, 255]);
+        assert!(run(Some(4), v, true, 16, 16, &flat)
+            .iter()
+            .all(|&p| p == 128));
+        let mut doc = Document::new(16, 1).unwrap();
+        let id = doc.add_layer("p", &row, 16, 1).unwrap();
+        assert!(doc
+            .path_blur(
+                id,
+                &PathBlur {
+                    points: vec![(0.5, 0.5), (15.5, 0.5)],
+                    speed: 1,
+                    taper: 0.0,
+                    centered: true,
+                    end_speed: Some(0),
+                    curved: false,
+                },
+            )
+            .is_err());
+    }
+
+    #[test]
+    fn lens_blur_iris_and_specular_highlights() {
+        // An opaque ramp: four unturned blades are the diamond, four turned
+        // 45° the 3×3 square at radius 2; no blades is lens_blur.
+        let (w, h) = (9u32, 9u32);
+        let mut ramp = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                ramp.extend_from_slice(&[(x * 20 + y * 7) as u8, 0, 0, 255]);
+            }
+        }
+        let lens = |blades: u32, rotation: f32, brightness: u32, threshold: u8, pixels: &[u8]| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", pixels, w, h).unwrap();
+            doc.lens_blur_with(id, 2, false, blades, 0, rotation, brightness, threshold)
+                .unwrap();
+            red_plane(&doc)
+        };
+        let mut diamond = Document::new(w, h).unwrap();
+        let did = diamond.add_layer("r", &ramp, w, h).unwrap();
+        diamond
+            .shape_blur(did, ShapeBlurKernel::Diamond, 2)
+            .unwrap();
+        assert_eq!(lens(4, 0.0, 0, 255, &ramp), red_plane(&diamond));
+        let mut square = Document::new(w, h).unwrap();
+        let sid = square.add_layer("r", &ramp, w, h).unwrap();
+        square.box_blur(sid, 1).unwrap();
+        assert_eq!(lens(4, 45.0, 0, 255, &ramp), red_plane(&square));
+        let mut old = Document::new(w, h).unwrap();
+        let oid = old.add_layer("r", &ramp, w, h).unwrap();
+        old.lens_blur(oid, 2, false).unwrap();
+        assert_eq!(lens(0, 0.0, 0, 255, &ramp), red_plane(&old));
+        // A hexagon lies between the diamond and the square in samples.
+        let hexagon = lens(6, 0.0, 0, 255, &ramp);
+        assert_ne!(hexagon, red_plane(&diamond));
+        assert_ne!(hexagon, red_plane(&square));
+        // Specular: a white point on black, radius 1 square kernel: 255/9
+        // → 28; with threshold 200 and full brightness it is lifted to 365
+        // before the blur → 40, and so are its neighbours.
+        let mut point = solid(w, h, [0, 0, 0, 255]);
+        point[(4 * 9 + 4) * 4..(4 * 9 + 4) * 4 + 3].copy_from_slice(&[255, 255, 255]);
+        let spec = |brightness: u32, threshold: u8| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("p", &point, w, h).unwrap();
+            doc.lens_blur_with(id, 1, false, 0, 0, 0.0, brightness, threshold)
+                .unwrap();
+            red_plane(&doc)
+        };
+        assert_eq!(spec(0, 255)[4 * 9 + 4], 28);
+        assert_eq!(spec(100, 200)[4 * 9 + 4], 40);
+        assert_eq!(spec(100, 200)[4 * 9 + 5], 40);
+        assert_eq!(spec(100, 255)[4 * 9 + 4], 28);
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("p", &point, w, h).unwrap();
+        assert!(doc.lens_blur_with(id, 1, false, 2, 0, 0.0, 0, 255).is_err());
+    }
+
+    #[test]
     fn reduce_noise_advanced_controls() {
         // A red speck on grey: every 3×3 median is grey 128.
         let mut speck = solid(3, 3, [128, 128, 128, 255]);
@@ -59211,6 +59505,8 @@ colorspaces:
             speed,
             taper,
             centered,
+            end_speed: None,
+            curved: false,
         }
     }
 
