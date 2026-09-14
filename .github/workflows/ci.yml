@@ -31,6 +31,9 @@ jobs:
       # `npm run build` is `tsc --noEmit && vite build`, so this covers types too.
       - run: npm run build
 
+      # Node's own test runner over the pure frontend modules (`src/*.test.ts`).
+      - run: npm test
+
   rust:
     name: Rust (fmt + clippy + test)
     runs-on: ubuntu-latest

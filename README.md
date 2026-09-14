@@ -20800,6 +20800,87 @@ not one per document; and a recovery file is offered only when
 nothing is open at launch — an app started by double-clicking a file
 opens that file and keeps the recovery file for the next launch.
 
+## Phase 348 — The menu bar: File … Help over the toolbar's own commands
+
+Photoshop's first surface is its menu bar, and `docs/PLAN_TO_100.md`
+section B.4 lists it first among the UI work: "a real menu bar organised
+the way Photoshop's is (File/Edit/Image/Layer/Type/Select/Filter/View/
+Window/Help) driving the commands that already exist". This phase builds
+it — without a second copy of the 340 command handlers the toolbar
+already owns.
+
+**Mechanism.** Every toolbar button that stands in for a Photoshop menu
+command has always named its place in its `title`, in the form
+`Edit > Transform > Rotate (any angle, selected layer)`. `src/menuBar.ts`
+turns that convention into the model: `menuPath` reads the menu path
+above the command (the button's own text is the command), folds titles
+that start at a submenu (`Filter Gallery > Artistic > …`, `Neural Filters
+> …`, `Camera Raw Filter > …`, `Color Settings > …`) under their
+Photoshop menu, files the Blur Gallery as Photoshop's own `Filter > Blur
+Gallery`, and names no menu for tools, contextual buttons, and prose that
+merely mentions one ("Load an alpha channel made by Image >
+Calculations"). `buildMenuTree` folds the entries into the ten top-level
+menus in Photoshop's order, nests submenus to any depth where their
+first command sits, orders each menu the way Photoshop's own reads
+(`MENU_ORDER`: Undo, Redo, Cut, Copy, … for Edit; Brightness/Contrast,
+Levels, Curves, … for Image > Adjustments; and so on, anything a menu
+carries beyond the known order following in the toolbar's order), reads
+the `(Ctrl/Cmd+…)` hint out of each title as the shortcut column, and
+leaves out the commands Edit > Menus hides, pruning any submenu that
+empties.
+
+`src/MenuBar.tsx` is the view: `toolbarEntries` reads the commands off the
+toolbar's buttons — label, title, `disabled`, `aria-pressed` for toggles
+— and choosing a menu item clicks the button, so the button's handler,
+availability, and state *are* the command's. The toolbar stays the one
+registry of what the app does; the menu bar is a view over it, rebuilt
+after every render while a menu is open (a signature check keeps an
+unchanged toolbar from re-rendering), so a command that just became
+available reads that way at once. Mouse: click a menu, slide across to
+switch, hover a submenu, click to run. Keyboard: Left/Right switch
+menus, Up/Down move, Right opens a submenu, Left closes it, Enter runs,
+Escape closes; toggles render as `menuitemcheckbox` with a check mark.
+Forty-three command buttons that had named no menu (New…, Open PNG…,
+Undo, the cloud, share, generative, and colour-profile commands, Select
+All and its siblings) now do.
+
+**Edit > Menus** now customises the real thing: the dialog lists all 277
+menu commands by their path ("Edit > Transform > Rotate…") and unchecking
+one removes it from the menu bar (its toolbar button and shortcut stay);
+the `hiddenMenuCommands` preference is keyed by that path. Discover's
+search no longer consults it — Discover is a search, not a menu.
+
+**Window > Workspace > Compact Toolbar** is the first answer to the
+"feature bloat and UI clutter" pain point: with the menu bar carrying
+every command, the toolbar can drop them and keep only the tools and the
+buttons no menu names — one CSS rule over `button[title*=" > "]`, the
+buttons staying in the document, hidden, so the menu bar can still click
+them. It is a toggle button on the toolbar (reachable from the menu once
+the toolbar is compact), a browser preference, and a field of every saved
+workspace.
+
+**Verified two ways.** `src/menuBar.test.ts`, run by Node's own test
+runner (`npm test`, now a CI step): nine tests over `menuPath` (paths,
+description punctuation `:`, `(`, `—`, `--`, submenu roots, the Blur
+Gallery, the four kinds of non-menu title), `menuShortcut` (including a
+`(Shift+Ctrl+C: …)` hint that carries prose), `menuHint`, and
+`buildMenuTree` (Photoshop's menu order, the toolbar's order within a
+menu, submenu nesting and `path`, disabled states, hidden commands and
+the submenu they empty, Image > Adjustments' order with an unknown item
+appended, and that the built command runs the entry it came from). Then
+the built app in Chromium (`vite preview` + Playwright, the Tauri bridge
+stubbed): every menu dumped — File 15 rows, Edit 39, Image 32, Layer 32,
+Type 1, Select 28, Filter 161, View 1, Window 8, Help 1, with submenus
+nested and disabled states matching the empty document; `Edit >
+Transform` hovered open; ArrowRight moving the open menu from Edit to
+Image and Escape closing it; Window > Workspace > Compact Toolbar from
+the menu taking the toolbar from 340 visible buttons to 62 and reading
+back `aria-checked="true"`; File > New… from the menu opening the New
+document dialog; Edit > Menus hiding `Edit > Fill…` and the Edit menu
+losing it. The Xvfb live-verification gap from the previous phases stands.
+
+**Frontend tests: 9** (0 → 9, Node's test runner). Rust tests unchanged at 1820.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

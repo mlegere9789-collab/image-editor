@@ -8,6 +8,8 @@ import ChannelPanel, { channelQuery, type ChannelThumbs } from "./ChannelPanel";
 import DockablePanel, { type PanelPlacement } from "./DockablePanel";
 import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
+import MenuBar, { toolbarEntries } from "./MenuBar";
+import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import type {
   Adjustment,
   BrushDynamics,
@@ -154,6 +156,7 @@ const ALL_TOOLS: { id: Tool; label: string }[] = [
 /** LegeLabs local-storage keys — per-installation UI preferences, never
  * document data, so they live in the browser, not on the document. */
 const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
+const COMPACT_TOOLBAR_STORAGE_KEY = "legelabs.compactToolbar";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
@@ -357,6 +360,8 @@ type Workspace = {
   name: string;
   hiddenTools: Tool[];
   keyBindings: Record<ShortcutAction, KeyBinding>;
+  /** Window > Workspace > Compact Toolbar; absent in workspaces saved before it. */
+  compactToolbar?: boolean;
 };
 
 /** `binding` as the toolbar and dialog display it, e.g. "Ctrl/Cmd+Shift+D". */
@@ -2340,12 +2345,32 @@ export default function App() {
       // ignore
     }
   }, [lockWorkspace]);
-  // Edit > Menus (Custom Menus): DISCOVER_ACTIONS entries hidden from the
-  // Discover panel's own "Adjustments, Filters & Layer Styles" list --
-  // this app's own analogue of a menu command, since it has no
-  // File/Edit/Image dropdown menu bar of its own, just Discover's search
-  // over the same command set. Kept in the browser like hiddenTools
-  // above, by each command's own label (its stable identity here).
+  // Window > Workspace > Compact Toolbar: with the menu bar carrying every
+  // command, the toolbar can drop them and keep only the tools -- a
+  // browser preference, saved into workspaces like hiddenTools above.
+  const [compactToolbar, setCompactToolbar] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COMPACT_TOOLBAR_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleCompactToolbar = useCallback(() => {
+    if (lockWorkspace) return;
+    setCompactToolbar((previous) => {
+      const next = !previous;
+      try {
+        localStorage.setItem(COMPACT_TOOLBAR_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [lockWorkspace]);
+  const menuEntries = useCallback(() => toolbarEntries(window.document), []);
+  // Edit > Menus (Custom Menus): commands hidden from the menu bar, kept
+  // in the browser like hiddenTools above by each command's own key --
+  // its menu path and label, e.g. "Edit > Transform > Rotate…".
   const [hiddenMenuCommands, setHiddenMenuCommands] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
@@ -2441,7 +2466,7 @@ export default function App() {
       setWorkspaces((previous) => {
         const next = [
           ...previous.filter((w) => w.name !== name),
-          { name, hiddenTools: [...hiddenTools], keyBindings },
+          { name, hiddenTools: [...hiddenTools], keyBindings, compactToolbar },
         ];
         try {
           localStorage.setItem(WORKSPACES_STORAGE_KEY, JSON.stringify(next));
@@ -2452,7 +2477,7 @@ export default function App() {
         return next;
       });
     },
-    [hiddenTools, keyBindings],
+    [hiddenTools, keyBindings, compactToolbar],
   );
   const loadWorkspace = useCallback(
     (name: string) => {
@@ -2461,9 +2486,11 @@ export default function App() {
       if (!workspace) return;
       setHiddenTools(new Set(workspace.hiddenTools));
       setKeyBindings({ ...DEFAULT_KEY_BINDINGS, ...workspace.keyBindings });
+      setCompactToolbar(workspace.compactToolbar ?? false);
       try {
         localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify(workspace.hiddenTools));
         localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(workspace.keyBindings));
+        localStorage.setItem(COMPACT_TOOLBAR_STORAGE_KEY, JSON.stringify(workspace.compactToolbar ?? false));
       } catch {
         // ignore
       }
@@ -8982,19 +9009,20 @@ export default function App() {
           {[...hiddenTools].map((id) => `[data-tool="${id}"]{display:none!important}`).join("")}
         </style>
       )}
-      <header className="toolbar">
+      <MenuBar entries={menuEntries} hidden={hiddenMenuCommands} />
+      <header className={`toolbar${compactToolbar ? " toolbar--compact" : ""}`}>
         <h1 className="toolbar__title">LegeLabs: Photo Editing Suite</h1>
-        <button
+        <button title="File > New…"
           className="button"
           onClick={() => setShowNewDialog(true)}
           disabled={busy}
         >
           New…
         </button>
-        <button className="button" onClick={openDocument} disabled={busy}>
+        <button title="File > Open PNG…" className="button" onClick={openDocument} disabled={busy}>
           Open PNG…
         </button>
-        <button className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
+        <button title="Layer > New > Add layer…" className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
           Add layer…
         </button>
         <button
@@ -9045,9 +9073,18 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowCustomizeMenusDialog(true)}
           disabled={busy}
-          title="Edit > Menus: show or hide individual commands from Discover's own list"
+          title="Edit > Menus: show or hide individual commands in the menu bar"
         >
           Customize Menus…
+        </button>
+        <button
+          className={`button button--quiet${compactToolbar ? " button--active" : ""}`}
+          onClick={toggleCompactToolbar}
+          disabled={lockWorkspace}
+          aria-pressed={compactToolbar}
+          title="Window > Workspace > Compact Toolbar: keep only the tools and the buttons no menu names on the toolbar; every menu command stays reachable from the menu bar above"
+        >
+          Compact Toolbar
         </button>
         <button
           className="button button--quiet"
@@ -9061,7 +9098,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowDiscoverDialog(true)}
           disabled={busy}
-          title="Discover: search the Toolbox by name"
+          title="Help > Discover…: search the Toolbox by name"
         >
           Discover…
         </button>
@@ -9069,7 +9106,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowArtboardsDialog(true)}
           disabled={busy || !hasDocument}
-          title="Artboard Tool: named regions of the canvas, each exportable to its own PNG"
+          title="Window > Artboards…: named regions of the canvas, each exportable to its own PNG"
         >
           Artboards…
         </button>
@@ -9090,7 +9127,7 @@ export default function App() {
         <button
           className="button button--quiet"
           onClick={() => setShowBrushSettings(true)}
-          title="Brush Settings: spacing, Shape Dynamics, Scattering, Transfer and hardness"
+          title="Window > Brush Settings…: spacing, Shape Dynamics, Scattering, Transfer and hardness"
         >
           Brush Settings…
         </button>
@@ -9110,7 +9147,7 @@ export default function App() {
         >
           Pattern Fill
         </button>
-        <button
+        <button title="File > Export > Export PNG…"
           className="button button--quiet"
           onClick={exportDocument}
           disabled={busy || !hasDocument}
@@ -9138,10 +9175,10 @@ export default function App() {
             Export TIFF (32-bit float)…
           </button>
         )}
-        <button className="button button--quiet" onClick={openProject} disabled={busy}>
+        <button title="File > Open Project…" className="button button--quiet" onClick={openProject} disabled={busy}>
           Open Project…
         </button>
-        <button
+        <button title="File > Save Project…"
           className="button button--quiet"
           onClick={saveProject}
           disabled={busy || !hasDocument}
@@ -9157,7 +9194,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => void saveToCloud()}
           disabled={busy || cloudBusy || !hasDocument}
-          title="Cloud Documents: upload the open document's project bytes to a user-configured endpoint"
+          title="File > Cloud Documents > Save to Cloud: upload the open document's project bytes to a user-configured endpoint"
         >
           Save to Cloud
         </button>
@@ -9165,7 +9202,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => void loadFromCloud()}
           disabled={busy || cloudBusy}
-          title="Cloud Documents: replace the open document with one fetched from a user-configured endpoint"
+          title="File > Cloud Documents > Load from Cloud: replace the open document with one fetched from a user-configured endpoint"
         >
           Load from Cloud
         </button>
@@ -9176,7 +9213,7 @@ export default function App() {
             void refreshCloudDocuments();
           }}
           disabled={busy}
-          title="Search Your Cloud Files: lists and filters the documents at the configured Cloud Documents endpoint"
+          title="File > Cloud Documents > Search Cloud Files…: lists and filters the documents at the configured Cloud Documents endpoint"
         >
           Search Cloud Files…
         </button>
@@ -9187,7 +9224,7 @@ export default function App() {
             void refreshCloudShares();
           }}
           disabled={busy}
-          title="Invite to Edit: give another user of your image-editor-server edit or view access to the cloud document"
+          title="File > Share > Invite to Edit…: give another user of your image-editor-server edit or view access to the cloud document"
         >
           Invite to Edit…
         </button>
@@ -9198,7 +9235,7 @@ export default function App() {
             void refreshCloudReviews();
           }}
           disabled={busy}
-          title="Share for Review: a link to the cloud document's current version anyone can open and comment on"
+          title="File > Share > Share for Review…: a link to the cloud document's current version anyone can open and comment on"
         >
           Share for Review…
         </button>
@@ -9209,7 +9246,7 @@ export default function App() {
             void refreshCloudLibraries();
           }}
           disabled={busy}
-          title="Libraries: shared asset libraries on image-editor-server -- colours, gradient and adjustment presets, graphics"
+          title="Window > Libraries…: shared asset libraries on image-editor-server -- colours, gradient and adjustment presets, graphics"
         >
           Libraries…
         </button>
@@ -9221,7 +9258,7 @@ export default function App() {
             void refreshFontCatalogue();
           }}
           disabled={busy}
-          title="Fonts: activate open-licensed families from image-editor-server's catalogue, or a font file of your own, for the Type tools"
+          title="Type > Fonts…: activate open-licensed families from image-editor-server's catalogue, or a font file of your own, for the Type tools"
         >
           Fonts…
         </button>
@@ -9232,7 +9269,7 @@ export default function App() {
             void refreshBoards();
           }}
           disabled={busy}
-          title="Boards: shared boards on image-editor-server where images, notes and prompts are pinned and arranged"
+          title="Window > Boards…: shared boards on image-editor-server where images, notes and prompts are pinned and arranged"
         >
           Boards…
         </button>
@@ -9240,7 +9277,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowAssistantDialog(true)}
           disabled={busy}
-          title="AI Assisted Editor: edit by talking -- Claude, with your own key, calling this app's own commands through image-editor-server; plain requests work without a key"
+          title="Window > Assistant…: edit by talking -- Claude, with your own key, calling this app's own commands through image-editor-server; plain requests work without a key"
         >
           Assistant…
         </button>
@@ -9248,7 +9285,7 @@ export default function App() {
           className="button button--quiet"
           onClick={() => setShowExternalServicesDialog(true)}
           disabled={busy}
-          title="Generative Fill's provider and image-editor-server's endpoint and token"
+          title="Edit > Preferences > External Services…: Generative Fill's provider and image-editor-server's endpoint and token"
         >
           External Services…
         </button>
@@ -9258,7 +9295,7 @@ export default function App() {
             className="button button--quiet"
             onClick={undo}
             disabled={busy || !canUndo}
-            title="Undo (Ctrl/Cmd+Z)"
+            title="Edit > Undo: Undo (Ctrl/Cmd+Z)"
           >
             Undo
           </button>
@@ -9266,7 +9303,7 @@ export default function App() {
             className="button button--quiet"
             onClick={redo}
             disabled={busy || !canRedo}
-            title="Redo (Ctrl/Cmd+Shift+Z)"
+            title="Edit > Redo: Redo (Ctrl/Cmd+Shift+Z)"
           >
             Redo
           </button>
@@ -9354,7 +9391,7 @@ export default function App() {
             className="tools__slider"
             title={`Image > Mode > HDR Support: imports a real Radiance .hdr file -- real scene-referred float samples that can genuinely exceed 1.0 (an "overbright" highlight no normal byte can represent), kept separate from this document's own 8-bit layer pipeline for real HDR Histogram analysis.${hdrSource ? ` Loaded: ${hdrSource.width}x${hdrSource.height}, max luma ${hdrSource.maxLuma.toFixed(2)}.` : " None loaded."}`}
           >
-            <button
+            <button title="File > Import > Import HDR (.hdr)…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadHdrSource()}
@@ -9516,7 +9553,7 @@ export default function App() {
             className="tools__slider"
             title={`Color Settings > Monitor Profile: a real, parsed .icc/.icm file describing the display's own colour response.${monitorProfile ? ` Currently: ${monitorProfile.description ?? monitorProfile.colorSpace} (${monitorProfile.deviceClass}).` : " None imported."}`}
           >
-            <button
+            <button title="Edit > Color Settings > Monitor Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importMonitorProfile()}
@@ -9532,7 +9569,7 @@ export default function App() {
             className="tools__slider"
             title={`Color Settings > Input Device Profile: a real, parsed .icc/.icm file for a scanner or camera's own colour response.${inputDeviceProfile ? ` Currently: ${inputDeviceProfile.description ?? inputDeviceProfile.colorSpace} (${inputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button
+            <button title="Edit > Color Settings > Input Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importInputDeviceProfile()}
@@ -9550,7 +9587,7 @@ export default function App() {
             className="tools__slider"
             title={`Color Settings > Output Device Profile: a real, parsed .icc/.icm file for a printer or other output device's own colour response.${outputDeviceProfile ? ` Currently: ${outputDeviceProfile.description ?? outputDeviceProfile.colorSpace} (${outputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button
+            <button title="Edit > Color Settings > Output Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importOutputDeviceProfile()}
@@ -9568,7 +9605,7 @@ export default function App() {
             className="tools__slider"
             title={`Color Settings > OpenColorIO Configuration: a real, parsed .ocio config file -- its own real colour spaces become available below as OCIO Input Color Space Assignment's From/To choices.${ocioConfig ? ` Loaded: ${ocioConfig.colorspaceNames.length} colour space(s)${ocioConfig.ocioProfileVersion !== null ? `, profile version ${ocioConfig.ocioProfileVersion}` : ""}.` : " None loaded."}`}
           >
-            <button
+            <button title="Edit > Color Settings > Load OCIO Configuration…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadOcioConfig()}
@@ -9781,7 +9818,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => openCanvasSizeDialog(true)}
             disabled={busy || !hasDocument || selectedId === null}
-            title="Generative Expand (AI): grow the canvas and fill the new area of the selected layer with this project's own on-device model — no prompt, no endpoint"
+            title="Image > Generative Expand…: grow the canvas and fill the new area of the selected layer with this project's own on-device model — no prompt, no endpoint"
           >
             Generative Expand…
           </button>
@@ -9871,7 +9908,7 @@ export default function App() {
             className="button button--quiet"
             onClick={openCylinderDialog}
             disabled={busy || !canPaint}
-            title="Cylindrical Transform Warp: wrap the layer around a cylinder"
+            title="Edit > Transform > Cylinder Warp…: wrap the layer around a cylinder"
           >
             Cylinder Warp…
           </button>
@@ -9930,7 +9967,7 @@ export default function App() {
               void understandPrompt(generatePrompt);
             }}
             disabled={busy || !hasDocument}
-            title="Generate Image: a text prompt drawn by this project's own on-device diffusion model (or the Generative AI Endpoint) as a new layer"
+            title="Filter > Generative > Generate Image…: a text prompt drawn by this project's own on-device diffusion model (or the Generative AI Endpoint) as a new layer"
           >
             Generate Image…
           </button>
@@ -9938,7 +9975,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => setShowPromptToEditDialog(true)}
             disabled={busy || !canPaint || !hasSelection}
-            title="Prompt to Edit: redraw the selection under a text prompt with this project's own on-device diffusion model (SDEdit)"
+            title="Filter > Generative > Prompt to Edit…: redraw the selection under a text prompt with this project's own on-device diffusion model (SDEdit)"
           >
             Prompt to Edit…
           </button>
@@ -9946,7 +9983,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => setShowGenerativeUpscaleDialog(true)}
             disabled={busy || !hasDocument}
-            title="Generative Upscale: Super Zoom x3, then the on-device diffusion model adds plausible detail tile by tile (SDEdit at a low strength)"
+            title="Filter > Generative > Generative Upscale…: Super Zoom x3, then the on-device diffusion model adds plausible detail tile by tile (SDEdit at a low strength)"
           >
             Generative Upscale…
           </button>
@@ -9954,7 +9991,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => void regenerateLayer()}
             disabled={busy || selectedGeneratedLayer === null}
-            title="Generative Layers: draw the selected generated layer again at the next seed, from its own prompt and settings"
+            title="Filter > Generative > Regenerate (AI): draw the selected generated layer again at the next seed, from its own prompt and settings"
           >
             Regenerate (AI)
           </button>
@@ -10038,7 +10075,7 @@ export default function App() {
             className="button button--quiet"
             onClick={() => setShowMoveSelectionDialog(true)}
             disabled={busy || !hasSelection}
-            title="Move the selection outline by an exact offset without moving pixels (arrow keys nudge it with a marquee tool active)"
+            title="Select > Move Selection…: Move the selection outline by an exact offset without moving pixels (arrow keys nudge it with a marquee tool active)"
           >
             Move Selection…
           </button>
@@ -10100,7 +10137,7 @@ export default function App() {
             className="button button--quiet"
             onClick={selectAll}
             disabled={busy || !hasDocument}
-            title="Select All (Ctrl/Cmd+A)"
+            title="Select > Select All: Select All (Ctrl/Cmd+A)"
           >
             Select All
           </button>
@@ -10108,7 +10145,7 @@ export default function App() {
             className="button button--quiet"
             onClick={invertSelection}
             disabled={busy || !hasSelection}
-            title="Invert Selection (Ctrl/Cmd+Shift+I)"
+            title="Select > Invert: Invert Selection (Ctrl/Cmd+Shift+I)"
           >
             Invert
           </button>
@@ -10164,7 +10201,7 @@ export default function App() {
             className="button button--quiet"
             onClick={deselect}
             disabled={busy || !hasSelection}
-            title="Deselect (Ctrl/Cmd+D)"
+            title="Select > Deselect: Deselect (Ctrl/Cmd+D)"
           >
             Deselect
           </button>
@@ -10172,7 +10209,7 @@ export default function App() {
             className="button button--quiet"
             onClick={reselect}
             disabled={busy || !canReselect}
-            title="Reselect (Ctrl/Cmd+Shift+D)"
+            title="Select > Reselect: Reselect (Ctrl/Cmd+Shift+D)"
           >
             Reselect
           </button>
@@ -10639,7 +10676,7 @@ export default function App() {
               void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
             }
             disabled={busy || !canPaint}
-            title="Remove Background: keep the subject and make everything else transparent"
+            title="Layer > Remove Background: keep the subject and make everything else transparent"
           >
             Remove Background
           </button>
@@ -10650,7 +10687,7 @@ export default function App() {
               void runCommand("mask_all_objects", { id: selectedId, tolerance: magicWandTolerance })
             }
             disabled={busy || !canPaint}
-            title="Mask All Objects: save every object on the layer as a selection named Object 1, 2, … and select them all"
+            title="Layer > Mask All Objects: save every object on the layer as a selection named Object 1, 2, … and select them all"
           >
             Mask All Objects
           </button>
@@ -11777,7 +11814,7 @@ export default function App() {
               void runCommand("photograph_to_linework", { id: selectedId, level: lineworkThreshold })
             }
             disabled={busy || !canPaint}
-            title="Turn a Photograph into Linework: Find Edges into Threshold, the audit's own named recipe"
+            title="Filter > Turn into Linework: Find Edges into Threshold, the audit's own named recipe"
           >
             Turn into Linework
           </button>
@@ -12794,7 +12831,7 @@ export default function App() {
               className="button button--quiet"
               onClick={() => setColorSamplers([])}
               disabled={colorSamplers.length === 0}
-              title="Remove every color sampler"
+              title="View > Clear Samplers: Remove every color sampler"
             >
               Clear Samplers
             </button>
@@ -12804,7 +12841,7 @@ export default function App() {
               className="button button--quiet"
               onClick={() => void runCommand("clear_count_marks", {})}
               disabled={busy || (document?.countMarks.length ?? 0) === 0}
-              title="Remove every count mark"
+              title="View > Clear Count: Remove every count mark"
             >
               Clear Count
             </button>
@@ -12814,7 +12851,7 @@ export default function App() {
               className="button button--quiet"
               onClick={() => void runCommand("clear_notes", {})}
               disabled={busy || (document?.notes.length ?? 0) === 0}
-              title="Remove every note"
+              title="View > Clear Notes: Remove every note"
             >
               Clear Notes
             </button>
@@ -15382,23 +15419,26 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Menus</h2>
             <p className="modal__hint">
-              Uncheck a command to hide it from Discover's own "Adjustments, Filters &amp;
-              Layer Styles" list — this app's own analogue of a menu command, since it has
-              no File/Edit/Image dropdown menu bar of its own. A browser preference, not
-              document data. Colour-coding menu commands is a documented scope cut.
+              Uncheck a command to hide it from the menu bar; a submenu with nothing left
+              disappears with it. Hidden commands keep their toolbar buttons and shortcuts.
+              A browser preference, not document data. Colour-coding menu commands is a
+              documented scope cut.
             </p>
             <div className="toolbar-customize__list">
-              {DISCOVER_ACTIONS.map(({ label }) => (
-                <label className="control control--row" key={label}>
-                  <input
-                    type="checkbox"
-                    checked={!hiddenMenuCommands.has(label)}
-                    onChange={() => toggleMenuCommandHidden(label)}
-                    disabled={lockWorkspace}
-                  />
-                  <span className="control__label">{label}</span>
-                </label>
-              ))}
+              {flattenMenuTree(buildMenuTree(toolbarEntries(window.document))).map((command, index) => {
+                const key = commandKey(command);
+                return (
+                  <label className="control control--row" key={`${key}-${index}`}>
+                    <input
+                      type="checkbox"
+                      checked={!hiddenMenuCommands.has(key)}
+                      onChange={() => toggleMenuCommandHidden(key)}
+                      disabled={lockWorkspace}
+                    />
+                    <span className="control__label">{key}</span>
+                  </label>
+                );
+              })}
             </div>
             <div className="modal__actions">
               <button
@@ -15509,8 +15549,8 @@ export default function App() {
             {(() => {
               const query = discoverQuery.trim().toLowerCase();
               const toolMatches = ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(query));
-              const actionMatches = DISCOVER_ACTIONS.filter(
-                ({ label }) => label.toLowerCase().includes(query) && !hiddenMenuCommands.has(label),
+              const actionMatches = DISCOVER_ACTIONS.filter(({ label }) =>
+                label.toLowerCase().includes(query),
               );
               if (toolMatches.length === 0 && actionMatches.length === 0) {
                 return <p className="modal__hint">No feature matches "{discoverQuery}".</p>;
