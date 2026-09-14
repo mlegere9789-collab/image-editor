@@ -8010,16 +8010,17 @@ impl Document {
         range: &ColorRange,
         invert: bool,
     ) -> Result<(), String> {
-        let mut bits = self.color_range_bits(id, range)?;
+        let mut coverage = self.color_range_coverage(id, range)?;
         if invert {
-            for bit in &mut bits {
-                *bit = !*bit;
+            for cover in &mut coverage {
+                *cover = 255 - *cover;
             }
         }
-        if !bits.iter().any(|&b| b) {
+        if !coverage.iter().any(|&c| c > 0) {
             return Err("No pixels of the layer are within the colour range.".to_string());
         }
-        self.set_mask_selection(bits)
+        let bits = coverage.iter().map(|&c| c > 0).collect();
+        self.set_mask_selection_soft(bits, coverage)
     }
 
     /// Which pixels of layer `id` Select > Color Range would pick for
@@ -8035,8 +8036,26 @@ impl Document {
     /// `>= 190`, Photoshop's default bands; Skin Tones is the classic
     /// RGB rule — R > 95, G > 40, B > 20, spread > 15, R − G > 15, R > G,
     /// R > B. Alpha is ignored throughout. Errors on an unknown layer, no
-    /// samples, or a bad Localized setting.
+    /// samples, or a bad Localized setting. A pixel is picked when its
+    /// [`Self::color_range_coverage`] is above zero.
     pub fn color_range_bits(&self, id: LayerId, range: &ColorRange) -> Result<Vec<bool>, String> {
+        Ok(self
+            .color_range_coverage(id, range)?
+            .into_iter()
+            .map(|c| c > 0)
+            .collect())
+    }
+
+    /// How far Select > Color Range selects each pixel of layer `id` for
+    /// `range`, `0..=255` per pixel — Photoshop's graded partial selection.
+    /// Sampled Colors: a pixel's coverage falls with its per-channel
+    /// distance `d` from the nearest matching sample, `255 − d · 255 /
+    /// (fuzziness + 1)`, so an exact match is fully selected, a pixel at
+    /// the edge of Fuzziness barely, and one beyond it not at all; the
+    /// presets are all-or-nothing. [`Self::select_color_range_with`]
+    /// stores the coverage as the mask's soft edge, so fills and
+    /// adjustments through the selection take in-between colours partly.
+    pub fn color_range_coverage(&self, id: LayerId, range: &ColorRange) -> Result<Vec<u8>, String> {
         let layer = self.layer(id)?;
         let width = self.width as usize;
         let limit = match range {
@@ -8066,30 +8085,39 @@ impl Document {
             }
             _ => None,
         };
-        let bits = layer
+        let coverage = layer
             .pixels
             .chunks_exact(CHANNELS)
             .enumerate()
             .map(|(i, px)| {
                 let (r, g, b) = (px[0], px[1], px[2]);
-                match range {
+                let picked = match range {
                     ColorRange::Sampled {
                         samples, fuzziness, ..
-                    } => samples.iter().any(|sample| {
-                        let close = px[..3]
+                    } => {
+                        return samples
                             .iter()
-                            .zip(sample.color.iter())
-                            .all(|(&a, &c)| a.abs_diff(c) <= *fuzziness);
-                        close
-                            && match (limit, sample.position) {
+                            .filter(|sample| match (limit, sample.position) {
                                 (Some(limit), Some((sx, sy))) => {
                                     let (x, y) = ((i % width) as f32, (i / width) as f32);
                                     let (dx, dy) = (x - sx as f32, y - sy as f32);
                                     (dx * dx + dy * dy).sqrt() <= limit
                                 }
                                 _ => true,
-                            }
-                    }),
+                            })
+                            .map(|sample| {
+                                px[..3]
+                                    .iter()
+                                    .zip(sample.color.iter())
+                                    .map(|(&a, &c)| a.abs_diff(c))
+                                    .max()
+                                    .unwrap_or(0)
+                            })
+                            .filter(|&d| d <= *fuzziness)
+                            .map(|d| 255 - (u32::from(d) * 255 / (u32::from(*fuzziness) + 1)) as u8)
+                            .max()
+                            .unwrap_or(0);
+                    }
                     ColorRange::Reds
                     | ColorRange::Yellows
                     | ColorRange::Greens
@@ -8117,10 +8145,15 @@ impl Document {
                         }
                     }
                     ColorRange::SkinTones => is_skin_tone([r, g, b]),
+                };
+                if picked {
+                    255
+                } else {
+                    0
                 }
             })
             .collect();
-        Ok(bits)
+        Ok(coverage)
     }
 
     /// Select > Grow: extends the current selection to every pixel of layer
@@ -54922,6 +54955,73 @@ mod tests {
         // The old single-colour entry point is one sample, not inverted.
         doc.select_color_range(id, [100, 100, 100], 0).unwrap();
         assert_eq!(doc.selected_bits().unwrap(), [f, f, f, t]);
+    }
+
+    #[test]
+    fn color_range_grades_partial_selection_by_distance() {
+        // Four greys 100, 120, 140 and 141 (in red only) sampled at
+        // (100, 100, 100) with Fuzziness 40: distances 0, 20, 40 and 41
+        // give coverages 255, 255 − 20·255/41 = 131, 255 − 40·255/41 = 7,
+        // and 0 beyond the fuzziness; the bits follow.
+        let mut pixels = Vec::new();
+        for r in [100u8, 120, 140, 141] {
+            pixels.extend_from_slice(&[r, 100, 100, 255]);
+        }
+        let mut doc = Document::new(4, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 4, 1).unwrap();
+        let range = ColorRange::Sampled {
+            samples: vec![ColorSample {
+                color: [100, 100, 100],
+                position: None,
+            }],
+            fuzziness: 40,
+            localized: None,
+        };
+        assert_eq!(
+            doc.color_range_coverage(id, &range).unwrap(),
+            vec![255, 131, 7, 0]
+        );
+        assert_eq!(
+            doc.color_range_bits(id, &range).unwrap(),
+            vec![true, true, true, false]
+        );
+        // Selecting stores the grade as the mask's soft edge, read by
+        // coverage; inverting grades the other way.
+        doc.select_color_range_with(id, &range, false).unwrap();
+        let selection = doc.selection.clone().unwrap();
+        let mask = selection.mask.as_ref().unwrap();
+        assert_eq!(mask.soft.as_ref().unwrap(), &vec![255, 131, 7, 0]);
+        assert!((selection.coverage(1.5, 0.5) - 131.0 / 255.0).abs() < 1e-3);
+        assert!((selection.coverage(0.5, 0.5) - 1.0).abs() < 1e-3);
+        doc.select_color_range_with(id, &range, true).unwrap();
+        let selection = doc.selection.clone().unwrap();
+        let mask = selection.mask.as_ref().unwrap();
+        assert_eq!(mask.soft.as_ref().unwrap(), &vec![0, 124, 248, 255]);
+        assert_eq!(mask.bits, vec![false, true, true, true]);
+        // A second, nearer sample raises a pixel's grade; presets stay
+        // all-or-nothing (Reds skips the pure grey, takes the reddish rest).
+        let two = ColorRange::Sampled {
+            samples: vec![
+                ColorSample {
+                    color: [100, 100, 100],
+                    position: None,
+                },
+                ColorSample {
+                    color: [140, 100, 100],
+                    position: None,
+                },
+            ],
+            fuzziness: 40,
+            localized: None,
+        };
+        assert_eq!(
+            doc.color_range_coverage(id, &two).unwrap(),
+            vec![255, 131, 255, 249]
+        );
+        assert_eq!(
+            doc.color_range_coverage(id, &ColorRange::Reds).unwrap(),
+            vec![0, 255, 255, 255]
+        );
     }
 
     #[test]

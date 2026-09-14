@@ -1036,6 +1036,19 @@ fn select_color_range_with(
     })
 }
 
+/// Color Range's graded Selection Preview: how far `range` selects each
+/// pixel of layer `id`, `0..=255` per pixel, row-major. Read-only.
+#[tauri::command]
+fn color_range_coverage(
+    state: State<'_, AppState>,
+    id: LayerId,
+    range: document::ColorRange,
+) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    document.color_range_coverage(id, &range)
+}
+
 /// Color Range's Selection Preview: which pixels of layer `id` `range`
 /// would select, one flag per pixel, row-major. Read-only.
 #[tauri::command]
@@ -8424,6 +8437,7 @@ pub fn run() {
             decontaminate_colors,
             select_and_mask_output,
             color_range_bits,
+            color_range_coverage,
             grow_selection,
             select_similar,
             magic_erase,

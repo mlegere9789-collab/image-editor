@@ -1856,7 +1856,7 @@ export default function App() {
   const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
   // Color Range's Select list: "sampled" with a list of samples, or a preset;
   // Localized Color Clusters with its Range; Invert; and the Grayscale
-  // Selection Preview drawn from `color_range_bits`.
+  // Selection Preview drawn from `color_range_coverage`.
   const [colorRangeSelect, setColorRangeSelect] = useState<
     "sampled" | ColorRangePreset
   >("sampled");
@@ -4058,14 +4058,15 @@ export default function App() {
     setShowColorRangeDialog(false);
   }, [runCommand, selectedId, currentColorRange, colorRangeInvert]);
 
-  /** Selection Preview: draw which pixels the current range would select,
-   * white on black, into the dialog's canvas. */
+  /** Selection Preview: draw how far the current range selects each pixel,
+   * white for fully, grey for partly, black for not at all, into the
+   * dialog's canvas. */
   const refreshColorRangePreview = useCallback(async () => {
     if (selectedId === null || !document) return;
     const canvas = colorRangePreviewCanvas.current;
     if (!canvas) return;
     try {
-      const bits = await invoke<boolean[]>("color_range_bits", {
+      const coverage = await invoke<number[]>("color_range_coverage", {
         id: selectedId,
         range: currentColorRange(),
       });
@@ -4074,9 +4075,8 @@ export default function App() {
       const context = canvas.getContext("2d");
       if (!context) return;
       const image = context.createImageData(document.width, document.height);
-      for (let i = 0; i < bits.length; i += 1) {
-        const on = bits[i] !== colorRangeInvert;
-        const value = on ? 255 : 0;
+      for (let i = 0; i < coverage.length; i += 1) {
+        const value = colorRangeInvert ? 255 - coverage[i] : coverage[i];
         image.data[i * 4] = value;
         image.data[i * 4 + 1] = value;
         image.data[i * 4 + 2] = value;
@@ -4087,6 +4087,14 @@ export default function App() {
       setError(String(err));
     }
   }, [selectedId, document, currentColorRange, colorRangeInvert]);
+
+  // The Grayscale preview follows the dialog live: every change to the
+  // range, its samples, Fuzziness or Invert redraws it.
+  useEffect(() => {
+    if (showColorRangeDialog && colorRangePreview === "grayscale") {
+      void refreshColorRangePreview();
+    }
+  }, [showColorRangeDialog, colorRangePreview, refreshColorRangePreview]);
 
   const growSelection = useCallback(async () => {
     if (selectedId === null) return;
@@ -17525,8 +17533,9 @@ export default function App() {
             <p className="modal__hint">
               Sampled Colors selects every pixel of the selected layer whose
               red, green, and blue are each within Fuzziness of any sample,
-              wherever it sits; the presets pick a hue sector, a tone band, or
-              skin tones.
+              wherever it sits, partly for in-between colours (the further from
+              a sample, the less); the presets pick a hue sector, a tone band,
+              or skin tones.
             </p>
             <label className="control control--row">
               <span className="control__label">Select</span>
@@ -17696,7 +17705,7 @@ export default function App() {
               <canvas
                 ref={colorRangePreviewCanvas}
                 className="color-range-preview"
-                aria-label="Selection preview: selected pixels in white"
+                aria-label="Selection preview: white where selected, grey where partly"
               />
             )}
             <div className="modal__actions">

@@ -22518,6 +22518,46 @@ eye.
 
 Tests: 1885 Rust (1883 → 1885), 22 frontend.
 
+## Phase 379 — Color Range's graded partial selection
+
+One dialog row of section D, possible now that masks carry a soft
+edge (Phase 375). `Document::color_range_coverage` judges each pixel
+of the layer in `0..=255`: for Sampled Colors, its per-channel distance
+`d` from the nearest sample that passes the Localized Color Clusters
+gate gives `255 − d · 255 / (fuzziness + 1)` when `d` is within
+Fuzziness and 0 beyond — an exact match fully selected, a colour at the
+edge of Fuzziness barely — and the presets stay all-or-nothing.
+`color_range_bits` is now that coverage above zero, unchanged for
+every earlier caller, and `select_color_range_with` stores the
+coverage (inverted with Invert) as the mask's soft edge, so a fill or
+adjustment through a Color Range selection takes in-between colours
+partly. The dialog's Grayscale Selection Preview draws the coverage as
+greys through a new `color_range_coverage` command, and now redraws
+itself live as the samples, Fuzziness or Invert change instead of
+waiting for Refresh.
+
+**Verified.** One Rust test, `color_range_grades_partial_selection_by_distance`:
+four pixels whose red is 100, 120, 140 and 141 sampled at
+(100, 100, 100) with Fuzziness 40 — distances 0, 20, 40 and 41 — cover
+255, 255 − 20·255/41 = 131, 255 − 40·255/41 = 7 and 0, the bits
+following; selecting stores exactly that soft edge and the selection's
+coverage reads 131/255 at the second pixel and 1 at the first;
+Invert stores 0, 124, 248, 255 with the first pixel unselected; a
+second sample at (140, 100, 100) lifts the third pixel to 255 and the
+fourth to 249; the Reds preset skips the pure grey and takes the three
+reddish pixels outright. In Chromium against the built frontend:
+Select > Color Range… with the Grayscale preview draws the stubbed
+coverages 255, 131, 7, 0 as those exact greys, 0, 124, 248, 255 with
+Invert ticked, and Select sends `select_color_range_with` with the
+range and `invert: true`. On the real app under Xvfb, on the recovered
+document: Sample on image took the stroke's grey through the real IPC,
+and with Fuzziness 97 the Grayscale preview drew the stroke as a ramp
+of greys — its white middle darker, the sampled grey brightest — where
+the earlier preview was white or black; five screenshots checked by
+eye.
+
+Tests: 1886 Rust (1885 → 1886), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
