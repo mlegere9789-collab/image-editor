@@ -20502,6 +20502,81 @@ Generative Upscale, Reference Images and Prompt to Edit flip to
 shipped (611/618). One generative row remains — AI Assisted Editor —
 and then only the tabled pair and its four gated headers.
 
+## Phase 343 — AI Assisted Editor
+
+The last generative-family row, and the last open row outside the
+tabled pair: a conversation that edits the document. Photoshop's is a
+hosted assistant over its own commands; this one is `server/src/assist.rs`
+over this app's own. The server offers 46 of the app's commands to
+Claude as tools — the adjustments, filters, selection, generative and
+layer commands a request in plain words usually wants, each described
+with the exact argument names and ranges the Tauri command takes, and
+marked when it acts on the selected layer — asks Anthropic's Messages
+API (`claude-opus-5`, adaptive thinking as the model defaults to,
+server-side refusal fallbacks opted in) with the user's own API key
+from External Services (or the server's `ANTHROPIC_API_KEY`), a system
+prompt that describes the open document (size, layers, which is
+selected, whether there is a selection), and the conversation so far in
+the API's own shape, and returns the reply's text and its tool calls as
+*actions*. The app runs each action through `runCommand` — the same
+undoable, checkpointed path a click takes, the selected layer filled
+in where the command takes one — and reports each result back as a
+`tool_result`, round after round, until a reply carries no actions. A
+declined request (`stop_reason: refusal`) is reported as such, with no
+actions. With no key anywhere, a rule-based reader on the server
+answers the plainest requests — brighter or darker, more or less
+contrast or saturation, black and white, blur by N pixels, sharpen,
+reduce noise, warmer or cooler, auto tone, auto colour, select the
+subject or the sky, remove the background, flip, undo, "generate a
+misty lake" — as the same kind of actions, so the assistant is never
+entirely absent. The **Assistant…** dialog shows the transcript (with
+each action's result as a quiet note), takes the next message on Enter,
+and starts a new conversation on request; External Services gained the
+key field.
+
+**Verified three ways.** `cargo test` in `server/`: 27 tests (22 →
+27) — the catalogue's names are unique and every schema is a closed
+object; the system prompt describes a document's size, a hidden
+selected layer and the selection, and the request body carries the
+model, the fallbacks and no explicit thinking configuration; a
+Messages API response becomes text and actions with the layer flag
+right, a refusal drops its actions, and a response without content is
+an error; the rule-based reader on eleven phrasings, including
+"darker, less contrast" (both), "blur it by 12 pixels" (the number),
+"select the subject and remove the background" (the stronger request
+alone), and "generate a misty lake at dawn" (the prompt extracted);
+and, over HTTP, the rule-based path with no key, the command
+catalogue, and the Claude path against a **mock Messages API** that
+records the request — the right model, `fallbacks: "default"`, the
+document's size in the system prompt, the conversation, the tool list,
+and the `x-api-key`, `anthropic-version` and `anthropic-beta` headers
+— and answers with a text block and a tool call that come back as the
+reply's text and action. Then the built frontend in Chromium against
+the running server, in rules mode (no key here): "make it a little
+brighter and warmer" was posted with the document summary, answered
+"Applying: brightness +20, a warming filter.", and both actions were
+attempted and reported honestly as "no layer is selected" (no document
+was open in the browser). `cargo fmt --check`, `cargo clippy
+--all-targets -- -D warnings` and `npm run build` clean.
+
+Honest limitations: the Claude path was verified against a mock of
+the Messages API, not the live service — this sandbox holds no
+Anthropic key, so the first live exchange is the user's; the first
+attempt at that test also found that the sandbox's HTTPS proxy
+intercepted the loopback mock, and the server now bypasses the proxy
+for loopback addresses only. The catalogue is 46 commands of the app's
+several hundred — the ones a request in words usually wants — and the
+rule-based reader is deliberately literal. The conversation is kept
+in the app for the session, not saved.
+
+AI Assisted Editor flips to shipped (612/618). Every row that can be
+built is built: what remains unchecked is Smart Portrait, Makeup
+Transfer, and the four Neural Filters headers gated on them — tabled
+by the user, to be revisited when they say so. Section C of
+`docs/PLAN_TO_100.md` is complete; the plan continues with its
+scope-cut backlog (D), pain points (G) and UI (H), and the finished
+generative model when its training run ends.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

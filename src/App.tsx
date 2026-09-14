@@ -163,6 +163,9 @@ const GENERATIVE_AI_ENDPOINT_STORAGE_KEY = "legelabs.generativeAi.endpoint";
 // AI Model Picker: which real model Generate Image runs -- this
 // project's own on-device diffusion model, or the Generative AI Endpoint.
 const GENERATIVE_MODEL_STORAGE_KEY = "legelabs.generativeAi.model";
+// AI Assisted Editor: the user's own Anthropic API key, sent only to the
+// configured image-editor-server, which forwards it to Anthropic's API.
+const ASSISTANT_API_KEY_STORAGE_KEY = "legelabs.assistant.apiKey";
 const GENERATIVE_AI_API_KEY_STORAGE_KEY = "legelabs.generativeAi.apiKey";
 const CLOUD_ENDPOINT_STORAGE_KEY = "legelabs.cloud.endpoint";
 const CLOUD_TOKEN_STORAGE_KEY = "legelabs.cloud.token";
@@ -276,6 +279,16 @@ type BoardItem = {
   added_by: string;
   added_at: number;
 };
+type AssistantAction = { id: string; name: string; input: Record<string, unknown>; needs_layer: boolean };
+type AssistantReply = {
+  mode: "claude" | "rules";
+  model: string;
+  text: string;
+  actions: AssistantAction[];
+  content: unknown;
+  stop_reason: string;
+};
+type AssistantLine = { role: "you" | "assistant" | "note"; text: string };
 type FontEntry = { family: string; category: string; license: string; source: string };
 type CloudReview = {
   id: string;
@@ -1246,6 +1259,14 @@ export default function App() {
     null,
   );
   const [generateBusy, setGenerateBusy] = useState(false);
+  // AI Assisted Editor: the transcript shown, the conversation as the
+  // Messages API holds it (opaque here), and the user's own key.
+  const [showAssistantDialog, setShowAssistantDialog] = useState(false);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantLines, setAssistantLines] = useState<AssistantLine[]>([]);
+  const [assistantMessages, setAssistantMessages] = useState<unknown[]>([]);
+  const [assistantBusy, setAssistantBusy] = useState(false);
+  const [assistantApiKey, setAssistantApiKey] = useState(() => localStorage.getItem(ASSISTANT_API_KEY_STORAGE_KEY) ?? "");
   // Reference Images: the layer a generation starts from (SDEdit), and
   // how far it is noised first; Prompt to Edit and Generative Upscale
   // share the same sampler settings with their own strengths.
@@ -3727,8 +3748,10 @@ export default function App() {
     localStorage.setItem(CLOUD_ENDPOINT_STORAGE_KEY, cloudEndpoint);
     localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, cloudToken);
     localStorage.setItem(GENERATIVE_MODEL_STORAGE_KEY, generativeModel);
+    localStorage.setItem(ASSISTANT_API_KEY_STORAGE_KEY, assistantApiKey);
     setShowExternalServicesDialog(false);
-  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken, generativeModel]);
+  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken, generativeModel, assistantApiKey]);
+
 
   const understandPrompt = useCallback(async (prompt: string) => {
     try {
@@ -4464,6 +4487,66 @@ export default function App() {
       setActiveBoardId(null);
     });
   }, [cloudFetch, boardAction, activeBoardId]);
+
+  // AI Assisted Editor: one user message, then as many rounds as the
+  // assistant needs -- each reply's actions run through `runCommand`
+  // (the selected layer filled in where a command takes one), their
+  // results go back as tool results, until a reply carries no actions.
+  const sendToAssistant = useCallback(async () => {
+    const text = assistantInput.trim();
+    if (!text || !cloudEndpoint) return;
+    setAssistantInput("");
+    setAssistantLines((lines) => [...lines, { role: "you", text }]);
+    setAssistantBusy(true);
+    let messages: unknown[] = [...assistantMessages, { role: "user", content: text }];
+    const summary = () => ({
+      width: document?.width ?? 0,
+      height: document?.height ?? 0,
+      layers: (document?.layers ?? []).map((l) => ({ id: l.id, name: l.name, visible: l.visible })),
+      selected_layer: selectedId,
+      has_selection: hasSelection,
+    });
+    try {
+      for (let round = 0; round < 6; round++) {
+        const response = await cloudFetch("/assist", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, api_key: assistantApiKey, document: summary(), messages }),
+        });
+        const reply = (await response.json()) as AssistantReply;
+        if (reply.text) setAssistantLines((lines) => [...lines, { role: "assistant", text: reply.text }]);
+        if (reply.mode === "claude") messages = [...messages, { role: "assistant", content: reply.content }];
+        if (reply.actions.length === 0) break;
+        const results: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
+        for (const action of reply.actions) {
+          let outcome: string;
+          if (action.needs_layer && selectedId === null) {
+            outcome = "error: no layer is selected";
+          } else {
+            try {
+              const args = action.needs_layer ? { id: selectedId, ...action.input } : action.input;
+              await runCommand(action.name, args);
+              outcome = "ok";
+            } catch (err) {
+              outcome = `error: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+          setAssistantLines((lines) => [...lines, { role: "note", text: `${action.name}: ${outcome}` }]);
+          results.push({ type: "tool_result", tool_use_id: action.id, content: outcome });
+        }
+        if (reply.mode !== "claude") break;
+        messages = [...messages, { role: "user", content: results }];
+      }
+      setAssistantMessages(messages);
+    } catch (err) {
+      setAssistantLines((lines) => [
+        ...lines,
+        { role: "note", text: `Assistant failed: ${err instanceof Error ? err.message : String(err)}` },
+      ]);
+    } finally {
+      setAssistantBusy(false);
+    }
+  }, [assistantInput, cloudEndpoint, assistantMessages, assistantApiKey, document, selectedId, hasSelection, cloudFetch, runCommand]);
 
   // Select Subject -- Cloud Processing: the selected layer's pixels go to
   // image-editor-server's heavier detector (colour models and an exact
@@ -8956,6 +9039,14 @@ export default function App() {
           title="Boards: shared boards on image-editor-server where images, notes and prompts are pinned and arranged"
         >
           Boards…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowAssistantDialog(true)}
+          disabled={busy}
+          title="AI Assisted Editor: edit by talking -- Claude, with your own key, calling this app's own commands through image-editor-server; plain requests work without a key"
+        >
+          Assistant…
         </button>
         <button
           className="button button--quiet"
@@ -17871,6 +17962,16 @@ export default function App() {
               </select>
             </label>
             <label className="control control--row">
+              <span className="control__label">Assistant API Key</span>
+              <input
+                type="password"
+                value={assistantApiKey}
+                onChange={(event) => setAssistantApiKey(event.target.value)}
+                placeholder="your own Anthropic API key, for the Assistant"
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control control--row">
               <span className="control__label">Cloud Documents Endpoint</span>
               <input
                 type="text"
@@ -18530,6 +18631,85 @@ export default function App() {
                 Refresh
               </button>
               <button className="button button--quiet" onClick={() => setShowBoardsDialog(false)} title="Close">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssistantDialog && (
+        <div className="modal-overlay" onClick={() => setShowAssistantDialog(false)} role="presentation">
+          <div
+            className="modal modal--panel"
+            role="dialog"
+            aria-label="Assistant"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">AI Assisted Editor</h2>
+            <p className="modal__hint">
+              Say what to do to the open document. image-editor-server asks Claude with your
+              own Anthropic API key (External Services), offering this app&apos;s own commands
+              as tools; every edit it makes runs through the same undoable commands as a
+              click, on the selected layer. Without a key, plain requests — brighter,
+              blur, select the subject, generate a lake — still work through a rule-based
+              reader.
+            </p>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list assistant__transcript">
+              {assistantLines.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>Try: &ldquo;make it a little brighter and warmer&rdquo;.</span>
+                </li>
+              )}
+              {assistantLines.map((line, i) => (
+                <li key={i} className={`cloud-search__row assistant__line assistant__line--${line.role}`}>
+                  <span>
+                    {line.role === "you" ? <strong>You: </strong> : line.role === "assistant" ? <strong>Assistant: </strong> : null}
+                    {line.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <label className="control control--row">
+              <span className="control__label">Ask</span>
+              <input
+                type="text"
+                value={assistantInput}
+                onChange={(event) => setAssistantInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void sendToAssistant();
+                }}
+                placeholder="what should change?"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="button"
+                onClick={() => void sendToAssistant()}
+                disabled={assistantBusy || busy || !cloudEndpoint || !assistantInput.trim()}
+                title="Send"
+              >
+                Send
+              </button>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => {
+                  setAssistantLines([]);
+                  setAssistantMessages([]);
+                }}
+                disabled={assistantBusy}
+                title="Start a new conversation"
+              >
+                New conversation
+              </button>
+              <button className="button button--quiet" onClick={() => setShowAssistantDialog(false)} title="Close">
                 Close
               </button>
             </div>

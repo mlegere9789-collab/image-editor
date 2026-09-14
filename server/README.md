@@ -2,8 +2,8 @@
 
 The self-hosted backend behind the desktop app's cloud rows: **Cloud
 Documents**, **Search Your Cloud Files**, **Invite to Edit**, **Share
-for Review**, **Libraries**, **Fonts**, **Boards** and **Select Subject — Cloud
-Processing**. One Rust binary (axum), one data directory, no database.
+for Review**, **Libraries**, **Fonts**, **Boards**, **Select Subject — Cloud
+Processing** and the **AI Assisted Editor**. One Rust binary (axum), one data directory, no database.
 
 ```bash
 cd server
@@ -14,6 +14,10 @@ On first start it prints an **admin token** (also written to
 `<data-dir>/admin.token`) and a token for a first user, `owner`. Tokens
 are shown once; only their SHA-256 hashes are stored. Paste the URL and
 the user token into **Edit > External Services** in the app.
+
+Set `ANTHROPIC_API_KEY` in the server's environment to give the AI
+Assisted Editor a key for every user; otherwise each user's own key,
+entered in the app's External Services, is sent with the request.
 
 Create more users with the admin token:
 
@@ -85,6 +89,8 @@ admin token; review-link routes need no token (the link is the secret).
 | GET | `/boards/{id}/items/{n}/blob` | anyone with access | an image item's bytes |
 | DELETE | `/boards/{id}/items/{n}` | owner or editor | 204 |
 | POST | `/select-subject?tolerance=32` (image/png, ≤ 64 MB) | user | a PNG mask the image's size, white and opaque on the subject, transparent elsewhere -- GrabCut-style iterated graph cuts from a canvas-edge background model, at up to 320 pixels on the long side; 404 when no subject is found |
+| POST | `/assist` `{ message, messages, document, api_key?, model? }` | user | AI Assisted Editor: one turn. With `api_key` (or the server's `ANTHROPIC_API_KEY`), Claude (`claude-opus-5` unless `model` says otherwise) is asked with the app's commands as tools; `messages` is the conversation in the Messages API's own shape and `document` a summary (`width`, `height`, `layers[{id,name,visible}]`, `selected_layer`, `has_selection`). Returns `{ mode: "claude" \| "rules", model, text, actions: [{ id, name, input, needs_layer }], content, stop_reason }` -- `content` is the assistant turn to append before reporting the actions' results as `tool_result` blocks. With no key at all, `mode: "rules"` reads `message` with a rule-based reader |
+| GET | `/assist/commands` | user | `{ layer_commands, tools }` -- the catalogue the assistant may call |
 | GET | `/fonts` | user | `{ fonts: [{ family, category, license, source }] }` -- the bundled catalogue of open-licensed Google Fonts families, then any `.ttf`/`.otf` in `<data-dir>/fonts/local/` (source `local`) |
 | GET | `/fonts/{family}/file?weight=400&italic=false` | user | the family's TrueType bytes (`font/ttf`): a local file as it is; a catalogue family fetched from Google Fonts on first request and cached under `<data-dir>/fonts/cache/` |
 

@@ -933,6 +933,16 @@ body {
   flex: 0 0 auto;
 }
 
+/* The Assistant's transcript: notes (an action's result) quieter. */
+.assistant__transcript {
+  max-height: 320px;
+}
+.assistant__line--note span {
+  opacity: 0.7;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+}
+
 /* Boards: the board's canvas, scaled to fit, each item a box at its
    own position -- an image's thumbnail, a note's or prompt's text. */
 .board-canvas {

@@ -13,6 +13,7 @@
 //! whose token is printed once and stored only as a hash.
 
 mod api;
+mod assist;
 mod fonts;
 mod segment;
 mod store;

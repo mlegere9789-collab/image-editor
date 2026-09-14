@@ -22,6 +22,8 @@ use crate::store::{BoardItemPatch, Principal, Role, Store, StoreError};
 pub struct App {
     pub store: Store,
     pub data_dir: std::path::PathBuf,
+    /// Anthropic's API, or a stand-in under test.
+    pub anthropic_url: String,
 }
 
 impl std::ops::Deref for App {
@@ -38,6 +40,14 @@ pub type Shared = Arc<App>;
 pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 
 pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
+    router_with_anthropic(store, data_dir, crate::assist::ANTHROPIC_URL.to_string())
+}
+
+pub fn router_with_anthropic(
+    store: Store,
+    data_dir: std::path::PathBuf,
+    anthropic_url: String,
+) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([
@@ -104,6 +114,8 @@ pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
             axum::routing::patch(update_board_item).delete(delete_board_item),
         )
         .route("/boards/{id}/items/{item}/blob", get(get_board_item_blob))
+        .route("/assist", post(assist))
+        .route("/assist/commands", get(assist_commands))
         .route("/select-subject", post(select_subject))
         .route("/fonts", get(list_fonts))
         .route("/fonts/{family}/file", get(font_file))
@@ -116,7 +128,11 @@ pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
         )
         .layer(axum::extract::DefaultBodyLimit::max(MAX_DOCUMENT_BYTES))
         .layer(cors)
-        .with_state(Arc::new(App { store, data_dir }))
+        .with_state(Arc::new(App {
+            store,
+            data_dir,
+            anthropic_url,
+        }))
 }
 
 /// An error the client can read: `{ "error": "..." }` with the status
@@ -644,6 +660,64 @@ async fn delete_board_item(
 ) -> Result<StatusCode, ApiError> {
     app.delete_board_item(&user, id, item)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct AssistRequest {
+    #[serde(default)]
+    messages: serde_json::Value,
+    #[serde(default)]
+    document: crate::assist::DocumentSummary,
+    /// The user's own Anthropic API key; the server's ANTHROPIC_API_KEY
+    /// is the fallback, and with neither the rule-based reader answers.
+    #[serde(default)]
+    api_key: Option<String>,
+    #[serde(default)]
+    model: Option<String>,
+    /// The latest user message, for the rule-based reader.
+    #[serde(default)]
+    message: String,
+}
+
+/// AI Assisted Editor: one turn -- Claude with the app's commands as
+/// tools when a key is at hand, the rule-based reader otherwise.
+async fn assist(
+    AuthUser(_): AuthUser,
+    State(app): State<Shared>,
+    Json(body): Json<AssistRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let key = body.api_key.filter(|k| !k.trim().is_empty()).or_else(|| {
+        std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty())
+    });
+    let reply = match key {
+        Some(key) => {
+            let base = app.anthropic_url.clone();
+            let model = body
+                .model
+                .unwrap_or_else(|| crate::assist::DEFAULT_MODEL.to_string());
+            let (document, messages) = (body.document, body.messages);
+            tokio::task::spawn_blocking(move || {
+                crate::assist::ask_claude(&base, &key, &model, &document, &messages)
+            })
+            .await
+            .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .map_err(|m| ApiError(StatusCode::BAD_GATEWAY, m))?
+        }
+        None => crate::assist::rules(&body.message),
+    };
+    Ok(Json(
+        serde_json::to_value(reply).expect("a reply serialises"),
+    ))
+}
+
+/// The commands the assistant may call, for the app to know which take
+/// the selected layer.
+async fn assist_commands(AuthUser(_): AuthUser) -> Json<serde_json::Value> {
+    Json(
+        json!({ "layer_commands": crate::assist::layer_commands(), "tools": crate::assist::tools() }),
+    )
 }
 
 #[derive(Deserialize)]
@@ -1356,6 +1430,124 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn assist_over_http_with_rules_and_with_a_mock_claude() {
+        let app = app();
+        // No key anywhere: the rule-based reader answers.
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            "/assist",
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br#"{"message":"make it brighter","document":{"width":10,"height":10}}"#.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let body = json(&body);
+        assert_eq!(body["mode"], "rules");
+        assert_eq!(body["actions"][0]["name"], "brightness_contrast");
+        assert_eq!(body["actions"][0]["needs_layer"], true);
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            "/assist/commands",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(json(&body)["layer_commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v == "gaussian_blur"));
+
+        // A mock of Anthropic's Messages API: checks the request's shape and
+        // answers with a text block and a tool call.
+        let seen: Arc<std::sync::Mutex<Option<serde_json::Value>>> =
+            Arc::new(std::sync::Mutex::new(None));
+        let seen_headers: Arc<std::sync::Mutex<Vec<(String, String)>>> =
+            Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mock = Router::new().route(
+            "/v1/messages",
+            post({
+                let seen = seen.clone();
+                let seen_headers = seen_headers.clone();
+                move |headers: axum::http::HeaderMap, Json(body): Json<serde_json::Value>| async move {
+                    *seen.lock().unwrap() = Some(body);
+                    *seen_headers.lock().unwrap() = headers
+                        .iter()
+                        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+                        .collect();
+                    Json(json!({
+                        "model": "claude-opus-5",
+                        "stop_reason": "tool_use",
+                        "content": [
+                            { "type": "text", "text": "Blurring it a little." },
+                            { "type": "tool_use", "id": "toolu_9", "name": "gaussian_blur", "input": { "radius": 3 } }
+                        ]
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, mock).await.unwrap() });
+        let dir = tempfile::tempdir().unwrap();
+        let (store, tokens) = Store::open(dir.path()).unwrap();
+        let owner = tokens.unwrap().owner_token;
+        let router = router_with_anthropic(store, dir.path().to_path_buf(), base);
+        let request = json!({
+            "message": "blur it a little",
+            "api_key": "sk-test",
+            "document": { "width": 20, "height": 10, "layers": [{ "id": 1, "name": "Background" }], "selected_layer": 1, "has_selection": false },
+            "messages": [{ "role": "user", "content": "blur it a little" }]
+        });
+        let (status, body) = call(
+            &router,
+            "POST",
+            "/assist",
+            Some(&owner),
+            Some(("application/json", request.to_string().into_bytes())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let body = json(&body);
+        assert_eq!(body["mode"], "claude");
+        assert_eq!(body["text"], "Blurring it a little.");
+        assert_eq!(body["actions"][0]["name"], "gaussian_blur");
+        assert_eq!(body["actions"][0]["input"]["radius"], 3);
+        assert_eq!(body["actions"][0]["id"], "toolu_9");
+        assert_eq!(body["content"].as_array().unwrap().len(), 2);
+        let sent = seen.lock().unwrap().clone().unwrap();
+        assert_eq!(sent["model"], "claude-opus-5");
+        assert_eq!(sent["fallbacks"], "default");
+        assert!(sent["system"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("20x10"));
+        assert_eq!(sent["messages"][0]["content"], "blur it a little");
+        assert!(sent["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t["name"] == "gaussian_blur"));
+        let headers = seen_headers.lock().unwrap().clone();
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "x-api-key" && v == "sk-test"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "anthropic-version" && v == "2023-06-01"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "anthropic-beta" && v.contains("server-side-fallback")));
     }
 
     #[tokio::test]
