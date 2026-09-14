@@ -1474,6 +1474,7 @@ body {
   top: -5px;
   left: 100%;
   border-radius: 6px;
+  z-index: 61;
 }
 
 .menubar__item {

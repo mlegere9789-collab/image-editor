@@ -21559,6 +21559,59 @@ Xvfb live-verification gap from the previous phases stands.
 
 **Frontend tests: 22** (20 → 22). Rust tests unchanged at 1844.
 
+## Phase 362 — The real app under Xvfb again, and the submenu bug it found
+
+The last item of `docs/PLAN_TO_100.md` section H, and the "Xvfb
+live-verification gap" every phase since 52 has carried: driving the
+actual Tauri app on a virtual display. Phase 52 found `xdotool` pointer
+sequences unreliable and the project fell back to Chromium against
+`vite preview` with the Tauri bridge stubbed — real for the frontend,
+blind to everything the webview, the IPC, and the Rust side do
+together.
+
+**What was wrong, and the recipe.** Two things, neither a bug in the
+app. A debug build's window loads `build.devUrl`
+(`http://localhost:1420`) rather than embedded assets, so without a
+Vite dev server the window is blank; and `xvfb-run` starts its server
+with an authorization cookie only the child holds, so `import` and
+`xdotool` from another shell are refused. `scripts/xvfb-live.sh` does
+it right: a Vite dev server on 1420 if none answers, an `Xvfb :101` with
+`-ac`, the debug binary on that display, and the window id once it
+appears; `scripts/xvfb-live.sh stop` ends it. Pointer sequences through
+`xdotool` (`mousedown`, a run of `mousemove`s, `mouseup`) reach the
+webview fine when given a few tens of milliseconds between moves — a
+screenshot taken too soon shows a stroke half drawn, one taken a second
+later the whole of it, which is what Phase 52 read as "stuck".
+
+**What it found.** The menu bar's submenus were invisible in the real
+app: a dropdown scrolls (`max-height` with `overflow-y: auto` for
+Filter's 161 rows) and a submenu positioned `absolute` inside it is
+clipped by that overflow. Every Chromium check had passed because
+Playwright clicks a hidden element's coordinates regardless. Submenus
+are now positioned `fixed` at their parent row's right edge (measured
+on pointer-enter and focus, kept to the viewport's height), so a
+scrolling dropdown cannot clip them.
+
+**Verified, on the real app.** With the script's display: the first
+launch shows the menu bar, options bar, toolbox, canvas, Layers panel,
+status bar, and the Welcome Tour's first card ("1 of 8"); Skip; File
+opens with New…, Open PNG…, Open Project…, Save Project… (disabled with
+nothing open), Cloud Documents, Share, Import, Export; New… opens the
+New document dialog and Create makes an 800×600 document — the status
+bar reads "800 × 600" and "1 layer", the Layers panel "Layer 1"; a
+brush drag from (400, 300) to (700, 500) through `xdotool` paints a
+white stroke on the real canvas through the real IPC, the status bar's
+pointer readout following; Image > Adjustments (now rendered) > Invert
+Colors turns the stroke black and leaves the transparent canvas alone;
+Edit > Undo restores it white, its tooltip reading "Undo (Ctrl/Cmd+Z)";
+and the options bar's autosave note appeared on its own thirty seconds
+in ("Autosaved 12:41:43 PM"). Six screenshots were checked by eye. In
+Chromium, the menu bar check of Phase 348 was re-run against the fixed
+submenus and passes as before. Every phase from here can verify on the
+real app; the "gap stands" note ends.
+
+Tests unchanged: 1844 Rust, 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

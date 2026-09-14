@@ -59,6 +59,20 @@ function siblingsOf(element: HTMLElement): HTMLElement[] {
 export default function MenuBar({ entries, hidden }: Props) {
   const [open, setOpen] = useState<number | null>(null);
   const [tree, setTree] = useState<MenuGroup[]>(() => buildMenuTree([]));
+  // Where each open submenu sits, in viewport pixels: submenus are
+  // positioned fixed so a scrolling dropdown (Filter's 161 rows) cannot
+  // clip them -- found by driving the real app under Xvfb (README Phase
+  // 362), where every submenu was invisible.
+  const [submenuAt, setSubmenuAt] = useState<Record<string, { top: number; left: number }>>({});
+  const placeSubmenu = useCallback((key: string, element: HTMLElement) => {
+    const rect = element.getBoundingClientRect();
+    setSubmenuAt((previous) => {
+      const next = { top: rect.top - 5, left: rect.right };
+      const current = previous[key];
+      if (current && current.top === next.top && current.left === next.left) return previous;
+      return { ...previous, [key]: next };
+    });
+  }, []);
   const signature = useRef("");
   const nav = useRef<HTMLElement>(null);
 
@@ -193,7 +207,12 @@ export default function MenuBar({ entries, hidden }: Props) {
     }
     return items.map((item, index) =>
       item.kind === "group" ? (
-        <li className="menubar__item menubar__item--group" key={`${item.label}-${index}`}>
+        <li
+          className="menubar__item menubar__item--group"
+          key={`${item.label}-${index}`}
+          onPointerEnter={(event) => placeSubmenu(item.path.join(">"), event.currentTarget)}
+          onFocus={(event) => placeSubmenu(item.path.join(">"), event.currentTarget)}
+        >
           <button
             type="button"
             className="menubar__command menubar__group"
@@ -207,7 +226,22 @@ export default function MenuBar({ entries, hidden }: Props) {
               ▸
             </span>
           </button>
-          <ul role="menu" className="menubar__submenu" aria-label={item.path.join(" > ")}>
+          <ul
+            role="menu"
+            className="menubar__submenu"
+            aria-label={item.path.join(" > ")}
+            style={(() => {
+              const at = submenuAt[item.path.join(">")];
+              return at
+                ? {
+                    position: "fixed" as const,
+                    top: at.top,
+                    left: at.left,
+                    maxHeight: Math.max(120, window.innerHeight - at.top - 8),
+                  }
+                : undefined;
+            })()}
+          >
             {renderItems(item.items, depth + 1)}
           </ul>
         </li>
