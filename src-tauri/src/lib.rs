@@ -3170,6 +3170,89 @@ fn lighting_effects_with(
     })
 }
 
+/// Blur Gallery > Tilt-Shift on layer `id` with its angle, distortion
+/// and symmetric distortion.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn tilt_shift_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    focus_row: u32,
+    half_height: u32,
+    blur_radius: u32,
+    angle: f32,
+    distortion: i32,
+    symmetric: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.tilt_shift_with(
+            id,
+            focus_row,
+            half_height,
+            blur_radius,
+            angle,
+            distortion,
+            symmetric,
+        )
+    })
+}
+
+/// Blur Gallery > Iris Blur on layer `id` with its ellipse's aspect and
+/// rotation.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn iris_blur_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    blur_radius: u32,
+    aspect: f32,
+    rotation: f32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.iris_blur_with(
+            id,
+            center_x,
+            center_y,
+            radius,
+            blur_radius,
+            aspect,
+            rotation,
+        )
+    })
+}
+
+/// Blur Gallery > Spin Blur on layer `id` with its ellipse and Strobe
+/// Effect.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn spin_blur_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    center_x: f32,
+    center_y: f32,
+    angle: f32,
+    aspect: f32,
+    rotation: f32,
+    strobe_strength: u32,
+    strobe_flashes: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.spin_blur_with(
+            id,
+            center_x,
+            center_y,
+            angle,
+            aspect,
+            rotation,
+            strobe_strength,
+            strobe_flashes,
+        )
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -8208,6 +8291,9 @@ pub fn run() {
             auto_color_with,
             lens_flare_with,
             lighting_effects_with,
+            tilt_shift_with,
+            iris_blur_with,
+            spin_blur_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

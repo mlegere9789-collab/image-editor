@@ -22092,6 +22092,68 @@ checked by eye.
 
 Tests: 1868 Rust (1866 → 1868), 22 frontend.
 
+## Phase 370 — Blur Gallery geometry: Tilt-Shift's angle and distortion, Iris Blur's ellipse, Spin Blur's ellipse and strobe
+
+Three Blur Gallery scope cuts of section D, on the dialogs Phase 361
+gave on-canvas pins. The pins keep placing the centre, ring and lines;
+the new controls are sliders in the dialogs.
+
+**Tilt-Shift** (`tilt_shift_with`): Angle (−90° to 90°) turns the sharp
+band about the point where the focus row crosses the canvas's vertical
+midline, a pixel's distance from the band being its distance from that
+turned line. Distortion (−100 to 100) mixes a directional blur along
+the band's normal into the box blur on one side of the band — below it
+for positive values, above for negative — by its magnitude, the streak
+a blur radius each way; Symmetric Distortion applies it on both sides.
+
+**Iris Blur** (`iris_blur_with`): Ellipse Height (25–400 %) is the
+sharp ellipse's height over its width, the ring's radius staying the
+half-width, and Rotation turns it about its centre; a pixel's distance
+is measured in the ellipse's own frame.
+
+**Spin Blur** (`spin_blur_with`): the same Ellipse Height and Rotation
+make the spin follow an ellipse — each pixel's offset is un-rotated,
+squashed into the circle where the samples are taken, and stretched
+and rotated back. Strobe Effect: Strobe Flashes (1–10) samples spread
+evenly over the arc are averaged and mixed into the smooth spin by
+Strobe Strength — one flash is the pixel itself, three flashes are the
+smooth spin's own samples.
+
+**Verified.** Three Rust tests. `tilt_shift_angle_and_distortion` on a
+16-wide ramp: angle 90 turns the band vertical, column 8 inside it
+stays 128 and column 15, 7.5 out, reads the clamped five-wide mean
+230; angle 0 without distortion equals `tilt_shift`; on a single
+bright column the box blur reads 51 and the streak along the normal
+255, distortion 100 streaks below the band only, −100 above, symmetric
+both, and 50 mixes to 153; 91° errors.
+`iris_blur_ellipse_stretches_and_turns_the_sharp_zone` with the iris
+at the ramp's right edge: (14, 8) is sharp and (14, 12) blurred under a
+circle of radius 3, an ellipse twice as tall keeps (14, 12) sharp, and
+rotated 90° puts it out again while (14, 8) stays in; aspect 1 and
+rotation 0 equal `iris_blur`; aspect 5 errors.
+`spin_blur_ellipse_and_strobe`: one flash at full strength is the
+picture, three flashes at full strength are the smooth spin, the
+defaults equal `spin_blur`, half strength with one flash sits within
+a level of the average of the two, an ellipse spins differently from
+a circle and turned differently again, a flat layer is unmoved, and 11
+flashes error. In Chromium against the built frontend: Blur Gallery >
+Tilt-Shift… shows Angle, Distortion and Symmetric Distortion after
+Blur Radius and sends `tilt_shift_with` with `angle: 30, distortion:
+-60, symmetric: true`; Iris Blur… shows Ellipse Height and Rotation
+and sends `aspect: 2.5, rotation: 45`; Spin Blur… shows Ellipse
+Height, Rotation, Strobe Strength and Strobe Flashes and sends
+`aspect: 0.5, strobeStrength: 70, strobeFlashes: 5`; every dialog
+closes on Apply. On the real app under Xvfb, on the recovered
+brush-stroke document: Blur Gallery > Tilt-Shift… with Angle 48°,
+half-height 20 and blur radius 39, applied through the real IPC, kept
+the stroke's middle — where the turned focus line crosses it — sharp
+white and blurred its two ends and the dot beside it into grey (the
+RGB-only box blur averages transparent black in, as the box blur
+always has); the debug build took six minutes over that radius. Seven
+screenshots checked by eye.
+
+Tests: 1871 Rust (1868 → 1871), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

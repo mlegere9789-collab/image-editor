@@ -2291,11 +2291,16 @@ export default function App() {
   const [tiltShiftFocusRow, setTiltShiftFocusRow] = useState(0);
   const [tiltShiftHalfHeight, setTiltShiftHalfHeight] = useState(20);
   const [tiltShiftBlurRadius, setTiltShiftBlurRadius] = useState(15);
+  const [tiltShiftAngle, setTiltShiftAngle] = useState(0);
+  const [tiltShiftDistortion, setTiltShiftDistortion] = useState(0);
+  const [tiltShiftSymmetric, setTiltShiftSymmetric] = useState(false);
   const [showIrisBlurDialog, setShowIrisBlurDialog] = useState(false);
   const [irisBlurCenterX, setIrisBlurCenterX] = useState(0);
   const [irisBlurCenterY, setIrisBlurCenterY] = useState(0);
   const [irisBlurRadius, setIrisBlurRadius] = useState(50);
   const [irisBlurBlurRadius, setIrisBlurBlurRadius] = useState(15);
+  const [irisBlurAspect, setIrisBlurAspect] = useState(100);
+  const [irisBlurRotation, setIrisBlurRotation] = useState(0);
   const [showFieldBlurDialog, setShowFieldBlurDialog] = useState(false);
   const [fieldBlurX1, setFieldBlurX1] = useState(0);
   const [fieldBlurY1, setFieldBlurY1] = useState(0);
@@ -2315,6 +2320,10 @@ export default function App() {
   const [spinBlurCenterX, setSpinBlurCenterX] = useState(0);
   const [spinBlurCenterY, setSpinBlurCenterY] = useState(0);
   const [spinBlurAngle, setSpinBlurAngle] = useState(15);
+  const [spinBlurAspect, setSpinBlurAspect] = useState(100);
+  const [spinBlurRotation, setSpinBlurRotation] = useState(0);
+  const [spinBlurStrobeStrength, setSpinBlurStrobeStrength] = useState(0);
+  const [spinBlurStrobeFlashes, setSpinBlurStrobeFlashes] = useState(3);
   const [showLensBlurDialog, setShowLensBlurDialog] = useState(false);
   const [lensBlurRadius, setLensBlurRadius] = useState(15);
   const [lensBlurInvert, setLensBlurInvert] = useState(false);
@@ -8452,11 +8461,14 @@ export default function App() {
 
   const applyTiltShift = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("tilt_shift", {
+    await runCommand("tilt_shift_with", {
       id: selectedId,
       focusRow: tiltShiftFocusRow,
       halfHeight: tiltShiftHalfHeight,
       blurRadius: tiltShiftBlurRadius,
+      angle: tiltShiftAngle,
+      distortion: tiltShiftDistortion,
+      symmetric: tiltShiftSymmetric,
     });
     setShowTiltShiftDialog(false);
   }, [
@@ -8465,6 +8477,9 @@ export default function App() {
     tiltShiftFocusRow,
     tiltShiftHalfHeight,
     tiltShiftBlurRadius,
+    tiltShiftAngle,
+    tiltShiftDistortion,
+    tiltShiftSymmetric,
   ]);
 
   const openIrisBlurDialog = useCallback(() => {
@@ -8475,12 +8490,14 @@ export default function App() {
 
   const applyIrisBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("iris_blur", {
+    await runCommand("iris_blur_with", {
       id: selectedId,
       centerX: irisBlurCenterX,
       centerY: irisBlurCenterY,
       radius: irisBlurRadius,
       blurRadius: irisBlurBlurRadius,
+      aspect: irisBlurAspect / 100,
+      rotation: irisBlurRotation,
     });
     setShowIrisBlurDialog(false);
   }, [
@@ -8490,6 +8507,8 @@ export default function App() {
     irisBlurCenterY,
     irisBlurRadius,
     irisBlurBlurRadius,
+    irisBlurAspect,
+    irisBlurRotation,
   ]);
 
   const openFieldBlurDialog = useCallback(() => {
@@ -8531,14 +8550,28 @@ export default function App() {
 
   const applySpinBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("spin_blur", {
+    await runCommand("spin_blur_with", {
       id: selectedId,
       centerX: spinBlurCenterX,
       centerY: spinBlurCenterY,
       angle: spinBlurAngle,
+      aspect: spinBlurAspect / 100,
+      rotation: spinBlurRotation,
+      strobeStrength: spinBlurStrobeStrength,
+      strobeFlashes: spinBlurStrobeFlashes,
     });
     setShowSpinBlurDialog(false);
-  }, [runCommand, selectedId, spinBlurCenterX, spinBlurCenterY, spinBlurAngle]);
+  }, [
+    runCommand,
+    selectedId,
+    spinBlurCenterX,
+    spinBlurCenterY,
+    spinBlurAngle,
+    spinBlurAspect,
+    spinBlurRotation,
+    spinBlurStrobeStrength,
+    spinBlurStrobeFlashes,
+  ]);
 
   const openPathBlurDialog = useCallback(() => {
     const w = document?.width ?? 2;
@@ -33860,6 +33893,46 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control">
+              <span className="control__label">
+                Angle
+                <span className="control__value">{tiltShiftAngle}°</span>
+              </span>
+              <input
+                type="range"
+                min={-90}
+                max={90}
+                value={tiltShiftAngle}
+                onChange={(event) =>
+                  setTiltShiftAngle(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Distortion
+                <span className="control__value">{tiltShiftDistortion}</span>
+              </span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={tiltShiftDistortion}
+                onChange={(event) =>
+                  setTiltShiftDistortion(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Symmetric Distortion</span>
+              <input
+                type="checkbox"
+                checked={tiltShiftSymmetric}
+                onChange={(event) =>
+                  setTiltShiftSymmetric(event.target.checked)
+                }
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -33951,6 +34024,36 @@ export default function App() {
                 value={irisBlurBlurRadius}
                 onChange={(event) =>
                   setIrisBlurBlurRadius(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Ellipse Height
+                <span className="control__value">{irisBlurAspect}%</span>
+              </span>
+              <input
+                type="range"
+                min={25}
+                max={400}
+                value={irisBlurAspect}
+                onChange={(event) =>
+                  setIrisBlurAspect(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Rotation
+                <span className="control__value">{irisBlurRotation}°</span>
+              </span>
+              <input
+                type="range"
+                min={-90}
+                max={90}
+                value={irisBlurRotation}
+                onChange={(event) =>
+                  setIrisBlurRotation(Number(event.target.value))
                 }
               />
             </label>
@@ -34250,6 +34353,68 @@ export default function App() {
                 value={spinBlurAngle}
                 onChange={(event) =>
                   setSpinBlurAngle(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Ellipse Height
+                <span className="control__value">{spinBlurAspect}%</span>
+              </span>
+              <input
+                type="range"
+                min={25}
+                max={400}
+                value={spinBlurAspect}
+                onChange={(event) =>
+                  setSpinBlurAspect(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Rotation
+                <span className="control__value">{spinBlurRotation}°</span>
+              </span>
+              <input
+                type="range"
+                min={-90}
+                max={90}
+                value={spinBlurRotation}
+                onChange={(event) =>
+                  setSpinBlurRotation(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strobe Strength
+                <span className="control__value">
+                  {spinBlurStrobeStrength}%
+                </span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={spinBlurStrobeStrength}
+                onChange={(event) =>
+                  setSpinBlurStrobeStrength(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strobe Flashes
+                <span className="control__value">{spinBlurStrobeFlashes}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                value={spinBlurStrobeFlashes}
+                onChange={(event) =>
+                  setSpinBlurStrobeFlashes(Number(event.target.value))
                 }
               />
             </label>

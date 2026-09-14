@@ -24451,8 +24451,37 @@ impl Document {
         half_height: u32,
         blur_radius: u32,
     ) -> Result<Option<Rect>, String> {
+        self.tilt_shift_with(id, focus_row, half_height, blur_radius, 0.0, 0, false)
+    }
+
+    /// [`Self::tilt_shift`] with Photoshop's own band geometry. `angle`
+    /// (degrees, `−90..=90`) turns the sharp band about the point where
+    /// the focus row crosses the canvas's vertical midline, a pixel's
+    /// distance from the band being its distance from that turned line.
+    /// `distortion` (`−100..=100`) mixes a directional blur along the
+    /// band's normal into the box blur on one side of the band — below
+    /// it for positive values, above for negative — by `|distortion| /
+    /// 100`, the streak `blur_radius` pixels each way; `symmetric`
+    /// applies it on both sides. Angle 0, distortion 0 is `tilt_shift`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tilt_shift_with(
+        &mut self,
+        id: LayerId,
+        focus_row: u32,
+        half_height: u32,
+        blur_radius: u32,
+        angle: f32,
+        distortion: i32,
+        symmetric: bool,
+    ) -> Result<Option<Rect>, String> {
         if blur_radius == 0 {
             return Err("Tilt-Shift blur radius must be at least 1 pixel.".to_string());
+        }
+        if !angle.is_finite() || !(-90.0..=90.0).contains(&angle) {
+            return Err("Tilt-Shift angle must be between -90 and 90 degrees.".to_string());
+        }
+        if !(-100..=100).contains(&distortion) {
+            return Err("Tilt-Shift distortion must be between -100 and 100.".to_string());
         }
         let bounds = self.copy_bounds();
         let selection = self.selection.clone();
@@ -24464,11 +24493,11 @@ impl Document {
         }
         let source = layer.pixels.clone();
         let r = blur_radius as i64;
-        let focus_row = focus_row as i64;
-        let half_height = half_height as i64;
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let (nx, ny) = (-sin, cos);
+        let pivot_x = (width - 1) as f32 / 2.0;
+        let mix = distortion.unsigned_abs() as f32 / 100.0;
         for row in bounds.y0..bounds.y1 {
-            let distance = (row as i64 - focus_row).abs();
-            let blend = ((distance - half_height) as f32 / blur_radius as f32).clamp(0.0, 1.0);
             for col in bounds.x0..bounds.x1 {
                 let keep = selection
                     .as_ref()
@@ -24476,7 +24505,32 @@ impl Document {
                 if !keep {
                     continue;
                 }
-                let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let signed = (col as f32 - pivot_x) * nx + (row as f32 - focus_row as f32) * ny;
+                let blend =
+                    ((signed.abs() - half_height as f32) / blur_radius as f32).clamp(0.0, 1.0);
+                let mut blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
+                let distorted_side = symmetric
+                    || (distortion > 0 && signed > 0.0)
+                    || (distortion < 0 && signed < 0.0);
+                if mix > 0.0 && distorted_side {
+                    let streak = average_samples(
+                        &source,
+                        doc_width,
+                        (-r..=r).map(|k| {
+                            let sx = (col as f32 + k as f32 * nx).round() as i64;
+                            let sy = (row as f32 + k as f32 * ny).round() as i64;
+                            (
+                                sx.clamp(0, width - 1) as usize,
+                                sy.clamp(0, height - 1) as usize,
+                            )
+                        }),
+                    );
+                    for c in 0..CHANNELS {
+                        blurred[c] = (blurred[c] as f32 * (1.0 - mix) + streak[c] as f32 * mix)
+                            .round()
+                            .clamp(0.0, 255.0) as u8;
+                    }
+                }
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
                 for c in 0..3 {
                     let original = source[dst + c] as f32;
@@ -24510,6 +24564,26 @@ impl Document {
         radius: f32,
         blur_radius: u32,
     ) -> Result<Option<Rect>, String> {
+        self.iris_blur_with(id, center_x, center_y, radius, blur_radius, 1.0, 0.0)
+    }
+
+    /// [`Self::iris_blur`] with Photoshop's stretched, turned ellipse:
+    /// `aspect` (`0.25..=4`) is the ellipse's height over its width —
+    /// `radius` stays the half-width — and `rotation` (degrees) turns it
+    /// about its centre; a pixel's distance is measured in the ellipse's
+    /// own frame, `√(u² + (v / aspect)²)` after un-rotating its offset.
+    /// Aspect 1, rotation 0 is `iris_blur`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn iris_blur_with(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        radius: f32,
+        blur_radius: u32,
+        aspect: f32,
+        rotation: f32,
+    ) -> Result<Option<Rect>, String> {
         if blur_radius == 0 {
             return Err("Iris Blur blur radius must be at least 1 pixel.".to_string());
         }
@@ -24518,6 +24592,12 @@ impl Document {
                 "Iris Blur center and radius must be finite, and radius non-negative.".to_string(),
             );
         }
+        if !aspect.is_finite() || !(0.25..=4.0).contains(&aspect) || !rotation.is_finite() {
+            return Err(
+                "Iris Blur aspect must be between 0.25 and 4, rotation finite.".to_string(),
+            );
+        }
+        let (sin, cos) = rotation.to_radians().sin_cos();
         let bounds = self.copy_bounds();
         let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
@@ -24538,7 +24618,9 @@ impl Document {
                 }
                 let dx = col as f32 - center_x;
                 let dy = row as f32 - center_y;
-                let distance = (dx * dx + dy * dy).sqrt();
+                let u = dx * cos + dy * sin;
+                let v = (-dx * sin + dy * cos) / aspect;
+                let distance = (u * u + v * v).sqrt();
                 let blend = ((distance - radius) / blur_radius as f32).clamp(0.0, 1.0);
                 let blurred = box_blur_at(&source, doc_width, width, height, row, col, r);
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
@@ -24736,37 +24818,102 @@ impl Document {
         center_y: f32,
         angle: f32,
     ) -> Result<Option<Rect>, String> {
+        self.spin_blur_with(id, center_x, center_y, angle, 1.0, 0.0, 0, 1)
+    }
+
+    /// [`Self::spin_blur`] with Photoshop's ellipse and Strobe Effect.
+    /// `aspect` (`0.25..=4`, height over width) and `rotation` (degrees)
+    /// make the spin follow an ellipse: each pixel's offset is un-rotated,
+    /// squashed by the aspect into the circle where the three samples
+    /// are taken, and stretched and rotated back. Strobe: `strobe_flashes`
+    /// (`1..=10`) samples spread evenly over the same arc, averaged, are
+    /// mixed into the smooth spin by `strobe_strength / 100` — one flash
+    /// is the pixel itself, so full strength with one flash is the
+    /// unblurred picture, and three flashes are the smooth spin's own
+    /// three samples. Aspect 1, rotation 0, strength 0 is `spin_blur`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn spin_blur_with(
+        &mut self,
+        id: LayerId,
+        center_x: f32,
+        center_y: f32,
+        angle: f32,
+        aspect: f32,
+        rotation: f32,
+        strobe_strength: u32,
+        strobe_flashes: u32,
+    ) -> Result<Option<Rect>, String> {
         if !center_x.is_finite() || !center_y.is_finite() {
             return Err("Spin Blur center must be finite numbers.".to_string());
         }
         if !(0.0..=360.0).contains(&angle) {
             return Err("Spin Blur angle must be between 0 and 360 degrees.".to_string());
         }
+        if !aspect.is_finite() || !(0.25..=4.0).contains(&aspect) || !rotation.is_finite() {
+            return Err(
+                "Spin Blur aspect must be between 0.25 and 4, rotation finite.".to_string(),
+            );
+        }
+        if strobe_strength > 100 {
+            return Err("Spin Blur strobe strength must be between 0 and 100.".to_string());
+        }
+        if !(1..=10).contains(&strobe_flashes) {
+            return Err("Spin Blur strobe flashes must be between 1 and 10.".to_string());
+        }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let half = angle / 2.0;
         let thetas = [(-half).to_radians(), 0.0, half.to_radians()];
+        let flashes: Vec<f32> = (0..strobe_flashes)
+            .map(|i| {
+                if strobe_flashes == 1 {
+                    0.0
+                } else {
+                    (-half + angle * i as f32 / (strobe_flashes - 1) as f32).to_radians()
+                }
+            })
+            .collect();
+        let strobe = strobe_strength as f32 / 100.0;
+        let (rsin, rcos) = rotation.to_radians().sin_cos();
         self.filter_pixels(id, move |source, row, col| {
             let (x, y) = (col as f32, row as f32);
             let (dx, dy) = (x - center_x, y - center_y);
-            let mut sums = [0u32; CHANNELS];
-            for &theta in &thetas {
+            // Into the ellipse's own circle: un-rotate, squash the height.
+            let (u, v) = (dx * rcos + dy * rsin, (-dx * rsin + dy * rcos) / aspect);
+            let sample_at = |theta: f32| {
                 let (sin, cos) = theta.sin_cos();
-                let rdx = dx * cos - dy * sin;
-                let rdy = dx * sin + dy * cos;
-                let sample = sample_nearest(
+                let (ru, rv) = (u * cos - v * sin, (u * sin + v * cos) * aspect);
+                let (rdx, rdy) = (ru * rcos - rv * rsin, ru * rsin + rv * rcos);
+                sample_nearest(
                     source,
                     doc_width,
                     (width, height),
                     (center_x + rdx, center_y + rdy),
-                );
-                for (sum, &v) in sums.iter_mut().zip(sample.iter()) {
-                    *sum += v as u32;
+                )
+            };
+            let average = |angles: &[f32]| -> [f32; CHANNELS] {
+                let mut sums = [0.0f32; CHANNELS];
+                for &theta in angles {
+                    let sample = sample_at(theta);
+                    for (sum, &v) in sums.iter_mut().zip(sample.iter()) {
+                        *sum += v as f32;
+                    }
                 }
-            }
+                sums.map(|s| s / angles.len() as f32)
+            };
+            let smooth = average(&thetas);
             let mut out = [0u8; CHANNELS];
-            for (slot, &sum) in out.iter_mut().zip(sums.iter()) {
-                *slot = (sum as f32 / 3.0).round().clamp(0.0, 255.0) as u8;
+            if strobe > 0.0 {
+                let flashed = average(&flashes);
+                for c in 0..CHANNELS {
+                    out[c] = (smooth[c] * (1.0 - strobe) + flashed[c] * strobe)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+            } else {
+                for c in 0..CHANNELS {
+                    out[c] = smooth[c].round().clamp(0.0, 255.0) as u8;
+                }
             }
             out
         })
@@ -45853,6 +46000,138 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn tilt_shift_angle_and_distortion() {
+        let (w, h) = (16u32, 16u32);
+        // A horizontal ramp (x · 16) with a vertical band: angle 90 turns
+        // the band about (7.5, 8); column 8 is inside it and stays 128,
+        // column 15 is 7.5 out, fully blurred → the clamped five-wide
+        // mean 230.
+        let ramp = red_ramp(w, h, 16);
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.tilt_shift_with(id, 8, 2, 2, 90.0, 0, false).unwrap();
+        let out = red_plane(&doc);
+        assert_eq!(out[3 * 16 + 8], 128);
+        assert_eq!(out[3 * 16 + 15], 230);
+        // Angle 0 with no distortion is tilt_shift.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.tilt_shift_with(id, 8, 2, 2, 0.0, 0, false).unwrap();
+        let mut old = Document::new(w, h).unwrap();
+        let old_id = old.add_layer("r", &ramp, w, h).unwrap();
+        old.tilt_shift(old_id, 8, 2, 2).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        // Distortion: a single bright column 8 on black. The box blur
+        // (radius 2) sees five bright samples of 25 → 51; the streak along
+        // the band's normal sees all five bright → 255. Distortion 100
+        // streaks below the band only, −100 above, symmetric both.
+        let mut column = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h as usize {
+            for x in 0..w as usize {
+                let v = if x == 8 { 255 } else { 0 };
+                column[(y * 16 + x) * 4..(y * 16 + x) * 4 + 4].copy_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let run = |distortion: i32, symmetric: bool| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("c", &column, w, h).unwrap();
+            doc.tilt_shift_with(id, 8, 2, 2, 0.0, distortion, symmetric)
+                .unwrap();
+            red_plane(&doc)
+        };
+        let below = run(100, false);
+        assert_eq!(below[14 * 16 + 8], 255);
+        assert_eq!(below[2 * 16 + 8], 51);
+        let above = run(-100, false);
+        assert_eq!(above[14 * 16 + 8], 51);
+        assert_eq!(above[2 * 16 + 8], 255);
+        let both = run(100, true);
+        assert_eq!(both[14 * 16 + 8], 255);
+        assert_eq!(both[2 * 16 + 8], 255);
+        // Half distortion mixes the two: 51 · 0.5 + 255 · 0.5 = 153.
+        assert_eq!(run(50, true)[14 * 16 + 8], 153);
+        assert!(doc.tilt_shift_with(id, 8, 2, 2, 91.0, 0, false).is_err());
+    }
+
+    #[test]
+    fn iris_blur_ellipse_stretches_and_turns_the_sharp_zone() {
+        // A horizontal ramp, the iris at (8, 8) with radius 3 and a 2-pixel
+        // transition. Aspect 2 keeps (8, 12), 4 below the centre, sharp
+        // (its ellipse distance is 2); a circle blurs it fully (4 − 3 = 1
+        // → half blend, but the box blur of a ramp is the ramp, so the
+        // proof is the sharp zone's own edge on the ramp's clamped side).
+        let (w, h) = (16u32, 16u32);
+        let ramp = red_ramp(w, h, 16);
+        let inside = |aspect: f32, rotation: f32, x: usize, y: usize| -> bool {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            // Probe with the blur radius huge so any blend reads clearly
+            // at the ramp's right edge, where the box blur differs.
+            doc.iris_blur_with(id, 14.0, 8.0, 3.0, 4, aspect, rotation)
+                .unwrap();
+            red_plane(&doc)[y * 16 + x] == ramp[(y * 16 + x) * 4]
+        };
+        // The circle's edge: (14, 8) sharp (224 stays), (14, 12) blurred.
+        assert!(inside(1.0, 0.0, 14, 8));
+        assert!(!inside(1.0, 0.0, 14, 12));
+        // Twice as tall: (14, 12) is inside; rotated 90° the long axis is
+        // horizontal and (14, 12) is out again while (14, 8) stays in.
+        assert!(inside(2.0, 0.0, 14, 12));
+        assert!(!inside(2.0, 90.0, 14, 12));
+        assert!(inside(2.0, 90.0, 14, 8));
+        // Aspect 1, rotation 0 is iris_blur.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.iris_blur_with(id, 8.0, 8.0, 3.0, 2, 1.0, 0.0).unwrap();
+        let mut old = Document::new(w, h).unwrap();
+        let old_id = old.add_layer("r", &ramp, w, h).unwrap();
+        old.iris_blur(old_id, 8.0, 8.0, 3.0, 2).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        assert!(doc.iris_blur_with(id, 8.0, 8.0, 3.0, 2, 5.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn spin_blur_ellipse_and_strobe() {
+        let (w, h) = (16u32, 16u32);
+        let ramp = red_ramp(w, h, 16);
+        let run = |aspect: f32, rotation: f32, strength: u32, flashes: u32| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.spin_blur_with(id, 7.5, 7.5, 90.0, aspect, rotation, strength, flashes)
+                .unwrap();
+            red_plane(&doc)
+        };
+        let plain: Vec<u8> = ramp.chunks_exact(4).map(|p| p[0]).collect();
+        // One flash at full strength is the picture itself; three flashes
+        // at full strength are the smooth spin's own samples; the
+        // defaults are spin_blur.
+        assert_eq!(run(1.0, 0.0, 100, 1), plain);
+        let smooth = run(1.0, 0.0, 0, 1);
+        assert_eq!(run(1.0, 0.0, 100, 3), smooth);
+        let mut old = Document::new(w, h).unwrap();
+        let old_id = old.add_layer("r", &ramp, w, h).unwrap();
+        old.spin_blur(old_id, 7.5, 7.5, 90.0).unwrap();
+        assert_eq!(red_plane(&old), smooth);
+        // Half strength with one flash halves the blur toward the picture.
+        let half = run(1.0, 0.0, 50, 1);
+        for i in 0..plain.len() {
+            let expected = (smooth[i] as f32 * 0.5 + plain[i] as f32 * 0.5).round() as u8;
+            assert!((half[i] as i32 - expected as i32).abs() <= 1, "pixel {i}");
+        }
+        // An ellipse spins differently from a circle, and a flat layer is
+        // unmoved by any of it.
+        assert_ne!(run(2.0, 0.0, 0, 1), smooth);
+        assert_ne!(run(2.0, 45.0, 0, 1), run(2.0, 0.0, 0, 1));
+        let (mut doc, id) = flat_grey(8, 8);
+        doc.spin_blur_with(id, 3.5, 3.5, 180.0, 2.0, 30.0, 50, 4)
+            .unwrap();
+        assert!(red_plane(&doc).iter().all(|&v| v == 128));
+        assert!(doc
+            .spin_blur_with(id, 3.5, 3.5, 90.0, 1.0, 0.0, 0, 11)
+            .is_err());
     }
 
     #[test]
