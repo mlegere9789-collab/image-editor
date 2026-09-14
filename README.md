@@ -21272,6 +21272,42 @@ phases stands.
 
 **Frontend tests: 18** (15 → 18). Rust tests unchanged at 1839.
 
+## Phase 355 — The toolbar fits the window
+
+Found by the Welcome Tour's own measurement in Phase 354: the app's
+layout was 24,601 px wide in a 1,200 px window. The `.app` grid had no
+column template, so its one implicit column took the min-content width
+of its widest item — a `.tools` group of a few hundred buttons in one
+non-wrapping row — and the menu bar, toolbar, workspace, and status bar
+all followed it past the window's edge, where `body`'s `overflow:
+hidden` clipped them. Every button past the edge was unreachable
+without a mouse-wheel scroll the page did not offer, and the toolbar's
+`flex-wrap` never got a chance to wrap. Playwright had been reaching
+those buttons by scrolling the clipped ancestor itself, which is why the
+previous phases' checks passed.
+
+**Mechanism.** Three rules and a default. `.app` gets
+`grid-template-columns: minmax(0, 1fr)`, the standard cure for a grid
+item's `min-width: auto` blow-out, so the column is the window's width
+and no wider. `.tools` groups wrap. The toolbar, which now wraps to many
+rows when every command is shown, is capped at 40 % of the window's
+height and scrolls inside itself rather than push the canvas away. And
+with the Phase 348 menu bar carrying every command, Compact Toolbar
+becomes the default — a fresh install shows the tools and the buttons
+no menu names, and Window > Workspace > Compact Toolbar turns the rest
+back on; a workspace saved before the field existed loads compact too.
+
+**Verified.** The built app in Chromium (`vite preview` + Playwright,
+1,200 × 800): a fresh install lays out at a scroll width of 1,200 with
+the toolbar compact, 62 buttons visible and every one of them inside
+the window, the toolbar 320 px tall over a 423 px canvas; with the full
+toolbar chosen, the scroll width is still 1,200, all 343 visible buttons
+are inside the window, and the toolbar scrolls (2,018 px of content in
+its 320 px). A screenshot of the compact layout was checked by eye. The
+Xvfb live-verification gap from the previous phases stands.
+
+Tests unchanged: 1839 Rust, 18 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

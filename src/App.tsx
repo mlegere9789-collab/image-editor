@@ -2465,11 +2465,13 @@ export default function App() {
   // Window > Workspace > Compact Toolbar: with the menu bar carrying every
   // command, the toolbar can drop them and keep only the tools -- a
   // browser preference, saved into workspaces like hiddenTools above.
+  // Compact is the default: with the menu bar carrying every command, the
+  // full toolbar is there for whoever asks for it.
   const [compactToolbar, setCompactToolbar] = useState<boolean>(() => {
     try {
-      return localStorage.getItem(COMPACT_TOOLBAR_STORAGE_KEY) === "true";
+      return localStorage.getItem(COMPACT_TOOLBAR_STORAGE_KEY) !== "false";
     } catch {
-      return false;
+      return true;
     }
   });
   const toggleCompactToolbar = useCallback(() => {
@@ -2603,11 +2605,11 @@ export default function App() {
       if (!workspace) return;
       setHiddenTools(new Set(workspace.hiddenTools));
       setKeyBindings({ ...DEFAULT_KEY_BINDINGS, ...workspace.keyBindings });
-      setCompactToolbar(workspace.compactToolbar ?? false);
+      setCompactToolbar(workspace.compactToolbar ?? true);
       try {
         localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify(workspace.hiddenTools));
         localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(workspace.keyBindings));
-        localStorage.setItem(COMPACT_TOOLBAR_STORAGE_KEY, JSON.stringify(workspace.compactToolbar ?? false));
+        localStorage.setItem(COMPACT_TOOLBAR_STORAGE_KEY, JSON.stringify(workspace.compactToolbar ?? true));
       } catch {
         // ignore
       }
