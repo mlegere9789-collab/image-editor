@@ -9,6 +9,8 @@ import DockablePanel, { type PanelPlacement } from "./DockablePanel";
 import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
+import Tour from "./Tour";
+import { markTourSeen, tourSeen } from "./tour";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import {
   applyInterface,
@@ -1314,6 +1316,13 @@ export default function App() {
   // -- kept in the browser, applied as root attributes the stylesheet's
   // token sets key on (main.tsx applies them again before first paint).
   const [showInterfaceDialog, setShowInterfaceDialog] = useState(false);
+  // Help > Welcome Tour: runs once on its own, the first time the app
+  // opens with nothing loaded, and again whenever asked.
+  const [showTour, setShowTour] = useState(() => !tourSeen());
+  const closeTour = useCallback(() => {
+    setShowTour(false);
+    markTourSeen();
+  }, []);
   const [interfacePreferences, setInterfacePreferences] = useState<InterfacePreferences>(() => {
     try {
       return parseInterface(localStorage.getItem(INTERFACE_STORAGE_KEY));
@@ -9424,6 +9433,13 @@ export default function App() {
           title="Help > Discover…: search the Toolbox by name"
         >
           Discover…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowTour(true)}
+          title="Help > Welcome Tour…: a short walk through the menu bar, toolbar, canvas, panels, and status bar"
+        >
+          Welcome Tour…
         </button>
         <button
           className="button button--quiet"
@@ -29109,6 +29125,7 @@ export default function App() {
       </div>
       {floatingPanels}
 
+      {showTour && <Tour onClose={closeTour} />}
       <footer className="statusbar">
         {progress && (
           <div className="progress-strip" role="status" aria-live="polite">

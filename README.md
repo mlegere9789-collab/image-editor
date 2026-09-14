@@ -21232,6 +21232,46 @@ phases stands.
 
 **1839 Rust tests total** (1834 → 1839: 1832 lib + 7 pipeline). Frontend tests unchanged at 15.
 
+## Phase 354 — Help > Welcome Tour
+
+The onboarding item of `docs/PLAN_TO_100.md` section B.4. Photoshop's
+own first-launch experience is a home screen and a set of guided
+tutorials; this app's is a short tour of its surfaces, run once on its
+own the first time the app opens and again from the Help menu.
+
+**Mechanism.** `src/tour.ts` holds the steps as data — seven cards, the
+first and last untargeted, the five between pointed at the menu bar,
+the toolbar, the canvas, the right dock, and the status bar by CSS
+selector — with `tourStep` to walk them, a `legelabs.tourSeen` flag in
+the browser, and `cardPlacement`, which sits the card below its
+target's box when there is room, above it otherwise, and centred when
+neither fits or there is no target, always inside the viewport by a
+12 px margin. `src/Tour.tsx` renders it: a dimmed layer, an accent ring
+4 px outside the target's box (measured on every step and on resize),
+and the card with its count, title, body, Skip, Back, and Next — Done
+on the last card; Esc and the arrow keys work too. The App opens it
+when the seen flag is unset (so a fresh install sees it once), marks
+the flag on Skip, Done, or Esc, and Help > Welcome Tour… opens it
+again.
+
+**Verified two ways.** `npm test` (`src/tour.test.ts`, 3 tests): the
+steps' shape; `tourStep` walking both ways and falling off either end;
+`cardPlacement` below a top-of-page target at (40, 340), above a
+bottom-of-page one at (388, 340), held inside the viewport for a
+far-right target at left 668, and centred at (220, 340) for a target
+that fills the window or for none. Then the built app in Chromium
+(`vite preview` + Playwright, storage empty): the first launch opens on
+"1 of 7 · Welcome to LegeLabs" with no ring; Next shows "2 of 7 · The
+menu bar" with the ring at top −4 and height 36 around the 28 px menu
+bar at top 0; ArrowRight reaches step 3 and Back returns to 2; five
+more Nexts reach "7 of 7 · That's the tour" whose button reads Done;
+Done removes the tour and stores the flag; a reload starts without it;
+Help lists Discover… and Welcome Tour…; Welcome Tour… reopens at step
+1; Esc closes it. The Xvfb live-verification gap from the previous
+phases stands.
+
+**Frontend tests: 18** (15 → 18). Rust tests unchanged at 1839.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

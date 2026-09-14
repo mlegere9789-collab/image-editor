@@ -1618,3 +1618,56 @@ body {
 .modal__hint--error {
   color: var(--danger);
 }
+
+/* Help > Welcome Tour -- see README Phase 354. */
+.tour {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgb(0 0 0 / 35%);
+}
+
+.tour__ring {
+  position: fixed;
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+  box-shadow: 0 0 0 4px rgb(76 141 255 / 25%);
+  pointer-events: none;
+}
+
+.tour__card {
+  position: fixed;
+  width: min(360px, calc(100vw - 24px));
+  padding: 16px 18px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 40%);
+}
+
+.tour__count {
+  margin: 0 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.tour__title {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.tour__body {
+  margin: 0 0 14px;
+  line-height: 1.45;
+}
+
+.tour__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour__spacer {
+  flex: 1;
+}
