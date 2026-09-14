@@ -13620,40 +13620,111 @@ impl Document {
         strength: u32,
         preserve_details: u32,
     ) -> Result<Option<Rect>, String> {
-        if strength > 10 {
-            return Err("Reduce Noise strength must be between 0 and 10.".to_string());
+        self.reduce_noise_with(id, strength, preserve_details, 0, 0, false, None)
+    }
+
+    /// [`Self::reduce_noise`] with the rest of Photoshop's dialog. Reduce
+    /// Color Noise (`0..=100`) moves each pixel's colour — its offset from
+    /// its own luma — toward the median's colour by that fraction while
+    /// keeping the pixel's luma, so colour speckle fades without the
+    /// tones softening. Remove JPEG Artifact averages the result with its
+    /// own 3×3 box blur, a mild deblocking. Sharpen Details (`0..=100`)
+    /// then adds back `(v − box blur) · sharpen / 100`, the unsharp
+    /// mask's own detail term. Advanced mode's `per_channel` gives each
+    /// of Red, Green and Blue its own `(strength, preserve_details)` in
+    /// place of the overall pair. All defaults are `reduce_noise`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reduce_noise_with(
+        &mut self,
+        id: LayerId,
+        strength: u32,
+        preserve_details: u32,
+        reduce_color_noise: u32,
+        sharpen_details: u32,
+        remove_jpeg_artifact: bool,
+        per_channel: Option<[(u32, u32); 3]>,
+    ) -> Result<Option<Rect>, String> {
+        let check = |strength: u32, preserve: u32| -> Result<f32, String> {
+            if strength > 10 {
+                return Err("Reduce Noise strength must be between 0 and 10.".to_string());
+            }
+            if preserve > 100 {
+                return Err("Reduce Noise preserve details must be between 0 and 100.".to_string());
+            }
+            Ok((strength as f32 / 10.0) * (1.0 - preserve as f32 / 100.0))
+        };
+        let overall = check(strength, preserve_details)?;
+        let blends: [f32; 3] = match per_channel {
+            Some(channels) => [
+                check(channels[0].0, channels[0].1)?,
+                check(channels[1].0, channels[1].1)?,
+                check(channels[2].0, channels[2].1)?,
+            ],
+            None => [overall; 3],
+        };
+        if reduce_color_noise > 100 || sharpen_details > 100 {
+            return Err(
+                "Reduce Noise colour noise and sharpen details must be between 0 and 100."
+                    .to_string(),
+            );
         }
-        if preserve_details > 100 {
-            return Err("Reduce Noise preserve details must be between 0 and 100.".to_string());
-        }
-        let bounds = self.copy_bounds();
-        let selection = self.selection.clone();
+        let colour = reduce_color_noise as f32 / 100.0;
+        let sharpen = sharpen_details as f32 / 100.0;
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
-        let layer = self.layer_mut(id)?;
-        if layer.locked {
-            return Err(format!("Layer \"{}\" is locked.", layer.name));
-        }
-        let source = layer.pixels.clone();
-        let blend = (strength as f32 / 10.0) * (1.0 - preserve_details as f32 / 100.0);
-        for row in bounds.y0..bounds.y1 {
-            for col in bounds.x0..bounds.x1 {
-                let keep = selection
-                    .as_ref()
-                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
-                if !keep {
-                    continue;
-                }
-                let denoised = median_at(&source, doc_width, width, height, row, col, 1);
-                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+        let luma = |p: &[f32; 3]| 0.299 * p[0] + 0.587 * p[1] + 0.114 * p[2];
+        let bounds = self.filter_pixels(id, move |source, row, col| {
+            let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+            let median = median_at(source, doc_width, width, height, row, col, 1);
+            let median_f = [median[0] as f32, median[1] as f32, median[2] as f32];
+            let mut out = [0.0f32; 3];
+            for c in 0..3 {
+                let original = source[dst + c] as f32;
+                out[c] = original * (1.0 - blends[c]) + median_f[c] * blends[c];
+            }
+            if colour > 0.0 {
+                let (y_out, y_med) = (luma(&out), luma(&median_f));
                 for c in 0..3 {
-                    let original = source[dst + c] as f32;
-                    let final_value = original * (1.0 - blend) + denoised[c] as f32 * blend;
-                    layer.pixels[dst + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                    let chroma = out[c] - y_out;
+                    let target = median_f[c] - y_med;
+                    out[c] = y_out + chroma + colour * (target - chroma);
                 }
             }
+            [
+                out[0].round().clamp(0.0, 255.0) as u8,
+                out[1].round().clamp(0.0, 255.0) as u8,
+                out[2].round().clamp(0.0, 255.0) as u8,
+                source[dst + 3],
+            ]
+        })?;
+        if remove_jpeg_artifact {
+            self.filter_pixels(id, move |source, row, col| {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let blurred = box_blur_at(source, doc_width, width, height, row, col, 1);
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    out[c] = ((source[dst + c] as f32 + blurred[c] as f32) / 2.0).round() as u8;
+                }
+                out[3] = source[dst + 3];
+                out
+            })?;
         }
-        Ok(Some(bounds))
+        if sharpen > 0.0 {
+            self.filter_pixels(id, move |source, row, col| {
+                let dst = (row as usize * doc_width + col as usize) * CHANNELS;
+                let blurred = box_blur_at(source, doc_width, width, height, row, col, 1);
+                let mut out = [0u8; CHANNELS];
+                for c in 0..3 {
+                    let v = source[dst + c] as f32;
+                    out[c] = (v + (v - blurred[c] as f32) * sharpen)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                out[3] = source[dst + 3];
+                out
+            })?;
+        }
+        Ok(bounds)
     }
 
     /// Filter > Blur > Blur: Photoshop's one-click "just soften it a
@@ -28935,6 +29006,37 @@ pub fn curve_with_point(
 /// ends using themselves in place of the missing neighbour, so one press
 /// rounds a step off by a third of its height on each side and a
 /// straight line — the identity included — is left exactly as it was.
+/// Filter > Other > Custom's own `.acf` file: Photoshop's kernel format,
+/// 27 big-endian signed 16-bit words — the 25 kernel entries row by row,
+/// then Scale, then Offset — 54 bytes. Errors when a value does not fit
+/// in 16 bits.
+pub fn encode_acf(kernel: &[i32; 25], scale: i32, offset: i32) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::with_capacity(54);
+    for &value in kernel.iter().chain([&scale, &offset]) {
+        let word = i16::try_from(value)
+            .map_err(|_| format!("A .acf value must fit in 16 bits, got {value}."))?;
+        bytes.extend_from_slice(&word.to_be_bytes());
+    }
+    Ok(bytes)
+}
+
+/// The inverse of [`encode_acf`]: the kernel, Scale and Offset of a
+/// 54-byte `.acf` file. Errors on any other length.
+pub fn decode_acf(bytes: &[u8]) -> Result<([i32; 25], i32, i32), String> {
+    if bytes.len() != 54 {
+        return Err(format!(
+            "A .acf file is 54 bytes (25 kernel entries, scale, offset); this one is {}.",
+            bytes.len()
+        ));
+    }
+    let word = |i: usize| i16::from_be_bytes([bytes[2 * i], bytes[2 * i + 1]]) as i32;
+    let mut kernel = [0i32; 25];
+    for (i, slot) in kernel.iter_mut().enumerate() {
+        *slot = word(i);
+    }
+    Ok((kernel, word(25), word(26)))
+}
+
 pub fn smooth_curve_table(table: &[u8; 256]) -> [u8; 256] {
     let mut out = [0u8; 256];
     for (i, slot) in out.iter_mut().enumerate() {
@@ -46000,6 +46102,81 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn reduce_noise_advanced_controls() {
+        // A red speck on grey: every 3×3 median is grey 128.
+        let mut speck = solid(3, 3, [128, 128, 128, 255]);
+        speck[16..19].copy_from_slice(&[255, 0, 0]);
+        let run = |strength: u32,
+                   colour: u32,
+                   sharpen: u32,
+                   jpeg: bool,
+                   per_channel: Option<[(u32, u32); 3]>| {
+            let mut doc = Document::new(3, 3).unwrap();
+            let id = doc.add_layer("s", &speck, 3, 3).unwrap();
+            doc.reduce_noise_with(id, strength, 0, colour, sharpen, jpeg, per_channel)
+                .unwrap();
+            doc.layers()[0].pixels.clone()
+        };
+        // Reduce Color Noise alone keeps the speck's luma (76) and takes
+        // the median's colour (none): a 76 grey; its neighbours stay 128.
+        let decoloured = run(0, 100, 0, false, None);
+        assert_eq!(&decoloured[16..19], &[76, 76, 76]);
+        assert_eq!(&decoloured[0..3], &[128, 128, 128]);
+        // Advanced: full strength on Red only replaces the speck's red
+        // with the median's 128 and leaves green and blue at 0.
+        let red_only = run(0, 0, 0, false, Some([(10, 0), (0, 0), (0, 0)]));
+        assert_eq!(&red_only[16..19], &[128, 0, 0]);
+        // Sharpen Details and Remove JPEG Artifact on a 100|150 step (the
+        // 3×3 box blur reads 116 left of the edge and 133 right of it):
+        // sharpening at 100 % pushes them to 84 and 167, deblocking to
+        // 108 and 142.
+        let step = grey_row(&[100, 100, 100, 150, 150, 150]);
+        let edge = |sharpen: u32, jpeg: bool| {
+            let mut doc = Document::new(6, 1).unwrap();
+            let id = doc.add_layer("e", &step, 6, 1).unwrap();
+            doc.reduce_noise_with(id, 0, 0, 0, sharpen, jpeg, None)
+                .unwrap();
+            red_plane(&doc)
+        };
+        let sharpened = edge(100, false);
+        assert_eq!((sharpened[2], sharpened[3]), (84, 167));
+        let deblocked = edge(0, true);
+        assert_eq!((deblocked[2], deblocked[3]), (108, 142));
+        // The defaults are reduce_noise.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc.add_layer("s", &speck, 3, 3).unwrap();
+        doc.reduce_noise_with(id, 6, 50, 0, 0, false, None).unwrap();
+        let mut old = Document::new(3, 3).unwrap();
+        let old_id = old.add_layer("s", &speck, 3, 3).unwrap();
+        old.reduce_noise(old_id, 6, 50).unwrap();
+        assert_eq!(doc.layers()[0].pixels, old.layers()[0].pixels);
+        assert!(doc
+            .reduce_noise_with(id, 6, 50, 101, 0, false, None)
+            .is_err());
+        assert!(doc
+            .reduce_noise_with(id, 6, 50, 0, 0, false, Some([(11, 0), (0, 0), (0, 0)]))
+            .is_err());
+    }
+
+    #[test]
+    fn custom_kernels_round_trip_through_acf_files() {
+        let mut kernel = [0i32; 25];
+        kernel[12] = 1;
+        kernel[7] = -2;
+        let bytes = encode_acf(&kernel, 3, -1).unwrap();
+        assert_eq!(bytes.len(), 54);
+        assert_eq!(&bytes[24..26], &[0x00, 0x01]);
+        assert_eq!(&bytes[14..16], &[0xFF, 0xFE]);
+        assert_eq!(&bytes[50..52], &[0x00, 0x03]);
+        assert_eq!(&bytes[52..54], &[0xFF, 0xFF]);
+        assert_eq!(decode_acf(&bytes).unwrap(), (kernel, 3, -1));
+        assert!(decode_acf(&bytes[..53]).is_err());
+        let mut wide = [0i32; 25];
+        wide[0] = 40_000;
+        assert!(encode_acf(&wide, 1, 0).is_err());
     }
 
     #[test]

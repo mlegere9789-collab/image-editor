@@ -2639,6 +2639,17 @@ export default function App() {
   const [smartSharpenReduceNoise, setSmartSharpenReduceNoise] = useState(10);
   const [showReduceNoiseDialog, setShowReduceNoiseDialog] = useState(false);
   const [reduceNoiseStrength, setReduceNoiseStrength] = useState(6);
+  const [reduceNoiseColor, setReduceNoiseColor] = useState(45);
+  const [reduceNoiseSharpen, setReduceNoiseSharpen] = useState(25);
+  const [reduceNoiseJpeg, setReduceNoiseJpeg] = useState(false);
+  const [reduceNoiseAdvanced, setReduceNoiseAdvanced] = useState(false);
+  const [reduceNoiseChannels, setReduceNoiseChannels] = useState<
+    [number, number][]
+  >([
+    [6, 50],
+    [6, 50],
+    [6, 50],
+  ]);
   const [reduceNoisePreserveDetails, setReduceNoisePreserveDetails] =
     useState(60);
 
@@ -8729,13 +8740,65 @@ export default function App() {
 
   const applyReduceNoise = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("reduce_noise", {
+    await runCommand("reduce_noise_with", {
       id: selectedId,
       strength: reduceNoiseStrength,
       preserveDetails: reduceNoisePreserveDetails,
+      reduceColorNoise: reduceNoiseColor,
+      sharpenDetails: reduceNoiseSharpen,
+      removeJpegArtifact: reduceNoiseJpeg,
+      perChannel: reduceNoiseAdvanced ? reduceNoiseChannels : null,
     });
     setShowReduceNoiseDialog(false);
-  }, [runCommand, selectedId, reduceNoiseStrength, reduceNoisePreserveDetails]);
+  }, [
+    runCommand,
+    selectedId,
+    reduceNoiseStrength,
+    reduceNoisePreserveDetails,
+    reduceNoiseColor,
+    reduceNoiseSharpen,
+    reduceNoiseJpeg,
+    reduceNoiseAdvanced,
+    reduceNoiseChannels,
+  ]);
+
+  const loadCustomKernel = useCallback(async () => {
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Custom filter", extensions: ["acf"] }],
+    });
+    if (typeof selected !== "string") return;
+    try {
+      const [kernel, scale, offset] = await invoke<[number[], number, number]>(
+        "load_custom_kernel",
+        { path: selected },
+      );
+      setCustomKernel(kernel.map((v) => String(v)));
+      setCustomScale(String(scale));
+      setCustomOffset(String(offset));
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const saveCustomKernel = useCallback(async () => {
+    const destination = await save({
+      filters: [{ name: "Custom filter", extensions: ["acf"] }],
+      defaultPath: "custom.acf",
+    });
+    if (typeof destination !== "string") return;
+    try {
+      await invoke("save_custom_kernel", {
+        path: destination,
+        kernel: customKernel.map(toInteger),
+        scale: toInteger(customScale),
+        offset: toInteger(customOffset),
+      });
+    } catch (err) {
+      setError(String(err));
+    }
+  }, [customKernel, customScale, customOffset]);
 
   const applyMotionBlur = useCallback(async () => {
     if (selectedId === null) return;
@@ -27828,6 +27891,98 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control">
+              <span className="control__label">
+                Reduce Color Noise
+                <span className="control__value">{reduceNoiseColor}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={reduceNoiseColor}
+                onChange={(event) =>
+                  setReduceNoiseColor(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Sharpen Details
+                <span className="control__value">{reduceNoiseSharpen}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={reduceNoiseSharpen}
+                onChange={(event) =>
+                  setReduceNoiseSharpen(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Remove JPEG Artifact</span>
+              <input
+                type="checkbox"
+                checked={reduceNoiseJpeg}
+                onChange={(event) => setReduceNoiseJpeg(event.target.checked)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Advanced (per channel)</span>
+              <input
+                type="checkbox"
+                checked={reduceNoiseAdvanced}
+                onChange={(event) =>
+                  setReduceNoiseAdvanced(event.target.checked)
+                }
+              />
+            </label>
+            {reduceNoiseAdvanced &&
+              ["Red", "Green", "Blue"].map((name, index) => (
+                <label className="control" key={name}>
+                  <span className="control__label">
+                    {name} Strength / Preserve
+                    <span className="control__value">
+                      {reduceNoiseChannels[index][0]} /{" "}
+                      {reduceNoiseChannels[index][1]}%
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={10}
+                    aria-label={`${name} strength`}
+                    value={reduceNoiseChannels[index][0]}
+                    onChange={(event) =>
+                      setReduceNoiseChannels((channels) =>
+                        channels.map((pair, i) =>
+                          i === index
+                            ? [Number(event.target.value), pair[1]]
+                            : pair,
+                        ),
+                      )
+                    }
+                  />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    aria-label={`${name} preserve details`}
+                    value={reduceNoiseChannels[index][1]}
+                    onChange={(event) =>
+                      setReduceNoiseChannels((channels) =>
+                        channels.map((pair, i) =>
+                          i === index
+                            ? [pair[0], Number(event.target.value)]
+                            : pair,
+                        ),
+                      )
+                    }
+                  />
+                </label>
+              ))}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -28334,6 +28489,21 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => void loadCustomKernel()}
+                title="Load a Photoshop .acf kernel file"
+              >
+                Load…
+              </button>
+              <button
+                className="button button--quiet"
+                onClick={() => void saveCustomKernel()}
+                disabled={toInteger(customScale) === 0}
+                title="Save this kernel as a Photoshop .acf file"
+              >
+                Save…
+              </button>
               <button
                 className="button button--quiet"
                 onClick={() => {

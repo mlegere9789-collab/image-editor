@@ -22154,6 +22154,57 @@ screenshots checked by eye.
 
 Tests: 1871 Rust (1868 → 1871), 22 frontend.
 
+## Phase 371 — Noise and Custom options: Reduce Noise's full dialog, Custom's .acf files
+
+Two section D scope cuts on the Noise and Other menus.
+
+**Reduce Noise** (`reduce_noise_with`): Reduce Color Noise (0–100 %)
+moves each pixel's colour — its offset from its own luma — toward the
+median's colour by that fraction while keeping the pixel's luma, so
+colour speckle fades without the tones softening. Remove JPEG Artifact
+averages the result with its own 3×3 box blur, a mild deblocking.
+Sharpen Details (0–100 %) then adds back `(v − box blur) · sharpen`,
+the unsharp mask's detail term. Advanced (per channel) gives Red,
+Green and Blue their own Strength and Preserve Details pairs in place
+of the overall two. The old command is every new control at zero.
+
+**Custom** (`encode_acf` / `decode_acf`, `save_custom_kernel` /
+`load_custom_kernel`, Load… and Save… buttons in the dialog):
+Photoshop's `.acf` kernel file, 27 big-endian signed 16-bit words —
+the 25 kernel entries row by row, then Scale, then Offset, 54 bytes —
+written from and read into the dialog's grid through the file dialogs.
+
+**Verified.** Two Rust tests. `reduce_noise_advanced_controls` with a
+red speck on grey (every 3×3 median is grey 128): Reduce Color Noise
+alone turns the speck into a 76 grey — its own luma, the median's
+colour — and leaves its neighbours at 128; Advanced full strength on
+Red only replaces the speck's red with 128 and keeps green and blue at
+0; on a 100|150 step Sharpen Details at 100 % pushes the two pixels at
+the edge from 100 and 150 to 84 and 167, and Remove JPEG Artifact to
+108 and 142; the defaults equal `reduce_noise`; 101 % and a strength of
+11 error. `custom_kernels_round_trip_through_acf_files`: a kernel with
+1 at the centre and −2 at entry 7, Scale 3, Offset −1 encodes to 54
+bytes with `00 01` at bytes 24–25, `FF FE` at 14–15, `00 03` at 50–51
+and `FF FF` at 52–53, decodes back exactly, a 53-byte file errors, and
+a 40 000 entry errors. In Chromium against the built frontend with the
+file dialogs stubbed: Filter > Noise > Reduce Noise… shows Reduce
+Color Noise (45 %), Sharpen Details (25 %), Remove JPEG Artifact and
+Advanced after Preserve Details, Advanced reveals three
+Strength / Preserve rows, and Apply sends `reduce_noise_with` with
+`reduceColorNoise: 80, sharpenDetails: 10, removeJpegArtifact: true,
+perChannel: [[6, 50], [6, 50], [9, 50]]`; Filter > Other > Custom…
+shows Load…, Save…, Reset, Cancel and Apply, Load… asks the file
+dialog and fills the grid, Scale and Offset from `load_custom_kernel`,
+and Save… sends the grid to `save_custom_kernel`. On the real app
+under Xvfb, on the recovered document (the tilt-shifted stroke of
+Phase 370): Filter > Noise > Reduce Noise… shows the four new controls
+after Preserve Details, Advanced unfolds the Red, Green and Blue
+Strength / Preserve rows, and Apply with Sharpen Details at 100 % ran
+through the real IPC in under ten seconds, crisping the stroke's
+anti-aliased edge; four screenshots checked by eye.
+
+Tests: 1873 Rust (1871 → 1873), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

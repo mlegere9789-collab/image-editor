@@ -3253,6 +3253,56 @@ fn spin_blur_with(
     })
 }
 
+/// Filter > Noise > Reduce Noise on layer `id` with the dialog's Reduce
+/// Color Noise, Sharpen Details, Remove JPEG Artifact and Advanced
+/// per-channel strength and preserve-details pairs.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn reduce_noise_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    strength: u32,
+    preserve_details: u32,
+    reduce_color_noise: u32,
+    sharpen_details: u32,
+    remove_jpeg_artifact: bool,
+    per_channel: Option<[(u32, u32); 3]>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.reduce_noise_with(
+            id,
+            strength,
+            preserve_details,
+            reduce_color_noise,
+            sharpen_details,
+            remove_jpeg_artifact,
+            per_channel,
+        )
+    })
+}
+
+/// Filter > Other > Custom's Save…: the kernel, Scale and Offset as a
+/// Photoshop `.acf` file at `path`.
+#[tauri::command]
+fn save_custom_kernel(
+    path: String,
+    kernel: [i32; 25],
+    scale: i32,
+    offset: i32,
+) -> Result<(), String> {
+    let bytes = document::encode_acf(&kernel, scale, offset)?;
+    std::fs::write(&path, bytes).map_err(|err| format!("Could not write {path}: {err}"))
+}
+
+/// Filter > Other > Custom's Load…: the kernel, Scale and Offset read
+/// from a Photoshop `.acf` file at `path`.
+#[tauri::command]
+fn load_custom_kernel(path: String) -> Result<(Vec<i32>, i32, i32), String> {
+    let bytes = std::fs::read(&path).map_err(|err| format!("Could not read {path}: {err}"))?;
+    let (kernel, scale, offset) = document::decode_acf(&bytes)?;
+    Ok((kernel.to_vec(), scale, offset))
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -8294,6 +8344,9 @@ pub fn run() {
             tilt_shift_with,
             iris_blur_with,
             spin_blur_with,
+            reduce_noise_with,
+            save_custom_kernel,
+            load_custom_kernel,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,
