@@ -11,6 +11,16 @@ import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import {
+  applyInterface,
+  HIGHLIGHTS,
+  INTERFACE_DEFAULTS,
+  INTERFACE_STORAGE_KEY,
+  parseInterface,
+  THEMES,
+  UI_SIZES,
+  type InterfacePreferences,
+} from "./interface";
+import {
   batchOutputName,
   describeStep,
   isRecordable,
@@ -1299,6 +1309,29 @@ export default function App() {
   // waiting only on the user's own provider details. See the External
   // Services dialog below for the one contract each endpoint must speak.
   const [showExternalServicesDialog, setShowExternalServicesDialog] = useState(false);
+  // Edit > Preferences > Interface: theme, highlight colour, UI font size
+  // -- kept in the browser, applied as root attributes the stylesheet's
+  // token sets key on (main.tsx applies them again before first paint).
+  const [showInterfaceDialog, setShowInterfaceDialog] = useState(false);
+  const [interfacePreferences, setInterfacePreferences] = useState<InterfacePreferences>(() => {
+    try {
+      return parseInterface(localStorage.getItem(INTERFACE_STORAGE_KEY));
+    } catch {
+      return { ...INTERFACE_DEFAULTS };
+    }
+  });
+  const updateInterface = useCallback((patch: Partial<InterfacePreferences>) => {
+    setInterfacePreferences((previous) => {
+      const next = { ...previous, ...patch };
+      applyInterface(window.document.documentElement, next);
+      try {
+        localStorage.setItem(INTERFACE_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
   const [generativeAiEndpoint, setGenerativeAiEndpoint] = useState(
     () => localStorage.getItem(GENERATIVE_AI_ENDPOINT_STORAGE_KEY) ?? "",
   );
@@ -9516,6 +9549,13 @@ export default function App() {
           title="Edit > Preferences > External Services…: Generative Fill's provider and image-editor-server's endpoint and token"
         >
           External Services…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => setShowInterfaceDialog(true)}
+          title="Edit > Preferences > Interface…: colour theme (Darkest, Dark, Light, Lightest), highlight colour, and UI font size"
+        >
+          Interface…
         </button>
 
         <div className="tools" role="group" aria-label="Undo history">
@@ -18399,6 +18439,82 @@ export default function App() {
                 title="Call the configured provider and insert its response as a new layer"
               >
                 Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInterfaceDialog && (
+        <div className="modal-overlay" onClick={() => setShowInterfaceDialog(false)} role="presentation">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Interface preferences"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Preferences &gt; Interface</h2>
+            <p className="modal__hint">
+              Photoshop's own Interface preferences: a colour theme at one of four
+              brightnesses, the highlight colour, and the UI font size. Applied at once and
+              kept in this browser; the next launch starts in this look without a flash.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Color Theme</span>
+              <select
+                value={interfacePreferences.theme}
+                onChange={(event) =>
+                  updateInterface({ theme: event.target.value as InterfacePreferences["theme"] })
+                }
+              >
+                {THEMES.map((theme) => (
+                  <option value={theme} key={theme}>
+                    {theme[0].toUpperCase() + theme.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Highlight Color</span>
+              <select
+                value={interfacePreferences.highlight}
+                onChange={(event) =>
+                  updateInterface({
+                    highlight: event.target.value as InterfacePreferences["highlight"],
+                  })
+                }
+              >
+                {HIGHLIGHTS.map((highlight) => (
+                  <option value={highlight} key={highlight}>
+                    {highlight[0].toUpperCase() + highlight.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">UI Font Size</span>
+              <select
+                value={interfacePreferences.uiSize}
+                onChange={(event) =>
+                  updateInterface({ uiSize: event.target.value as InterfacePreferences["uiSize"] })
+                }
+              >
+                {UI_SIZES.map((size) => (
+                  <option value={size} key={size}>
+                    {size[0].toUpperCase() + size.slice(1)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => updateInterface({ ...INTERFACE_DEFAULTS })}
+              >
+                Reset to Defaults
+              </button>
+              <button className="button" onClick={() => setShowInterfaceDialog(false)}>
+                Close
               </button>
             </div>
           </div>

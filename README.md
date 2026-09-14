@@ -21026,6 +21026,56 @@ The Xvfb live-verification gap from the previous phases stands.
 
 **1827 Rust tests total** (1823 → 1827: 1820 lib + 7 pipeline). **Frontend tests: 13** (9 → 13).
 
+## Phase 351 — Edit > Preferences > Interface: four colour themes, highlight colour, UI font size
+
+The "consistent theme" item of `docs/PLAN_TO_100.md` section B.4, done
+the way Photoshop's own Interface preferences do it. The app had one
+look, dark, with its colours spread between design tokens and a few
+dozen literal values.
+
+**Mechanism.** The stylesheet's `:root` tokens are now the whole
+palette: besides `--bg`, `--surface`, `--border`, `--text`, `--muted`,
+`--accent`, and `--danger`, the canvas well and its transparency
+checkerboard (`--canvas-well`, `--canvas-check`), the panel wells
+(`--canvas-bg`, `--panel-bg`), the hover washes (`--hover`,
+`--hover-faint`), and the selected-layer wash (`--accent-wash`); every
+rule that used a literal for one of these reads the token instead. Four
+attribute-keyed token sets give Photoshop's four brightnesses — Darkest,
+Dark (the default), Light, Lightest — the two light ones also switching
+`color-scheme` so native inputs and scrollbars follow; `data-highlight`
+swaps the accent between Blue and Grey; `data-ui-size` sets the root
+font size to 13, 14, or 16 px, which every `rem`-free control inherits.
+
+`src/interface.ts` holds the preferences: `parseInterface` reads the
+stored JSON and lets anything missing or unknown fall back to the
+default, `applyInterface` sets the three attributes on the root element,
+and `applyStoredInterface` does both — which `main.tsx` calls before
+React renders, so a light theme never flashes dark at launch. The
+dialog (Edit > Preferences > Interface…) has the three selects and Reset
+to Defaults; every change applies at once and is kept in the browser.
+
+**Verified two ways.** `npm test` (`src/interface.test.ts`, 2 tests):
+`null`, non-JSON, and a bare number parse to the defaults; a partial
+object keeps the defaults for what it omits; unknown values fall back
+per field while known ones in the same object are kept; applying sets
+exactly the three attributes and applying the defaults resets them.
+Then the built app in Chromium (`vite preview` + Playwright): the
+default look reads `data-theme="dark"`, body `rgb(27, 29, 33)`, text
+`rgb(230, 232, 234)`, accent `#4c8dff`, 14 px, canvas well `rgb(21, 23,
+26)`, colour scheme dark; Edit > Preferences from the menu bar lists
+External Services… and Interface…; choosing Light, Grey, Large changes
+the body to `rgb(230, 232, 236)`, the text to `rgb(29, 32, 36)`, the
+accent to `#7d8592`, the font to 16 px, the canvas well to `rgb(214,
+217, 222)`, and the colour scheme to light, and stores
+`{"theme":"light","highlight":"grey","uiSize":"large"}`; a reload comes
+back in that look with the same computed values; Darkest reads body
+`rgb(18, 19, 22)` and canvas well `rgb(14, 15, 17)`; Reset to Defaults
+returns every value to the first reading. A screenshot of the Light
+theme with the dialog open was checked by eye for legibility. The Xvfb
+live-verification gap from the previous phases stands.
+
+**Frontend tests: 15** (13 → 15). Rust tests unchanged at 1827.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
