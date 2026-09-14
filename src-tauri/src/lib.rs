@@ -376,11 +376,11 @@ fn encode_with_spots(
     composite: &composite::Composite,
 ) -> Result<Vec<u8>, String> {
     if document.spots().is_empty() {
-        return png::encode(composite);
+        return png::encode_preview(composite);
     }
     let mut pixels = composite.pixels.clone();
     document.spot_preview(&mut pixels);
-    png::encode_pixels(composite.width, composite.height, &pixels)
+    png::encode_pixels_preview(composite.width, composite.height, &pixels)
 }
 
 /// Flatten `document` and write the result to `path` as PNG. Kept separate

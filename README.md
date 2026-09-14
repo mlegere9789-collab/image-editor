@@ -21463,6 +21463,56 @@ Bicubic. The six checklist rows now say so.
 
 **1841 Rust tests total** (1840 → 1841: 1834 lib + 7 pipeline). Frontend tests unchanged at 20.
 
+## Phase 360 — Large files: a parallel compositor and a fast preview encoder
+
+The fourth pain point in `docs/PLAN_TO_100.md` section B.3: "performance
+on large files". Every edit re-flattens the whole document on one
+thread and then PNG-encodes the whole composite at the default deflate
+level so the webview can show it; on a 12-megapixel document the
+encode alone was the slowest step of every edit.
+
+**Mechanism.** `composite.rs` composites in row bands on every core:
+`composite_rows_parallel` splits the rows into as many bands as
+`available_parallelism` reports (none below 64 rows, where handing out
+bands would cost more than compositing them), hands each band out as a
+disjoint `chunks_mut` slice of the target buffer, and runs each on its
+own scoped thread (`std::thread::scope`, no new dependency). Every
+pixel still goes through `composite_layers_pixel`, so the result is
+byte-identical whatever the core count; `flatten`, `recomposite_region`
+(a stroke's dirty rect), and `flatten_subset` (Merge Visible) all use
+it. `png::encode_preview` encodes the canvas preview with
+`CompressionType::Fast` and `FilterType::NoFilter` — the bytes only
+cross to the webview and are decoded there at once, so their size
+matters far less than the time to make them — and `snapshot` uses it;
+exports and project files keep the default, smaller encoding.
+
+**Verified.** `cargo test`: a 37×300 two-layer document with Multiply
+at 60 % flattens byte-identically to a pixel-by-pixel reference
+through `composite_pixel` (300 rows make four bands and a remainder on
+this machine), a dirty rect recomposited in place matches the flatten
+inside and leaves every byte outside alone, and a 3×2 document takes
+the single-thread path and agrees; the preview encoding decodes to
+exactly the pixels the default encoding does and is a real PNG.
+Timings from the ignored `bench_large_file_composite_and_encode` on a
+4000×3000 three-layer document — this machine's four cores, a debug
+build (a release build would not fit the sandbox's disk), with the
+diffusion model's training sharing the cores, so the absolute numbers
+are pessimistic and the ratios are what count:
+
+| Step | Before | After |
+| --- | --- | --- |
+| Flatten (one thread → four bands) | 6.01 s | 2.82 s |
+| Encode the preview (default deflate → fast, unfiltered) | 9.20 s | 2.92 s |
+| Bytes handed to the webview | 12.9 MB | 48.0 MB |
+
+The two together take an edit's turnaround on that document from 15.2 s
+to 5.7 s; the preview's larger byte count crosses an in-process
+protocol and is decoded once, which the timings above already include
+on the encoding side. The bench asserts the parallel flatten equals
+the sequential one byte for byte on the full 12-megapixel buffer.
+
+**1844 Rust tests total** (1841 → 1844: 1837 lib + 7 pipeline; the benchmark is ignored). Frontend tests unchanged at 20.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

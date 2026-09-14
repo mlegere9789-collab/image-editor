@@ -63,6 +63,30 @@ pub fn encode(composite: &Composite) -> Result<Vec<u8>, String> {
     encode_pixels(composite.width, composite.height, &composite.pixels)
 }
 
+/// Encode a composite for the canvas preview: the same pixels as
+/// [`encode`], as a PNG with no filtering and the fastest deflate level
+/// (`CompressionType::Fast`, `FilterType::NoFilter`). The bytes only ever
+/// cross to the webview and are decoded there at once, so their size
+/// matters far less than the time to make them — on a large document the
+/// default encoder was the slowest step of every edit (README Phase 360).
+/// Exports and project files keep [`encode`]'s smaller output.
+pub fn encode_preview(composite: &Composite) -> Result<Vec<u8>, String> {
+    encode_pixels_preview(composite.width, composite.height, &composite.pixels)
+}
+
+/// [`encode_preview`] over a raw RGBA8 buffer.
+pub fn encode_pixels_preview(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, String> {
+    let mut buffer = Vec::new();
+    image::codecs::png::PngEncoder::new_with_quality(
+        &mut buffer,
+        image::codecs::png::CompressionType::Fast,
+        image::codecs::png::FilterType::NoFilter,
+    )
+    .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
+    .map_err(|err| format!("Could not encode the preview: {err}"))?;
+    Ok(buffer)
+}
+
 /// Encode a raw RGBA8 buffer as PNG bytes — the part of [`encode`] that
 /// doesn't need a [`Composite`], shared with `project.rs`, which encodes one
 /// layer's own pixels rather than the flattened composite.
@@ -100,6 +124,26 @@ pub fn encode_pixels_16(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_preview_encoding_decodes_to_the_same_pixels_as_the_default() {
+        let (w, h) = (17u32, 9u32);
+        let pixels: Vec<u8> = (0..w * h * 4).map(|i| (i * 37 % 256) as u8).collect();
+        let composite = Composite {
+            width: w,
+            height: h,
+            pixels: pixels.clone(),
+        };
+        let preview = encode_preview(&composite).unwrap();
+        let decoded = decode_bytes(&preview).unwrap();
+        assert_eq!((decoded.width, decoded.height), (w, h));
+        assert_eq!(decoded.pixels, pixels);
+        assert_eq!(
+            decode_bytes(&encode(&composite).unwrap()).unwrap().pixels,
+            pixels
+        );
+        assert_eq!(&preview[..8], b"\x89PNG\r\n\x1a\n");
+    }
+
     use super::*;
     use std::path::PathBuf;
 

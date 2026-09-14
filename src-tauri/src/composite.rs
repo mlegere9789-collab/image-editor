@@ -52,16 +52,88 @@ pub fn flatten(document: &Document) -> Composite {
     let height = document.height();
     let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
     let layers = document.compositing_layers();
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = composite_layers_pixel(&layers, width, x, y);
-            write_pixel(&mut pixels, width, x, y, pixel);
-        }
-    }
+    composite_rows_parallel(&layers, width, 0..height, 0..width, &mut pixels);
     Composite {
         width,
         height,
         pixels,
+    }
+}
+
+/// Rows below which a composite runs on one thread: the bands would cost
+/// more to hand out than to composite.
+const PARALLEL_MIN_ROWS: u32 = 64;
+
+/// Composites `rows` × `columns` of `layers` into `target` (a full
+/// `width`-wide RGBA buffer), splitting the rows into as many bands as
+/// there are cores and compositing each on its own thread — the whole
+/// point of a large file's edit not stalling the app (README Phase 360).
+/// Every pixel is computed by [`composite_layers_pixel`] exactly as the
+/// sequential loop did, so the result is byte-identical whatever the core
+/// count. Bands are disjoint row ranges of `target`, handed out with
+/// `chunks_mut`, so no two threads write the same byte.
+fn composite_rows_parallel(
+    layers: &[&Layer],
+    width: u32,
+    rows: std::ops::Range<u32>,
+    columns: std::ops::Range<u32>,
+    target: &mut [u8],
+) {
+    let row_count = rows.end.saturating_sub(rows.start);
+    if row_count == 0 || columns.is_empty() {
+        return;
+    }
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1);
+    let bands = cores.min(row_count / PARALLEL_MIN_ROWS.max(1)).max(1);
+    let row_bytes = width as usize * CHANNELS;
+    let first = rows.start as usize * row_bytes;
+    let last = rows.end as usize * row_bytes;
+    let region = &mut target[first..last];
+    if bands <= 1 {
+        let origin = rows.start;
+        composite_rows(layers, width, rows, columns, region, origin);
+        return;
+    }
+    let rows_per_band = row_count.div_ceil(bands);
+    std::thread::scope(|scope| {
+        for (index, band) in region
+            .chunks_mut(rows_per_band as usize * row_bytes)
+            .enumerate()
+        {
+            let band_start = rows.start + index as u32 * rows_per_band;
+            let band_rows = (band.len() / row_bytes) as u32;
+            let columns = columns.clone();
+            scope.spawn(move || {
+                composite_rows(
+                    layers,
+                    width,
+                    band_start..band_start + band_rows,
+                    columns,
+                    band,
+                    band_start,
+                );
+            });
+        }
+    });
+}
+
+/// Composites `rows` × `columns` into `band`, a buffer whose first byte
+/// is row `band_origin` of the document.
+fn composite_rows(
+    layers: &[&Layer],
+    width: u32,
+    rows: std::ops::Range<u32>,
+    columns: std::ops::Range<u32>,
+    band: &mut [u8],
+    band_origin: u32,
+) {
+    for y in rows {
+        for x in columns.clone() {
+            let pixel = composite_layers_pixel(layers, width, x, y);
+            write_pixel(band, width, x, y - band_origin, pixel);
+        }
     }
 }
 
@@ -81,12 +153,7 @@ pub fn flatten(document: &Document) -> Composite {
 pub fn recomposite_region(document: &Document, rect: Rect, target: &mut [u8]) {
     let width = document.width();
     let layers = document.compositing_layers();
-    for y in rect.y0..rect.y1 {
-        for x in rect.x0..rect.x1 {
-            let pixel = composite_layers_pixel(&layers, width, x, y);
-            write_pixel(target, width, x, y, pixel);
-        }
-    }
+    composite_rows_parallel(&layers, width, rect.y0..rect.y1, rect.x0..rect.x1, target);
 }
 
 /// Flatten just the layers at `indices` (bottom-to-top order, as in
@@ -102,12 +169,7 @@ pub fn flatten_subset(document: &Document, indices: &[usize]) -> Composite {
     let mut pixels = vec![0u8; width as usize * height as usize * CHANNELS];
     let all = document.layers();
     let layers: Vec<&Layer> = indices.iter().map(|&i| &all[i]).collect();
-    for y in 0..height {
-        for x in 0..width {
-            let pixel = composite_layers_pixel(&layers, width, x, y);
-            write_pixel(&mut pixels, width, x, y, pixel);
-        }
-    }
+    composite_rows_parallel(&layers, width, 0..height, 0..width, &mut pixels);
     Composite {
         width,
         height,
@@ -231,6 +293,119 @@ pub(crate) fn to_byte(unit: f32) -> u8 {
 
 #[cfg(test)]
 mod tests {
+    /// The sequential reference: every pixel through `composite_pixel`.
+    fn flatten_one_by_one(document: &Document) -> Vec<u8> {
+        let mut out = Vec::with_capacity((document.width() * document.height() * 4) as usize);
+        for y in 0..document.height() {
+            for x in 0..document.width() {
+                out.extend_from_slice(&composite_pixel(document, x, y));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn a_parallel_flatten_is_byte_identical_to_the_sequential_one() {
+        // Tall enough for several bands (4 cores × 64 rows = 256, plus
+        // a remainder band), with masks, opacity, and blend modes in play.
+        let (w, h) = (37u32, 300u32);
+        let mut document = Document::new(w, h).unwrap();
+        let mut base = Vec::new();
+        let mut top = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let v = ((x * 7 + y * 3) % 256) as u8;
+                base.extend_from_slice(&[v, 255 - v, (x ^ y) as u8, 255]);
+                top.extend_from_slice(&[200, v, 40, ((x + y) % 3 * 100) as u8]);
+            }
+        }
+        document.add_layer("base", &base, w, h).unwrap();
+        let upper = document.add_layer("top", &top, w, h).unwrap();
+        document.set_opacity(upper, 0.6).unwrap();
+        document
+            .set_blend_mode(upper, crate::blend::BlendMode::Multiply)
+            .unwrap();
+        let flat = flatten(&document);
+        assert_eq!(flat.pixels, flatten_one_by_one(&document));
+        // A dirty rect recomposited in place agrees too, and touches
+        // nothing outside it.
+        let mut target = vec![7u8; (w * h * 4) as usize];
+        let rect = Rect {
+            x0: 5,
+            y0: 100,
+            x1: 30,
+            y1: 290,
+        };
+        recomposite_region(&document, rect, &mut target);
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let inside = (rect.x0..rect.x1).contains(&x) && (rect.y0..rect.y1).contains(&y);
+                let expected: &[u8] = if inside {
+                    &flat.pixels[i..i + 4]
+                } else {
+                    &[7, 7, 7, 7]
+                };
+                assert_eq!(&target[i..i + 4], expected, "pixel ({x}, {y})");
+            }
+        }
+        // A tiny document takes the single-thread path and agrees as well.
+        let mut small = Document::new(3, 2).unwrap();
+        small.add_layer("s", &[9u8; 24], 3, 2).unwrap();
+        assert_eq!(flatten(&small).pixels, flatten_one_by_one(&small));
+    }
+
+    /// A large-file timing, run by hand: `cargo test --release
+    /// bench_large_file -- --ignored --nocapture`. Prints the flatten
+    /// and preview-encode times for a 4000×3000 three-layer document.
+    #[test]
+    #[ignore]
+    fn bench_large_file_composite_and_encode() {
+        let (w, h) = (4000u32, 3000u32);
+        let mut document = Document::new(w, h).unwrap();
+        for layer in 0..3u8 {
+            let mut px = Vec::with_capacity((w * h * 4) as usize);
+            for y in 0..h {
+                for x in 0..w {
+                    px.extend_from_slice(&[
+                        (x % 256) as u8,
+                        (y % 256) as u8,
+                        layer.wrapping_mul(90),
+                        if layer == 0 {
+                            255
+                        } else {
+                            ((x + y) % 200) as u8
+                        },
+                    ]);
+                }
+            }
+            document.add_layer(format!("l{layer}"), &px, w, h).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let flat = flatten(&document);
+        let flattened = started.elapsed();
+        let layers = document.compositing_layers();
+        let mut sequential = vec![0u8; (w * h * 4) as usize];
+        let started = std::time::Instant::now();
+        composite_rows(&layers, w, 0..h, 0..w, &mut sequential, 0);
+        let flattened_sequential = started.elapsed();
+        assert_eq!(sequential, flat.pixels);
+        let started = std::time::Instant::now();
+        let default = crate::png::encode(&flat).unwrap();
+        let encoded_default = started.elapsed();
+        let started = std::time::Instant::now();
+        let preview = crate::png::encode_preview(&flat).unwrap();
+        let encoded_preview = started.elapsed();
+        let cores = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        eprintln!(
+            "BENCH cores={cores} flatten_sequential={flattened_sequential:?} flatten_parallel={flattened:?} encode_default={encoded_default:?} ({} bytes) encode_preview={encoded_preview:?} ({} bytes)",
+            default.len(),
+            preview.len()
+        );
+    }
+
     use super::*;
     use crate::blend::BlendMode;
     use crate::document::MoveDirection;
