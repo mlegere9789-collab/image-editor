@@ -6489,6 +6489,16 @@ fn export_layer(state: State<'_, AppState>, id: LayerId, path: String) -> Result
     export_layer_pixels(document, id, Path::new(&path))
 }
 
+/// The flattened document as PNG bytes -- what [`export_png`] writes to
+/// a path, returned instead (a board's image item). Reads the open
+/// document without mutating it.
+#[tauri::command]
+fn export_composite_bytes(state: State<'_, AppState>) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    png::encode(&composite::flatten(document))
+}
+
 /// Fonts: every activated face, the bundled Open Sans always among them.
 #[tauri::command]
 fn list_fonts() -> Vec<String> {
@@ -7169,6 +7179,7 @@ pub fn run() {
             read_content_credentials,
             export_layer,
             export_layer_bytes,
+            export_composite_bytes,
             list_fonts,
             register_font,
             register_font_file,

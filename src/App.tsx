@@ -259,6 +259,20 @@ type CloudAsset = {
   added_by: string;
   added_at: number;
 };
+type CloudBoard = { id: number; name: string; owner: string; access: "owner" | "edit" | "view"; items: number };
+type BoardItem = {
+  id: number;
+  kind: "image" | "note" | "prompt";
+  name: string;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  bytes: number;
+  added_by: string;
+  added_at: number;
+};
 type FontEntry = { family: string; category: string; license: string; source: string };
 type CloudReview = {
   id: string;
@@ -1600,6 +1614,20 @@ export default function App() {
   const [fontWeight, setFontWeight] = useState<"400" | "700">("400");
   const [fontItalic, setFontItalic] = useState(false);
   const [fontsBusy, setFontsBusy] = useState(false);
+  // Boards (Firefly Boards' open equivalent): shared boards on
+  // image-editor-server where images, notes and prompts are pinned and
+  // arranged -- shown here as a scaled canvas, items dragged to move.
+  const [showBoardsDialog, setShowBoardsDialog] = useState(false);
+  const [cloudBoards, setCloudBoards] = useState<CloudBoard[]>([]);
+  const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
+  const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
+  const [boardThumbnails, setBoardThumbnails] = useState<Record<number, string>>({});
+  const [newBoardName, setNewBoardName] = useState("");
+  const [boardText, setBoardText] = useState("");
+  const [boardShareUser, setBoardShareUser] = useState("");
+  const [boardShareRole, setBoardShareRole] = useState<"edit" | "view">("edit");
+  const [boardBusy, setBoardBusy] = useState(false);
+  const boardDrag = useRef<{ id: number; startX: number; startY: number; originX: number; originY: number; scale: number } | null>(null);
   // The shape tools' Shape mode and the Custom Shape tool.
   const [showShapeLayerDialog, setShowShapeLayerDialog] = useState(false);
   const [shapeKind, setShapeKind] = useState<ShapeSpec["kind"]>("rectangle");
@@ -4104,6 +4132,193 @@ export default function App() {
       setLibraryShareUser("");
     });
   }, [cloudFetch, libraryAction, activeLibraryId, libraryShareUser, libraryShareRole]);
+
+  // Boards: the list, the shown board's items (image items fetched once
+  // into object URLs for thumbnails), and every way onto a board.
+  const refreshBoardItems = useCallback(
+    async (boardId: number) => {
+      const response = await cloudFetch(`/boards/${boardId}`);
+      const body = (await response.json()) as { items?: BoardItem[] };
+      const items = Array.isArray(body.items) ? body.items : [];
+      setBoardItems(items);
+      const thumbnails: Record<number, string> = {};
+      for (const item of items) {
+        if (item.kind !== "image") continue;
+        try {
+          const blob = await (await cloudFetch(`/boards/${boardId}/items/${item.id}/blob`)).blob();
+          thumbnails[item.id] = URL.createObjectURL(blob);
+        } catch {
+          // A thumbnail that will not load shows as its name.
+        }
+      }
+      setBoardThumbnails((old) => {
+        Object.values(old).forEach((url) => URL.revokeObjectURL(url));
+        return thumbnails;
+      });
+    },
+    [cloudFetch],
+  );
+
+  const refreshBoards = useCallback(async () => {
+    setBoardBusy(true);
+    try {
+      const response = await cloudFetch("/boards");
+      const body = (await response.json()) as { boards?: CloudBoard[] };
+      const boards = Array.isArray(body.boards) ? body.boards : [];
+      setCloudBoards(boards);
+      const shown =
+        activeBoardId !== null && boards.some((b) => b.id === activeBoardId) ? activeBoardId : (boards[0]?.id ?? null);
+      setActiveBoardId(shown);
+      if (shown !== null) await refreshBoardItems(shown);
+      else setBoardItems([]);
+    } catch (err) {
+      setCloudBoards([]);
+      setBoardItems([]);
+      setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setBoardBusy(false);
+    }
+  }, [cloudFetch, activeBoardId, refreshBoardItems]);
+
+  const boardAction = useCallback(
+    async (action: () => Promise<void>) => {
+      setBoardBusy(true);
+      try {
+        await action();
+      } catch (err) {
+        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+        setBoardBusy(false);
+        return;
+      }
+      await refreshBoards();
+    },
+    [refreshBoards],
+  );
+
+  const createBoard = useCallback(async () => {
+    const name = newBoardName.trim();
+    if (!name) return;
+    await boardAction(async () => {
+      const response = await cloudFetch("/boards", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await response.json()) as { board?: CloudBoard };
+      if (body.board) setActiveBoardId(body.board.id);
+      setNewBoardName("");
+    });
+  }, [cloudFetch, boardAction, newBoardName]);
+
+  const pinTextToBoard = useCallback(
+    async (kind: "note" | "prompt") => {
+      const text = boardText.trim();
+      if (activeBoardId === null || !text) return;
+      const boardId = activeBoardId;
+      await boardAction(async () => {
+        await cloudFetch(`/boards/${boardId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ kind, text }),
+        });
+        setBoardText("");
+      });
+    },
+    [cloudFetch, boardAction, activeBoardId, boardText],
+  );
+
+  const pinImageToBoard = useCallback(
+    async (source: "document" | "layer") => {
+      if (activeBoardId === null || !document) return;
+      const boardId = activeBoardId;
+      const layer = document.layers.find((l) => l.id === selectedId);
+      if (source === "layer" && !layer) return;
+      const name = source === "layer" ? (layer?.name ?? "Layer") : cloudDocumentName;
+      await boardAction(async () => {
+        const bytes =
+          source === "layer"
+            ? await invoke<number[]>("export_layer_bytes", { id: selectedId })
+            : await invoke<number[]>("export_composite_bytes");
+        await cloudFetch(`/boards/${boardId}/images/${encodeURIComponent(name)}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: new Uint8Array(bytes),
+        });
+      });
+    },
+    [cloudFetch, boardAction, activeBoardId, document, selectedId, cloudDocumentName],
+  );
+
+  const placeBoardImage = useCallback(
+    async (item: BoardItem) => {
+      if (activeBoardId === null) return;
+      const boardId = activeBoardId;
+      setBoardBusy(true);
+      try {
+        const response = await cloudFetch(`/boards/${boardId}/items/${item.id}/blob`);
+        const buffer = await response.arrayBuffer();
+        await runCommand("add_layer_from_bytes", { name: item.name, bytes: Array.from(new Uint8Array(buffer)) }, "top");
+      } catch (err) {
+        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setBoardBusy(false);
+      }
+    },
+    [cloudFetch, runCommand, activeBoardId],
+  );
+
+  const deleteBoardItem = useCallback(
+    async (item: BoardItem) => {
+      if (activeBoardId === null) return;
+      const boardId = activeBoardId;
+      await boardAction(async () => {
+        await cloudFetch(`/boards/${boardId}/items/${item.id}`, { method: "DELETE" });
+      });
+    },
+    [cloudFetch, boardAction, activeBoardId],
+  );
+
+  const moveBoardItem = useCallback(
+    async (item: BoardItem, x: number, y: number) => {
+      if (activeBoardId === null) return;
+      const boardId = activeBoardId;
+      setBoardItems((items) => items.map((i) => (i.id === item.id ? { ...i, x, y } : i)));
+      try {
+        await cloudFetch(`/boards/${boardId}/items/${item.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ x, y }),
+        });
+      } catch (err) {
+        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+        await refreshBoardItems(boardId).catch(() => undefined);
+      }
+    },
+    [cloudFetch, activeBoardId, refreshBoardItems],
+  );
+
+  const shareBoard = useCallback(async () => {
+    const user = boardShareUser.trim();
+    if (activeBoardId === null || !user) return;
+    const boardId = activeBoardId;
+    await boardAction(async () => {
+      await cloudFetch(`/boards/${boardId}/shares/${encodeURIComponent(user)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: boardShareRole }),
+      });
+      setBoardShareUser("");
+    });
+  }, [cloudFetch, boardAction, activeBoardId, boardShareUser, boardShareRole]);
+
+  const deleteBoard = useCallback(async () => {
+    if (activeBoardId === null) return;
+    const boardId = activeBoardId;
+    await boardAction(async () => {
+      await cloudFetch(`/boards/${boardId}`, { method: "DELETE" });
+      setActiveBoardId(null);
+    });
+  }, [cloudFetch, boardAction, activeBoardId]);
 
   const setReviewCommentResolved = useCallback(
     async (commentId: number, resolved: boolean) => {
@@ -8557,6 +8772,17 @@ export default function App() {
           title="Fonts: activate open-licensed families from image-editor-server's catalogue, or a font file of your own, for the Type tools"
         >
           Fonts…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => {
+            setShowBoardsDialog(true);
+            void refreshBoards();
+          }}
+          disabled={busy}
+          title="Boards: shared boards on image-editor-server where images, notes and prompts are pinned and arranged"
+        >
+          Boards…
         </button>
         <button
           className="button button--quiet"
@@ -17555,6 +17781,283 @@ export default function App() {
                 Refresh
               </button>
               <button className="button button--quiet" onClick={() => setShowLibrariesDialog(false)} title="Close">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBoardsDialog && (
+        <div className="modal-overlay" onClick={() => setShowBoardsDialog(false)} role="presentation">
+          <div
+            className="modal modal--panel"
+            role="dialog"
+            aria-label="Boards"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Boards</h2>
+            <p className="modal__hint">
+              Shared boards on image-editor-server — Firefly Boards&apos; open equivalent:
+              pin the open document, the selected layer, a note or a prompt; drag items to
+              arrange them; place an image back into the document as a layer.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">New board</span>
+              <input
+                type="text"
+                value={newBoardName}
+                onChange={(event) => setNewBoardName(event.target.value)}
+                placeholder="name"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="button"
+                onClick={() => void createBoard()}
+                disabled={boardBusy || !cloudEndpoint || !newBoardName.trim()}
+                title="Create a board"
+              >
+                Create
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {cloudBoards.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>No boards yet.</span>
+                </li>
+              )}
+              {cloudBoards.map((board) => (
+                <li key={board.id} className="cloud-search__row">
+                  <span>
+                    {board.name}
+                    {board.access !== "owner" ? ` (${board.owner}, can ${board.access})` : ""} — {board.items}{" "}
+                    {board.items === 1 ? "item" : "items"}
+                  </span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setActiveBoardId(board.id);
+                      void refreshBoardItems(board.id).catch((err: unknown) =>
+                        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`),
+                      );
+                    }}
+                    disabled={board.id === activeBoardId}
+                    title="Show this board"
+                  >
+                    {board.id === activeBoardId ? "Shown" : "Show"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {(() => {
+              const board = cloudBoards.find((b) => b.id === activeBoardId);
+              if (!board) return null;
+              const canEdit = board.access !== "view";
+              const extentX = Math.max(1600, ...boardItems.map((i) => i.x + i.w));
+              const extentY = Math.max(960, ...boardItems.map((i) => i.y + i.h));
+              const scale = Math.min(520 / extentX, 320 / extentY);
+              return (
+                <>
+                  <div
+                    className="board-canvas"
+                    style={{ width: Math.round(extentX * scale), height: Math.round(extentY * scale) }}
+                    role="group"
+                    aria-label={`${board.name} board`}
+                  >
+                    {boardItems.map((item) => (
+                      <div
+                        key={item.id}
+                        className={`board-item board-item--${item.kind}`}
+                        style={{
+                          left: item.x * scale,
+                          top: item.y * scale,
+                          width: Math.max(8, item.w * scale),
+                          height: Math.max(8, item.h * scale),
+                          cursor: canEdit ? "grab" : "default",
+                        }}
+                        title={item.kind === "image" ? item.name : `${item.kind}: ${item.text}`}
+                        onPointerDown={(event) => {
+                          if (!canEdit) return;
+                          event.currentTarget.setPointerCapture(event.pointerId);
+                          boardDrag.current = {
+                            id: item.id,
+                            startX: event.clientX,
+                            startY: event.clientY,
+                            originX: item.x,
+                            originY: item.y,
+                            scale,
+                          };
+                        }}
+                        onPointerMove={(event) => {
+                          const drag = boardDrag.current;
+                          if (!drag || drag.id !== item.id) return;
+                          const x = Math.max(0, drag.originX + (event.clientX - drag.startX) / drag.scale);
+                          const y = Math.max(0, drag.originY + (event.clientY - drag.startY) / drag.scale);
+                          setBoardItems((items) => items.map((i) => (i.id === item.id ? { ...i, x, y } : i)));
+                        }}
+                        onPointerUp={(event) => {
+                          const drag = boardDrag.current;
+                          if (!drag || drag.id !== item.id) return;
+                          boardDrag.current = null;
+                          const x = Math.round(Math.max(0, drag.originX + (event.clientX - drag.startX) / drag.scale));
+                          const y = Math.round(Math.max(0, drag.originY + (event.clientY - drag.startY) / drag.scale));
+                          if (x !== Math.round(drag.originX) || y !== Math.round(drag.originY)) {
+                            void moveBoardItem(item, x, y);
+                          }
+                        }}
+                      >
+                        {item.kind === "image" && boardThumbnails[item.id] ? (
+                          <img src={boardThumbnails[item.id]} alt={item.name} draggable={false} />
+                        ) : (
+                          <span>{item.kind === "image" ? item.name : item.text}</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <ul className="cloud-search__list">
+                    {boardItems.length === 0 && (
+                      <li className="cloud-search__row">
+                        <span>Empty board.</span>
+                      </li>
+                    )}
+                    {boardItems.map((item) => (
+                      <li key={item.id} className="cloud-search__row">
+                        <span>
+                          <em>{item.kind}</em> {item.kind === "image" ? item.name : item.text}{" "}
+                          <small>
+                            ({Math.round(item.x)}, {Math.round(item.y)})
+                          </small>
+                        </span>
+                        <span style={{ display: "flex", gap: 4 }}>
+                          {item.kind === "image" && (
+                            <button
+                              className="button button--quiet"
+                              onClick={() => void placeBoardImage(item)}
+                              disabled={boardBusy || busy || !hasDocument}
+                              title="Place this image in the document as a new layer"
+                            >
+                              Place
+                            </button>
+                          )}
+                          {item.kind === "prompt" && (
+                            <button
+                              className="button button--quiet"
+                              onClick={() => setGenerativeFillPrompt(item.text)}
+                              disabled={boardBusy}
+                              title="Use this prompt for Generative Fill"
+                            >
+                              Use prompt
+                            </button>
+                          )}
+                          {canEdit && (
+                            <button
+                              className="button button--quiet"
+                              onClick={() => void deleteBoardItem(item)}
+                              disabled={boardBusy}
+                              title="Remove this item from the board"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {canEdit && (
+                    <label className="control control--row">
+                      <span className="control__label">Pin</span>
+                      <input
+                        type="text"
+                        value={boardText}
+                        onChange={(event) => setBoardText(event.target.value)}
+                        placeholder="a note or a prompt"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void pinTextToBoard("note")}
+                        disabled={boardBusy || !boardText.trim()}
+                        title="Pin this text as a note"
+                      >
+                        Note
+                      </button>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void pinTextToBoard("prompt")}
+                        disabled={boardBusy || !boardText.trim()}
+                        title="Pin this text as a prompt"
+                      >
+                        Prompt
+                      </button>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void pinImageToBoard("document")}
+                        disabled={boardBusy || busy || !hasDocument}
+                        title="Pin the flattened document as an image"
+                      >
+                        Document
+                      </button>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void pinImageToBoard("layer")}
+                        disabled={boardBusy || busy || selectedId === null}
+                        title="Pin the selected layer as an image"
+                      >
+                        Selected layer
+                      </button>
+                    </label>
+                  )}
+                  {board.access === "owner" && (
+                    <label className="control control--row">
+                      <span className="control__label">Share with</span>
+                      <input
+                        type="text"
+                        value={boardShareUser}
+                        onChange={(event) => setBoardShareUser(event.target.value)}
+                        placeholder="user name"
+                        style={{ flex: 1 }}
+                      />
+                      <select value={boardShareRole} onChange={(event) => setBoardShareRole(event.target.value as "edit" | "view")}>
+                        <option value="edit">Can edit</option>
+                        <option value="view">Can view</option>
+                      </select>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void shareBoard()}
+                        disabled={boardBusy || !boardShareUser.trim()}
+                        title="Share this board with another user"
+                      >
+                        Share
+                      </button>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void deleteBoard()}
+                        disabled={boardBusy}
+                        title="Delete this board and everything on it"
+                      >
+                        Delete board
+                      </button>
+                    </label>
+                  )}
+                </>
+              );
+            })()}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => void refreshBoards()}
+                disabled={boardBusy || !cloudEndpoint}
+                title="Re-fetch the boards"
+              >
+                Refresh
+              </button>
+              <button className="button button--quiet" onClick={() => setShowBoardsDialog(false)} title="Close">
                 Close
               </button>
             </div>

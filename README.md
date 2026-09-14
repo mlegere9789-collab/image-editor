@@ -20156,6 +20156,66 @@ Adobe Fonts integration flips to shipped as its open equivalent
 (602/618), and the Type tools' "scalable outline font" scope cut is
 closed.
 
+## Phase 338 — Boards (Firefly Boards' open equivalent)
+
+Firefly Boards is a shared canvas where a team pins images, notes and
+prompts, arranges them, and generates from them. The open equivalent
+is a board on image-editor-server: owned by a user, shared under the
+same two roles as documents and libraries, holding items of three
+kinds — an image (a PNG in a blob file), a note, a prompt — each at a
+position and size on the board. Items pinned without a position fill
+a row of five, 320 units apart, in reading order, so a board fills
+sensibly until someone moves things; `PATCH` moves, resizes, retitles
+or rewrites an item. The store's rules are tested without HTTP: the
+kinds, every refused combination (an unknown kind, an image without
+bytes, text with bytes, an empty image, a blank note, a NaN position,
+a zero size), automatic and explicit placement, updates with the same
+checks, view/edit/owner exactly as elsewhere, a deleted image item's
+blob gone from disk, a reopen keeping the rest, and a deleted board
+taking its directory with it. Ten routes, in `server/README.md`,
+tested through the router.
+
+The client's **Boards…** dialog lists and creates boards and shows the
+chosen one as a scaled canvas — every item a box at its own position,
+an image as its thumbnail (fetched once into an object URL, since an
+`<img>` cannot carry the bearer token), a note or prompt as its text —
+where items are dragged into place with pointer capture and the move
+is sent on release. Below it, the item list offers *Place* (an image
+into the document as a new layer through `add_layer_from_bytes`),
+*Use prompt* (into Generative Fill's prompt) and *Remove*; *Pin* adds
+a note, a prompt, the flattened document (a new `export_composite_bytes`
+command, `export_png`'s bytes returned instead of written) or the
+selected layer; the owner shares or deletes the board.
+
+**Verified three ways.** `cargo test` in `server/`: 17 tests (15 → 17;
+the store's board rules above, and the HTTP round trip: create, a
+prompt at the first slot, an image by PUT at the second, its blob
+fetched back byte-for-byte, a PATCH moving and renaming it, the count
+in the listing, a refused kind, delete item, delete board). The built
+frontend in Playwright's Chromium against the running server: Boards…
+pinned a prompt and a note beside an image pinned by curl, the canvas
+showed three items with the image's thumbnail, and the list read
+`image sample (0, 0) | prompt misty pines at dawn (320, 0) | note keep
+it warm (640, 0)`, matching the server's own `/boards/1`. The drag
+then found a real bug: the item snapped back and the server still had
+it at (0, 0), because the `PATCH` the drag sent was refused at the
+browser's CORS preflight — the server's allowed methods did not
+include `PATCH`. With that added (and the CORS test now asserting all
+five methods), the same dispatched drag moved the item to (308, 123)
+on both the canvas and the server. `cargo fmt --check` and `cargo
+clippy --all-targets -- -D warnings` clean in both crates, `npm run
+build` clean; `export_composite_bytes` wraps two already-tested
+functions and adds no Rust test of its own.
+
+Honest limitations: generating an image from a prompt directly on
+the board waits on the text-to-image model now training (Phase C1 of
+`docs/PLAN_TO_100.md`); items are moved but not resized from the
+canvas (`PATCH` takes a size, the dialog does not offer one yet); and
+comments on board items are a documented scope cut.
+
+Firefly Boards Integration flips to shipped as its open equivalent
+(603/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

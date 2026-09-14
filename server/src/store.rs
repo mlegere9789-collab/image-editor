@@ -201,6 +201,62 @@ pub struct LibrarySummary {
 
 pub const ASSET_KINDS: [&str; 4] = ["color", "gradient", "adjustment", "graphic"];
 
+/// One thing pinned to a board: an image (its PNG in a blob file), a
+/// note, or a prompt -- at a position and size on the board's canvas.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BoardItem {
+    pub id: u64,
+    pub kind: String,
+    pub name: String,
+    pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub bytes: u64,
+    pub added_by: String,
+    pub added_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BoardRecord {
+    id: u64,
+    owner: String,
+    name: String,
+    shares: BTreeMap<String, Role>,
+    items: Vec<BoardItem>,
+    next_item_id: u64,
+}
+
+impl BoardRecord {
+    fn access_for(&self, user: &str) -> Option<Access> {
+        access_of(&self.owner, &self.shares, user)
+    }
+}
+
+/// A board as its user sees it in the list.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct BoardSummary {
+    pub id: u64,
+    pub name: String,
+    pub owner: String,
+    pub access: Access,
+    pub items: usize,
+}
+
+pub const BOARD_ITEM_KINDS: [&str; 3] = ["image", "note", "prompt"];
+
+/// A change to a board item: any subset of its position, size and text.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct BoardItemPatch {
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub w: Option<f64>,
+    pub h: Option<f64>,
+    pub text: Option<String>,
+    pub name: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReviewRecord {
     id: String,
@@ -236,6 +292,10 @@ struct Index {
     libraries: Vec<LibraryRecord>,
     #[serde(default = "one")]
     next_library_id: u64,
+    #[serde(default)]
+    boards: Vec<BoardRecord>,
+    #[serde(default = "one")]
+    next_board_id: u64,
 }
 
 fn one() -> u64 {
@@ -357,6 +417,8 @@ impl Store {
             next_document_id: 1,
             libraries: Vec::new(),
             next_library_id: 1,
+            boards: Vec::new(),
+            next_board_id: 1,
         };
         let store = Store {
             root: root.to_path_buf(),
@@ -1081,6 +1143,344 @@ impl Store {
     }
 }
 
+impl Store {
+    fn board_blob_path(&self, board_id: u64, item_id: u64) -> PathBuf {
+        self.root
+            .join("blobs")
+            .join(format!("board-{board_id}"))
+            .join(item_id.to_string())
+    }
+
+    fn board_index(index: &Index, user: &str, id: u64) -> Result<(usize, Access)> {
+        let position = index
+            .boards
+            .iter()
+            .position(|b| b.id == id)
+            .ok_or(StoreError::NotFound)?;
+        let access = index.boards[position]
+            .access_for(user)
+            .ok_or(StoreError::NotFound)?;
+        Ok((position, access))
+    }
+
+    pub fn list_boards(&self, user: &str) -> Vec<BoardSummary> {
+        let index = self.index.lock().expect("index lock");
+        let mut list: Vec<BoardSummary> = index
+            .boards
+            .iter()
+            .filter_map(|b| {
+                Some(BoardSummary {
+                    id: b.id,
+                    name: b.name.clone(),
+                    owner: b.owner.clone(),
+                    access: b.access_for(user)?,
+                    items: b.items.len(),
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            (a.access != Access::Owner)
+                .cmp(&(b.access != Access::Owner))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        list
+    }
+
+    pub fn create_board(&self, user: &str, name: &str) -> Result<BoardSummary> {
+        let name = name.trim();
+        validate_document_name(name)?;
+        let mut index = self.index.lock().expect("index lock");
+        if index
+            .boards
+            .iter()
+            .any(|b| b.owner == user && b.name == name)
+        {
+            return Err(StoreError::Conflict(format!(
+                "you already have a board named \"{name}\""
+            )));
+        }
+        let id = index.next_board_id;
+        index.next_board_id += 1;
+        index.boards.push(BoardRecord {
+            id,
+            owner: user.into(),
+            name: name.into(),
+            shares: BTreeMap::new(),
+            items: Vec::new(),
+            next_item_id: 1,
+        });
+        self.persist(&index)?;
+        Ok(BoardSummary {
+            id,
+            name: name.into(),
+            owner: user.into(),
+            access: Access::Owner,
+            items: 0,
+        })
+    }
+
+    pub fn delete_board(&self, user: &str, id: u64) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::board_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        index.boards.remove(position);
+        self.persist(&index)?;
+        let dir = self.root.join("blobs").join(format!("board-{id}"));
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+        }
+        Ok(())
+    }
+
+    pub fn list_board_shares(&self, user: &str, id: u64) -> Result<Vec<Share>> {
+        let index = self.index.lock().expect("index lock");
+        let (position, access) = Self::board_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        Ok(index.boards[position]
+            .shares
+            .iter()
+            .map(|(user, role)| Share {
+                user: user.clone(),
+                role: *role,
+            })
+            .collect())
+    }
+
+    pub fn set_board_share(&self, user: &str, id: u64, target: &str, role: Role) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::board_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        if !Self::user_exists(&index, target) {
+            return Err(StoreError::Invalid(format!("no user named \"{target}\"")));
+        }
+        if index.boards[position].owner == target {
+            return Err(StoreError::Invalid(
+                "the owner already has full access".into(),
+            ));
+        }
+        index.boards[position].shares.insert(target.into(), role);
+        self.persist(&index)
+    }
+
+    pub fn remove_board_share(&self, user: &str, id: u64, target: &str) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::board_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        if index.boards[position].shares.remove(target).is_none() {
+            return Err(StoreError::NotFound);
+        }
+        self.persist(&index)
+    }
+
+    pub fn list_board_items(&self, user: &str, id: u64) -> Result<Vec<BoardItem>> {
+        let index = self.index.lock().expect("index lock");
+        let (position, _) = Self::board_index(&index, user, id)?;
+        Ok(index.boards[position].items.clone())
+    }
+
+    /// Pins an item to a board. An `image` is its PNG `blob`; a `note`
+    /// or `prompt` is its `text`. With no position given, items are laid
+    /// out left to right in a row of 5, 320 units apart, so a board fills
+    /// in reading order until someone moves things. Needs edit access.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_board_item(
+        &self,
+        user: &str,
+        id: u64,
+        kind: &str,
+        name: &str,
+        text: &str,
+        position: Option<(f64, f64)>,
+        size: Option<(f64, f64)>,
+        blob: Option<&[u8]>,
+    ) -> Result<BoardItem> {
+        if !BOARD_ITEM_KINDS.contains(&kind) {
+            return Err(StoreError::Invalid(format!(
+                "a board item is one of {}",
+                BOARD_ITEM_KINDS.join(", ")
+            )));
+        }
+        if (kind == "image") != blob.is_some() {
+            return Err(StoreError::Invalid(
+                "an image is its PNG bytes; a note or prompt is its text".into(),
+            ));
+        }
+        if blob.is_some_and(<[u8]>::is_empty) {
+            return Err(StoreError::Invalid(
+                "an empty image cannot be pinned".into(),
+            ));
+        }
+        if kind != "image" && text.trim().is_empty() {
+            return Err(StoreError::Invalid(
+                "a note or prompt needs some text".into(),
+            ));
+        }
+        if text.chars().count() > 4000 {
+            return Err(StoreError::Invalid(
+                "an item's text is up to 4000 characters".into(),
+            ));
+        }
+        let name = name.trim();
+        if name.chars().count() > 200 || name.chars().any(char::is_control) {
+            return Err(StoreError::Invalid(
+                "an item name is up to 200 characters".into(),
+            ));
+        }
+        let mut index = self.index.lock().expect("index lock");
+        let (at, access) = Self::board_index(&index, user, id)?;
+        if !access.can_edit() {
+            return Err(StoreError::Forbidden);
+        }
+        let board = &mut index.boards[at];
+        let item_id = board.next_item_id;
+        board.next_item_id += 1;
+        let slot = board.items.len() as f64;
+        let (x, y) = position.unwrap_or(((slot % 5.0) * 320.0, (slot / 5.0).floor() * 320.0));
+        let (w, h) = size.unwrap_or((300.0, 300.0));
+        if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite())
+            || w <= 0.0
+            || h <= 0.0
+        {
+            return Err(StoreError::Invalid(
+                "an item needs a finite position and a positive size".into(),
+            ));
+        }
+        if let Some(bytes) = blob {
+            let path = self.board_blob_path(id, item_id);
+            fs::create_dir_all(path.parent().expect("blob dir"))?;
+            write_atomic(&path, bytes)?;
+        }
+        let item = BoardItem {
+            id: item_id,
+            kind: kind.into(),
+            name: if name.is_empty() {
+                format!("{kind} {item_id}")
+            } else {
+                name.into()
+            },
+            text: text.trim().into(),
+            x,
+            y,
+            w,
+            h,
+            bytes: blob.map_or(0, |b| b.len() as u64),
+            added_by: user.into(),
+            added_at: now(),
+        };
+        board.items.push(item.clone());
+        self.persist(&index)?;
+        Ok(item)
+    }
+
+    /// Moves, resizes, retitles or rewrites an item. Needs edit access.
+    pub fn update_board_item(
+        &self,
+        user: &str,
+        id: u64,
+        item_id: u64,
+        patch: BoardItemPatch,
+    ) -> Result<BoardItem> {
+        let mut index = self.index.lock().expect("index lock");
+        let (at, access) = Self::board_index(&index, user, id)?;
+        if !access.can_edit() {
+            return Err(StoreError::Forbidden);
+        }
+        let item = index.boards[at]
+            .items
+            .iter_mut()
+            .find(|i| i.id == item_id)
+            .ok_or(StoreError::NotFound)?;
+        let (x, y) = (patch.x.unwrap_or(item.x), patch.y.unwrap_or(item.y));
+        let (w, h) = (patch.w.unwrap_or(item.w), patch.h.unwrap_or(item.h));
+        if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite())
+            || w <= 0.0
+            || h <= 0.0
+        {
+            return Err(StoreError::Invalid(
+                "an item needs a finite position and a positive size".into(),
+            ));
+        }
+        if let Some(text) = &patch.text {
+            if item.kind != "image" && text.trim().is_empty() {
+                return Err(StoreError::Invalid(
+                    "a note or prompt needs some text".into(),
+                ));
+            }
+            if text.chars().count() > 4000 {
+                return Err(StoreError::Invalid(
+                    "an item's text is up to 4000 characters".into(),
+                ));
+            }
+        }
+        if let Some(name) = &patch.name {
+            if name.trim().is_empty()
+                || name.chars().count() > 200
+                || name.chars().any(char::is_control)
+            {
+                return Err(StoreError::Invalid(
+                    "an item name is 1 to 200 characters".into(),
+                ));
+            }
+        }
+        item.x = x;
+        item.y = y;
+        item.w = w;
+        item.h = h;
+        if let Some(text) = patch.text {
+            item.text = text.trim().to_string();
+        }
+        if let Some(name) = patch.name {
+            item.name = name.trim().to_string();
+        }
+        let item = item.clone();
+        self.persist(&index)?;
+        Ok(item)
+    }
+
+    pub fn get_board_item_blob(&self, user: &str, id: u64, item_id: u64) -> Result<Vec<u8>> {
+        let index = self.index.lock().expect("index lock");
+        let (at, _) = Self::board_index(&index, user, id)?;
+        let item = index.boards[at]
+            .items
+            .iter()
+            .find(|i| i.id == item_id)
+            .ok_or(StoreError::NotFound)?;
+        if item.kind != "image" {
+            return Err(StoreError::NotFound);
+        }
+        Ok(fs::read(self.board_blob_path(id, item_id))?)
+    }
+
+    pub fn delete_board_item(&self, user: &str, id: u64, item_id: u64) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (at, access) = Self::board_index(&index, user, id)?;
+        if !access.can_edit() {
+            return Err(StoreError::Forbidden);
+        }
+        let board = &mut index.boards[at];
+        let pos = board
+            .items
+            .iter()
+            .position(|i| i.id == item_id)
+            .ok_or(StoreError::NotFound)?;
+        board.items.remove(pos);
+        self.persist(&index)?;
+        let path = self.board_blob_path(id, item_id);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1575,6 +1975,235 @@ mod tests {
             .path()
             .join("blobs")
             .join(format!("lib-{}", lib.id))
+            .exists());
+    }
+
+    #[test]
+    fn boards_pin_images_notes_and_prompts_in_reading_order() {
+        let (dir, store, _) = fresh();
+        store.create_user("ana").unwrap();
+        let board = store.create_board("owner", " Autumn campaign ").unwrap();
+        assert_eq!(board.name, "Autumn campaign");
+        assert!(matches!(
+            store.create_board("owner", "Autumn campaign"),
+            Err(StoreError::Conflict(_))
+        ));
+        let note = store
+            .add_board_item(
+                "owner",
+                board.id,
+                "note",
+                "",
+                " Warm palette ",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (note.id, note.x, note.y, note.w, note.h),
+            (1, 0.0, 0.0, 300.0, 300.0)
+        );
+        assert_eq!(note.name, "note 1");
+        assert_eq!(note.text, "Warm palette");
+        let image = store
+            .add_board_item(
+                "owner",
+                board.id,
+                "image",
+                "Hero",
+                "",
+                None,
+                None,
+                Some(b"PNG"),
+            )
+            .unwrap();
+        assert_eq!((image.x, image.y, image.bytes), (320.0, 0.0, 3));
+        assert_eq!(
+            store
+                .get_board_item_blob("owner", board.id, image.id)
+                .unwrap(),
+            b"PNG"
+        );
+        assert_eq!(
+            store.get_board_item_blob("owner", board.id, note.id),
+            Err(StoreError::NotFound)
+        );
+        for _ in 0..3 {
+            store
+                .add_board_item(
+                    "owner",
+                    board.id,
+                    "prompt",
+                    "",
+                    "a forest lake at dawn",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        let sixth = store
+            .add_board_item(
+                "owner",
+                board.id,
+                "note",
+                "",
+                "row two",
+                Some((10.0, 20.0)),
+                Some((50.0, 60.0)),
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (sixth.x, sixth.y, sixth.w, sixth.h),
+            (10.0, 20.0, 50.0, 60.0)
+        );
+        let seventh = store
+            .add_board_item("owner", board.id, "note", "", "auto", None, None, None)
+            .unwrap();
+        assert_eq!((seventh.x, seventh.y), (320.0, 320.0));
+        for bad in [
+            store.add_board_item("owner", board.id, "video", "", "x", None, None, None),
+            store.add_board_item("owner", board.id, "image", "", "", None, None, None),
+            store.add_board_item("owner", board.id, "note", "", "x", None, None, Some(b"png")),
+            store.add_board_item("owner", board.id, "image", "", "", None, None, Some(b"")),
+            store.add_board_item("owner", board.id, "note", "", "  ", None, None, None),
+            store.add_board_item(
+                "owner",
+                board.id,
+                "note",
+                "",
+                "x",
+                Some((f64::NAN, 0.0)),
+                None,
+                None,
+            ),
+            store.add_board_item(
+                "owner",
+                board.id,
+                "note",
+                "",
+                "x",
+                None,
+                Some((0.0, 10.0)),
+                None,
+            ),
+        ] {
+            assert!(matches!(bad, Err(StoreError::Invalid(_))), "{bad:?}");
+        }
+        // Updates: move, resize, retitle, rewrite -- with the same checks.
+        let moved = store
+            .update_board_item(
+                "owner",
+                board.id,
+                note.id,
+                BoardItemPatch {
+                    x: Some(5.0),
+                    text: Some("Warm, muted palette".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            (moved.x, moved.y, moved.text.as_str()),
+            (5.0, 0.0, "Warm, muted palette")
+        );
+        assert!(matches!(
+            store.update_board_item(
+                "owner",
+                board.id,
+                note.id,
+                BoardItemPatch {
+                    w: Some(0.0),
+                    ..Default::default()
+                }
+            ),
+            Err(StoreError::Invalid(_))
+        ));
+        assert!(matches!(
+            store.update_board_item(
+                "owner",
+                board.id,
+                note.id,
+                BoardItemPatch {
+                    text: Some(" ".into()),
+                    ..Default::default()
+                }
+            ),
+            Err(StoreError::Invalid(_))
+        ));
+        assert_eq!(
+            store.update_board_item("owner", board.id, 99, BoardItemPatch::default()),
+            Err(StoreError::NotFound)
+        );
+        // Roles as everywhere else.
+        assert_eq!(
+            store.list_board_items("ana", board.id),
+            Err(StoreError::NotFound)
+        );
+        store
+            .set_board_share("owner", board.id, "ana", Role::View)
+            .unwrap();
+        assert_eq!(store.list_board_items("ana", board.id).unwrap().len(), 7);
+        assert_eq!(
+            store.add_board_item("ana", board.id, "note", "", "x", None, None, None),
+            Err(StoreError::Forbidden)
+        );
+        assert_eq!(
+            store.update_board_item("ana", board.id, note.id, BoardItemPatch::default()),
+            Err(StoreError::Forbidden)
+        );
+        assert_eq!(
+            store.delete_board_item("ana", board.id, note.id),
+            Err(StoreError::Forbidden)
+        );
+        store
+            .set_board_share("owner", board.id, "ana", Role::Edit)
+            .unwrap();
+        store
+            .add_board_item("ana", board.id, "note", "", "from ana", None, None, None)
+            .unwrap();
+        assert_eq!(store.list_boards("ana")[0].items, 8);
+        assert_eq!(store.list_boards("ana")[0].access, Access::Edit);
+        assert_eq!(
+            store.delete_board("ana", board.id),
+            Err(StoreError::Forbidden)
+        );
+        assert_eq!(
+            store.list_board_shares("owner", board.id).unwrap(),
+            vec![Share {
+                user: "ana".into(),
+                role: Role::Edit
+            }]
+        );
+        store.remove_board_share("owner", board.id, "ana").unwrap();
+        assert_eq!(
+            store.list_board_items("ana", board.id),
+            Err(StoreError::NotFound)
+        );
+        // Deleting an image item removes its blob; reopening keeps the rest.
+        store
+            .delete_board_item("owner", board.id, image.id)
+            .unwrap();
+        assert!(!dir
+            .path()
+            .join("blobs")
+            .join(format!("board-{}", board.id))
+            .join(image.id.to_string())
+            .exists());
+        drop(store);
+        let (reopened, _) = Store::open(dir.path()).unwrap();
+        assert_eq!(
+            reopened.list_board_items("owner", board.id).unwrap().len(),
+            7
+        );
+        reopened.delete_board("owner", board.id).unwrap();
+        assert!(reopened.list_boards("owner").is_empty());
+        assert!(!dir
+            .path()
+            .join("blobs")
+            .join(format!("board-{}", board.id))
             .exists());
     }
 

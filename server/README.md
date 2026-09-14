@@ -2,7 +2,7 @@
 
 The self-hosted backend behind the desktop app's cloud rows: **Cloud
 Documents**, **Search Your Cloud Files**, **Invite to Edit**, **Share
-for Review**, **Libraries** and **Fonts**. One Rust binary (axum), one data directory, no database.
+for Review**, **Libraries**, **Fonts** and **Boards**. One Rust binary (axum), one data directory, no database.
 
 ```bash
 cd server
@@ -29,6 +29,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
   index.json         users (token hashes), documents, shares, reviews -- rewritten atomically
   blobs/<id>/<n>     every saved version of every document, never overwritten
   blobs/lib-<id>/<n> a library's graphic assets
+  blobs/board-<id>/<n> a board's image items
   fonts/cache/       catalogue fonts fetched from Google Fonts, by family, weight and style
   fonts/local/       the operator's own .ttf/.otf files, listed by file name
 ```
@@ -72,6 +73,16 @@ admin token; review-link routes need no token (the link is the secret).
 | PUT | `/libraries/{id}/graphics/{name}` (octet-stream) | owner or editor | `{ asset }` (201) -- a `graphic` asset, its PNG bytes |
 | GET | `/libraries/{id}/assets/{n}/blob` | anyone with access | a graphic's bytes |
 | DELETE | `/libraries/{id}/assets/{n}` | owner or editor | 204 |
+| GET | `/boards` | user | `{ boards: [{ id, name, owner, access, items }] }` |
+| POST | `/boards` `{ name }` | user | `{ board }` (201) |
+| GET | `/boards/{id}` | anyone with access | `{ items: [{ id, kind, name, text, x, y, w, h, bytes, added_by, added_at }] }` |
+| DELETE | `/boards/{id}` | owner | 204, items and blobs included |
+| GET / PUT / DELETE | `/boards/{id}/shares[/{user}]` | owner | as for documents and libraries |
+| POST | `/boards/{id}/items` `{ kind, text, name?, x?, y?, w?, h? }` | owner or editor | `{ item }` (201); `kind` is `note` or `prompt`; with no position, items fill a row of 5, 320 units apart |
+| PUT | `/boards/{id}/images/{name}` (octet-stream) | owner or editor | `{ item }` (201) -- an `image` item, its PNG bytes |
+| PATCH | `/boards/{id}/items/{n}` `{ x?, y?, w?, h?, text?, name? }` | owner or editor | `{ item }` -- move, resize, retitle, rewrite |
+| GET | `/boards/{id}/items/{n}/blob` | anyone with access | an image item's bytes |
+| DELETE | `/boards/{id}/items/{n}` | owner or editor | 204 |
 | GET | `/fonts` | user | `{ fonts: [{ family, category, license, source }] }` -- the bundled catalogue of open-licensed Google Fonts families, then any `.ttf`/`.otf` in `<data-dir>/fonts/local/` (source `local`) |
 | GET | `/fonts/{family}/file?weight=400&italic=false` | user | the family's TrueType bytes (`font/ttf`): a local file as it is; a catalogue family fetched from Google Fonts on first request and cached under `<data-dir>/fonts/cache/` |
 

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::store::{Principal, Role, Store, StoreError};
+use crate::store::{BoardItemPatch, Principal, Role, Store, StoreError};
 
 /// What every handler shares: the store, and the data directory the
 /// font cache lives under.
@@ -44,6 +44,7 @@ pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
             Method::GET,
             Method::PUT,
             Method::POST,
+            Method::PATCH,
             Method::DELETE,
             Method::OPTIONS,
         ])
@@ -86,6 +87,23 @@ pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
             axum::routing::delete(delete_asset),
         )
         .route("/libraries/{id}/assets/{asset}/blob", get(get_asset_blob))
+        .route("/boards", get(list_boards).post(create_board))
+        .route("/boards/{id}", get(get_board).delete(delete_board))
+        .route("/boards/{id}/shares", get(list_board_shares))
+        .route(
+            "/boards/{id}/shares/{user}",
+            axum::routing::put(set_board_share).delete(remove_board_share),
+        )
+        .route("/boards/{id}/items", post(add_board_item))
+        .route(
+            "/boards/{id}/images/{name}",
+            axum::routing::put(add_board_image),
+        )
+        .route(
+            "/boards/{id}/items/{item}",
+            axum::routing::patch(update_board_item).delete(delete_board_item),
+        )
+        .route("/boards/{id}/items/{item}/blob", get(get_board_item_blob))
         .route("/fonts", get(list_fonts))
         .route("/fonts/{family}/file", get(font_file))
         .route("/reviews/{id}", get(get_review))
@@ -495,6 +513,135 @@ async fn delete_asset(
     Path((id, asset)): Path<(u64, u64)>,
 ) -> Result<StatusCode, ApiError> {
     store.delete_asset(&user, id, asset)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_boards(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+) -> Json<serde_json::Value> {
+    Json(json!({ "boards": app.list_boards(&user) }))
+}
+
+#[derive(Deserialize)]
+struct NewBoard {
+    name: String,
+}
+
+async fn create_board(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Json(body): Json<NewBoard>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let board = app.create_board(&user, &body.name)?;
+    Ok((StatusCode::CREATED, Json(json!({ "board": board }))))
+}
+
+async fn get_board(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({ "items": app.list_board_items(&user, id)? })))
+}
+
+async fn delete_board(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, ApiError> {
+    app.delete_board(&user, id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_board_shares(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({ "shares": app.list_board_shares(&user, id)? })))
+}
+
+async fn set_board_share(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, target)): Path<(u64, String)>,
+    Json(body): Json<ShareBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    app.set_board_share(&user, id, &target, body.role)?;
+    Ok(Json(json!({ "user": target, "role": body.role })))
+}
+
+async fn remove_board_share(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, target)): Path<(u64, String)>,
+) -> Result<StatusCode, ApiError> {
+    app.remove_board_share(&user, id, &target)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct NewBoardItem {
+    kind: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    text: String,
+    x: Option<f64>,
+    y: Option<f64>,
+    w: Option<f64>,
+    h: Option<f64>,
+}
+
+async fn add_board_item(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path(id): Path<u64>,
+    Json(body): Json<NewBoardItem>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let position = body.x.zip(body.y);
+    let size = body.w.zip(body.h);
+    let item = app.add_board_item(
+        &user, id, &body.kind, &body.name, &body.text, position, size, None,
+    )?;
+    Ok((StatusCode::CREATED, Json(json!({ "item": item }))))
+}
+
+async fn add_board_image(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, name)): Path<(u64, String)>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let item = app.add_board_item(&user, id, "image", &name, "", None, None, Some(&body))?;
+    Ok((StatusCode::CREATED, Json(json!({ "item": item }))))
+}
+
+async fn update_board_item(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, item)): Path<(u64, u64)>,
+    Json(patch): Json<BoardItemPatch>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let item = app.update_board_item(&user, id, item, patch)?;
+    Ok(Json(json!({ "item": item })))
+}
+
+async fn get_board_item_blob(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, item)): Path<(u64, u64)>,
+) -> Result<Response, ApiError> {
+    Ok(octets(app.get_board_item_blob(&user, id, item)?))
+}
+
+async fn delete_board_item(
+    AuthUser(user): AuthUser,
+    State(app): State<Shared>,
+    Path((id, item)): Path<(u64, u64)>,
+) -> Result<StatusCode, ApiError> {
+    app.delete_board_item(&user, id, item)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1055,6 +1202,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn boards_over_http() {
+        let app = app();
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            "/boards",
+            Some(&app.owner),
+            Some(("application/json", br#"{"name":"Moodboard"}"#.to_vec())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let id = json(&body)["board"]["id"].as_u64().unwrap();
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            &format!("/boards/{id}/items"),
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br#"{"kind":"prompt","text":"misty pines"}"#.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(json(&body)["item"]["x"], 0.0);
+        let (status, body) = call(
+            &app.router,
+            "PUT",
+            &format!("/boards/{id}/images/Hero"),
+            Some(&app.owner),
+            Some(("application/octet-stream", b"PNGBYTES".to_vec())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let image = json(&body)["item"]["id"].as_u64().unwrap();
+        assert_eq!(json(&body)["item"]["x"], 320.0);
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            &format!("/boards/{id}/items/{image}/blob"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"PNGBYTES");
+        let (status, body) = call(
+            &app.router,
+            "PATCH",
+            &format!("/boards/{id}/items/{image}"),
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br#"{"x":40.5,"name":"Hero v2"}"#.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(json(&body)["item"]["x"], 40.5);
+        assert_eq!(json(&body)["item"]["name"], "Hero v2");
+        let (_, body) = call(
+            &app.router,
+            "GET",
+            &format!("/boards/{id}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(json(&body)["items"].as_array().unwrap().len(), 2);
+        let (_, body) = call(&app.router, "GET", "/boards", Some(&app.owner), None).await;
+        assert_eq!(json(&body)["boards"][0]["items"], 2);
+        let (status, _) = call(
+            &app.router,
+            "POST",
+            &format!("/boards/{id}/items"),
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br#"{"kind":"video","text":"x"}"#.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &app.router,
+            "DELETE",
+            &format!("/boards/{id}/items/{image}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = call(
+            &app.router,
+            "DELETE",
+            &format!("/boards/{id}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (status, _) = call(
+            &app.router,
+            "GET",
+            &format!("/boards/{id}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn fonts_over_http() {
         let app = app();
         let (status, _) = call(&app.router, "GET", "/fonts", None, None).await;
@@ -1133,9 +1393,12 @@ mod tests {
         let response = app.router.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(response.headers()["access-control-allow-origin"], "*");
-        assert!(response.headers()["access-control-allow-methods"]
+        let methods = response.headers()["access-control-allow-methods"]
             .to_str()
             .unwrap()
-            .contains("PUT"));
+            .to_string();
+        for method in ["GET", "PUT", "POST", "PATCH", "DELETE"] {
+            assert!(methods.contains(method), "{methods} lacks {method}");
+        }
     }
 }
