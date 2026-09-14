@@ -23449,8 +23449,50 @@ impl Document {
         x: u32,
         y: u32,
     ) -> Result<Option<Rect>, String> {
+        self.levels_black_point_with(id, x, y, [0; 3])
+    }
+
+    /// [`Self::levels_black_point`] with Photoshop's configurable target
+    /// colour: the clicked pixel becomes `target` rather than pure black —
+    /// each channel's input black is the pixel's own value and its output
+    /// black the target's, the output white staying `255`.
+    pub fn levels_black_point_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        target: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
         let [r, g, b, _] = self.layer_pixel(id, x, y)?;
-        self.levels_per_channel(id, [r, g, b], [255; 3])
+        self.levels_per_channel_to(id, [r, g, b], [255; 3], target, [255; 3])
+    }
+
+    /// [`Self::levels_white_point`] with its target colour: the clicked
+    /// pixel becomes `target`, each channel's input white the pixel's own
+    /// value and its output white the target's.
+    pub fn levels_white_point_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        target: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        self.levels_per_channel_to(id, [0; 3], [r, g, b], [0; 3], target)
+    }
+
+    /// [`Self::levels_gray_point`] with its target colour: each channel's
+    /// gamma puts the clicked pixel's value on the target's value in that
+    /// channel rather than on the mean of its three.
+    pub fn levels_gray_point_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        target: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        self.neutralize_channels_to(id, [r as f32, g as f32, b as f32], target.map(|t| t as f32))
     }
 
     /// The Levels and Curves dialogs' White Point eyedropper: the mirror
@@ -23509,9 +23551,30 @@ impl Document {
         shadow_clip: u32,
         highlight_clip: u32,
     ) -> Result<Option<Rect>, String> {
+        self.auto_color_with(id, shadow_clip, highlight_clip, [0; 3], None, [255; 3])
+    }
+
+    /// [`Self::auto_color`] with Photoshop's Auto Color Correction target
+    /// colours: after the stretch, each channel's full range is laid onto
+    /// `shadows[c]..=highlights[c]` (the Shadows and Highlights targets;
+    /// pure black and white leave it as it was), and the mean colour is
+    /// snapped to the `midtones` target instead of to the mean of the
+    /// three channels — `None` keeps the old snap.
+    pub fn auto_color_with(
+        &mut self,
+        id: LayerId,
+        shadow_clip: u32,
+        highlight_clip: u32,
+        shadows: [u8; 3],
+        midtones: Option<[u8; 3]>,
+        highlights: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
         let Some(bounds) = self.auto_stretch(id, false, shadow_clip, highlight_clip)? else {
             return Ok(None);
         };
+        if shadows != [0; 3] || highlights != [255; 3] {
+            self.levels_per_channel_to(id, [0; 3], [255; 3], shadows, highlights)?;
+        }
         let selection = self.selection.clone();
         let doc_width = self.width as usize;
         let layer = self.layer(id)?;
@@ -23540,7 +23603,10 @@ impl Document {
             sums[1] as f32 / count as f32,
             sums[2] as f32 / count as f32,
         ];
-        self.neutralize_channels(id, means)?;
+        match midtones {
+            Some(target) => self.neutralize_channels_to(id, means, target.map(|t| t as f32))?,
+            None => self.neutralize_channels(id, means)?,
+        };
         Ok(Some(bounds))
     }
 
@@ -23557,13 +23623,32 @@ impl Document {
         values: [f32; 3],
     ) -> Result<Option<Rect>, String> {
         let target = (values[0] + values[1] + values[2]) / 3.0;
-        let exponent = |value: f32| -> Option<f32> {
-            if value <= 0.0 || value >= 255.0 || value == target {
+        self.neutralize_channels_to(id, values, [target; 3])
+    }
+
+    /// [`Self::neutralize_channels`] toward a target per channel: each
+    /// channel gets the gamma that puts `values[c]` on `targets[c]`; a
+    /// channel whose value is already the target, or at `0` or `255`, or
+    /// whose target is `0` or `255` (where no gamma reaches), is left
+    /// alone.
+    fn neutralize_channels_to(
+        &mut self,
+        id: LayerId,
+        values: [f32; 3],
+        targets: [f32; 3],
+    ) -> Result<Option<Rect>, String> {
+        let exponent = |value: f32, target: f32| -> Option<f32> {
+            if value <= 0.0 || value >= 255.0 || target <= 0.0 || target >= 255.0 || value == target
+            {
                 return None;
             }
             Some((target / 255.0).ln() / (value / 255.0).ln())
         };
-        let exponents = values.map(exponent);
+        let exponents = [
+            exponent(values[0], targets[0]),
+            exponent(values[1], targets[1]),
+            exponent(values[2], targets[2]),
+        ];
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
             let apply = |v: u8, exponent: Option<f32>| match exponent {
                 Some(exponent) => to_byte(to_unit(v).powf(exponent)),
@@ -23588,16 +23673,51 @@ impl Document {
         input_black: [u8; 3],
         input_white: [u8; 3],
     ) -> Result<Option<Rect>, String> {
-        let apply = move |c: u8, black: u8, white: u8| {
+        self.levels_per_channel_to(id, input_black, input_white, [0; 3], [255; 3])
+    }
+
+    /// [`Self::levels_per_channel`] with an output black and white per
+    /// channel as well: the input range lands on `output_black..=
+    /// output_white` instead of `0..=255`.
+    fn levels_per_channel_to(
+        &mut self,
+        id: LayerId,
+        input_black: [u8; 3],
+        input_white: [u8; 3],
+        output_black: [u8; 3],
+        output_white: [u8; 3],
+    ) -> Result<Option<Rect>, String> {
+        let apply = move |c: u8, black: u8, white: u8, out_black: u8, out_white: u8| {
             let black = black as f32;
             let white = (white as f32).max(black + 1.0);
-            to_byte(((c as f32 - black) / (white - black)).clamp(0.0, 1.0))
+            let unit = ((c as f32 - black) / (white - black)).clamp(0.0, 1.0);
+            (out_black as f32 + unit * (out_white as f32 - out_black as f32))
+                .round()
+                .clamp(0.0, 255.0) as u8
         };
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
             [
-                apply(r, input_black[0], input_white[0]),
-                apply(g, input_black[1], input_white[1]),
-                apply(b, input_black[2], input_white[2]),
+                apply(
+                    r,
+                    input_black[0],
+                    input_white[0],
+                    output_black[0],
+                    output_white[0],
+                ),
+                apply(
+                    g,
+                    input_black[1],
+                    input_white[1],
+                    output_black[1],
+                    output_white[1],
+                ),
+                apply(
+                    b,
+                    input_black[2],
+                    input_white[2],
+                    output_black[2],
+                    output_white[2],
+                ),
                 a,
             ]
         })
@@ -23680,12 +23800,45 @@ impl Document {
         green: &[(u8, u8)],
         blue: &[(u8, u8)],
     ) -> Result<Option<Rect>, String> {
-        let master = curve_lookup(rgb)?;
-        let (red, green, blue) = (
-            curve_lookup(red)?,
-            curve_lookup(green)?,
-            curve_lookup(blue)?,
-        );
+        self.curves_channels_with(id, rgb, red, green, blue, false)
+    }
+
+    /// [`Self::curves_channels`] with the curve's shape: `smooth` joins
+    /// each list's points by [`curve_lookup_smooth`]'s spline, the bow
+    /// Photoshop's own dialog draws, instead of straight segments.
+    pub fn curves_channels_with(
+        &mut self,
+        id: LayerId,
+        rgb: &[(u8, u8)],
+        red: &[(u8, u8)],
+        green: &[(u8, u8)],
+        blue: &[(u8, u8)],
+        smooth: bool,
+    ) -> Result<Option<Rect>, String> {
+        let lookup = if smooth {
+            curve_lookup_smooth
+        } else {
+            curve_lookup
+        };
+        let master = lookup(rgb)?;
+        let (red, green, blue) = (lookup(red)?, lookup(green)?, lookup(blue)?);
+        self.curves_tables(id, &master, &red, &green, &blue)
+    }
+
+    /// [`Self::curves_table`] with Photoshop's Channel dropdown filled in
+    /// for Pencil mode: one freehand table for the RGB composite and one
+    /// each for Red, Green and Blue, the channel table first and the
+    /// composite second exactly as [`Self::curves_channels`] orders its
+    /// curves — a red value `v` becomes `master[red[v]]`. Alpha untouched.
+    pub fn curves_tables(
+        &mut self,
+        id: LayerId,
+        master: &[u8; 256],
+        red: &[u8; 256],
+        green: &[u8; 256],
+        blue: &[u8; 256],
+    ) -> Result<Option<Rect>, String> {
+        let (master, red, green, blue) = (*master, *red, *green, *blue);
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
             [
                 master[red[r as usize] as usize],
@@ -28242,6 +28395,67 @@ pub fn curve_lookup(points: &[(u8, u8)]) -> Result<[u8; 256], String> {
         let (x1, y1) = (nodes[seg + 1].0 as f32, nodes[seg + 1].1 as f32);
         let t = (x - x0) / (x1 - x0);
         *out = (y0 + t * (y1 - y0)).round().clamp(0.0, 255.0) as u8;
+    }
+    Ok(lut)
+}
+
+/// [`curve_lookup`] with Photoshop's smooth curve instead of straight
+/// segments: a cubic Hermite spline through the sorted points whose
+/// tangent at each interior point is the slope between its two
+/// neighbours and at each end the slope of the end segment, so the
+/// curve passes through every point, a two-point curve is exactly the
+/// straight line, and the bow between points follows the neighbours'
+/// trend; flat beyond the outer points as before, and clamped to
+/// `0..=255` where the spline overshoots. Same validation as
+/// `curve_lookup`.
+pub fn curve_lookup_smooth(points: &[(u8, u8)]) -> Result<[u8; 256], String> {
+    if points.len() < 2 {
+        return Err("A curve needs at least two points.".to_string());
+    }
+    let mut nodes: Vec<(u8, u8)> = points.to_vec();
+    nodes.sort_by_key(|&(x, _)| x);
+    if nodes.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err("Curve points must have distinct input values.".to_string());
+    }
+    let n = nodes.len();
+    let slope = |a: usize, b: usize| {
+        (nodes[b].1 as f32 - nodes[a].1 as f32) / (nodes[b].0 as f32 - nodes[a].0 as f32)
+    };
+    let tangents: Vec<f32> = (0..n)
+        .map(|i| {
+            if i == 0 {
+                slope(0, 1)
+            } else if i == n - 1 {
+                slope(n - 2, n - 1)
+            } else {
+                slope(i - 1, i + 1)
+            }
+        })
+        .collect();
+    let mut lut = [0u8; 256];
+    for (c, out) in lut.iter_mut().enumerate() {
+        let x = c as f32;
+        let seg = match nodes.iter().position(|&(nx, _)| nx as usize > c) {
+            Some(0) => {
+                *out = nodes[0].1;
+                continue;
+            }
+            Some(i) => i - 1,
+            None => {
+                *out = nodes[nodes.len() - 1].1;
+                continue;
+            }
+        };
+        let (x0, x1) = (nodes[seg].0 as f32, nodes[seg + 1].0 as f32);
+        let (y0, y1) = (nodes[seg].1 as f32, nodes[seg + 1].1 as f32);
+        let h = x1 - x0;
+        let t = (x - x0) / h;
+        let (t2, t3) = (t * t, t * t * t);
+        let value = (2.0 * t3 - 3.0 * t2 + 1.0) * y0
+            + (t3 - 2.0 * t2 + t) * h * tangents[seg]
+            + (-2.0 * t3 + 3.0 * t2) * y1
+            + (t3 - t2) * h * tangents[seg + 1];
+        *out = value.round().clamp(0.0, 255.0) as u8;
     }
     Ok(lut)
 }
@@ -45339,6 +45553,149 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn smooth_curves_bow_between_their_points() {
+        // Points (0, 0), (128, 192), (255, 255): the straight curve reads
+        // 96 at 64 and 224 at 192; the spline (tangents 1.5, 1.0 and 0.496
+        // at the three points) bows to 104 and 232, and still passes
+        // through every point.
+        let points = [(0u8, 0u8), (128, 192), (255, 255)];
+        let straight = curve_lookup(&points).unwrap();
+        let smooth = curve_lookup_smooth(&points).unwrap();
+        assert_eq!((straight[64], straight[192]), (96, 224));
+        assert_eq!((smooth[64], smooth[192]), (104, 232));
+        assert_eq!((smooth[0], smooth[128], smooth[255]), (0, 192, 255));
+        // Two points make a straight line either way.
+        assert_eq!(
+            curve_lookup_smooth(&[(0, 0), (255, 255)]).unwrap(),
+            curve_lookup(&[(0, 0), (255, 255)]).unwrap()
+        );
+        assert!(curve_lookup_smooth(&[(0, 0)]).is_err());
+        // curves_channels_with applies the spline to a picture: a grey 64
+        // reads 104 on the composite, and smooth off is curves_channels.
+        let identity = [(0u8, 0u8), (255, 255)];
+        let pixels = grey_row(&[64, 192]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
+        doc.curves_channels_with(id, &points, &identity, &identity, &identity, true)
+            .unwrap();
+        assert_eq!(red_plane(&doc), vec![104, 232]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
+        doc.curves_channels_with(id, &points, &identity, &identity, &identity, false)
+            .unwrap();
+        assert_eq!(red_plane(&doc), vec![96, 224]);
+    }
+
+    #[test]
+    fn pencil_curves_per_channel_run_before_the_composite() {
+        // Red table inverted, the others identity, composite halving: red
+        // 40 → 215 → 108 (rounded from 107.5), green 40 → 20.
+        let mut identity = [0u8; 256];
+        for (i, v) in identity.iter_mut().enumerate() {
+            *v = i as u8;
+        }
+        let inverted: [u8; 256] = std::array::from_fn(|i| 255 - i as u8);
+        let half: [u8; 256] = std::array::from_fn(|i| ((i as f32) / 2.0).round() as u8);
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("p", &[40, 40, 40, 255], 1, 1).unwrap();
+        doc.curves_tables(id, &half, &inverted, &identity, &identity)
+            .unwrap();
+        assert_eq!(&doc.layers()[0].pixels[..], &[108, 20, 20, 255]);
+        // All identities but the composite is curves_table.
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("p", &[40, 40, 40, 255], 1, 1).unwrap();
+        doc.curves_tables(id, &inverted, &identity, &identity, &identity)
+            .unwrap();
+        let mut old = Document::new(1, 1).unwrap();
+        let old_id = old.add_layer("p", &[40, 40, 40, 255], 1, 1).unwrap();
+        old.curves_table(old_id, &inverted).unwrap();
+        assert_eq!(doc.layers()[0].pixels, old.layers()[0].pixels);
+    }
+
+    #[test]
+    fn levels_eyedroppers_reach_their_target_colours() {
+        let pixels = grey_row(&[40, 100, 200, 255]);
+        let run = |f: &dyn Fn(&mut Document, LayerId)| {
+            let mut doc = Document::new(4, 1).unwrap();
+            let id = doc.add_layer("g", &pixels, 4, 1).unwrap();
+            f(&mut doc, id);
+            red_plane(&doc)
+        };
+        // Black point at pixel 0 (40) toward 20: 40 → 20, 100 → 20 + 60/215
+        // · 235 = 85.6 → 86, 255 → 255.
+        let black = run(&|doc, id| {
+            doc.levels_black_point_with(id, 0, 0, [20, 20, 20]).unwrap();
+        });
+        assert_eq!(black, vec![20, 86, 195, 255]);
+        // White point at pixel 2 (200) toward 200: 100 → 100, 200 → 200,
+        // 255 clamps to 200.
+        let white = run(&|doc, id| {
+            doc.levels_white_point_with(id, 2, 0, [200, 200, 200])
+                .unwrap();
+        });
+        assert_eq!(white, vec![40, 100, 200, 200]);
+        // Gray point at pixel 1 (100) toward 128: 100 → 128, 40 → 65.
+        let gray = run(&|doc, id| {
+            doc.levels_gray_point_with(id, 1, 0, [128, 128, 128])
+                .unwrap();
+        });
+        assert_eq!(gray[1], 128);
+        assert_eq!(gray[0], 65);
+        // Pure black and white targets are the old eyedroppers.
+        let old_black = run(&|doc, id| {
+            doc.levels_black_point(id, 0, 0).unwrap();
+        });
+        let new_black = run(&|doc, id| {
+            doc.levels_black_point_with(id, 0, 0, [0, 0, 0]).unwrap();
+        });
+        assert_eq!(old_black, new_black);
+        let old_white = run(&|doc, id| {
+            doc.levels_white_point(id, 2, 0).unwrap();
+        });
+        let new_white = run(&|doc, id| {
+            doc.levels_white_point_with(id, 2, 0, [255, 255, 255])
+                .unwrap();
+        });
+        assert_eq!(old_white, new_white);
+    }
+
+    #[test]
+    fn auto_color_targets_shape_the_result() {
+        // Two grey pixels 0 and 255 need no stretch; shadows 10 and
+        // highlights 200 lay the range onto 10..=200; the midtone target
+        // 128 then lifts the mean 105 to 128 per channel: 10 → 21, 200 →
+        // 211.
+        let pixels = grey_row(&[0, 255]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
+        doc.auto_color_with(id, 0, 0, [10, 10, 10], None, [200, 200, 200])
+            .unwrap();
+        assert_eq!(red_plane(&doc), vec![10, 200]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
+        doc.auto_color_with(
+            id,
+            0,
+            0,
+            [10, 10, 10],
+            Some([128, 128, 128]),
+            [200, 200, 200],
+        )
+        .unwrap();
+        assert_eq!(red_plane(&doc), vec![21, 211]);
+        // Default targets are auto_color.
+        let cast = vec![60, 40, 20, 255, 200, 160, 120, 255];
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("c", &cast, 2, 1).unwrap();
+        doc.auto_color_with(id, 0, 0, [0; 3], None, [255; 3])
+            .unwrap();
+        let mut old = Document::new(2, 1).unwrap();
+        let old_id = old.add_layer("c", &cast, 2, 1).unwrap();
+        old.auto_color(old_id, 0, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, old.layers()[0].pixels);
     }
 
     #[test]

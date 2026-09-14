@@ -21951,6 +21951,81 @@ four screenshots checked by eye.
 
 Tests: 1862 Rust (1860 → 1862), 22 frontend.
 
+## Phase 368 — Adjustment options: smooth Curves, per-channel pencil curves, eyedropper and Auto Color target colours
+
+Five section D scope cuts on the Levels and Curves dialogs.
+
+**Smooth curves** (`curve_lookup_smooth`, `curves_channels_with`, a
+Smooth curve checkbox in point mode, on by default as in Photoshop): a
+cubic Hermite spline through the sorted points whose tangent at each
+interior point is the slope between its two neighbours and at each end
+the slope of the end segment, so the curve passes through every point,
+a two-point curve is exactly the straight line, and the bow between
+points follows the neighbours' trend; flat beyond the outer points and
+clamped where it overshoots. The dialog's drawn curve asks
+`curves_lookup` for the same spline.
+
+**Per-channel pencil curves** (`curves_tables`): Pencil mode keeps a
+freehand table per channel — the Channel select parks the current
+table and loads the chosen channel's — and Apply sends all four, the
+channel table first and the composite second exactly as the point
+curves are ordered.
+
+**Eyedropper target colours** (`levels_black_point_with`,
+`levels_gray_point_with`, `levels_white_point_with`; three colour
+inputs beside the eyedropper buttons in Levels and Curves, defaulting
+to black, 50 % grey and white): the clicked pixel becomes the target —
+for Black and White each channel's input point is the pixel's own value
+and its output point the target's; for Gray each channel's gamma puts
+the pixel's value on the target's value in that channel.
+
+**Auto Color targets** (`auto_color_with`): the same three colours are
+Auto Color's Shadows, Midtones and Highlights — after the stretch,
+each channel's full range is laid onto `shadows..=highlights` and the
+mean colour is snapped to the Midtones target instead of to the mean
+of the three channels.
+
+**Verified.** Four Rust tests. `smooth_curves_bow_between_their_points`
+with points (0, 0), (128, 192), (255, 255): the straight curve reads 96
+at 64 and 224 at 192, the spline (tangents 1.5, 1.0 and 0.496) 104 and
+232, passing through every point; two points make the same line either
+way; one point errors; on a picture the composite spline turns grey 64
+into 104 and smooth off equals `curves_channels`.
+`pencil_curves_per_channel_run_before_the_composite`: a red table
+inverted under a halving composite turns red 40 into 108 and green 40
+into 20; all-identity channel tables equal `curves_table`.
+`levels_eyedroppers_reach_their_target_colours` on greys 40, 100, 200,
+255: Black Point at 40 toward 20 reads 20, 86, 195, 255; White Point at
+200 toward 200 reads 40, 100, 200, 200; Gray Point at 100 toward 128
+puts 100 on 128 and 40 on 65; black and white targets equal the old
+eyedroppers. `auto_color_targets_shape_the_result` on greys 0 and
+255: shadows 10 and highlights 200 read 10 and 200, and a midtone
+target of 128 lifts them to 21 and 211; default targets equal
+`auto_color`. In Chromium against the built frontend: Image >
+Adjustments > Curves… shows Smooth curve checked and asks
+`curves_lookup` with `smooth: true` for every channel, Apply sends
+`curves_channels_with`; in Pencil mode the checkbox hides, a stroke
+drawn on Red and another on Blue send `curves_tables` whose red table
+reads 26 and blue 230 at 128 while master and green stay 128; Levels…
+shows the three target inputs at black, grey and white, a Black Pt
+click after setting the black target sends
+`levels_black_point_with` with `target: [10, 20, 40]`, and Auto Color
+sends `auto_color_with` with those targets. On the real app under
+Xvfb, on the recovered brush-stroke document: Image > Adjustments >
+Curves… opens with Smooth curve checked and the Targets row above the
+eyedropper buttons; dragging the composite's 128 point to 43 draws the
+spline's bow on the graph (dipping through the point and easing back
+to the straight line above it), and Apply runs through the real IPC,
+leaving the white stroke white (255 maps to 255) with its anti-aliased
+edge darkened. The check also showed the Curves dialog, now taller
+than a 900-pixel display, running its action row off the modal's left
+edge and its top off the screen — a pre-existing overflow: `.modal` now
+caps its height at the viewport and scrolls, keeps its children from
+shrinking, and `.modal__actions` wraps, verified by a second screenshot.
+Eight screenshots checked by eye.
+
+Tests: 1866 Rust (1862 → 1866), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

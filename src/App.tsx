@@ -2044,6 +2044,10 @@ export default function App() {
   // Levels > Auto Options: the Clip percentages in hundredths (0.10% = 10).
   const [levelsClipShadows, setLevelsClipShadows] = useState(10);
   const [levelsClipHighlights, setLevelsClipHighlights] = useState(10);
+  // The eyedroppers' and Auto Color's target colours.
+  const [levelsBlackTarget, setLevelsBlackTarget] = useState("#000000");
+  const [levelsGrayTarget, setLevelsGrayTarget] = useState("#808080");
+  const [levelsWhiteTarget, setLevelsWhiteTarget] = useState("#ffffff");
   // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
   // makes the clicked pixel black or white and disarms.
   // Guides dialog: New Guide's orientation and position, Guide Layout's grid.
@@ -2190,6 +2194,12 @@ export default function App() {
   const [curveShowClipping, setCurveShowClipping] = useState(false);
   // Pencil mode: a freehand 256-entry table drawn on the graph.
   const [curvesPencilMode, setCurvesPencilMode] = useState(false);
+  // Point mode's curve shape: Photoshop's smooth spline or straight segments.
+  const [curvesSmooth, setCurvesSmooth] = useState(true);
+  // Pencil mode keeps a table per channel; the current channel's is live.
+  const [curveTableStore, setCurveTableStore] = useState<
+    Partial<Record<LevelsChannel, number[]>>
+  >({});
   const [curveTable, setCurveTable] = useState<number[]>(() =>
     Array.from({ length: 256 }, (_, i) => i),
   );
@@ -6835,12 +6845,36 @@ export default function App() {
   const applyCurves = useCallback(async () => {
     if (selectedId === null) return;
     if (curvesPencilMode) {
-      await runCommand("curves_table", { id: selectedId, table: curveTable });
+      const identity = Array.from({ length: 256 }, (_, i) => i);
+      const tableFor = (channel: LevelsChannel) =>
+        channel === curveChannel
+          ? curveTable
+          : (curveTableStore[channel] ?? identity);
+      await runCommand("curves_tables", {
+        id: selectedId,
+        master: tableFor("rgb"),
+        red: tableFor("red"),
+        green: tableFor("green"),
+        blue: tableFor("blue"),
+      });
     } else {
-      await runCommand("curves_channels", { id: selectedId, ...curveLists() });
+      await runCommand("curves_channels_with", {
+        id: selectedId,
+        ...curveLists(),
+        smooth: curvesSmooth,
+      });
     }
     setShowCurvesDialog(false);
-  }, [runCommand, selectedId, curveLists, curvesPencilMode, curveTable]);
+  }, [
+    runCommand,
+    selectedId,
+    curveLists,
+    curvesPencilMode,
+    curveTable,
+    curveTableStore,
+    curveChannel,
+    curvesSmooth,
+  ]);
 
   /** Pencil mode: set the table at the pointer, filling the gap from the
    * last sample with a straight run so a fast stroke stays continuous. */
@@ -6888,12 +6922,23 @@ export default function App() {
         ...store,
         [curveChannel]: { points: curvePoints, nodes: curveNodes },
       }));
+      setCurveTableStore((store) => ({ ...store, [curveChannel]: curveTable }));
       setCurvePoints(curveStore[channel].points);
       setCurveNodes(curveStore[channel].nodes);
+      setCurveTable(
+        curveTableStore[channel] ?? Array.from({ length: 256 }, (_, i) => i),
+      );
       setCurveFocus(null);
       setCurveChannel(channel);
     },
-    [curveChannel, curvePoints, curveNodes, curveStore],
+    [
+      curveChannel,
+      curvePoints,
+      curveNodes,
+      curveStore,
+      curveTable,
+      curveTableStore,
+    ],
   );
 
   const openCurvesDialog = useCallback(() => {
@@ -6923,7 +6968,10 @@ export default function App() {
     const channels: LevelsChannel[] = ["rgb", "red", "green", "blue"];
     void Promise.all(
       channels.map((channel) =>
-        invoke<number[]>("curves_lookup", { points: lists[channel] }),
+        invoke<number[]>("curves_lookup", {
+          points: lists[channel],
+          smooth: curvesSmooth,
+        }),
       ),
     )
       .then((luts) =>
@@ -6942,7 +6990,13 @@ export default function App() {
     } else {
       setCurveClipping(null);
     }
-  }, [showCurvesDialog, curveLists, curveShowClipping, selectedId]);
+  }, [
+    showCurvesDialog,
+    curveLists,
+    curveShowClipping,
+    selectedId,
+    curvesSmooth,
+  ]);
 
   const setCurveNode = useCallback(
     (index: number, axis: 0 | 1, value: number) => {
@@ -9975,14 +10029,21 @@ export default function App() {
           const [x, y] = toDocPoint(event, document);
           const command =
             levelsEyedropper === "black"
-              ? "levels_black_point"
+              ? "levels_black_point_with"
               : levelsEyedropper === "gray"
-                ? "levels_gray_point"
-                : "levels_white_point";
+                ? "levels_gray_point_with"
+                : "levels_white_point_with";
+          const target =
+            levelsEyedropper === "black"
+              ? levelsBlackTarget
+              : levelsEyedropper === "gray"
+                ? levelsGrayTarget
+                : levelsWhiteTarget;
           void runCommand(command, {
             id: selectedId,
             x: Math.floor(x),
             y: Math.floor(y),
+            target: hexToRgb(target),
           });
         }
         setLevelsEyedropper(null);
@@ -13576,10 +13637,13 @@ export default function App() {
             className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
-              void runCommand("auto_color", {
+              void runCommand("auto_color_with", {
                 id: selectedId,
                 shadowClip: levelsClipShadows,
                 highlightClip: levelsClipHighlights,
+                shadows: hexToRgb(levelsBlackTarget),
+                midtones: hexToRgb(levelsGrayTarget),
+                highlights: hexToRgb(levelsWhiteTarget),
               })
             }
             disabled={busy || !canPaint}
@@ -26658,6 +26722,30 @@ export default function App() {
                 />
               </label>
             </div>
+            <label
+              className="control control--row"
+              title="Target colours for the Black, Gray and White Point eyedroppers (and Auto Color's shadows, midtones and highlights)"
+            >
+              <span className="control__label">Targets</span>
+              <input
+                type="color"
+                aria-label="Black point target"
+                value={levelsBlackTarget}
+                onChange={(event) => setLevelsBlackTarget(event.target.value)}
+              />
+              <input
+                type="color"
+                aria-label="Gray point target"
+                value={levelsGrayTarget}
+                onChange={(event) => setLevelsGrayTarget(event.target.value)}
+              />
+              <input
+                type="color"
+                aria-label="White point target"
+                value={levelsWhiteTarget}
+                onChange={(event) => setLevelsWhiteTarget(event.target.value)}
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -26891,6 +26979,16 @@ export default function App() {
             >
               On-image
             </button>
+            {!curvesPencilMode && (
+              <label className="tools__slider">
+                <input
+                  type="checkbox"
+                  checked={curvesSmooth}
+                  onChange={(event) => setCurvesSmooth(event.target.checked)}
+                />
+                Smooth curve
+              </label>
+            )}
             <label className="tools__slider">
               <input
                 type="checkbox"
@@ -26999,6 +27097,30 @@ export default function App() {
                   />
                 </label>
               ))}
+            <label
+              className="control control--row"
+              title="Target colours for the Black, Gray and White Point eyedroppers (and Auto Color's shadows, midtones and highlights)"
+            >
+              <span className="control__label">Targets</span>
+              <input
+                type="color"
+                aria-label="Black point target"
+                value={levelsBlackTarget}
+                onChange={(event) => setLevelsBlackTarget(event.target.value)}
+              />
+              <input
+                type="color"
+                aria-label="Gray point target"
+                value={levelsGrayTarget}
+                onChange={(event) => setLevelsGrayTarget(event.target.value)}
+              />
+              <input
+                type="color"
+                aria-label="White point target"
+                value={levelsWhiteTarget}
+                onChange={(event) => setLevelsWhiteTarget(event.target.value)}
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"

@@ -6605,8 +6605,122 @@ fn curve_with_point(points: Vec<(u8, u8)>, input: u8, delta: i32) -> Result<Vec<
 /// The Curves dialog's graph: the 256-entry lookup table `points` describe.
 /// Read-only; needs no document.
 #[tauri::command]
-fn curves_lookup(points: Vec<(u8, u8)>) -> Result<Vec<u8>, String> {
-    document::curve_lookup(&points).map(|lut| lut.to_vec())
+fn curves_lookup(points: Vec<(u8, u8)>, smooth: Option<bool>) -> Result<Vec<u8>, String> {
+    if smooth.unwrap_or(false) {
+        document::curve_lookup_smooth(&points).map(|lut| lut.to_vec())
+    } else {
+        document::curve_lookup(&points).map(|lut| lut.to_vec())
+    }
+}
+
+/// Image > Adjustments > Curves with every channel's points and the
+/// curve's shape (`smooth`: a spline through the points).
+#[tauri::command]
+fn curves_channels_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    rgb: Vec<(u8, u8)>,
+    red: Vec<(u8, u8)>,
+    green: Vec<(u8, u8)>,
+    blue: Vec<(u8, u8)>,
+    smooth: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.curves_channels_with(id, &rgb, &red, &green, &blue, smooth)
+    })
+}
+
+fn curve_table(table: Vec<u8>) -> Result<[u8; 256], String> {
+    table
+        .try_into()
+        .map_err(|_| "A curve table needs exactly 256 entries.".to_string())
+}
+
+/// Image > Adjustments > Curves in Pencil mode with a table per channel.
+#[tauri::command]
+fn curves_tables(
+    state: State<'_, AppState>,
+    id: LayerId,
+    master: Vec<u8>,
+    red: Vec<u8>,
+    green: Vec<u8>,
+    blue: Vec<u8>,
+) -> Result<Snapshot, String> {
+    let (master, red, green, blue) = (
+        curve_table(master)?,
+        curve_table(red)?,
+        curve_table(green)?,
+        curve_table(blue)?,
+    );
+    edit_checkpointed(&state, |document| {
+        document.curves_tables(id, &master, &red, &green, &blue)
+    })
+}
+
+/// Levels/Curves Black Point eyedropper with its target colour.
+#[tauri::command]
+fn levels_black_point_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    target: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.levels_black_point_with(id, x, y, target)
+    })
+}
+
+/// Levels/Curves White Point eyedropper with its target colour.
+#[tauri::command]
+fn levels_white_point_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    target: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.levels_white_point_with(id, x, y, target)
+    })
+}
+
+/// Levels/Curves Gray Point eyedropper with its target colour.
+#[tauri::command]
+fn levels_gray_point_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+    target: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.levels_gray_point_with(id, x, y, target)
+    })
+}
+
+/// Image > Adjustments > Auto Color with its Shadows, Midtones and
+/// Highlights target colours.
+#[tauri::command]
+fn auto_color_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    shadow_clip: Option<u32>,
+    highlight_clip: Option<u32>,
+    shadows: [u8; 3],
+    midtones: Option<[u8; 3]>,
+    highlights: [u8; 3],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.auto_color_with(
+            id,
+            shadow_clip.unwrap_or(0),
+            highlight_clip.unwrap_or(0),
+            shadows,
+            midtones,
+            highlights,
+        )
+    })
 }
 
 /// Levels/Curves Black Point eyedropper: make pixel `(x, y)` of layer `id`
@@ -8026,6 +8140,12 @@ pub fn run() {
             rough_pastels_with,
             radial_blur_with,
             shape_blur_with,
+            curves_channels_with,
+            curves_tables,
+            levels_black_point_with,
+            levels_white_point_with,
+            levels_gray_point_with,
+            auto_color_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,
