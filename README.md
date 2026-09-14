@@ -20637,6 +20637,69 @@ Three scope cuts close (Free Transform's single resample, the
 Transform family's bicubic option, rotation from the on-canvas
 controls); 612/618 unchanged.
 
+## Phase 345 — Project format version 2: every record saved
+
+The largest scope cut nobody had written down. Since Phase 296 the
+project file (`IEDP1`) carried each layer's pixels, name, visibility,
+opacity, blend mode and lock, the canvas size and the colour profile —
+and nothing else. A saved text layer came back as pixels that could no
+longer be edited as type; a smart object lost its source; a layer mask,
+an adjustment layer's adjustment, a fill layer's recipe, a shape's
+spec, a clip, a link, every guide, note, count mark, saved selection,
+preset and generated-layer record was gone on reopen. Version 2 saves
+all of it. The magic is unchanged and every new manifest field has a
+serde default, so a version-1 file still reads — and a version-2 file
+still holds exactly the layer PNGs a version-1 reader expects first.
+
+`LayerRecords` (document.rs) is what a layer carries besides its pixels
+and the fields the manifest always had: link, clip, adjustment, fill,
+text, shape, and a `SmartRecord` (transform, Smart Filters, Neural
+Smart Filters); the mask and the smart object's source travel as
+further PNG blobs after the layer's own — the mask as an opaque grey
+PNG — with their lengths in the manifest, so the reader walks the
+blobs without a scan. `DocumentRecords` is the document's own: guides,
+artboards, notes, count marks, the work path, gradient, adjustment,
+custom-shape and tool presets, saved selections and the selection,
+colour mode and bit depth, layer groups, and the generated-layer
+records; the defined pattern is a last PNG blob with its size in the
+manifest. Layer ids are reassigned on load, so each layer's saved id
+is kept in the manifest and the reader remaps every id inside the
+document records — a group's members, a generated layer's own id and
+its reference layer — to the ids it assigned, dropping a record whose
+layer did not survive. `Document::layer_records`,
+`restore_layer_records` (which checks a mask's and a source's size,
+validates an adjustment, and refuses a smart record without its
+source), `document_records`, `restore_document_records` and
+`restore_pattern` are the seams the format uses, so `project.rs`
+never reaches into private fields.
+
+**Verified two ways.** `cargo test`: 1817 total (1810 lib + 7
+pipeline, up from 1815) — a document with a masked, linked photo
+layer, a clipped fill layer, an adjustment layer, a text layer, a shape
+layer, a smart object with a Smart Filter, a generated layer, a
+defined pattern, a guide, a note, a count mark, a gradient preset, a
+saved selection and an active selection round-trips with every record
+equal to the original (mask bytes, text, shape, the whole smart
+object, the pattern, guides, notes, marks, presets, selections), and
+the generated record follows its layer to a *different* id because a
+layer removed before saving shifts every id on reload; a second save
+of the reloaded document is byte-for-byte the same length (a stable
+format); a version-1 file written exactly as the old writer laid it
+out reads with empty records and the missing-profile flag; and a
+version-2 file truncated inside a mask blob is reported as truncated.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean
+(`LayerRecordParts` names the accessor's three-part answer, at
+clippy's request), `npm run build` unchanged.
+
+Honest limitations: alpha channels, spot channels, the duotone inks,
+layer comps and the brush tip are not yet in the records (`AlphaChannel`,
+`SpotChannel` and `LayerComp` do not serialise today; the next pass on
+this format adds them); Cloud Documents carry version-2 bytes the same
+way, since they are the same bytes.
+
+One scope cut closes, the one that mattered most for keeping work;
+612/618 unchanged.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

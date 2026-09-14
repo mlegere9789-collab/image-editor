@@ -2,7 +2,14 @@
 //! order, name, visibility, opacity, blend mode, and lock state, plus each
 //! layer's own pixels — across a save and reopen. **Export PNG…** only ever
 //! wrote the flattened composite; nothing until now could save (and get
-//! back) the *editable* document.
+//! back) the *editable* document. Version 2 of the manifest (the same
+//! magic; every new field has a serde default, so a version-1 file still
+//! reads) adds each layer's records — mask, adjustment, fill, text, shape,
+//! smart object, link and clip — and the document's own: guides,
+//! artboards, notes, count marks, the work path, presets, saved
+//! selections and the selection, mode and depth, groups, generated-layer
+//! records, and the defined pattern. A mask, a smart object's source, and
+//! the pattern travel as further PNG blobs after the layer's own.
 //!
 //! Layout, chosen to reuse the PNG codec already in `png.rs` rather than
 //! inventing a second pixel format or pulling in an archive library:
@@ -12,7 +19,8 @@
 //! u32 LE                manifest length, in bytes
 //! <manifest JSON>        width, height, and each layer's name/visible/
 //!                        opacity/blend_mode/locked/png_len, in stack order
-//! <layer 0 PNG bytes><layer 1 PNG bytes>...
+//! <layer 0 PNG bytes>[<layer 0 mask PNG>][<layer 0 smart source PNG>]
+//! <layer 1 PNG bytes>...[<pattern PNG>]
 //! ```
 //!
 //! Each layer's own pixels are PNG-encoded independently and concatenated
@@ -25,7 +33,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
-use crate::document::{ColorProfile, Document};
+use crate::document::{ColorProfile, Document, DocumentRecords, LayerId, LayerRecords, Pattern};
 use crate::png;
 
 const MAGIC: &[u8; 5] = b"IEDP1";
@@ -46,6 +54,20 @@ struct Manifest {
     #[serde(default)]
     profile: Option<ColorProfile>,
     layers: Vec<LayerManifest>,
+    /// `1` when absent (a file from before the records were saved).
+    #[serde(default = "one")]
+    version: u32,
+    #[serde(default)]
+    records: DocumentRecords,
+    /// The defined pattern's PNG, after every layer's blobs; `0` for none.
+    #[serde(default)]
+    pattern_png_len: u32,
+    #[serde(default)]
+    pattern_size: (u32, u32),
+}
+
+fn one() -> u32 {
+    1
 }
 
 #[derive(Serialize, Deserialize)]
@@ -59,6 +81,23 @@ struct LayerManifest {
     #[serde(default)]
     locked: bool,
     png_len: u32,
+    /// The layer's id at save time, so document records can be remapped.
+    #[serde(default)]
+    id: LayerId,
+    #[serde(default)]
+    records: LayerRecords,
+    /// The mask's PNG (grey in every channel, opaque), `0` for none.
+    #[serde(default)]
+    mask_png_len: u32,
+    /// The smart object's source PNG, `0` for none.
+    #[serde(default)]
+    smart_png_len: u32,
+}
+
+/// A document-sized byte plane as an opaque grey PNG.
+fn encode_plane(width: u32, height: u32, plane: &[u8]) -> Result<Vec<u8>, String> {
+    let rgba: Vec<u8> = plane.iter().flat_map(|&v| [v, v, v, 255]).collect();
+    png::encode_pixels(width, height, &rgba)
 }
 
 /// Encode `document` as project-file bytes, in memory -- the format
@@ -69,9 +108,21 @@ struct LayerManifest {
 pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
     let mut layers = Vec::with_capacity(document.layers().len());
     let mut layer_bytes = Vec::with_capacity(document.layers().len());
+    let (width, height) = (document.width(), document.height());
     for layer in document.layers() {
-        let bytes = png::encode_pixels(document.width(), document.height(), &layer.pixels)
+        let bytes = png::encode_pixels(width, height, &layer.pixels)
             .map_err(|err| format!("Could not encode layer '{}': {err}", layer.name))?;
+        let (records, mask, smart_source) = document.layer_records(layer.id)?;
+        let mask_bytes = match mask {
+            Some(mask) => encode_plane(width, height, mask)
+                .map_err(|err| format!("Could not encode layer '{}' mask: {err}", layer.name))?,
+            None => Vec::new(),
+        };
+        let smart_bytes = match smart_source {
+            Some(source) => png::encode_pixels(width, height, source)
+                .map_err(|err| format!("Could not encode layer '{}' source: {err}", layer.name))?,
+            None => Vec::new(),
+        };
         layers.push(LayerManifest {
             name: layer.name.clone(),
             visible: layer.visible,
@@ -79,15 +130,35 @@ pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
             blend_mode: layer.blend_mode,
             locked: layer.locked,
             png_len: bytes.len() as u32,
+            id: layer.id,
+            records,
+            mask_png_len: mask_bytes.len() as u32,
+            smart_png_len: smart_bytes.len() as u32,
         });
         layer_bytes.push(bytes);
+        layer_bytes.push(mask_bytes);
+        layer_bytes.push(smart_bytes);
     }
+    let (pattern_bytes, pattern_size) = match document.pattern() {
+        Some(pattern) => (
+            png::encode_pixels(pattern.width, pattern.height, &pattern.pixels)
+                .map_err(|err| format!("Could not encode the pattern: {err}"))?,
+            (pattern.width, pattern.height),
+        ),
+        None => (Vec::new(), (0, 0)),
+    };
+    let pattern_png_len = pattern_bytes.len() as u32;
+    layer_bytes.push(pattern_bytes);
 
     let manifest = Manifest {
-        width: document.width(),
-        height: document.height(),
+        width,
+        height,
         profile: Some(document.profile()),
         layers,
+        version: 2,
+        records: document.document_records(),
+        pattern_png_len,
+        pattern_size,
     };
     let manifest_json = serde_json::to_vec(&manifest)
         .map_err(|err| format!("Could not encode the project manifest: {err}"))?;
@@ -134,22 +205,45 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
     let mut document = Document::new(manifest.width, manifest.height)?;
     document.profile_was_missing = manifest.profile.is_none();
     document.assign_profile(manifest.profile.unwrap_or_default());
-    for layer in &manifest.layers {
-        let len = layer.png_len as usize;
+    let mut take = |len: u32, what: &str| -> Result<&[u8], String> {
         let end = offset
-            .checked_add(len)
+            .checked_add(len as usize)
             .filter(|&end| end <= bytes.len())
-            .ok_or_else(|| format!("truncated (layer '{}').", layer.name))?;
-        let decoded = png::decode_bytes(&bytes[offset..end])
-            .map_err(|err| format!("Corrupt layer '{}': {err}", layer.name))?;
+            .ok_or_else(|| format!("truncated ({what})."))?;
+        let slice = &bytes[offset..end];
         offset = end;
-
+        Ok(slice)
+    };
+    let mut id_map: Vec<(LayerId, LayerId)> = Vec::with_capacity(manifest.layers.len());
+    for layer in &manifest.layers {
+        let decoded = png::decode_bytes(take(layer.png_len, &format!("layer '{}'", layer.name))?)
+            .map_err(|err| format!("Corrupt layer '{}': {err}", layer.name))?;
         if decoded.width != manifest.width || decoded.height != manifest.height {
             return Err(format!(
                 "Layer '{}' is {}x{}, but the document is {}x{}.",
                 layer.name, decoded.width, decoded.height, manifest.width, manifest.height
             ));
         }
+        let mask = if layer.mask_png_len > 0 {
+            let plane = png::decode_bytes(take(
+                layer.mask_png_len,
+                &format!("layer '{}' mask", layer.name),
+            )?)
+            .map_err(|err| format!("Corrupt layer '{}' mask: {err}", layer.name))?;
+            Some(plane.pixels.chunks_exact(4).map(|p| p[0]).collect())
+        } else {
+            None
+        };
+        let smart_source = if layer.smart_png_len > 0 {
+            let source = png::decode_bytes(take(
+                layer.smart_png_len,
+                &format!("layer '{}' source", layer.name),
+            )?)
+            .map_err(|err| format!("Corrupt layer '{}' source: {err}", layer.name))?;
+            Some(source.pixels)
+        } else {
+            None
+        };
 
         let id = document.add_layer(
             layer.name.clone(),
@@ -161,6 +255,30 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
         document.set_opacity(id, layer.opacity)?;
         document.set_blend_mode(id, layer.blend_mode)?;
         document.set_locked(id, layer.locked)?;
+        document
+            .restore_layer_records(id, layer.records.clone(), mask, smart_source)
+            .map_err(|err| format!("Layer '{}': {err}", layer.name))?;
+        id_map.push((layer.id, id));
+    }
+    if manifest.pattern_png_len > 0 {
+        let decoded = png::decode_bytes(take(manifest.pattern_png_len, "pattern")?)
+            .map_err(|err| format!("Corrupt pattern: {err}"))?;
+        if (decoded.width, decoded.height) != manifest.pattern_size {
+            return Err("The pattern's size does not match its manifest.".to_string());
+        }
+        document.restore_pattern(Pattern {
+            width: decoded.width,
+            height: decoded.height,
+            pixels: decoded.pixels,
+        })?;
+    }
+    if manifest.version >= 2 {
+        document.restore_document_records(manifest.records, |old| {
+            id_map
+                .iter()
+                .find(|(saved, _)| *saved == old)
+                .map(|(_, new)| *new)
+        });
     }
 
     Ok(document)
@@ -176,7 +294,7 @@ pub fn load(path: &Path) -> Result<Document, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::document::MoveDirection;
+    use crate::document::{MaskSource, MoveDirection};
 
     fn temp_path(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(name)
@@ -245,6 +363,155 @@ mod tests {
         assert_eq!((reloaded.width(), reloaded.height()), (2, 1));
         assert_eq!(reloaded.layers()[0].name, "only");
         assert_eq!(reloaded.layers()[0].pixels, solid(2, 1, [10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn version_two_keeps_every_layer_record_and_the_documents_own() {
+        use crate::document::{
+            Adjustment, Fill, GuideOrientation, MaskSource, ShapeLayer, ShapeSpec, TextLayer,
+        };
+        let mut document = Document::new(8, 6).unwrap();
+        let photo = document
+            .add_layer("photo", &solid(8, 6, [90, 60, 30, 255]), 8, 6)
+            .unwrap();
+        document.select_rectangle(2.0, 1.0, 6.0, 5.0).unwrap();
+        document
+            .add_layer_mask(photo, MaskSource::RevealSelection)
+            .unwrap();
+        document.set_linked(photo, true).unwrap();
+        document.save_selection("window").unwrap();
+        document.define_pattern(photo).unwrap();
+        let fill = document
+            .add_fill_layer(
+                "Color Fill 1",
+                Fill::SolidColor {
+                    color: [0, 0, 255, 255],
+                },
+            )
+            .unwrap();
+        document.set_clipped(fill, true).unwrap();
+        let adjust = document
+            .add_adjustment_layer("Threshold 1", Adjustment::Threshold { level: 99 })
+            .unwrap();
+        let text = document
+            .add_text_layer(
+                "Hello",
+                &TextLayer {
+                    text: "Hello".into(),
+                    x: 1,
+                    y: 1,
+                    size: 1,
+                    color: [255, 0, 0, 255],
+                    vertical: false,
+                    font: None,
+                },
+            )
+            .unwrap();
+        let shape = document
+            .add_shape_layer(
+                "Rectangle 1",
+                &ShapeLayer {
+                    spec: ShapeSpec::Rectangle {
+                        x0: 1.0,
+                        y0: 1.0,
+                        x1: 5.0,
+                        y1: 4.0,
+                        radius: 0,
+                    },
+                    fill: Some([0, 255, 0, 255]),
+                    stroke: None,
+                },
+            )
+            .unwrap();
+        let smart = document
+            .add_layer("smart", &solid(8, 6, [10, 20, 30, 255]), 8, 6)
+            .unwrap();
+        document.convert_to_smart_object(smart).unwrap();
+        document
+            .add_smart_filter(smart, Adjustment::Invert)
+            .unwrap();
+        document.add_guide(GuideOrientation::Vertical, 3).unwrap();
+        document.add_note(1, 1, "check the sky").unwrap();
+        document.add_count_mark(4, 4).unwrap();
+        document
+            .save_gradient_preset("dusk", [255, 128, 0, 255], [0, 0, 64, 255])
+            .unwrap();
+        let generated = document.generate_image("a lake", 3, 2, 2.0).unwrap();
+        // Removing an earlier layer shifts every later id on reload, so the
+        // generated record's id must be remapped, not copied.
+        document.remove_layer(adjust).unwrap();
+
+        let bytes = encode(&document).unwrap();
+        let reloaded = decode(&bytes).unwrap();
+        let by_name = |name: &str| reloaded.layers().iter().find(|l| l.name == name).unwrap();
+        let orig = |id: LayerId| document.layers().iter().find(|l| l.id == id).unwrap();
+        let photo2 = by_name("photo");
+        assert_eq!(photo2.mask, orig(photo).mask);
+        assert!(photo2.linked);
+        assert!(by_name("Color Fill 1").clipped);
+        assert_eq!(
+            by_name("Color Fill 1").fill,
+            Some(Fill::SolidColor {
+                color: [0, 0, 255, 255]
+            })
+        );
+        assert_eq!(by_name("Hello").text, orig(text).text);
+        assert_eq!(by_name("Rectangle 1").shape, orig(shape).shape);
+        assert_eq!(by_name("smart").smart, orig(smart).smart);
+        assert_eq!(by_name("smart").pixels, orig(smart).pixels);
+        assert!(reloaded.layers().iter().all(|l| l.name != "Threshold 1"));
+        assert_eq!(reloaded.pattern(), document.pattern());
+        let records = reloaded.document_records();
+        let original = document.document_records();
+        assert_eq!(records.guides, original.guides);
+        assert_eq!(records.notes, original.notes);
+        assert_eq!(records.count_marks, original.count_marks);
+        assert_eq!(records.gradient_presets, original.gradient_presets);
+        assert_eq!(records.saved_selections, original.saved_selections);
+        assert_eq!(records.selection, original.selection);
+        // The generated record follows the layer to its new id.
+        assert_eq!(records.generated.len(), 1);
+        assert_eq!(records.generated[0].prompt, "a lake");
+        assert_eq!(records.generated[0].id, by_name("a lake").id);
+        assert_ne!(
+            records.generated[0].id, generated,
+            "ids are reassigned on load"
+        );
+        assert_eq!(reloaded.view().generated_layers.len(), 1);
+        // And it all survives a second save: the format is stable.
+        assert_eq!(encode(&reloaded).unwrap().len(), bytes.len());
+    }
+
+    #[test]
+    fn a_version_one_file_still_reads() {
+        // A file exactly as the version-1 writer laid it out: no records,
+        // no blob lengths, no version.
+        let pixels = png::encode_pixels(2, 2, &solid(2, 2, [1, 2, 3, 255])).unwrap();
+        let manifest = format!(
+            r#"{{"width":2,"height":2,"layers":[{{"name":"old","visible":true,"opacity":1.0,"blend_mode":"normal","png_len":{}}}]}}"#,
+            pixels.len()
+        );
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(MAGIC);
+        bytes.extend_from_slice(&(manifest.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(manifest.as_bytes());
+        bytes.extend_from_slice(&pixels);
+        let document = decode(&bytes).unwrap();
+        assert_eq!(document.layers().len(), 1);
+        assert_eq!(document.layers()[0].name, "old");
+        assert!(document.layers()[0].mask.is_none());
+        assert!(document.profile_was_missing);
+        assert!(document.document_records().guides.is_empty());
+        // A truncated mask blob is reported as such.
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc
+            .add_layer("m", &solid(2, 2, [5, 5, 5, 255]), 2, 2)
+            .unwrap();
+        doc.add_layer_mask(id, MaskSource::HideAll).unwrap();
+        let full = encode(&doc).unwrap();
+        assert!(decode(&full[..full.len() - 10])
+            .unwrap_err()
+            .contains("truncated"));
     }
 
     #[test]

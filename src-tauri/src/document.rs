@@ -4311,6 +4311,241 @@ pub enum MoveDirection {
     Down,
 }
 
+/// Everything a layer carries besides its pixels and the fields the
+/// project manifest has always saved -- the records project format
+/// version 2 keeps, so a reopened text layer is still type, a smart
+/// object still has its source, a mask still masks. The mask's and the
+/// smart source's bytes travel separately as PNG blobs.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LayerRecords {
+    #[serde(default)]
+    pub linked: bool,
+    #[serde(default)]
+    pub clipped: bool,
+    #[serde(default)]
+    pub adjustment: Option<Adjustment>,
+    #[serde(default)]
+    pub fill: Option<Fill>,
+    #[serde(default)]
+    pub text: Option<TextLayer>,
+    #[serde(default)]
+    pub shape: Option<ShapeLayer>,
+    #[serde(default)]
+    pub smart: Option<SmartRecord>,
+}
+
+/// A smart object's records minus its source pixels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmartRecord {
+    pub transform: FreeTransform,
+    #[serde(default)]
+    pub filters: Vec<Adjustment>,
+    #[serde(default)]
+    pub neural_filters: Vec<NeuralFilterKind>,
+}
+
+/// The document-level state project format version 2 keeps beyond the
+/// size, profile and layers: guides, artboards, notes, count marks, the
+/// work path, presets, saved selections and the selection, the mode and
+/// depth, groups, and the generated-layer records. Layer ids inside
+/// (`generated`, `groups`) are the ids at save time; the reader remaps
+/// them to the ids it assigns.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentRecords {
+    #[serde(default)]
+    pub guides: Vec<Guide>,
+    #[serde(default)]
+    pub artboards: Vec<Artboard>,
+    #[serde(default)]
+    pub notes: Vec<Note>,
+    #[serde(default)]
+    pub count_marks: Vec<(u32, u32)>,
+    #[serde(default)]
+    pub current_path: Option<Path>,
+    #[serde(default)]
+    pub gradient_presets: Vec<GradientPreset>,
+    #[serde(default)]
+    pub adjustment_presets: Vec<AdjustmentPreset>,
+    #[serde(default)]
+    pub custom_shape_presets: Vec<CustomShapePreset>,
+    #[serde(default)]
+    pub tool_presets: Vec<ToolPreset>,
+    #[serde(default)]
+    pub saved_selections: Vec<(String, Selection)>,
+    #[serde(default)]
+    pub selection: Option<Selection>,
+    #[serde(default)]
+    pub mode: ColorMode,
+    #[serde(default)]
+    pub bit_depth: BitDepth,
+    #[serde(default)]
+    pub groups: Vec<LayerGroup>,
+    #[serde(default)]
+    pub generated: Vec<GeneratedLayer>,
+}
+
+/// [`Document::layer_records`]' answer: the records, the mask bytes and
+/// the smart source bytes.
+pub type LayerRecordParts<'a> = (LayerRecords, Option<&'a [u8]>, Option<&'a [u8]>);
+
+impl Document {
+    /// Layer `id`'s records, its mask bytes and its smart source bytes,
+    /// for the project format.
+    pub fn layer_records(&self, id: LayerId) -> Result<LayerRecordParts<'_>, String> {
+        let layer = self.layer(id)?;
+        let records = LayerRecords {
+            linked: layer.linked,
+            clipped: layer.clipped,
+            adjustment: layer.adjustment,
+            fill: layer.fill,
+            text: layer.text.clone(),
+            shape: layer.shape.clone(),
+            smart: layer.smart.as_ref().map(|smart| SmartRecord {
+                transform: smart.transform,
+                filters: smart.filters.clone(),
+                neural_filters: smart.neural_filters.clone(),
+            }),
+        };
+        Ok((
+            records,
+            layer.mask.as_deref(),
+            layer.smart.as_ref().map(|smart| smart.source.as_slice()),
+        ))
+    }
+
+    /// Puts `records` (and a mask and smart source read back from the
+    /// file) onto layer `id`, as the project format's reader. A mask or
+    /// source of the wrong size, or a smart record without its source, is
+    /// refused.
+    pub fn restore_layer_records(
+        &mut self,
+        id: LayerId,
+        records: LayerRecords,
+        mask: Option<Vec<u8>>,
+        smart_source: Option<Vec<u8>>,
+    ) -> Result<(), String> {
+        let count = self.width as usize * self.height as usize;
+        if let Some(mask) = &mask {
+            if mask.len() != count {
+                return Err(format!(
+                    "The layer mask has {} bytes for {count} pixels.",
+                    mask.len()
+                ));
+            }
+        }
+        if let Some(source) = &smart_source {
+            if source.len() != count * CHANNELS {
+                return Err(format!(
+                    "The smart object source has {} bytes for {count} pixels.",
+                    source.len()
+                ));
+            }
+        }
+        if let Some(adjustment) = records.adjustment {
+            adjustment.validate()?;
+        }
+        let smart = match (records.smart, smart_source) {
+            (Some(record), Some(source)) => Some(SmartObject {
+                source,
+                transform: record.transform,
+                filters: record.filters,
+                neural_filters: record.neural_filters,
+            }),
+            (Some(_), None) => return Err("The smart object has no source pixels.".to_string()),
+            (None, _) => None,
+        };
+        let layer = self.layer_mut(id)?;
+        layer.linked = records.linked;
+        layer.clipped = records.clipped;
+        layer.adjustment = records.adjustment;
+        layer.fill = records.fill;
+        layer.text = records.text;
+        layer.shape = records.shape;
+        layer.smart = smart;
+        layer.mask = mask;
+        Ok(())
+    }
+
+    /// The document-level records for the project format.
+    pub fn document_records(&self) -> DocumentRecords {
+        DocumentRecords {
+            guides: self.guides.clone(),
+            artboards: self.artboards.clone(),
+            notes: self.notes.clone(),
+            count_marks: self.count_marks.clone(),
+            current_path: self.current_path.clone(),
+            gradient_presets: self.gradient_presets.clone(),
+            adjustment_presets: self.adjustment_presets.clone(),
+            custom_shape_presets: self.custom_shape_presets.clone(),
+            tool_presets: self.tool_presets.clone(),
+            saved_selections: self.saved_selections.clone(),
+            selection: self.selection.clone(),
+            mode: self.mode,
+            bit_depth: self.bit_depth,
+            groups: self.groups.clone(),
+            generated: self.generated.clone(),
+        }
+    }
+
+    /// Restores [`Self::document_records`], `remap` translating the
+    /// layer ids the records were saved with into the ids this document
+    /// assigned (a record whose layer did not survive is dropped).
+    pub fn restore_document_records(
+        &mut self,
+        records: DocumentRecords,
+        remap: impl Fn(LayerId) -> Option<LayerId>,
+    ) {
+        self.guides = records.guides;
+        self.artboards = records.artboards;
+        self.notes = records.notes;
+        self.count_marks = records.count_marks;
+        self.current_path = records.current_path;
+        self.gradient_presets = records.gradient_presets;
+        self.adjustment_presets = records.adjustment_presets;
+        self.custom_shape_presets = records.custom_shape_presets;
+        self.tool_presets = records.tool_presets;
+        self.saved_selections = records.saved_selections;
+        self.selection = records.selection;
+        self.mode = records.mode;
+        self.bit_depth = records.bit_depth;
+        self.groups = records
+            .groups
+            .into_iter()
+            .map(|group| LayerGroup {
+                name: group.name,
+                members: group.members.iter().filter_map(|&id| remap(id)).collect(),
+            })
+            .collect();
+        self.generated = records
+            .generated
+            .into_iter()
+            .filter_map(|g| {
+                let id = remap(g.id)?;
+                let reference = match g.reference {
+                    Some(r) => Some(remap(r)?),
+                    None => None,
+                };
+                Some(GeneratedLayer { id, reference, ..g })
+            })
+            .collect();
+    }
+
+    /// Puts a pattern read back from a project file in place.
+    pub fn restore_pattern(&mut self, pattern: Pattern) -> Result<(), String> {
+        if pattern.width == 0
+            || pattern.height == 0
+            || pattern.pixels.len() != pattern.width as usize * pattern.height as usize * CHANNELS
+        {
+            return Err("The pattern's size does not match its pixels.".to_string());
+        }
+        self.pattern = Some(pattern);
+        Ok(())
+    }
+}
+
 /// Generative Layers: what a layer Generate Image made was made from,
 /// so it can be drawn again on demand -- the prompt, the seed, and the
 /// sampler settings. Transient, like [`LastGeneration`]: the project
