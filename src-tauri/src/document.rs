@@ -279,6 +279,33 @@ impl LensType {
     }
 }
 
+/// The Background Eraser's Sampling: where the colour to erase comes from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum EraseSampling {
+    /// The colour under the stroke's first point.
+    #[default]
+    Once,
+    /// The colour under the brush centre where the path passed closest to
+    /// each pixel, so the stroke keeps re-sampling as it moves.
+    Continuous,
+    /// The background swatch.
+    BackgroundSwatch,
+}
+
+/// The Background Eraser's Limits: how far an erase reaches within the
+/// brush.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum EraseLimits {
+    /// Every covered pixel of the sampled colour.
+    #[default]
+    Discontiguous,
+    /// Only covered pixels 4-connected to the pixels under the path
+    /// through pixels of the sampled colour.
+    Contiguous,
+}
+
 /// The Dodge and Burn tools' Range: which tones a stroke reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -18984,7 +19011,7 @@ impl Document {
                 }
             }
         } else {
-            for (a, b) in segments {
+            for &(a, b) in &segments {
                 for row in 0..box_height {
                     let cy = (y0 as usize + row) as f32 + 0.5;
                     for col in 0..box_width {
@@ -19003,6 +19030,111 @@ impl Document {
                 }
             }
         }
+
+        // The Background Eraser decides per covered pixel, before erasing
+        // anything, whether its colour is the one to erase: judged against
+        // the sample its Sampling names, never a protected colour, and with
+        // Contiguous limits only where 4-connected to the pixels under the
+        // path through such pixels.
+        let erase_plan: Option<Vec<bool>> = match stroke {
+            Stroke::BackgroundErase {
+                tolerance,
+                sampling,
+                swatch,
+                limits,
+                protect,
+            } => {
+                let distance = |px: &[u8], sample: [u8; 3]| {
+                    px.iter()
+                        .zip(sample.iter())
+                        .map(|(&a, &b)| a.abs_diff(b))
+                        .max()
+                        .unwrap_or(0)
+                };
+                let mut plan = vec![false; box_width * box_height];
+                for row in 0..box_height {
+                    for col in 0..box_width {
+                        let idx = row * box_width + col;
+                        if coverage[idx] <= 0.0 {
+                            continue;
+                        }
+                        let base =
+                            ((y0 as usize + row) * width as usize + (x0 as usize + col)) * CHANNELS;
+                        let px = &layer.pixels[base..base + 3];
+                        let sample = match sampling {
+                            EraseSampling::Once => replace_sample,
+                            EraseSampling::BackgroundSwatch => swatch,
+                            EraseSampling::Continuous => {
+                                let cx = (x0 as usize + col) as f32 + 0.5;
+                                let cy = (y0 as usize + row) as f32 + 0.5;
+                                let (nx, ny) = segments
+                                    .iter()
+                                    .map(|&(a, b)| nearest_on_segment(cx, cy, a, b))
+                                    .min_by(|p, q| {
+                                        let dp = (p.0 - cx).hypot(p.1 - cy);
+                                        let dq = (q.0 - cx).hypot(q.1 - cy);
+                                        dp.partial_cmp(&dq).unwrap_or(std::cmp::Ordering::Equal)
+                                    })
+                                    .expect("a stroke has at least one segment");
+                                let sx = (nx.floor().max(0.0) as usize).min(width as usize - 1);
+                                let sy = (ny.floor().max(0.0) as usize).min(height as usize - 1);
+                                let at = (sy * width as usize + sx) * CHANNELS;
+                                [layer.pixels[at], layer.pixels[at + 1], layer.pixels[at + 2]]
+                            }
+                        };
+                        // Protect Foreground Color spares a pixel nearer that
+                        // colour than the sample.
+                        plan[idx] = distance(px, sample) <= tolerance
+                            && !protect.is_some_and(|f| distance(px, f) <= distance(px, sample));
+                    }
+                }
+                if limits == EraseLimits::Contiguous {
+                    let mut reached = vec![false; plan.len()];
+                    let mut stack: Vec<usize> = Vec::new();
+                    for &(a, b) in &segments {
+                        for (px, py) in [a, b] {
+                            let sx = px.floor() as i64 - x0 as i64;
+                            let sy = py.floor() as i64 - y0 as i64;
+                            if sx >= 0
+                                && sy >= 0
+                                && (sx as usize) < box_width
+                                && (sy as usize) < box_height
+                            {
+                                let idx = sy as usize * box_width + sx as usize;
+                                if plan[idx] && !reached[idx] {
+                                    reached[idx] = true;
+                                    stack.push(idx);
+                                }
+                            }
+                        }
+                    }
+                    while let Some(idx) = stack.pop() {
+                        let (col, row) = (idx % box_width, idx / box_width);
+                        let mut visit = |n: usize| {
+                            if plan[n] && !reached[n] {
+                                reached[n] = true;
+                                stack.push(n);
+                            }
+                        };
+                        if col > 0 {
+                            visit(idx - 1);
+                        }
+                        if col + 1 < box_width {
+                            visit(idx + 1);
+                        }
+                        if row > 0 {
+                            visit(idx - box_width);
+                        }
+                        if row + 1 < box_height {
+                            visit(idx + box_width);
+                        }
+                    }
+                    plan = reached;
+                }
+                Some(plan)
+            }
+            _ => None,
+        };
 
         for row in 0..box_height {
             for col in 0..box_width {
@@ -19213,12 +19345,11 @@ impl Document {
                         }
                         continue;
                     }
-                    Stroke::BackgroundErase { tolerance } => {
-                        let within = layer.pixels[base..base + 3]
-                            .iter()
-                            .zip(replace_sample.iter())
-                            .all(|(&a, &b)| a.abs_diff(b) <= tolerance);
-                        if within {
+                    Stroke::BackgroundErase { .. } => {
+                        let planned = erase_plan
+                            .as_ref()
+                            .is_some_and(|plan| plan[row * box_width + col]);
+                        if planned {
                             let dest_alpha = to_unit(layer.pixels[base + 3]);
                             layer.pixels[base + 3] = to_byte(dest_alpha * (1.0 - c));
                         }
@@ -29313,14 +29444,24 @@ pub enum Stroke<'a> {
     /// Swatch sampling, Hue/Saturation/Luminosity modes, Limits, and
     /// Anti-alias are documented scope cuts.
     ColorReplace { color: [u8; 3], tolerance: u8 },
-    /// The Background Eraser with Sampling: Once — the Eraser's
-    /// multiply-toward-zero on alpha, applied only to covered pixels whose
-    /// RGB is within `tolerance` (per channel) of the pixel under the
-    /// stroke's first point, so a background colour can be scrubbed away
-    /// around a differently coloured subject. Continuous and Background
-    /// Swatch sampling, Limits, and Protect Foreground Color are documented
-    /// scope cuts.
-    BackgroundErase { tolerance: u8 },
+    /// The Background Eraser — the Eraser's multiply-toward-zero on alpha,
+    /// applied only to covered pixels whose RGB is within `tolerance` (per
+    /// channel) of the sampled colour, so a background colour can be
+    /// scrubbed away around a differently coloured subject. `sampling`
+    /// picks the sample: Once, the pixel under the stroke's first point;
+    /// Continuous, the pixel under the brush centre where the path passed
+    /// closest to the pixel; Background Swatch, `swatch`. `limits`
+    /// Contiguous erases only pixels 4-connected to the pixels under the
+    /// path through pixels of the sampled colour; Discontiguous every
+    /// covered one. `protect` (Protect Foreground Color) spares any pixel
+    /// at least as near that colour as the sample, per-channel.
+    BackgroundErase {
+        tolerance: u8,
+        sampling: EraseSampling,
+        swatch: [u8; 3],
+        limits: EraseLimits,
+        protect: Option<[u8; 3]>,
+    },
     /// The Healing Brush: the Clone Stamp's sampling (`offset` from the
     /// Alt-clicked source, aligned) with the classic heal — texture from
     /// the source, tone from the destination: each covered pixel takes the
@@ -29524,6 +29665,17 @@ pub fn smooth_curve_table(table: &[u8; 256]) -> [u8; 256] {
 /// is an undisclosed halo-and-noise suppressor; a fixed contrast threshold
 /// — Unsharp Mask's Threshold at 8 — is this project's explicit stand-in.
 pub const PROTECT_DETAIL_THRESHOLD: f32 = 8.0;
+
+/// The point of segment `a → b` nearest to `(px, py)`.
+fn nearest_on_segment(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len_sq = dx * dx + dy * dy;
+    if len_sq <= f32::EPSILON {
+        return a;
+    }
+    let t = (((px - a.0) * dx + (py - a.1) * dy) / len_sq).clamp(0.0, 1.0);
+    (a.0 + t * dx, a.1 + t * dy)
+}
 
 fn point_segment_distance(px: f32, py: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
     let (dx, dy) = (b.0 - a.0, b.1 - a.1);
@@ -37188,7 +37340,171 @@ mod tests {
     }
 
     fn background_erase(tolerance: u8) -> Stroke<'static> {
-        Stroke::BackgroundErase { tolerance }
+        background_erase_with(
+            tolerance,
+            EraseSampling::Once,
+            [0, 0, 0],
+            EraseLimits::Discontiguous,
+            None,
+        )
+    }
+
+    fn background_erase_with(
+        tolerance: u8,
+        sampling: EraseSampling,
+        swatch: [u8; 3],
+        limits: EraseLimits,
+        protect: Option<[u8; 3]>,
+    ) -> Stroke<'static> {
+        Stroke::BackgroundErase {
+            tolerance,
+            sampling,
+            swatch,
+            limits,
+            protect,
+        }
+    }
+
+    const GREEN: [u8; 4] = [100, 200, 100, 255];
+    const BLUE: [u8; 4] = [50, 50, 200, 255];
+
+    /// A 5×3 layer, green in columns 0–2 and blue in 3–4.
+    fn green_then_blue() -> (Document, LayerId) {
+        let mut pixels = Vec::new();
+        for _ in 0..3 {
+            for x in 0..5 {
+                pixels.extend_from_slice(if x < 3 { &GREEN } else { &BLUE });
+            }
+        }
+        let mut doc = Document::new(5, 3).unwrap();
+        let id = doc.add_layer("l", &pixels, 5, 3).unwrap();
+        (doc, id)
+    }
+
+    fn alphas(doc: &Document, id: LayerId, y: u32, width: u32) -> Vec<u8> {
+        (0..width).map(|x| pixel(doc, id, x, y)[3]).collect()
+    }
+
+    #[test]
+    fn background_eraser_sampling_once_continuous_and_swatch() {
+        // Stroked along the middle row from x 0.5 to 4.5 at radius 1.5,
+        // every pixel is fully covered (at most 1 from the path, so
+        // 1.5 − 1 + 0.5 = 1). Once samples green under the first point:
+        // the blue columns stay. Continuous samples under the path where it
+        // passed closest — the pixel's own column — so everything goes.
+        // Background Swatch of blue takes only the blue columns.
+        let path = [(0.5, 1.5), (4.5, 1.5)];
+        let (mut doc, id) = green_then_blue();
+        doc.stroke(id, &path, 1.5, background_erase(32)).unwrap();
+        for y in 0..3 {
+            assert_eq!(
+                alphas(&doc, id, y, 5),
+                vec![0, 0, 0, 255, 255],
+                "once, row {y}"
+            );
+        }
+        let (mut doc, id) = green_then_blue();
+        doc.stroke(
+            id,
+            &path,
+            1.5,
+            background_erase_with(
+                32,
+                EraseSampling::Continuous,
+                [0, 0, 0],
+                EraseLimits::Discontiguous,
+                None,
+            ),
+        )
+        .unwrap();
+        for y in 0..3 {
+            assert_eq!(
+                alphas(&doc, id, y, 5),
+                vec![0, 0, 0, 0, 0],
+                "continuous, row {y}"
+            );
+        }
+        let (mut doc, id) = green_then_blue();
+        doc.stroke(
+            id,
+            &path,
+            1.5,
+            background_erase_with(
+                32,
+                EraseSampling::BackgroundSwatch,
+                [50, 50, 200],
+                EraseLimits::Discontiguous,
+                None,
+            ),
+        )
+        .unwrap();
+        for y in 0..3 {
+            assert_eq!(
+                alphas(&doc, id, y, 5),
+                vec![255, 255, 255, 0, 0],
+                "swatch, row {y}"
+            );
+        }
+    }
+
+    #[test]
+    fn background_eraser_limits_and_protect_foreground_color() {
+        // A 5×1 row G G B G G under one dab at (0.5, 0.5) of radius 5, which
+        // covers the whole row (the far pixel is 4 away: 5 − 4 + 0.5 = 1).
+        // Discontiguous erases every green; Contiguous only the greens
+        // 4-connected to the pixel under the dab through green — x 0 and
+        // 1 — the blue at x 2 walling off x 3 and 4. Protect Foreground
+        // Color of blue at tolerance 255, which alone would take the row,
+        // spares the blue: it is nearer blue than the green sample (0
+        // against 150), while the greens are nearer the sample.
+        let row = || {
+            let mut pixels = Vec::new();
+            for x in 0..5 {
+                pixels.extend_from_slice(if x == 2 { &BLUE } else { &GREEN });
+            }
+            let mut doc = Document::new(5, 1).unwrap();
+            let id = doc.add_layer("l", &pixels, 5, 1).unwrap();
+            (doc, id)
+        };
+        let (mut doc, id) = row();
+        doc.stroke(id, &[(0.5, 0.5)], 5.0, background_erase(32))
+            .unwrap();
+        assert_eq!(alphas(&doc, id, 0, 5), vec![0, 0, 255, 0, 0]);
+        let (mut doc, id) = row();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            5.0,
+            background_erase_with(
+                32,
+                EraseSampling::Once,
+                [0, 0, 0],
+                EraseLimits::Contiguous,
+                None,
+            ),
+        )
+        .unwrap();
+        assert_eq!(alphas(&doc, id, 0, 5), vec![0, 0, 255, 255, 255]);
+        let (mut doc, id) = row();
+        doc.stroke(
+            id,
+            &[(0.5, 0.5)],
+            5.0,
+            background_erase_with(
+                255,
+                EraseSampling::Once,
+                [0, 0, 0],
+                EraseLimits::Discontiguous,
+                Some([50, 50, 200]),
+            ),
+        )
+        .unwrap();
+        assert_eq!(alphas(&doc, id, 0, 5), vec![0, 0, 255, 0, 0]);
+        // Without the protection, tolerance 255 takes the blue too.
+        let (mut doc, id) = row();
+        doc.stroke(id, &[(0.5, 0.5)], 5.0, background_erase(255))
+            .unwrap();
+        assert_eq!(alphas(&doc, id, 0, 5), vec![0, 0, 0, 0, 0]);
     }
 
     #[test]

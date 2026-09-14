@@ -4494,18 +4494,37 @@ fn color_replace_stroke(
 }
 
 /// Background Eraser: erase, along `points` on layer `id`, only pixels
-/// within `tolerance` of the colour under the stroke's start. See
-/// [`paint_stroke`] for `points` and checkpointing.
+/// within `tolerance` of the sampled colour — under the stroke's start
+/// (Once, the default), under the brush as it moves (Continuous), or the
+/// background `swatch` — within `limits` (Discontiguous by default) and
+/// never a pixel nearer `protect`, the Protect Foreground Color, than the
+/// sample. See [`paint_stroke`] for `points` and checkpointing.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn background_erase_stroke(
     state: State<'_, AppState>,
     id: LayerId,
     points: Vec<(f32, f32)>,
     radius: f32,
     tolerance: u8,
+    sampling: Option<document::EraseSampling>,
+    swatch: Option<[u8; 3]>,
+    limits: Option<document::EraseLimits>,
+    protect: Option<[u8; 3]>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::BackgroundErase { tolerance })
+        document.stroke(
+            id,
+            &points,
+            radius,
+            Stroke::BackgroundErase {
+                tolerance,
+                sampling: sampling.unwrap_or_default(),
+                swatch: swatch.unwrap_or([0, 0, 0]),
+                limits: limits.unwrap_or_default(),
+                protect,
+            },
+        )
     })
 }
 

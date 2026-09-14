@@ -22423,6 +22423,53 @@ grey ends; two screenshots checked by eye.
 
 Tests: 1881 Rust (1879 → 1881), 22 frontend.
 
+## Phase 377 — The Background Eraser's Sampling, Limits and Protect Foreground Color
+
+One tool row of section D. `Stroke::BackgroundErase` carries the
+tool's three Photoshop options. Sampling names the colour to erase:
+Once, the pixel under the stroke's first point, as before; Continuous,
+the pixel under the brush centre where the path passed closest to each
+covered pixel (`nearest_on_segment` over the stroke's segments), so the
+brush keeps re-sampling as it moves; Background Swatch, a given colour.
+Limits: Discontiguous erases every covered pixel of the sampled colour;
+Contiguous only those 4-connected to the pixels under the path through
+pixels of the sampled colour, a flood fill over the covered box. Protect
+Foreground Color spares any pixel at least as near that colour as the
+sample, per channel, so the protection never swallows the colour being
+erased. The stroke builds a per-pixel plan before erasing anything, then
+the arm erases the planned pixels by coverage as before. The command
+takes the four optional fields; the options bar shows Sampling (with a
+swatch picker for Background Swatch), Limits and Protect Foreground
+Color, the protected colour being the brush colour.
+
+**Verified.** Two Rust tests.
+`background_eraser_sampling_once_continuous_and_swatch`: a 5×3 layer,
+green in columns 0–2 and blue in 3–4, stroked along the middle row at
+radius 1.5 so every pixel is fully covered: Once erases the green
+columns and leaves the blue at 255; Continuous erases all fifteen,
+each pixel's sample being the colour under the path in its own column;
+Background Swatch of blue erases only the blue columns.
+`background_eraser_limits_and_protect_foreground_color`: a row
+G G B G G under one dab of radius 5 at its first pixel: Discontiguous
+leaves 0 0 255 0 0, Contiguous 0 0 255 255 255 (the blue walls off the
+far greens), Protect Foreground Color of blue at tolerance 255 leaves
+0 0 255 0 0 where the same tolerance unprotected takes the whole row.
+In Chromium against the built frontend: choosing the Background Eraser
+shows Tolerance, Sampling, Limits and Protect Foreground Color, a drag
+sends `background_erase_stroke` with `sampling: "once", limits:
+"discontiguous", protect: null`; Background Swatch reveals a swatch
+picker and, with Contiguous and Protect ticked, the stroke carries
+`sampling: "backgroundSwatch", swatch: [50, 100, 200], limits:
+"contiguous", protect: [255, 255, 255]`; Continuous hides the picker.
+On the real app under Xvfb, on the recovered document: the options bar
+wrapped to show Sampling (Once), Limits (Discontiguous) and Protect
+Foreground Color; with Continuous chosen, a drag from the stroke's grey
+end to its white middle scrubbed the track away the whole way through
+the real IPC, across a ramp that Once sampling at Tolerance 32 could
+not follow; two screenshots checked by eye.
+
+Tests: 1883 Rust (1881 → 1883), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

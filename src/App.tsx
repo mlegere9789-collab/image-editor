@@ -1835,6 +1835,16 @@ export default function App() {
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [magicWandAntiAlias, setMagicWandAntiAlias] = useState(true);
   const [magicWandSampleAll, setMagicWandSampleAll] = useState(false);
+  // Background Eraser options: Sampling, its Background Swatch, Limits and
+  // Protect Foreground Color (the brush colour).
+  const [bgEraserSampling, setBgEraserSampling] = useState<
+    "once" | "continuous" | "backgroundSwatch"
+  >("once");
+  const [bgEraserSwatch, setBgEraserSwatch] = useState("#000000");
+  const [bgEraserLimits, setBgEraserLimits] = useState<
+    "discontiguous" | "contiguous"
+  >("discontiguous");
+  const [bgEraserProtect, setBgEraserProtect] = useState(false);
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
   const [colorRangeFuzziness, setColorRangeFuzziness] = useState(40);
@@ -9524,6 +9534,10 @@ export default function App() {
           points,
           radius: brushSize,
           tolerance: magicWandTolerance,
+          sampling: bgEraserSampling,
+          swatch: hexToRgb(bgEraserSwatch),
+          limits: bgEraserLimits,
+          protect: bgEraserProtect ? hexToRgb(brushColor) : null,
         });
       } else if (tool === "colorReplace") {
         const [r, g, b] = hexToRgb(brushColor);
@@ -9692,6 +9706,10 @@ export default function App() {
       toneRange,
       protectTones,
       spongeVibrance,
+      bgEraserSampling,
+      bgEraserSwatch,
+      bgEraserLimits,
+      bgEraserProtect,
       channelView,
     ],
   );
@@ -15138,6 +15156,71 @@ export default function App() {
                 <option value="both">Dual Axis</option>
               </select>
             </label>
+          )}
+          {tool === "backgroundEraser" && (
+            <>
+              <label className="tools__slider">
+                Sampling
+                <select
+                  value={bgEraserSampling}
+                  disabled={!canPaint}
+                  aria-label="Erase sampling"
+                  onChange={(event) =>
+                    setBgEraserSampling(
+                      event.target.value as
+                        | "once"
+                        | "continuous"
+                        | "backgroundSwatch",
+                    )
+                  }
+                >
+                  <option value="once">Once</option>
+                  <option value="continuous">Continuous</option>
+                  <option value="backgroundSwatch">Background Swatch</option>
+                </select>
+              </label>
+              {bgEraserSampling === "backgroundSwatch" && (
+                <label className="tools__slider">
+                  Swatch
+                  <input
+                    type="color"
+                    className="tools__color"
+                    value={bgEraserSwatch}
+                    disabled={!canPaint}
+                    aria-label="Background swatch"
+                    onChange={(event) => setBgEraserSwatch(event.target.value)}
+                  />
+                </label>
+              )}
+              <label className="tools__slider">
+                Limits
+                <select
+                  value={bgEraserLimits}
+                  disabled={!canPaint}
+                  aria-label="Erase limits"
+                  onChange={(event) =>
+                    setBgEraserLimits(
+                      event.target.value as "discontiguous" | "contiguous",
+                    )
+                  }
+                >
+                  <option value="discontiguous">Discontiguous</option>
+                  <option value="contiguous">Contiguous</option>
+                </select>
+              </label>
+              <label
+                className="tools__slider"
+                title="Protect Foreground Color: never erase pixels within Tolerance of the brush colour"
+              >
+                <input
+                  type="checkbox"
+                  checked={bgEraserProtect}
+                  disabled={!canPaint}
+                  onChange={(event) => setBgEraserProtect(event.target.checked)}
+                />
+                Protect Foreground Color
+              </label>
+            </>
           )}
           {(tool === "dodge" || tool === "burn") && (
             <>
