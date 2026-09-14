@@ -9949,6 +9949,8 @@ export default function App() {
         tolerance: magicWandTolerance,
         contiguous: magicWandContiguous,
         opacity: Math.round(brushOpacity * 255),
+        antiAlias: magicWandAntiAlias,
+        sampleAllLayers: magicWandSampleAll,
       });
     },
     [
@@ -9958,6 +9960,8 @@ export default function App() {
       magicWandTolerance,
       magicWandContiguous,
       brushOpacity,
+      magicWandAntiAlias,
+      magicWandSampleAll,
     ],
   );
 

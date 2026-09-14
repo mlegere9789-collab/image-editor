@@ -5846,6 +5846,7 @@ fn flood_fill(
 /// `id` the Magic Wand would select from a click at `(x, y)`. A whole,
 /// discrete action like the Paint Bucket, so it checkpoints itself.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn magic_erase(
     state: State<'_, AppState>,
     id: LayerId,
@@ -5854,9 +5855,20 @@ fn magic_erase(
     tolerance: u8,
     contiguous: bool,
     opacity: u8,
+    anti_alias: Option<bool>,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.magic_erase(id, x, y, tolerance, contiguous, opacity)
+        document.magic_erase_with(
+            id,
+            x,
+            y,
+            tolerance,
+            contiguous,
+            opacity,
+            anti_alias.unwrap_or(false),
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 

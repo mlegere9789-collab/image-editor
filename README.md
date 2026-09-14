@@ -22383,6 +22383,46 @@ the loop; four screenshots checked by eye.
 
 Tests: 1879 Rust (1877 → 1879), 22 frontend.
 
+## Phase 376 — The Magic Eraser's Anti-alias and Sample All Layers
+
+One tool row of section D, the Magic Wand's two options carried to
+the eraser that shares its region. `Document::magic_erase_with` takes
+them: Sample All Layers finds the region on the composite of every
+visible layer (`composite_pixels`, now the one buffer the Wand, the
+eraser and the Sample All Layers strokes share) and still erases only
+the clicked layer; Anti-alias erases each pixel by its coverage of the
+region — `wand_coverage`, the 3×3 edge-clamped box blur of the region's
+bits that the Wand stores as its soft edge — times the tool's Opacity,
+so the region's edge pixels and the ring just outside it fade rather
+than step, and the returned box spans every pixel with any coverage.
+`magic_erase` keeps its old meaning with both off; the command takes
+the two flags and the Magic Eraser's options bar, which already shares
+the Wand's controls, sends them with every click.
+
+**Verified.** Two Rust tests.
+`magic_eraser_anti_alias_fades_the_regions_edge`: a 3×3 red block
+centred on a 5×5 blue layer, tolerance 0 from the centre at Opacity
+255 with Anti-alias, leaves the centre at alpha 0 (9 of 9), the block's
+edge middles at 85 (6 of 9, 255 − 170), its corners at 142 (4 of 9,
+255 − 113), and the ring outside at 170, 199 and 227 (3, 2 and 1 of
+9), the box spanning the whole canvas and colour bytes untouched;
+Opacity 128 leaves the centre at 127; without Anti-alias the block
+goes and its ring stays, the box 1..4.
+`magic_eraser_sample_all_layers_reads_the_composite`: a half-
+transparent green layer over a red-left, blue-elsewhere layer is
+erased outright from a click alone, and only its red column with
+Sample All Layers, the bottom layer untouched. In Chromium against the
+built frontend: the Magic Eraser's options bar shows Contiguous,
+Anti-alias (on) and Sample All Layers (off), a click sends
+`magic_erase` with those defaults and `antiAlias: false,
+sampleAllLayers: true` after toggling. On the real app under Xvfb, on
+the recovered document: picking the Magic Eraser put Anti-alias
+(ticked) and Sample All Layers in the options bar, and a click on the
+stroke's white middle erased it through the real IPC, leaving the
+grey ends; two screenshots checked by eye.
+
+Tests: 1881 Rust (1879 → 1881), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

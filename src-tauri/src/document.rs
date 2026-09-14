@@ -4700,6 +4700,31 @@ fn grow_bits(
     bits
 }
 
+/// The Magic Wand's and Magic Eraser's Anti-alias: each pixel's coverage
+/// of a wand region is the 3×3 edge-clamped box blur of the region's bits,
+/// `hits · 255 / 9` truncated, so the region's edge pixels — and the ring
+/// of pixels just outside it — get a fractional share.
+fn wand_coverage(bits: &[bool], width: u32, height: u32) -> Vec<u8> {
+    let (w, h) = (width as i64, height as i64);
+    (0..h)
+        .flat_map(|py| {
+            (0..w).map(move |px| {
+                let mut hits = 0u32;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
+                        let sx = (px + dx).clamp(0, w - 1);
+                        let sy = (py + dy).clamp(0, h - 1);
+                        if bits[(sy * w + sx) as usize] {
+                            hits += 1;
+                        }
+                    }
+                }
+                (hits * 255 / 9) as u8
+            })
+        })
+        .collect()
+}
+
 fn wand_bits(
     pixels: &[u8],
     width: u32,
@@ -7681,13 +7706,7 @@ impl Document {
         }
         let layer = self.layer(id)?;
         let bits = if sample_all_layers {
-            let this: &Document = self;
-            let mut pixels = Vec::with_capacity(this.buffer_len());
-            for py in 0..height {
-                for px in 0..width {
-                    pixels.extend_from_slice(&crate::composite::composite_pixel(this, px, py));
-                }
-            }
+            let pixels = self.composite_pixels();
             wand_bits(&pixels, width, height, x, y, tolerance, contiguous)
         } else {
             wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous)
@@ -7695,25 +7714,7 @@ impl Document {
         if !anti_alias {
             return self.set_mask_selection(bits);
         }
-        let (w, h) = (width as i64, height as i64);
-        let soft: Vec<u8> = (0..h)
-            .flat_map(|py| {
-                let bits = &bits;
-                (0..w).map(move |px| {
-                    let mut hits = 0u32;
-                    for dy in -1..=1 {
-                        for dx in -1..=1 {
-                            let sx = (px + dx).clamp(0, w - 1);
-                            let sy = (py + dy).clamp(0, h - 1);
-                            if bits[(sy * w + sx) as usize] {
-                                hits += 1;
-                            }
-                        }
-                    }
-                    (hits * 255 / 9) as u8
-                })
-            })
-            .collect();
+        let soft = wand_coverage(&bits, width, height);
         self.set_mask_selection_soft(bits, soft)
     }
 
@@ -7728,8 +7729,8 @@ impl Document {
     /// the region are erased, and a click on an unselected pixel erases
     /// nothing and returns `None`. Returns the erased region's bounding
     /// box otherwise. Errors on a locked or unknown layer or a click off
-    /// the canvas. Photoshop's Anti-alias and Sample All Layers options are
-    /// documented scope cuts.
+    /// the canvas. Photoshop's Anti-alias and Sample All Layers come through
+    /// [`Self::magic_erase_with`].
     pub fn magic_erase(
         &mut self,
         id: LayerId,
@@ -7739,6 +7740,29 @@ impl Document {
         contiguous: bool,
         opacity: u8,
     ) -> Result<Option<Rect>, String> {
+        self.magic_erase_with(id, x, y, tolerance, contiguous, opacity, false, false)
+    }
+
+    /// [`Self::magic_erase`] with Photoshop's Anti-alias and Sample All
+    /// Layers. Sample All Layers finds the region on the composite of every
+    /// visible layer rather than on layer `id` alone, and still erases only
+    /// layer `id`. Anti-alias erases each pixel by its coverage of the
+    /// region — the 3×3 box blur of the region's bits, the Wand's own soft
+    /// edge — times `opacity`, so the region's edge pixels and the ring
+    /// just outside it fade rather than step; the returned box then spans
+    /// every pixel with any coverage.
+    #[allow(clippy::too_many_arguments)]
+    pub fn magic_erase_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        tolerance: u8,
+        contiguous: bool,
+        opacity: u8,
+        anti_alias: bool,
+        sample_all_layers: bool,
+    ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width, self.height);
         if x >= width || y >= height {
             return Err(format!(
@@ -7746,6 +7770,10 @@ impl Document {
             ));
         }
         let selection = self.selection.clone();
+        let composite = match sample_all_layers {
+            true => Some(self.composite_pixels()),
+            false => None,
+        };
         let layer = self.layer_mut(id)?;
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
@@ -7759,14 +7787,20 @@ impl Document {
         if !in_selection(x, y) {
             return Ok(None);
         }
-        let bits = wand_bits(&layer.pixels, width, height, x, y, tolerance, contiguous);
-        let keep = 1.0 - to_unit(opacity);
+        let source = composite.as_deref().unwrap_or(&layer.pixels);
+        let bits = wand_bits(source, width, height, x, y, tolerance, contiguous);
+        // Each pixel's share of the erase: its coverage of the region.
+        let coverage: Vec<u8> = match anti_alias {
+            true => wand_coverage(&bits, width, height),
+            false => bits.iter().map(|&b| if b { 255 } else { 0 }).collect(),
+        };
         let mut erased: Option<Rect> = None;
-        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+        for (idx, &cover) in coverage.iter().enumerate().filter(|(_, &c)| c > 0) {
             let (px, py) = (idx as u32 % width, idx as u32 / width);
             if !in_selection(px, py) {
                 continue;
             }
+            let keep = 1.0 - to_unit(cover) * to_unit(opacity);
             let alpha = &mut layer.pixels[idx * CHANNELS + 3];
             *alpha = to_byte(to_unit(*alpha) * keep);
             erased = Some(match erased {
@@ -9175,6 +9209,18 @@ impl Document {
     /// Number of bytes in a document-sized RGBA8 buffer.
     pub fn buffer_len(&self) -> usize {
         self.width as usize * self.height as usize * CHANNELS
+    }
+
+    /// The composite of every visible layer as a document-sized RGBA8
+    /// buffer — what Photoshop's Sample All Layers reads.
+    pub(crate) fn composite_pixels(&self) -> Vec<u8> {
+        let mut pixels = Vec::with_capacity(self.buffer_len());
+        for y in 0..self.height {
+            for x in 0..self.width {
+                pixels.extend_from_slice(&crate::composite::composite_pixel(self, x, y));
+            }
+        }
+        pixels
     }
 
     /// Add `source` (an RGBA8 buffer of `source_width` x `source_height`) as a new
@@ -18820,16 +18866,7 @@ impl Document {
                     | Stroke::SpotHeal
             ));
         let composite_snapshot: Option<Vec<u8>> = match wants_composite {
-            true => {
-                let this: &Document = self;
-                let mut pixels = Vec::with_capacity(this.buffer_len());
-                for y in 0..this.height {
-                    for x in 0..this.width {
-                        pixels.extend_from_slice(&crate::composite::composite_pixel(this, x, y));
-                    }
-                }
-                Some(pixels)
-            }
+            true => Some(self.composite_pixels()),
             false => None,
         };
         let layer = self.layer_mut(id)?;
@@ -58355,6 +58392,114 @@ colorspaces:
         assert_eq!(alpha_grid(&doc, id)[0], vec![0, 0, 255]);
         assert_eq!(doc.magic_erase(id, 2, 0, 25, true, 255).unwrap(), None);
         assert_eq!(alpha_grid(&doc, id)[0], vec![0, 0, 255]);
+    }
+
+    #[test]
+    fn magic_eraser_anti_alias_fades_the_regions_edge() {
+        // A 3×3 red block centred on a 5×5 blue layer, tolerance 0 from the
+        // centre: the block is the region. With Anti-alias each pixel is
+        // erased by its 3×3 coverage of the block — the centre by 9/9
+        // (alpha 0), the block's edge middles by 6/9 (255 − 170 = 85), its
+        // corners by 4/9 (255 − 113 = 142), the ring outside by 3/9, 2/9
+        // and 1/9 (170, 199, 227) — and the box spans the whole canvas.
+        let mut px = solid(5, 5, [0, 0, 255, 255]);
+        for y in 1..4 {
+            for x in 1..4 {
+                px[(y * 5 + x) * 4..(y * 5 + x) * 4 + 3].copy_from_slice(&[255, 0, 0]);
+            }
+        }
+        let mut doc = Document::new(5, 5).unwrap();
+        let id = doc.add_layer("p", &px, 5, 5).unwrap();
+        let rect = doc
+            .magic_erase_with(id, 2, 2, 0, true, 255, true, false)
+            .unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 5,
+                y1: 5
+            })
+        );
+        let alpha = |x: u32, y: u32| pixel(&doc, id, x, y)[3];
+        assert_eq!(alpha(2, 2), 0);
+        assert_eq!(alpha(1, 2), 85);
+        assert_eq!(alpha(3, 2), 85);
+        assert_eq!(alpha(2, 1), 85);
+        assert_eq!(alpha(1, 1), 142);
+        assert_eq!(alpha(3, 3), 142);
+        assert_eq!(alpha(0, 2), 170);
+        assert_eq!(alpha(0, 1), 199);
+        assert_eq!(alpha(0, 0), 227);
+        assert_eq!(alpha(4, 4), 227);
+        // Colour bytes stay; opacity scales the coverage (128 at the centre
+        // leaves 127); and without Anti-alias the block goes, its ring stays.
+        assert_eq!(pixel(&doc, id, 2, 2)[..3], [255, 0, 0]);
+        let mut doc2 = Document::new(5, 5).unwrap();
+        let id2 = doc2.add_layer("p", &px, 5, 5).unwrap();
+        doc2.magic_erase_with(id2, 2, 2, 0, true, 128, true, false)
+            .unwrap();
+        assert_eq!(pixel(&doc2, id2, 2, 2)[3], 127);
+        let mut doc3 = Document::new(5, 5).unwrap();
+        let id3 = doc3.add_layer("p", &px, 5, 5).unwrap();
+        let rect = doc3
+            .magic_erase_with(id3, 2, 2, 0, true, 255, false, false)
+            .unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 4,
+                y1: 4
+            })
+        );
+        assert_eq!(pixel(&doc3, id3, 1, 1)[3], 0);
+        assert_eq!(pixel(&doc3, id3, 0, 2)[3], 255);
+    }
+
+    #[test]
+    fn magic_eraser_sample_all_layers_reads_the_composite() {
+        // A half-transparent green layer over a bottom layer that is red on
+        // the left column and blue elsewhere. Alone, every top pixel matches
+        // a click at (0, 0) at tolerance 0 and the whole layer is erased;
+        // sampling all layers, the composite differs by column and only the
+        // red column's pixels of the top layer go — the bottom untouched.
+        let mut bottom = solid(3, 3, [0, 0, 255, 255]);
+        for y in 0..3 {
+            bottom[(y * 3) * 4..(y * 3) * 4 + 3].copy_from_slice(&[255, 0, 0]);
+        }
+        let green = solid(3, 3, [0, 255, 0, 128]);
+        let mut doc = Document::new(3, 3).unwrap();
+        doc.add_layer("b", &bottom, 3, 3).unwrap();
+        let top = doc.add_layer("t", &green, 3, 3).unwrap();
+        doc.magic_erase_with(top, 0, 0, 0, true, 255, false, false)
+            .unwrap();
+        assert_eq!(
+            alpha_grid(&doc, top),
+            vec![vec![0, 0, 0], vec![0, 0, 0], vec![0, 0, 0]]
+        );
+        let mut doc = Document::new(3, 3).unwrap();
+        let bottom_id = doc.add_layer("b", &bottom, 3, 3).unwrap();
+        let top = doc.add_layer("t", &green, 3, 3).unwrap();
+        let rect = doc
+            .magic_erase_with(top, 0, 0, 0, true, 255, false, true)
+            .unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 0,
+                y0: 0,
+                x1: 1,
+                y1: 3
+            })
+        );
+        assert_eq!(
+            alpha_grid(&doc, top),
+            vec![vec![0, 128, 128], vec![0, 128, 128], vec![0, 128, 128]]
+        );
+        assert_eq!(pixel(&doc, bottom_id, 0, 0), [255, 0, 0, 255]);
     }
 
     #[test]
