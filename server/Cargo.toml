@@ -1,0 +1,25 @@
+[package]
+name = "image-editor-server"
+version = "0.1.0"
+edition = "2021"
+description = "The self-hosted backend for image-editor's cloud rows: documents with version history, sharing, review links with threaded comments."
+license = "MIT"
+publish = false
+
+[[bin]]
+name = "image-editor-server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.6", features = ["cors"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+rand = "0.8"
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tempfile = "3"

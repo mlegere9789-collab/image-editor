@@ -19924,6 +19924,92 @@ Generate Similar flips to shipped (596/618). Every remaining row in the
 Generative Fill family now needs real text-to-image generation or a
 hosted service.
 
+## Phase 335 — The backend: Cloud Documents, Search Your Cloud Files, Invite to Edit, Share for Review
+
+The first phase of `docs/PLAN_TO_100.md`'s section C2, and the first
+time this project has a server of its own: `server/` is
+`image-editor-server`, a Rust/axum binary with one data directory and
+no database, built for exactly the four cloud rows whose client side
+was already wired and waiting for something to talk to. Photoshop's
+cloud documents are versioned files under an account; its Invite to
+Edit is per-user access with two roles; its Share for Review is a link
+anyone can open and comment on without an account. The server does
+those three things and nothing else.
+
+The store (`server/src/store.rs`) is where every rule lives, so it is
+tested without HTTP: users with bearer tokens stored only as SHA-256
+hashes (the admin token and a first user's token are minted on first
+start, printed once, never stored in clear); documents as one file per
+saved version, never overwritten, addressed by bare name for one's own
+and `owner/name` for shared ones; shares as `edit` (save new versions,
+share for review) or `view` (open only), enforced on every call, with a
+document the caller has no access to reading as *not found* so its
+existence is not revealed; review links as 128 random bits pinned to
+the version current when they were made, so later saves never change
+what a reviewer sees, taking comments from anyone with the link (a
+display name, the text, an optional pin position as fractions of the
+image, one level of threaded replies) and resolved only by someone
+with edit access to the document. Every change rewrites `index.json`
+atomically; a reopened store sees exactly what was saved. The API
+(`server/src/api.rs`) is a thin translation — the store's refusals map
+to 401/403/404/409/400, the body limit is the same 64 MB the app's own
+`check_canvas_bytes` allows, and CORS admits any origin because the
+desktop app's webview calls from its own `tauri://localhost`. The whole
+contract is in `server/README.md`, and CI gained a `server` job
+(fmt, clippy, test).
+
+The client grew two dialogs on the same fetch helper: **Invite to
+Edit…** (a user name, Can edit/Can view, the current shares with
+Remove) and **Share for Review…** (Create Link with a title, the links
+made so far with their version and comment counts, and for the shown
+link its URL, its threads with Reply and Resolve/Reopen, and a form to
+post). External Services' text now says what the endpoint is. Two
+things came out of wiring a real server that a stub would never have
+shown: the app's Content Security Policy had no `connect-src`, so the
+webview would have refused every one of the existing cloud and
+Generative Fill fetches — fixed with `connect-src 'self' http:
+https:`, the endpoint being the user's own; and comment pin positions
+serialised as `f32` came back as `0.20000000298`, so they are `f64`.
+
+**Verified three ways.** `cargo test` in `server/`: 9 tests — the
+store's first start, token rotation, versions surviving a reopen,
+shares granting exactly their role, review links pinning a version and
+taking threaded comments, the name rules; and the HTTP contract end to
+end through the router, including the exact request `App.tsx` sends
+and a CORS preflight from `tauri://localhost`. Then the real binary,
+live, with curl: `samples/sample.png` PUT as a document came back
+byte-identical (`cmp`), a second user created with the admin token saw
+nothing until invited and then saw `owner/sample`, a review link
+served the pinned bytes and took a pinned comment, and a tokenless
+`GET /documents` was refused with 401. Then the real UI: `vite
+preview` of the built frontend in Playwright's Chromium with a stub
+for Tauri's IPC, against the running server — Invite to Edit shared
+with `ana` (the server's share list then read `ana — can edit`), Share
+for Review created "Round 1", posted a comment, resolved it, replied in
+its thread, and the server's own `/reviews` listing showed the same two
+comments, the first resolved, the second with `parent: 1`. That last
+path — a browser driving the built frontend against a real service,
+for any feature that only fetches — is a live-verification route this
+project did not have while the Xvfb path stayed broken; it is recorded
+here as the way to verify the rest of section C2. `cargo fmt --check`
+and `cargo clippy --all-targets -- -D warnings` clean in both crates,
+`cargo check` clean in `src-tauri` after the CSP change, `npm run
+build` clean.
+
+Honest limitations, recorded rather than glossed: sharing is by saved
+versions, not live co-editing of one open document — the same model
+Photoshop's own cloud documents use, and the "real-time" part of Invite
+to Edit's original note stays a documented scope cut; a review link
+serves the document's bytes and a JSON comment API, so a reviewer
+without this app needs a client for the project format — a hosted
+review page for browser-only reviewers is the documented scope cut;
+users are created by the operator with the admin token, there is no
+self-service sign-up; and the server speaks plain HTTP, meant to sit
+behind the operator's own TLS terminator when it leaves localhost.
+
+Photoshop Cloud Documents, Search Your Cloud Files, Invite to Edit and
+Share for Review flip to shipped (600/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

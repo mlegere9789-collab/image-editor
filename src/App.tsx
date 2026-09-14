@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -234,6 +234,30 @@ type ShortcutAction =
  * shortcuts is modified that way, so the modifier itself is not part of
  * the rebindable binding. */
 type KeyBinding = { key: string; shift: boolean };
+
+// Invite to Edit / Share for Review: the shapes `server/` (this project's
+// own backend, `image-editor-server`) returns for a document's shares, its
+// review links and their comment threads.
+type CloudShare = { user: string; role: "edit" | "view" };
+type CloudComment = {
+  id: number;
+  author: string;
+  text: string;
+  x: number | null;
+  y: number | null;
+  parent: number | null;
+  posted_at: number;
+  resolved: boolean;
+};
+type CloudReview = {
+  id: string;
+  document: string;
+  version: number;
+  title: string;
+  created_by: string;
+  created_at: number;
+  comments: CloudComment[];
+};
 
 const SHORTCUT_LABELS: Record<ShortcutAction, string> = {
   undo: "Undo",
@@ -1190,6 +1214,21 @@ export default function App() {
   const [cloudSearchQuery, setCloudSearchQuery] = useState("");
   const [cloudDocumentList, setCloudDocumentList] = useState<string[]>([]);
   const [cloudSearchBusy, setCloudSearchBusy] = useState(false);
+  // Invite to Edit / Share for Review: the sharing and review-link routes
+  // of image-editor-server, for the document named in External Services.
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [inviteUser, setInviteUser] = useState("");
+  const [inviteRole, setInviteRole] = useState<"edit" | "view">("edit");
+  const [cloudShares, setCloudShares] = useState<CloudShare[]>([]);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [showReviewDialog, setShowReviewDialog] = useState(false);
+  const [reviewTitle, setReviewTitle] = useState("");
+  const [cloudReviews, setCloudReviews] = useState<CloudReview[]>([]);
+  const [activeReviewId, setActiveReviewId] = useState<string | null>(null);
+  const [reviewCommentAuthor, setReviewCommentAuthor] = useState("");
+  const [reviewCommentText, setReviewCommentText] = useState("");
+  const [reviewReplyTo, setReviewReplyTo] = useState<number | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
   // PART XXX > Turn a Photograph into Linework: Find Edges into
   // Threshold at this level, the audit's own named recipe.
   const [lineworkThreshold, setLineworkThreshold] = useState(128);
@@ -3703,6 +3742,177 @@ export default function App() {
       setCloudSearchBusy(false);
     }
   }, [cloudEndpoint, cloudToken]);
+
+  // One fetch for every image-editor-server route below: the configured
+  // endpoint, the bearer token, and the server's own `{ error }` body
+  // surfaced as the message when it refuses.
+  const cloudFetch = useCallback(
+    async (path: string, init?: RequestInit) => {
+      if (!cloudEndpoint) {
+        throw new Error("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+      }
+      const response = await fetch(`${cloudEndpoint.replace(/\/$/, "")}${path}`, {
+        ...init,
+        headers: {
+          ...(init?.headers ?? {}),
+          ...(cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {}),
+        },
+      });
+      if (!response.ok) {
+        let detail = `The cloud endpoint returned ${response.status}.`;
+        try {
+          const body = (await response.json()) as { error?: string };
+          if (body.error) detail = body.error;
+        } catch {
+          // Not a JSON refusal; the status is the message.
+        }
+        throw new Error(detail);
+      }
+      return response;
+    },
+    [cloudEndpoint, cloudToken],
+  );
+
+  // Invite to Edit: the owner's list of who else can open the cloud
+  // document, each with the role the server enforces -- "edit" saves new
+  // versions and shares for review, "view" opens only.
+  const refreshCloudShares = useCallback(async () => {
+    setShareBusy(true);
+    try {
+      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/shares`);
+      const body = (await response.json()) as { shares?: CloudShare[] };
+      setCloudShares(Array.isArray(body.shares) ? body.shares : []);
+    } catch (err) {
+      setCloudShares([]);
+      setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setShareBusy(false);
+    }
+  }, [cloudFetch, cloudDocumentName]);
+
+  const inviteToEdit = useCallback(async () => {
+    const user = inviteUser.trim();
+    if (!user) return;
+    setShareBusy(true);
+    try {
+      await cloudFetch(
+        `/documents/${encodeURIComponent(cloudDocumentName)}/shares/${encodeURIComponent(user)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: inviteRole }),
+        },
+      );
+      setInviteUser("");
+    } catch (err) {
+      setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+      setShareBusy(false);
+      return;
+    }
+    await refreshCloudShares();
+  }, [cloudFetch, cloudDocumentName, inviteUser, inviteRole, refreshCloudShares]);
+
+  const removeCloudShare = useCallback(
+    async (user: string) => {
+      setShareBusy(true);
+      try {
+        await cloudFetch(
+          `/documents/${encodeURIComponent(cloudDocumentName)}/shares/${encodeURIComponent(user)}`,
+          { method: "DELETE" },
+        );
+      } catch (err) {
+        setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+        setShareBusy(false);
+        return;
+      }
+      await refreshCloudShares();
+    },
+    [cloudFetch, cloudDocumentName, refreshCloudShares],
+  );
+
+  // Share for Review: the review links made for the cloud document, each
+  // pinned to the version it was made at, with its comment threads.
+  const refreshCloudReviews = useCallback(async () => {
+    setReviewBusy(true);
+    try {
+      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/reviews`);
+      const body = (await response.json()) as { reviews?: CloudReview[] };
+      const reviews = Array.isArray(body.reviews) ? body.reviews : [];
+      setCloudReviews(reviews);
+      setActiveReviewId((current) =>
+        current !== null && reviews.some((r) => r.id === current) ? current : (reviews[reviews.length - 1]?.id ?? null),
+      );
+    } catch (err) {
+      setCloudReviews([]);
+      setActiveReviewId(null);
+      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setReviewBusy(false);
+    }
+  }, [cloudFetch, cloudDocumentName]);
+
+  const createCloudReview = useCallback(async () => {
+    setReviewBusy(true);
+    let created: string | null = null;
+    try {
+      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/reviews`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: reviewTitle }),
+      });
+      const body = (await response.json()) as { review?: CloudReview };
+      created = body.review?.id ?? null;
+      setReviewTitle("");
+    } catch (err) {
+      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+      setReviewBusy(false);
+      return;
+    }
+    await refreshCloudReviews();
+    if (created) setActiveReviewId(created);
+  }, [cloudFetch, cloudDocumentName, reviewTitle, refreshCloudReviews]);
+
+  const postReviewComment = useCallback(async () => {
+    if (activeReviewId === null) return;
+    const author = reviewCommentAuthor.trim();
+    const text = reviewCommentText.trim();
+    if (!author || !text) return;
+    setReviewBusy(true);
+    try {
+      await cloudFetch(`/reviews/${encodeURIComponent(activeReviewId)}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ author, text, parent: reviewReplyTo }),
+      });
+      setReviewCommentText("");
+      setReviewReplyTo(null);
+    } catch (err) {
+      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+      setReviewBusy(false);
+      return;
+    }
+    await refreshCloudReviews();
+  }, [cloudFetch, activeReviewId, reviewCommentAuthor, reviewCommentText, reviewReplyTo, refreshCloudReviews]);
+
+  const setReviewCommentResolved = useCallback(
+    async (commentId: number, resolved: boolean) => {
+      if (activeReviewId === null) return;
+      setReviewBusy(true);
+      try {
+        await cloudFetch(`/reviews/${encodeURIComponent(activeReviewId)}/comments/${commentId}/resolved`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resolved }),
+        });
+      } catch (err) {
+        setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+        setReviewBusy(false);
+        return;
+      }
+      await refreshCloudReviews();
+    },
+    [cloudFetch, activeReviewId, refreshCloudReviews],
+  );
 
   // Puppet Warp: every change to the options or pins re-reads the mesh.
   const updatePuppet = useCallback(
@@ -8022,9 +8232,31 @@ export default function App() {
         </button>
         <button
           className="button button--quiet"
+          onClick={() => {
+            setShowInviteDialog(true);
+            void refreshCloudShares();
+          }}
+          disabled={busy}
+          title="Invite to Edit: give another user of your image-editor-server edit or view access to the cloud document"
+        >
+          Invite to Edit…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => {
+            setShowReviewDialog(true);
+            void refreshCloudReviews();
+          }}
+          disabled={busy}
+          title="Share for Review: a link to the cloud document's current version anyone can open and comment on"
+        >
+          Share for Review…
+        </button>
+        <button
+          className="button button--quiet"
           onClick={() => setShowExternalServicesDialog(true)}
           disabled={busy}
-          title="Generative Fill and Cloud Documents' own provider endpoint and credential"
+          title="Generative Fill's provider and image-editor-server's endpoint and token"
         >
           External Services…
         </button>
@@ -16608,10 +16840,12 @@ export default function App() {
           >
             <h2 className="modal__heading">External Services</h2>
             <p className="modal__hint">
-              Generative Fill and Cloud Documents each need a real provider endpoint of
-              your own — this app has no server or model of its own to call. Both
-              values are kept only in this browser&apos;s own storage and sent only to
-              the endpoint you enter here.
+              Cloud Documents, Search Cloud Files, Invite to Edit and Share for Review
+              talk to image-editor-server — this project&apos;s own backend, in the
+              repository&apos;s <code>server/</code> directory. Run it, then paste its URL
+              and the user token it printed here. Generative Fill&apos;s provider endpoint
+              is a separate service of your choosing. Every value is kept only in this
+              browser&apos;s own storage and sent only to the endpoint you enter.
             </p>
             <label className="control control--row">
               <span className="control__label">Generative AI Endpoint</span>
@@ -16739,6 +16973,257 @@ export default function App() {
                 onClick={() => setShowCloudSearchDialog(false)}
                 title="Close"
               >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showInviteDialog && (
+        <div className="modal-overlay" onClick={() => setShowInviteDialog(false)} role="presentation">
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Invite to Edit"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Invite to Edit</h2>
+            <p className="modal__hint">
+              Shares the cloud document &ldquo;{cloudDocumentName}&rdquo; with another user of
+              the same image-editor-server. &ldquo;Can edit&rdquo; lets them save new versions
+              and share it for review; &ldquo;Can view&rdquo; lets them open it. It appears in
+              their Search Cloud Files as &ldquo;your-name/{cloudDocumentName}&rdquo;, and the
+              server enforces the role on every request.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">User</span>
+              <input
+                type="text"
+                value={inviteUser}
+                onChange={(event) => setInviteUser(event.target.value)}
+                placeholder="their user name"
+                style={{ flex: 1 }}
+              />
+              <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "edit" | "view")}>
+                <option value="edit">Can edit</option>
+                <option value="view">Can view</option>
+              </select>
+              <button
+                className="button"
+                onClick={() => void inviteToEdit()}
+                disabled={shareBusy || !cloudEndpoint || !inviteUser.trim()}
+                title="Share the cloud document with this user"
+              >
+                Invite
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {cloudShares.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>Not shared with anyone yet.</span>
+                </li>
+              )}
+              {cloudShares.map((share) => (
+                <li key={share.user} className="cloud-search__row">
+                  <span>
+                    {share.user} — {share.role === "edit" ? "can edit" : "can view"}
+                  </span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void removeCloudShare(share.user)}
+                    disabled={shareBusy}
+                    title={`Stop sharing with ${share.user}`}
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowInviteDialog(false)} title="Close">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReviewDialog && (
+        <div className="modal-overlay" onClick={() => setShowReviewDialog(false)} role="presentation">
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Share for Review"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Share for Review</h2>
+            <p className="modal__hint">
+              Creates a link to the saved version of &ldquo;{cloudDocumentName}&rdquo; at the
+              Cloud Documents endpoint. Anyone with the link can fetch that exact version
+              and leave comments — no account needed — and later saves never change what
+              the link shows. Comments come back here, threaded, with Resolve.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Title</span>
+              <input
+                type="text"
+                value={reviewTitle}
+                onChange={(event) => setReviewTitle(event.target.value)}
+                placeholder={cloudDocumentName}
+                style={{ flex: 1 }}
+              />
+              <button
+                className="button"
+                onClick={() => void createCloudReview()}
+                disabled={reviewBusy || !cloudEndpoint}
+                title="Create a review link to the current saved version"
+              >
+                Create Link
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {cloudReviews.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>No review links yet.</span>
+                </li>
+              )}
+              {cloudReviews.map((review) => (
+                <li key={review.id} className="cloud-search__row">
+                  <span>
+                    {review.title} — version {review.version}, {review.comments.length}{" "}
+                    {review.comments.length === 1 ? "comment" : "comments"}
+                  </span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => setActiveReviewId(review.id)}
+                    disabled={review.id === activeReviewId}
+                    title="Show this review's link and comments"
+                  >
+                    {review.id === activeReviewId ? "Shown" : "Show"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {(() => {
+              const review = cloudReviews.find((r) => r.id === activeReviewId);
+              if (!review) return null;
+              const base = cloudEndpoint.replace(/\/$/, "");
+              const threads = review.comments.filter((c) => c.parent === null);
+              return (
+                <>
+                  <p className="modal__hint">
+                    Link: <code style={{ overflowWrap: "anywhere" }}>{`${base}/reviews/${review.id}/document`}</code>{" "}
+                    (comments at <code style={{ overflowWrap: "anywhere" }}>{`${base}/reviews/${review.id}`}</code>)
+                  </p>
+                  <ul className="cloud-search__list">
+                    {threads.length === 0 && (
+                      <li className="cloud-search__row">
+                        <span>No comments yet.</span>
+                      </li>
+                    )}
+                    {threads.map((comment) => (
+                      <Fragment key={comment.id}>
+                        <li className="cloud-search__row">
+                          <span style={{ opacity: comment.resolved ? 0.6 : 1 }}>
+                            <strong>{comment.author}</strong>
+                            {comment.x !== null && comment.y !== null
+                              ? ` (at ${Math.round(comment.x * 100)}%, ${Math.round(comment.y * 100)}%)`
+                              : ""}
+                            : {comment.text}
+                            {comment.resolved ? " — resolved" : ""}
+                          </span>
+                          <span style={{ display: "flex", gap: 4 }}>
+                            <button
+                              className="button button--quiet"
+                              onClick={() => setReviewReplyTo(comment.id)}
+                              disabled={reviewBusy}
+                              title="Reply in this thread"
+                            >
+                              Reply
+                            </button>
+                            <button
+                              className="button button--quiet"
+                              onClick={() => void setReviewCommentResolved(comment.id, !comment.resolved)}
+                              disabled={reviewBusy}
+                              title={comment.resolved ? "Reopen this thread" : "Mark this thread resolved"}
+                            >
+                              {comment.resolved ? "Reopen" : "Resolve"}
+                            </button>
+                          </span>
+                        </li>
+                        {review.comments
+                          .filter((reply) => reply.parent === comment.id)
+                          .map((reply) => (
+                            <li key={reply.id} className="cloud-search__row" style={{ paddingLeft: 28 }}>
+                              <span>
+                                <strong>{reply.author}</strong>: {reply.text}
+                              </span>
+                            </li>
+                          ))}
+                      </Fragment>
+                    ))}
+                  </ul>
+                  <label className="control control--row">
+                    <span className="control__label">Your name</span>
+                    <input
+                      type="text"
+                      value={reviewCommentAuthor}
+                      onChange={(event) => setReviewCommentAuthor(event.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                  </label>
+                  <label className="control control--row">
+                    <span className="control__label">{reviewReplyTo === null ? "Comment" : `Reply to #${reviewReplyTo}`}</span>
+                    <input
+                      type="text"
+                      value={reviewCommentText}
+                      onChange={(event) => setReviewCommentText(event.target.value)}
+                      style={{ flex: 1 }}
+                    />
+                    {reviewReplyTo !== null && (
+                      <button
+                        className="button button--quiet"
+                        onClick={() => setReviewReplyTo(null)}
+                        title="Post as a new thread instead"
+                      >
+                        New thread
+                      </button>
+                    )}
+                    <button
+                      className="button"
+                      onClick={() => void postReviewComment()}
+                      disabled={reviewBusy || !reviewCommentAuthor.trim() || !reviewCommentText.trim()}
+                      title="Post this comment on the review"
+                    >
+                      Post
+                    </button>
+                  </label>
+                </>
+              );
+            })()}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => void refreshCloudReviews()}
+                disabled={reviewBusy || !cloudEndpoint}
+                title="Re-fetch the review links and their comments"
+              >
+                Refresh
+              </button>
+              <button className="button button--quiet" onClick={() => setShowReviewDialog(false)} title="Close">
                 Close
               </button>
             </div>

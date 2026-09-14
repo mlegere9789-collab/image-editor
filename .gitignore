@@ -29,3 +29,14 @@ dist-ssr
 # Tauri
 src-tauri/target
 src-tauri/gen/schemas
+
+# The backend service (server/)
+server/target
+# Training runs: checkpoints, downloaded data, logs (scripts and attributions are committed)
+src-tauri/models/train_generate/generate_ckpt.pt
+src-tauri/models/train_generate/*.tmp
+src-tauri/models/train_generate/raw/
+src-tauri/models/train_generate/samples/
+src-tauri/models/train_generate/*.zip
+src-tauri/models/train_generate/*.log
+src-tauri/models/train_generate/__pycache__/
