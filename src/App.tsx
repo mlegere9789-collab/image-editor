@@ -10,6 +10,7 @@ import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
+import { documentPoint, percentOf, pixelDistance, ringStyle } from "./blurPins";
 import { BRUSH_TOOLS, optionsRule, PEOPLE_TOOLS, TIP_TOOLS } from "./optionsBar";
 import { markTourSeen, tourSeen } from "./tour";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
@@ -1958,6 +1959,21 @@ export default function App() {
   const [radialBlurCenterX, setRadialBlurCenterX] = useState(0);
   const [radialBlurCenterY, setRadialBlurCenterY] = useState(0);
   const [showTiltShiftDialog, setShowTiltShiftDialog] = useState(false);
+  // The Blur Gallery's on-canvas controls (README Phase 361): which pin a
+  // drag holds, and the canvas box it is measured against.
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
+  const [blurDrag, setBlurDrag] = useState<
+    | "field1"
+    | "field1ring"
+    | "field2"
+    | "field2ring"
+    | "iris"
+    | "irisring"
+    | "tiltFocus"
+    | "tiltBandTop"
+    | "tiltBandBottom"
+    | null
+  >(null);
   const [tiltShiftFocusRow, setTiltShiftFocusRow] = useState(0);
   const [tiltShiftHalfHeight, setTiltShiftHalfHeight] = useState(20);
   const [tiltShiftBlurRadius, setTiltShiftBlurRadius] = useState(15);
@@ -27568,7 +27584,7 @@ export default function App() {
 
       {showTiltShiftDialog && (
         <div
-          className="modal-overlay"
+          className="modal-overlay modal-overlay--passive"
           onClick={() => setShowTiltShiftDialog(false)}
           role="presentation"
         >
@@ -27637,7 +27653,7 @@ export default function App() {
 
       {showIrisBlurDialog && (
         <div
-          className="modal-overlay"
+          className="modal-overlay modal-overlay--passive"
           onClick={() => setShowIrisBlurDialog(false)}
           role="presentation"
         >
@@ -27719,7 +27735,7 @@ export default function App() {
 
       {showFieldBlurDialog && (
         <div
-          className="modal-overlay"
+          className="modal-overlay modal-overlay--passive"
           onClick={() => setShowFieldBlurDialog(false)}
           role="presentation"
         >
@@ -28784,7 +28800,7 @@ export default function App() {
             </div>
           )}
           {compositeSrc && document && (
-            <div className="canvas-wrap">
+            <div className="canvas-wrap" ref={canvasWrapRef}>
               <img
                 className={`canvas${(isMarqueeTool || isLineSelect || isEyedropper ? hasDocument : canPaint) ? ` canvas--${tool}` : ""}`}
                 src={compositeSrc}
@@ -28901,6 +28917,126 @@ export default function App() {
                   ))}
                 </div>
               )}
+              {(showFieldBlurDialog || showIrisBlurDialog || showTiltShiftDialog) &&
+                (() => {
+                  const doc = document;
+                  const pointAt = (event: React.PointerEvent) => {
+                    const box = canvasWrapRef.current?.getBoundingClientRect();
+                    return box ? documentPoint(box, event.clientX, event.clientY, doc) : null;
+                  };
+                  const start = (which: NonNullable<typeof blurDrag>) => (event: React.PointerEvent) => {
+                    event.stopPropagation();
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                    setBlurDrag(which);
+                  };
+                  const move = (event: React.PointerEvent) => {
+                    if (blurDrag === null) return;
+                    const at = pointAt(event);
+                    if (!at) return;
+                    switch (blurDrag) {
+                      case "field1":
+                        setFieldBlurX1(at.x);
+                        setFieldBlurY1(at.y);
+                        break;
+                      case "field1ring":
+                        setFieldBlurRadius1(Math.min(250, pixelDistance(at, { x: fieldBlurX1, y: fieldBlurY1 })));
+                        break;
+                      case "field2":
+                        setFieldBlurX2(at.x);
+                        setFieldBlurY2(at.y);
+                        break;
+                      case "field2ring":
+                        setFieldBlurRadius2(Math.min(250, pixelDistance(at, { x: fieldBlurX2, y: fieldBlurY2 })));
+                        break;
+                      case "iris":
+                        setIrisBlurCenterX(at.x);
+                        setIrisBlurCenterY(at.y);
+                        break;
+                      case "irisring":
+                        setIrisBlurRadius(Math.max(1, pixelDistance(at, { x: irisBlurCenterX, y: irisBlurCenterY })));
+                        break;
+                      case "tiltFocus":
+                        setTiltShiftFocusRow(Math.min(doc.height - 1, at.y));
+                        break;
+                      case "tiltBandTop":
+                      case "tiltBandBottom":
+                        setTiltShiftHalfHeight(Math.max(1, Math.abs(at.y - tiltShiftFocusRow)));
+                        break;
+                    }
+                  };
+                  const end = (event: React.PointerEvent) => {
+                    if (blurDrag === null) return;
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                    setBlurDrag(null);
+                  };
+                  const handlers = (which: NonNullable<typeof blurDrag>) => ({
+                    onPointerDown: start(which),
+                    onPointerMove: move,
+                    onPointerUp: end,
+                    onPointerCancel: end,
+                  });
+                  const pin = (which: NonNullable<typeof blurDrag>, x: number, y: number, label: string) => (
+                    <div
+                      key={which}
+                      className="blur-pin"
+                      role="slider"
+                      aria-label={label}
+                      aria-valuenow={0}
+                      tabIndex={-1}
+                      data-blur-control={which}
+                      style={{ left: percentOf(x, doc.width), top: percentOf(y, doc.height) }}
+                      title={`${label}: drag to move`}
+                      {...handlers(which)}
+                    />
+                  );
+                  const ring = (which: NonNullable<typeof blurDrag>, x: number, y: number, radius: number, label: string) => (
+                    <div
+                      key={which}
+                      className="blur-ring"
+                      role="slider"
+                      aria-label={label}
+                      aria-valuenow={radius}
+                      tabIndex={-1}
+                      data-blur-control={which}
+                      style={ringStyle({ x, y }, Math.max(radius, 1), doc)}
+                      title={`${label}: drag the ring to set ${radius}px`}
+                      {...handlers(which)}
+                    />
+                  );
+                  const line = (which: NonNullable<typeof blurDrag>, row: number, label: string, dashed: boolean) => (
+                    <div
+                      key={which}
+                      className={`blur-line${dashed ? " blur-line--band" : ""}`}
+                      role="slider"
+                      aria-label={label}
+                      aria-valuenow={row}
+                      tabIndex={-1}
+                      data-blur-control={which}
+                      style={{ top: percentOf(row, doc.height) }}
+                      title={`${label}: drag up or down`}
+                      {...handlers(which)}
+                    />
+                  );
+                  return (
+                    <>
+                      {showFieldBlurDialog && [
+                        ring("field1ring", fieldBlurX1, fieldBlurY1, fieldBlurRadius1, "Field Blur pin 1 blur"),
+                        pin("field1", fieldBlurX1, fieldBlurY1, "Field Blur pin 1"),
+                        ring("field2ring", fieldBlurX2, fieldBlurY2, fieldBlurRadius2, "Field Blur pin 2 blur"),
+                        pin("field2", fieldBlurX2, fieldBlurY2, "Field Blur pin 2"),
+                      ]}
+                      {showIrisBlurDialog && [
+                        ring("irisring", irisBlurCenterX, irisBlurCenterY, irisBlurRadius, "Iris Blur radius"),
+                        pin("iris", irisBlurCenterX, irisBlurCenterY, "Iris Blur centre"),
+                      ]}
+                      {showTiltShiftDialog && [
+                        line("tiltBandTop", tiltShiftFocusRow - tiltShiftHalfHeight, "Tilt-Shift upper band", true),
+                        line("tiltFocus", tiltShiftFocusRow, "Tilt-Shift focus", false),
+                        line("tiltBandBottom", tiltShiftFocusRow + tiltShiftHalfHeight, "Tilt-Shift lower band", true),
+                      ]}
+                    </>
+                  );
+                })()}
               {document.guides.map((guide) => (
                 <div
                   key={`${guide.orientation}-${guide.position}`}

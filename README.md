@@ -21513,6 +21513,52 @@ the sequential one byte for byte on the full 12-megapixel buffer.
 
 **1844 Rust tests total** (1841 → 1844: 1837 lib + 7 pipeline; the benchmark is ignored). Frontend tests unchanged at 20.
 
+## Phase 361 — The Blur Gallery's on-canvas controls
+
+Phase D's "Blur Gallery interactive controls" cut. Field Blur, Iris
+Blur, and Tilt-Shift (Phases 122–125) took their pins, centre, radius,
+and band as typed numbers in a blocking dialog; Photoshop's Blur
+Gallery is a workspace where the picture stays live and the blur is
+placed by dragging on it.
+
+**Mechanism.** The three dialogs now open as passive overlays — a
+`modal-overlay--passive` that takes no pointer events, transparent, the
+dialog floating at the right of the window — so the canvas stays live
+underneath. While one is open, `src/blurPins.ts`'s geometry places
+Photoshop's controls over the canvas as percentages of its box: Field
+Blur's two pins with a ring each whose radius is the pin's blur; Iris
+Blur's centre pin and its sharp-radius ring; Tilt-Shift's focus line
+with the two dashed band lines at ± the sharp band. Every control is a
+`role="slider"` element with pointer capture: a pin drag moves the pin
+to the document pixel under the pointer (`documentPoint`, the canvas
+box mapped to the document and clamped), a ring drag sets its radius
+to the pointer's distance from the pin (`pixelDistance`, capped at 250
+for Field Blur), the focus line drags to a row, and either band line
+sets the sharp band to its distance from the focus. The dialog's own
+numbers update live and remain typeable; Apply sends what the picture
+shows.
+
+**Verified two ways.** `npm test` (`src/blurPins.test.ts`, 2 tests): a
+pointer at the canvas box's corners and centre maps to (0, 0), (400,
+300), and (800, 600) of an 800×600 document, positions outside clamp,
+and a zero-size box maps to the origin; percentages, the ring's box,
+and pixel distances. Then the built app in Chromium (`vite preview` +
+Playwright, a 400×300 document with the canvas given a real picture):
+Filter > Blur Gallery > Field Blur… from the menu bar shows four
+controls (two pins, two rings) and the dialog's numbers; dragging pin 1
+to the canvas's (25 %, 50 %) and pin 2 to (50 %, 25 %) reads Pin 1 =
+(100, 150) and Pin 2 = (200, 75) in the dialog; dragging pin 2's ring
+40 px outward takes its blur from 15 to 54; Apply sends `{x1: 100, y1:
+150, radius1: 0, x2: 200, y2: 75, radius2: 54}`. Tilt-Shift's focus
+line dragged to 40 % reads Focus Row 120 and its lower band line
+dragged 45 px below the old focus reads a sharp band of 75; Iris Blur's
+centre dragged to (30 %, 60 %) reads (120, 180) and its ring dragged
+30 px out reads a sharp radius of 79. A screenshot of the floating
+Field Blur dialog beside the pinned canvas was checked by eye. The
+Xvfb live-verification gap from the previous phases stands.
+
+**Frontend tests: 22** (20 → 22). Rust tests unchanged at 1844.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
