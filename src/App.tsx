@@ -2636,6 +2636,18 @@ export default function App() {
     setShowSelectAndMask(true);
   }, [document]);
 
+  // Select and Mask > Refine Hair: Edge Detection's rule only where the
+  // border runs through fine detail, at the Edge Detection radius, then
+  // Decontaminate Colors at the dialog's amount when it is on.
+  const refineHair = useCallback(async () => {
+    if (selectedId === null || edgeRadius === 0) return;
+    await runCommand("refine_hair", {
+      id: selectedId,
+      radius: edgeRadius,
+      decontaminate: decontaminate ? decontaminateAmount : 0,
+    });
+  }, [runCommand, selectedId, edgeRadius, decontaminate, decontaminateAmount]);
+
   const applySelectAndMask = useCallback(async () => {
     if (edgeRadius > 0 && selectedId !== null) {
       await runCommand("edge_detect_selection", { id: selectedId, radius: edgeRadius, smart: smartRadius });
@@ -15768,6 +15780,14 @@ export default function App() {
                 disabled={selectedId === null}
                 onChange={(event) => setEdgeRadius(Number(event.target.value))}
               />
+              <button
+                className="button button--quiet"
+                onClick={() => void refineHair()}
+                disabled={busy || selectedId === null || edgeRadius === 0}
+                title="Refine Hair: re-decide the edge by colour only where it runs through fine detail (strands), within the Edge Detection radius, decontaminating if that is on"
+              >
+                Refine Hair
+              </button>
             </label>
             <label className="control control--row">
               <input

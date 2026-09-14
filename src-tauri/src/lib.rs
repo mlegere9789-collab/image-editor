@@ -939,6 +939,22 @@ fn edge_detect_selection(
     })
 }
 
+/// Select and Mask > Refine Hair on layer `id`: Edge Detection's colour
+/// rule where the border runs through fine detail, then Decontaminate
+/// Colors at `decontaminate` percent when above zero.
+#[tauri::command]
+fn refine_hair(
+    state: State<'_, AppState>,
+    id: LayerId,
+    radius: u32,
+    decontaminate: Option<u8>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.refine_hair(id, radius, decontaminate.unwrap_or(0))?;
+        Ok(None)
+    })
+}
+
 /// Select and Mask > Decontaminate Colors on layer `id` in place.
 #[tauri::command]
 fn decontaminate_colors(
@@ -7166,6 +7182,7 @@ pub fn run() {
             set_anti_alias,
             refine_selection,
             edge_detect_selection,
+            refine_hair,
             decontaminate_colors,
             select_and_mask_output,
             color_range_bits,

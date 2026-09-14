@@ -20290,6 +20290,56 @@ Select Subject — Cloud Processing flips to shipped (604/618). Section
 C2 of `docs/PLAN_TO_100.md` is complete; Refine Hair (C3) is next,
 while the text-conditioned model (C1) trains.
 
+## Phase 340 — Refine Hair
+
+Phase C3 of `docs/PLAN_TO_100.md`, and the last open row outside the
+generative family and the tabled pair. Photoshop's Refine Hair is a
+one-click pass over an existing selection's border that grows fine
+strands the rough selection missed, without disturbing the clean
+parts of the edge. `Document::refine_hair` is that: Edge Detection's
+colour rule, applied only where the border runs through fine detail.
+The band within `radius` of the border is scanned; a band pixel counts
+as fine detail when the edge pixels in its `(2·radius + 1)²` window
+(Sobel magnitude 48 or more in any channel; what of the window lies
+on the canvas) outnumber what one clean edge across the window would
+leave — more than `4 / (2·radius + 1)` of its pixels, twice a single
+edge's share — and such a pixel is re-decided by colour exactly as
+Edge Detection re-decides everything in the band: `d_out / (d_in +
+d_out)` against the window's selected and unselected mean colours.
+Every other pixel keeps the coverage it had (an earlier soft edge
+survives), the selection becomes a soft mask carrying the result, and
+with Decontaminate Colors on, the strands' colour fringe is pulled
+toward the subject's own at the dialog's amount by the existing
+`decontaminate_colors`. The **Refine Hair** button sits beside the
+Edge Detection radius in Select and Mask and uses that radius. The
+first cut of the fine-detail test used the nominal window size and
+failed at the canvas corner, where the window is clipped; the test
+caught it, and the measure is now over the pixels actually counted.
+
+**Verified two ways.** `cargo test`: 1806 total (1799 lib + 7
+pipeline, up from 1805) — a 24×24 scene of a dark body with 1-pixel
+strands rising from its top edge every third column, the rough
+selection being the body alone: after Refine Hair at radius 6, every
+strand pixel in the band is selected, every gap between strands is
+not, the body is untouched and nothing above the strands is selected;
+the same body with a clean edge re-decides zero pixels and leaves the
+coverage byte-for-byte as it was; with decontamination at 100, a
+partly covered strand-edge pixel moves toward the body's colour; and
+radius 0 or 251, an amount over 100, an unknown layer and no
+selection are refused. `cargo fmt --check`, `cargo clippy
+--all-targets -- -D warnings` and `npm run build` clean. Live Xvfb
+verification: the same documented gap as every phase since it broke;
+the browser route of Phases 335–339 does not reach a Tauri command.
+
+Honest limitations: Photoshop's Refine Edge brush lets the user paint
+where to refine — here the fine-detail test decides, which is the
+one-click Refine Hair button's own behaviour but not the brush; and a
+strand longer than the radius is grown only as far as the band reaches.
+
+Refine Hair flips to shipped (605/618). What remains open: the seven
+generative rows waiting on the model training in the background
+(Phase C1), and the tabled pair with its four gated headers.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

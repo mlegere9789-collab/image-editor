@@ -7257,6 +7257,133 @@ impl Document {
         self.set_soft_mask_selection(soft)
     }
 
+    /// Select and Mask > Refine Hair on layer `id`: Edge Detection's
+    /// colour rule applied only where the selection's border runs through
+    /// fine detail, so a rough selection around hair grows the strands
+    /// and leaves clean edges alone. The band within `radius` pixels of
+    /// the border is scanned; a band pixel counts as fine detail when the
+    /// edge pixels (Sobel magnitude `48` or more in any channel) in its
+    /// `(2·radius + 1)²` window (what of it lies on the canvas) outnumber
+    /// what one clean edge across it would leave — more than
+    /// `4 / (2·radius + 1)` of its pixels — and
+    /// such a pixel is re-decided by colour exactly as Edge Detection
+    /// does, `d_out / (d_in + d_out)` against the window's selected and
+    /// unselected means; every other pixel keeps its coverage. The
+    /// selection becomes a soft mask carrying the result, and with
+    /// `decontaminate` above zero the strands' colour fringe is then
+    /// pulled toward the subject's own by [`Self::decontaminate_colors`]
+    /// at that amount. Returns how many pixels were re-decided. Errors
+    /// for a radius of `0` or over `250`, an amount over `100`, an
+    /// unknown layer, or no selection.
+    pub fn refine_hair(
+        &mut self,
+        id: LayerId,
+        radius: u32,
+        decontaminate: u8,
+    ) -> Result<usize, String> {
+        if radius == 0 || radius > 250 {
+            return Err("Refine Hair's Radius must be between 1 and 250 pixels.".to_string());
+        }
+        if decontaminate > 100 {
+            return Err(
+                "Decontaminate Colors' Amount must be between 0 and 100 percent.".to_string(),
+            );
+        }
+        self.layer(id)?;
+        let bits = self.selected_bits()?;
+        let mut soft = self.coverage_mask()?;
+        let (w, h) = (self.width as i64, self.height as i64);
+        let at = |x: i64, y: i64| (y * w + x) as usize;
+        let boundary: Vec<bool> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let hard = bits[at(x, y)];
+                [(-1, 0), (1, 0), (0, -1), (0, 1)].iter().any(|&(dx, dy)| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    nx >= 0 && ny >= 0 && nx < w && ny < h && bits[at(nx, ny)] != hard
+                })
+            })
+            .collect();
+        let pixels = &self.layer(id)?.pixels;
+        let edges: Vec<bool> = (0..h)
+            .flat_map(|y| (0..w).map(move |x| (x, y)))
+            .map(|(x, y)| {
+                let edge = sobel_at(pixels, w as usize, (w, h), (y as u32, x as u32));
+                edge[0].max(edge[1]).max(edge[2]) >= 48
+            })
+            .collect();
+        let r = radius as i64;
+        let threshold = 4.0 / (2 * r + 1) as f32;
+        let distance = |a: [f32; 3], b: [f32; 3]| {
+            let mut sum = 0.0f32;
+            for c in 0..3 {
+                let d = a[c] - b[c];
+                sum += d * d;
+            }
+            sum.sqrt()
+        };
+        let mut redecided = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let in_band = (-r..=r).any(|dy| {
+                    (-r..=r).any(|dx| {
+                        let (nx, ny) = (x + dx, y + dy);
+                        nx >= 0 && ny >= 0 && nx < w && ny < h && boundary[at(nx, ny)]
+                    })
+                });
+                if !in_band {
+                    continue;
+                }
+                let (mut sum_in, mut sum_out) = ([0u32; 3], [0u32; 3]);
+                let (mut n_in, mut n_out, mut n_edge) = (0u32, 0u32, 0u32);
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        let (sx, sy) = (x + dx, y + dy);
+                        if sx < 0 || sy < 0 || sx >= w || sy >= h {
+                            continue;
+                        }
+                        let j = at(sx, sy);
+                        if edges[j] {
+                            n_edge += 1;
+                        }
+                        let base = j * CHANNELS;
+                        let (sum, n) = if bits[j] {
+                            (&mut sum_in, &mut n_in)
+                        } else {
+                            (&mut sum_out, &mut n_out)
+                        };
+                        for c in 0..3 {
+                            sum[c] += pixels[base + c] as u32;
+                        }
+                        *n += 1;
+                    }
+                }
+                if n_in == 0 || n_out == 0 || n_edge as f32 / (n_in + n_out) as f32 <= threshold {
+                    continue;
+                }
+                let mean_in = sum_in.map(|s| s as f32 / n_in as f32);
+                let mean_out = sum_out.map(|s| s as f32 / n_out as f32);
+                let base = at(x, y) * CHANNELS;
+                let own = [
+                    pixels[base] as f32,
+                    pixels[base + 1] as f32,
+                    pixels[base + 2] as f32,
+                ];
+                let (d_in, d_out) = (distance(own, mean_in), distance(own, mean_out));
+                if d_in + d_out == 0.0 {
+                    continue;
+                }
+                soft[at(x, y)] = to_byte(d_out / (d_in + d_out));
+                redecided += 1;
+            }
+        }
+        self.set_soft_mask_selection(soft)?;
+        if decontaminate > 0 {
+            self.decontaminate_colors(id, decontaminate)?;
+        }
+        Ok(redecided)
+    }
+
     /// Select and Mask > Decontaminate Colors on layer `id`: every pixel
     /// the selection covers partly (coverage strictly between `0` and `1`)
     /// has its colour pulled `amount` percent toward the mean colour of
@@ -52917,6 +53044,90 @@ colorspaces:
             .contains("Amount"));
         assert!(doc.set_soft_mask_selection(vec![0, 0, 0]).is_err());
         assert!(doc.set_soft_mask_selection(vec![255, 255]).is_err());
+    }
+
+    /// A dark body across the bottom of a white canvas with 1-pixel dark
+    /// strands rising from its top edge every third column, the way hair
+    /// leaves a head: the rough selection is the body alone.
+    fn hair_scene(strands: bool) -> (Document, LayerId) {
+        let (w, h) = (24u32, 24u32);
+        let mut pixels = vec![255u8; (w * h) as usize * CHANNELS];
+        for y in 0..h {
+            for x in 0..w {
+                let strand = strands && y >= 2 && x % 3 == 2;
+                if y >= 8 || strand {
+                    let base = ((y * w + x) as usize) * CHANNELS;
+                    pixels[base..base + 3].copy_from_slice(&[30, 30, 30]);
+                }
+            }
+        }
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("hair", &pixels, w, h).unwrap();
+        doc.select_rectangle(0.0, 8.0, w as f32, h as f32).unwrap();
+        (doc, id)
+    }
+
+    #[test]
+    fn refine_hair_grows_strands_and_leaves_a_clean_edge_alone() {
+        let (mut doc, id) = hair_scene(true);
+        let redecided = doc.refine_hair(id, 6, 0).unwrap();
+        assert!(redecided > 0);
+        let coverage = doc.coverage_mask().unwrap();
+        let at = |x: u32, y: u32| coverage[(y * 24 + x) as usize];
+        // Every strand pixel within the band is now selected, every gap
+        // between strands is not, and the body is untouched.
+        for y in 2..8 {
+            for x in 0..24 {
+                if x % 3 == 2 {
+                    assert!(at(x, y) >= 128, "strand ({x}, {y}) = {}", at(x, y));
+                } else {
+                    assert!(at(x, y) < 128, "gap ({x}, {y}) = {}", at(x, y));
+                }
+            }
+        }
+        for y in 8..24 {
+            for x in 0..24 {
+                assert!(at(x, y) >= 128, "body ({x}, {y})");
+            }
+        }
+        // Above the strands nothing is selected.
+        assert!((0..24).all(|x| at(x, 0) == 0 && at(x, 1) == 0));
+        // The same body with a clean edge: nothing is fine detail, so
+        // nothing is re-decided and the selection is exactly as it was.
+        let (mut clean, clean_id) = hair_scene(false);
+        let before = clean.coverage_mask().unwrap();
+        assert_eq!(clean.refine_hair(clean_id, 6, 0).unwrap(), 0);
+        assert_eq!(clean.coverage_mask().unwrap(), before);
+        // With decontamination, a gap pixel the strands partly cover is
+        // pulled toward the body's colour.
+        let (mut doc, id) = hair_scene(true);
+        doc.refine_hair(id, 6, 100).unwrap();
+        let coverage = doc.coverage_mask().unwrap();
+        let partial = (2..8)
+            .flat_map(|y| (0..24).map(move |x| (x, y)))
+            .find(|&(x, y)| {
+                let c = coverage[(y * 24 + x) as usize];
+                c > 0 && c < 255
+            })
+            .expect("some strand-edge pixel is partly covered");
+        let p = pixel(&doc, id, partial.0, partial.1);
+        assert!(
+            p[0] < 255,
+            "decontaminated ({}, {}) = {:?}",
+            partial.0,
+            partial.1,
+            p
+        );
+        // Errors leave things alone.
+        assert!(doc.refine_hair(id, 0, 0).unwrap_err().contains("1 and 250"));
+        assert!(doc
+            .refine_hair(id, 251, 0)
+            .unwrap_err()
+            .contains("1 and 250"));
+        assert!(doc.refine_hair(id, 6, 101).unwrap_err().contains("100"));
+        assert!(doc.refine_hair(99, 6, 0).is_err());
+        doc.deselect();
+        assert!(doc.refine_hair(id, 6, 0).is_err());
     }
 
     #[test]
