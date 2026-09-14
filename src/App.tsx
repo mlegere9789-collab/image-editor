@@ -11,7 +11,12 @@ import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
 import { documentPoint, percentOf, pixelDistance, ringStyle } from "./blurPins";
-import { BRUSH_TOOLS, optionsRule, PEOPLE_TOOLS, TIP_TOOLS } from "./optionsBar";
+import {
+  BRUSH_TOOLS,
+  optionsRule,
+  PEOPLE_TOOLS,
+  TIP_TOOLS,
+} from "./optionsBar";
 import { markTourSeen, tourSeen } from "./tour";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import {
@@ -106,9 +111,13 @@ import type {
 } from "./types";
 
 const PNG_FILTER = [{ name: "PNG image", extensions: ["png"] }];
-const TIFF_32F_FILTER = [{ name: "TIFF (32-bit float)", extensions: ["tiff", "tif"] }];
+const TIFF_32F_FILTER = [
+  { name: "TIFF (32-bit float)", extensions: ["tiff", "tif"] },
+];
 const HDR_FILTER = [{ name: "Radiance HDR", extensions: ["hdr", "pic"] }];
-const PROJECT_FILTER = [{ name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] }];
+const PROJECT_FILTER = [
+  { name: "LegeLabs Photo Editing Suite Project", extensions: ["iep"] },
+];
 const CUBE_FILTER = [{ name: "3D LUT (.cube)", extensions: ["cube", "CUBE"] }];
 
 /** Edit > Toolbar (Customize Toolbar): every persistent tool-selection
@@ -250,7 +259,8 @@ const PROFILE_LABELS: Record<ColorProfile, string> = {
 // case -- a project with no embedded profile at all -- is Ask When
 // Opening's own, separately-scoped dialog, not this policy.
 const COLOR_MANAGEMENT_POLICY_STORAGE_KEY = "legelabs.colorManagementPolicy";
-const COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY = "legelabs.defaultWorkingSpace";
+const COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY =
+  "legelabs.defaultWorkingSpace";
 
 // Color Settings > Monitor Profile / Input Device Profile / Output Device
 // Profile: each is a real .icc/.icm file's own path, persisted the same
@@ -259,9 +269,17 @@ const COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY = "legelabs.defaultWork
 // without asking the user to re-import it every session.
 const MONITOR_PROFILE_PATH_STORAGE_KEY = "legelabs.monitorProfilePath";
 const INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.inputDeviceProfilePath";
-const OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY = "legelabs.outputDeviceProfilePath";
-const ICC_PROFILE_FILTER = [{ name: "ICC Profile (.icc, .icm)", extensions: ["icc", "icm", "ICC", "ICM"] }];
-const OCIO_CONFIG_FILTER = [{ name: "OpenColorIO Configuration (.ocio)", extensions: ["ocio"] }];
+const OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY =
+  "legelabs.outputDeviceProfilePath";
+const ICC_PROFILE_FILTER = [
+  {
+    name: "ICC Profile (.icc, .icm)",
+    extensions: ["icc", "icm", "ICC", "ICM"],
+  },
+];
+const OCIO_CONFIG_FILTER = [
+  { name: "OpenColorIO Configuration (.ocio)", extensions: ["ocio"] },
+];
 
 /** Edit > Keyboard Shortcuts: every Ctrl/Cmd-modified shortcut this app
  * already had hard-coded, now rebindable. Arrow-key selection/layer
@@ -302,7 +320,13 @@ type CloudComment = {
   posted_at: number;
   resolved: boolean;
 };
-type CloudLibrary = { id: number; name: string; owner: string; access: "owner" | "edit" | "view"; assets: number };
+type CloudLibrary = {
+  id: number;
+  name: string;
+  owner: string;
+  access: "owner" | "edit" | "view";
+  assets: number;
+};
 type CloudAsset = {
   id: number;
   name: string;
@@ -312,7 +336,13 @@ type CloudAsset = {
   added_by: string;
   added_at: number;
 };
-type CloudBoard = { id: number; name: string; owner: string; access: "owner" | "edit" | "view"; items: number };
+type CloudBoard = {
+  id: number;
+  name: string;
+  owner: string;
+  access: "owner" | "edit" | "view";
+  items: number;
+};
 type BoardItem = {
   id: number;
   kind: "image" | "note" | "prompt";
@@ -326,7 +356,12 @@ type BoardItem = {
   added_by: string;
   added_at: number;
 };
-type AssistantAction = { id: string; name: string; input: Record<string, unknown>; needs_layer: boolean };
+type AssistantAction = {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  needs_layer: boolean;
+};
 type AssistantReply = {
   mode: "claude" | "rules";
   model: string;
@@ -336,7 +371,12 @@ type AssistantReply = {
   stop_reason: string;
 };
 type AssistantLine = { role: "you" | "assistant" | "note"; text: string };
-type FontEntry = { family: string; category: string; license: string; source: string };
+type FontEntry = {
+  family: string;
+  category: string;
+  license: string;
+  source: string;
+};
 type CloudReview = {
   id: string;
   document: string;
@@ -408,13 +448,16 @@ type Workspace = {
 
 /** `binding` as the toolbar and dialog display it, e.g. "Ctrl/Cmd+Shift+D". */
 function formatKeyBinding(binding: KeyBinding): string {
-  const key = binding.key.length === 1 ? binding.key.toUpperCase() : binding.key;
+  const key =
+    binding.key.length === 1 ? binding.key.toUpperCase() : binding.key;
   return `Ctrl/Cmd+${binding.shift ? "Shift+" : ""}${key}`;
 }
 
 /** One row per output channel (R, G, B); each row is
  * [rCoeff, gCoeff, bCoeff, constant]. This is the no-op matrix. */
-const IDENTITY_KERNEL = Array.from({ length: 25 }, (_, i) => (i === 12 ? "1" : "0"));
+const IDENTITY_KERNEL = Array.from({ length: 25 }, (_, i) =>
+  i === 12 ? "1" : "0",
+);
 
 // The Custom kernel fields are held as strings: a controlled numeric value
 // would snap the invalid intermediate "-" back to 0 and eat the sign.
@@ -449,7 +492,14 @@ const ZIGZAG_STYLES: readonly (readonly [ZigZagStyle, string])[] = [
   ["pondRipples", "Pond Ripples"],
 ];
 
-const TEXT_INPUT_TYPES = new Set(["text", "number", "search", "email", "url", "password"]);
+const TEXT_INPUT_TYPES = new Set([
+  "text",
+  "number",
+  "search",
+  "email",
+  "url",
+  "password",
+]);
 
 // Keyboard shortcuts must not steal Ctrl+A / Ctrl+C / Ctrl+V / Ctrl+Z from a
 // field the user is typing in; sliders and colour pickers keep them.
@@ -505,17 +555,23 @@ function rgbToHex(r: number, g: number, b: number): string {
  * Removal, Harmonize, Color Transfer, none of which are a whole-image
  * model this project can remember and replay) it falls back to Current
  * Layer, the same as picking that option directly. */
-type NeuralFilterOutputValue = "current" | "new" | "newMasked" | "newDocument" | "smartFilter";
+type NeuralFilterOutputValue =
+  | "current"
+  | "new"
+  | "newMasked"
+  | "newDocument"
+  | "smartFilter";
 
 /** Neural Filters whose command has a real [`NeuralFilterKind`] — these
  * are the ones `applyNeuralFilterOutput` can hand to
  * `add_neural_smart_filter` when Output is Smart Filter. */
-const NEURAL_FILTER_KIND_BY_COMMAND: Partial<Record<string, NeuralFilterKind>> = {
-  colorize: "colorize",
-  style_transfer: "styleTransfer",
-  photo_restoration: "photoRestoration",
-  landscape_mixer: "landscapeMixer",
-};
+const NEURAL_FILTER_KIND_BY_COMMAND: Partial<Record<string, NeuralFilterKind>> =
+  {
+    colorize: "colorize",
+    style_transfer: "styleTransfer",
+    photo_restoration: "photoRestoration",
+    landscape_mixer: "landscapeMixer",
+  };
 
 function NeuralFilterOutput({
   value,
@@ -525,11 +581,16 @@ function NeuralFilterOutput({
   onChange: (value: NeuralFilterOutputValue) => void;
 }) {
   return (
-    <label className="control control--row" title="Neural Filters panel's own Output control">
+    <label
+      className="control control--row"
+      title="Neural Filters panel's own Output control"
+    >
       <span className="control__label">Output</span>
       <select
         value={value}
-        onChange={(event) => onChange(event.target.value as NeuralFilterOutputValue)}
+        onChange={(event) =>
+          onChange(event.target.value as NeuralFilterOutputValue)
+        }
       >
         <option value="current">Current Layer</option>
         <option value="new">New Layer</option>
@@ -570,7 +631,8 @@ function polygonPoints(
   const start = Math.atan2(first[1] - centre[1], first[0] - centre[0]);
   const count = starRatio === null ? sides : 2 * sides;
   return Array.from({ length: count }, (_, k) => {
-    const r = starRatio !== null && k % 2 === 1 ? (radius * starRatio) / 100 : radius;
+    const r =
+      starRatio !== null && k % 2 === 1 ? (radius * starRatio) / 100 : radius;
     const angle = start + (Math.PI * k) / (count / 2);
     return [centre[0] + r * Math.cos(angle), centre[1] + r * Math.sin(angle)];
   });
@@ -598,7 +660,10 @@ function nearestPathAnchor(path: PathData, p: [number, number]): number | null {
  * Add Anchor Point's hit test. Hit-tested against the straight line
  * between each segment's two anchor points rather than its true curve, a
  * documented simplification. `null` when the path has no segment. */
-function nearestPathSegment(path: PathData, p: [number, number]): { segment: number; t: number } | null {
+function nearestPathSegment(
+  path: PathData,
+  p: [number, number],
+): { segment: number; t: number } | null {
   const n = path.anchors.length;
   const segCount = path.closed ? n : n - 1;
   if (segCount < 1) return null;
@@ -609,7 +674,8 @@ function nearestPathSegment(path: PathData, p: [number, number]): { segment: num
     const abx = b[0] - a[0];
     const aby = b[1] - a[1];
     const lenSq = abx * abx + aby * aby;
-    let t = lenSq > 0 ? ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / lenSq : 0.5;
+    let t =
+      lenSq > 0 ? ((p[0] - a[0]) * abx + (p[1] - a[1]) * aby) / lenSq : 0.5;
     t = Math.min(0.95, Math.max(0.05, t));
     const cx = a[0] + abx * t;
     const cy = a[1] + aby * t;
@@ -733,7 +799,10 @@ export default function App() {
   // the recovery offer at launch.
   const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
-  const [recoveryStatus, setRecoveryStatus] = useState<{ modifiedAt: number; bytes: number } | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<{
+    modifiedAt: number;
+    bytes: number;
+  } | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   // The selection as the recorder and playback see it, without a stale
   // closure: runCommand's own closure is fixed for the app's life.
@@ -751,7 +820,9 @@ export default function App() {
   const [recording, setRecording] = useState<RecordedAction | null>(null);
   const recordingRef = useRef<RecordedAction | null>(null);
   const [showActionsDialog, setShowActionsDialog] = useState(false);
-  const [selectedActionName, setSelectedActionName] = useState<string | null>(null);
+  const [selectedActionName, setSelectedActionName] = useState<string | null>(
+    null,
+  );
   const [newActionName, setNewActionName] = useState("");
   const [stopMessage, setStopMessage] = useState("");
   const [actionsError, setActionsError] = useState<string | null>(null);
@@ -762,7 +833,9 @@ export default function App() {
   const playbackCancelRef = useRef(false);
   const cancelOperation = useCallback(() => {
     playbackCancelRef.current = true;
-    setProgress((current) => (current ? { ...current, stage: "Cancelling" } : current));
+    setProgress((current) =>
+      current ? { ...current, stage: "Cancelling" } : current,
+    );
     void invoke("cancel_operation").catch(() => {
       // Nothing to cancel any more.
     });
@@ -781,9 +854,7 @@ export default function App() {
   // closed, otherwise which of the three backend commands Apply should send.
   const [modifyMode, setModifyMode] = useState<
     "expand" | "contract" | "smooth" | "border" | "feather" | null
-  >(
-    null,
-  );
+  >(null);
   const [modifyAmount, setModifyAmount] = useState(4);
 
   const [showThresholdDialog, setShowThresholdDialog] = useState(false);
@@ -792,7 +863,8 @@ export default function App() {
   const [showPosterizeDialog, setShowPosterizeDialog] = useState(false);
   const [posterizeLevels, setPosterizeLevels] = useState(4);
 
-  const [showBrightnessContrastDialog, setShowBrightnessContrastDialog] = useState(false);
+  const [showBrightnessContrastDialog, setShowBrightnessContrastDialog] =
+    useState(false);
   const [brightness, setBrightness] = useState(0);
   const [contrast, setContrast] = useState(0);
 
@@ -815,24 +887,30 @@ export default function App() {
   const [showPhotoFilterDialog, setShowPhotoFilterDialog] = useState(false);
   const [photoFilterColor, setPhotoFilterColor] = useState("#ff9933");
   const [photoFilterDensity, setPhotoFilterDensity] = useState(25);
-  const [showTemperatureTintDialog, setShowTemperatureTintDialog] = useState(false);
+  const [showTemperatureTintDialog, setShowTemperatureTintDialog] =
+    useState(false);
   const [temperatureValue, setTemperatureValue] = useState(0);
   const [tintValue, setTintValue] = useState(0);
-  const [showHighlightsShadowsDialog, setShowHighlightsShadowsDialog] = useState(false);
+  const [showHighlightsShadowsDialog, setShowHighlightsShadowsDialog] =
+    useState(false);
   const [highlightsValue, setHighlightsValue] = useState(0);
   const [shadowsValue, setShadowsValue] = useState(0);
   const [showClarityDialog, setShowClarityDialog] = useState(false);
   const [clarityAmount, setClarityAmount] = useState(20);
-  const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] = useState(false);
+  const [showCameraRawSaturationDialog, setShowCameraRawSaturationDialog] =
+    useState(false);
   const [cameraRawSaturation, setCameraRawSaturation] = useState(25);
   const [histogramData, setHistogramData] = useState<{
     counts: number[][];
     shadowClipping: [number, number, number];
   } | null>(null);
-  const [rgbLevels, setRgbLevels] = useState<[number, number, number, number] | null>(null);
+  const [rgbLevels, setRgbLevels] = useState<
+    [number, number, number, number] | null
+  >(null);
   const lastLevelsPixel = useRef<string | null>(null);
   const [showPointCurveDialog, setShowPointCurveDialog] = useState(false);
-  const [pointCurvePoints, setPointCurvePoints] = useState<number[]>(IDENTITY_CURVE);
+  const [pointCurvePoints, setPointCurvePoints] =
+    useState<number[]>(IDENTITY_CURVE);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [rotateDegrees, setRotateDegrees] = useState(45);
   const [showMoveSelectionDialog, setShowMoveSelectionDialog] = useState(false);
@@ -845,7 +923,8 @@ export default function App() {
   const [personIndex, setPersonIndex] = useState(0);
   // Select > Subject > Person Components: which of Face/Hair/Body the
   // Select Person Component button targets.
-  const [personComponent, setPersonComponent] = useState<PersonComponent>("face");
+  const [personComponent, setPersonComponent] =
+    useState<PersonComponent>("face");
   // Edit > Convert to Profile > Use Dither: perturbs each channel's own
   // rounding with a fresh seed per click instead of always rounding the
   // same way, breaking up gradient banding.
@@ -856,52 +935,69 @@ export default function App() {
   // convert_to_profile's own doc comment for why it happens to be a
   // no-op for both profiles this project currently models (both have a
   // black point of exactly XYZ (0, 0, 0)).
-  const [useBlackPointCompensation, setUseBlackPointCompensation] = useState(false);
+  const [useBlackPointCompensation, setUseBlackPointCompensation] =
+    useState(false);
   // Edit > Convert to Profile: which profile the button converts into --
   // a real select now that there are three working spaces (ProPhoto RGB
   // joined sRGB/Adobe RGB (1998)), not a two-way toggle.
-  const [convertToProfileTarget, setConvertToProfileTarget] = useState<ColorProfile>("adobeRgb1998");
+  const [convertToProfileTarget, setConvertToProfileTarget] =
+    useState<ColorProfile>("adobeRgb1998");
   // Edit > Convert to Profile > Rendering Intent: see RenderingIntent's
   // own doc comment in document.rs for what each of the four options
   // actually computes.
-  const [renderingIntent, setRenderingIntent] = useState<RenderingIntent>("relativeColorimetric");
+  const [renderingIntent, setRenderingIntent] = useState<RenderingIntent>(
+    "relativeColorimetric",
+  );
   // Color Settings > Conversion Engine: see ConversionEngine's own doc
   // comment in document.rs for how LookupTable genuinely differs from
   // Analytic rather than being a label over identical code.
-  const [conversionEngine, setConversionEngine] = useState<ConversionEngine>("analytic");
+  const [conversionEngine, setConversionEngine] =
+    useState<ConversionEngine>("analytic");
   // Color Settings > Color Management Policies > Convert to Working
   // Space: a real, persisted alternative to the app's original
   // always-Preserve behavior -- see the storage keys' own doc comment
   // above for the exact scope.
-  const [colorManagementPolicy, setColorManagementPolicy] = useState<"preserve" | "convert">(() => {
+  const [colorManagementPolicy, setColorManagementPolicy] = useState<
+    "preserve" | "convert"
+  >(() => {
     try {
-      return localStorage.getItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY) === "convert"
+      return localStorage.getItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY) ===
+        "convert"
         ? "convert"
         : "preserve";
     } catch {
       return "preserve";
     }
   });
-  const [defaultWorkingSpace, setDefaultWorkingSpaceState] = useState<ColorProfile>(() => {
-    try {
-      const saved = localStorage.getItem(COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY);
-      return saved === "adobeRgb1998" ? "adobeRgb1998" : "srgb";
-    } catch {
-      return "srgb";
-    }
-  });
-  const setColorManagementPolicyPersisted = useCallback((policy: "preserve" | "convert") => {
-    setColorManagementPolicy(policy);
-    try {
-      localStorage.setItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY, policy);
-    } catch {
-      // ignore
-    }
-  }, []);
+  const [defaultWorkingSpace, setDefaultWorkingSpaceState] =
+    useState<ColorProfile>(() => {
+      try {
+        const saved = localStorage.getItem(
+          COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY,
+        );
+        return saved === "adobeRgb1998" ? "adobeRgb1998" : "srgb";
+      } catch {
+        return "srgb";
+      }
+    });
+  const setColorManagementPolicyPersisted = useCallback(
+    (policy: "preserve" | "convert") => {
+      setColorManagementPolicy(policy);
+      try {
+        localStorage.setItem(COLOR_MANAGEMENT_POLICY_STORAGE_KEY, policy);
+      } catch {
+        // ignore
+      }
+    },
+    [],
+  );
   const setDefaultWorkingSpace = useCallback((profile: ColorProfile) => {
     setDefaultWorkingSpaceState(profile);
     try {
-      localStorage.setItem(COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY, profile);
+      localStorage.setItem(
+        COLOR_MANAGEMENT_DEFAULT_WORKING_SPACE_STORAGE_KEY,
+        profile,
+      );
     } catch {
       // ignore
     }
@@ -912,8 +1008,10 @@ export default function App() {
   // these three, like the working-space select above, are app-level Color
   // Settings, the same real distinction Photoshop's own dialog makes.
   const [monitorProfile, setMonitorProfile] = useState<IccProfile | null>(null);
-  const [inputDeviceProfile, setInputDeviceProfile] = useState<IccProfile | null>(null);
-  const [outputDeviceProfile, setOutputDeviceProfile] = useState<IccProfile | null>(null);
+  const [inputDeviceProfile, setInputDeviceProfile] =
+    useState<IccProfile | null>(null);
+  const [outputDeviceProfile, setOutputDeviceProfile] =
+    useState<IccProfile | null>(null);
   const importDeviceProfile = useCallback(
     async (
       storageKey: string,
@@ -939,13 +1037,25 @@ export default function App() {
     [],
   );
   const importMonitorProfile = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: ICC_PROFILE_FILTER,
+    });
     if (typeof selected === "string") {
-      await importDeviceProfile(MONITOR_PROFILE_PATH_STORAGE_KEY, setMonitorProfile, selected);
+      await importDeviceProfile(
+        MONITOR_PROFILE_PATH_STORAGE_KEY,
+        setMonitorProfile,
+        selected,
+      );
     }
   }, [importDeviceProfile]);
   const importInputDeviceProfile = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: ICC_PROFILE_FILTER,
+    });
     if (typeof selected === "string") {
       await importDeviceProfile(
         INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY,
@@ -955,7 +1065,11 @@ export default function App() {
     }
   }, [importDeviceProfile]);
   const importOutputDeviceProfile = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: ICC_PROFILE_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: ICC_PROFILE_FILTER,
+    });
     if (typeof selected === "string") {
       await importDeviceProfile(
         OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY,
@@ -971,7 +1085,10 @@ export default function App() {
   // profile imported" rather than surfacing a startup error for a Color
   // Settings preference nothing has asked to use yet.
   useEffect(() => {
-    const restore = async (storageKey: string, setProfile: (profile: IccProfile | null) => void) => {
+    const restore = async (
+      storageKey: string,
+      setProfile: (profile: IccProfile | null) => void,
+    ) => {
       let path: string | null;
       try {
         path = localStorage.getItem(storageKey);
@@ -989,7 +1106,10 @@ export default function App() {
     };
     void restore(MONITOR_PROFILE_PATH_STORAGE_KEY, setMonitorProfile);
     void restore(INPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setInputDeviceProfile);
-    void restore(OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY, setOutputDeviceProfile);
+    void restore(
+      OUTPUT_DEVICE_PROFILE_PATH_STORAGE_KEY,
+      setOutputDeviceProfile,
+    );
   }, []);
   // Color Settings > OpenColorIO Configuration / OCIO Input Color Space
   // Assignment: a real, parsed .ocio config (icc.rs's own IccProfile
@@ -1024,14 +1144,22 @@ export default function App() {
     [],
   );
   const loadOcioConfig = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: OCIO_CONFIG_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: OCIO_CONFIG_FILTER,
+    });
     if (typeof selected !== "string") return;
     setBusy(true);
     try {
-      const summary = await invoke<OcioConfigSummary>("load_ocio_config", { path: selected });
+      const summary = await invoke<OcioConfigSummary>("load_ocio_config", {
+        path: selected,
+      });
       setOcioConfig(summary);
       setOcioFromColorSpace(summary.colorspaceNames[0] ?? "");
-      setOcioToColorSpace(summary.colorspaceNames[1] ?? summary.colorspaceNames[0] ?? "");
+      setOcioToColorSpace(
+        summary.colorspaceNames[1] ?? summary.colorspaceNames[0] ?? "",
+      );
       const firstRole = Object.keys(summary.roles)[0] ?? "";
       if (firstRole) {
         applyOcioWorkingSpaceRole(firstRole, summary);
@@ -1052,11 +1180,17 @@ export default function App() {
   const [hdrHistogram, setHdrHistogram] = useState<HdrHistogram | null>(null);
   const HDR_HISTOGRAM_BIN_COUNT = 32;
   const loadHdrSource = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: HDR_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: HDR_FILTER,
+    });
     if (typeof selected !== "string") return;
     setBusy(true);
     try {
-      const summary = await invoke<HdrSourceSummary>("load_hdr_source", { path: selected });
+      const summary = await invoke<HdrSourceSummary>("load_hdr_source", {
+        path: selected,
+      });
       setHdrSource(summary);
       const histogram = await invoke<HdrHistogram>("hdr_histogram", {
         binCount: HDR_HISTOGRAM_BIN_COUNT,
@@ -1088,24 +1222,27 @@ export default function App() {
   // Color Settings > Ask When Opening: a real choice dialog, not just a
   // passive warning, whenever Open Project/Load from Cloud reports the
   // loaded project had no embedded colour profile of its own.
-  const [showMissingProfileDialog, setShowMissingProfileDialog] = useState(false);
-  const [missingProfileChoice, setMissingProfileChoice] = useState<ColorProfile>("srgb");
+  const [showMissingProfileDialog, setShowMissingProfileDialog] =
+    useState(false);
+  const [missingProfileChoice, setMissingProfileChoice] =
+    useState<ColorProfile>("srgb");
   // Color Settings > Ask When Pasting: shown only when
   // clipboard_profile_mismatch actually finds a real difference -- the
   // clipboard's own real captured working space, for the dialog's own
   // wording, not the destination document's (that's whatever the
   // toolbar's own Assign Profile select currently shows).
   const [showPasteMismatchDialog, setShowPasteMismatchDialog] = useState(false);
-  const [pasteMismatchFromProfile, setPasteMismatchFromProfile] = useState<ColorProfile | null>(
-    null,
-  );
+  const [pasteMismatchFromProfile, setPasteMismatchFromProfile] =
+    useState<ColorProfile | null>(null);
   // Color Settings > Profile Mismatch Warnings: a real, passive notice --
   // not an interactive choice dialog, Missing Profile's own split between
   // Missing Profile Warning (a message) and Ask When Opening (a dialog)
   // applies here too -- whenever a project's own real, present profile
   // differs from the working space, saying plainly what the active
   // Color Management Policy just did about it.
-  const [colorMismatchNotice, setColorMismatchNotice] = useState<string | null>(null);
+  const [colorMismatchNotice, setColorMismatchNotice] = useState<string | null>(
+    null,
+  );
   // The marquee tools' Feather option: applied to each new marquee.
   const [marqueeFeather, setMarqueeFeather] = useState(0);
   // The selection tools' Anti-alias option, on by default as in Photoshop.
@@ -1117,8 +1254,14 @@ export default function App() {
   const [selectionOverlayOpacity, setSelectionOverlayOpacity] = useState(50);
   // Select and Mask: the Global Refinements and Output To.
   const [showSelectAndMask, setShowSelectAndMask] = useState(false);
-  const [refine, setRefine] = useState<RefineEdge>({ smooth: 0, feather: 0, contrast: 0, shiftEdge: 0 });
-  const [selectAndMaskOutput, setSelectAndMaskOutput] = useState<SelectAndMaskOutput>("selection");
+  const [refine, setRefine] = useState<RefineEdge>({
+    smooth: 0,
+    feather: 0,
+    contrast: 0,
+    shiftEdge: 0,
+  });
+  const [selectAndMaskOutput, setSelectAndMaskOutput] =
+    useState<SelectAndMaskOutput>("selection");
   // Select and Mask > Edge Detection and Decontaminate Colors.
   const [edgeRadius, setEdgeRadius] = useState(0);
   const [smartRadius, setSmartRadius] = useState(false);
@@ -1152,36 +1295,50 @@ export default function App() {
     index: number | null;
     text: string;
   } | null>(null);
-  const [samplerReadouts, setSamplerReadouts] = useState<[number, number, number, number][]>([]);
+  const [samplerReadouts, setSamplerReadouts] = useState<
+    [number, number, number, number][]
+  >([]);
   const [showApplyImageDialog, setShowApplyImageDialog] = useState(false);
   // Image > Mode > Bitmap: its Method dialog.
   const [showBitmapDialog, setShowBitmapDialog] = useState(false);
   const [bitmapMethod, setBitmapMethod] = useState<BitmapMethod>("threshold");
   // Image > Mode > Indexed Color: its Palette dialog.
   const [showIndexedDialog, setShowIndexedDialog] = useState(false);
-  const [indexedPalette, setIndexedPalette] = useState<Palette["kind"]>("adaptive");
+  const [indexedPalette, setIndexedPalette] =
+    useState<Palette["kind"]>("adaptive");
   const [indexedColors, setIndexedColors] = useState(256);
   // Image > Mode > Duotone: one to four ink colours (straight curves).
   const [showDuotoneDialog, setShowDuotoneDialog] = useState(false);
-  const [duotoneInks, setDuotoneInks] = useState<string[]>(["#000000", "#0080ff"]);
-  const [applyImageSource, setApplyImageSource] = useState<number | "merged">("merged");
+  const [duotoneInks, setDuotoneInks] = useState<string[]>([
+    "#000000",
+    "#0080ff",
+  ]);
+  const [applyImageSource, setApplyImageSource] = useState<number | "merged">(
+    "merged",
+  );
   const [applyImageBlend, setApplyImageBlend] = useState<BlendMode>("normal");
   const [applyImageOpacity, setApplyImageOpacity] = useState(100);
   // Apply Image's two arithmetic blends beyond the layer modes, with their
   // Scale and Offset; "mode" means `applyImageBlend` applies.
-  const [applyImageArithmetic, setApplyImageArithmetic] = useState<ApplyBlend["kind"]>("mode");
-  const [applyImageChannel, setApplyImageChannel] = useState<ApplyChannel>("rgb");
+  const [applyImageArithmetic, setApplyImageArithmetic] =
+    useState<ApplyBlend["kind"]>("mode");
+  const [applyImageChannel, setApplyImageChannel] =
+    useState<ApplyChannel>("rgb");
   // Apply Image's Mask group: off, or a mask image and channel, optionally
   // inverted.
   const [applyImageMasked, setApplyImageMasked] = useState(false);
-  const [applyImageMaskSource, setApplyImageMaskSource] = useState<number | "merged">("merged");
-  const [applyImageMaskChannel, setApplyImageMaskChannel] = useState<ApplyChannel>("rgb");
+  const [applyImageMaskSource, setApplyImageMaskSource] = useState<
+    number | "merged"
+  >("merged");
+  const [applyImageMaskChannel, setApplyImageMaskChannel] =
+    useState<ApplyChannel>("rgb");
   const [applyImageMaskInvert, setApplyImageMaskInvert] = useState(false);
   const [applyImageScale, setApplyImageScale] = useState(1);
   const [applyImageOffset, setApplyImageOffset] = useState(0);
   const [applyImageInvert, setApplyImageInvert] = useState(false);
   const [applyImagePreserve, setApplyImagePreserve] = useState(false);
-  const [showTransformSelectionDialog, setShowTransformSelectionDialog] = useState(false);
+  const [showTransformSelectionDialog, setShowTransformSelectionDialog] =
+    useState(false);
   const [transformSelection, setTransformSelection] = useState({
     widthPercent: 100,
     heightPercent: 100,
@@ -1196,18 +1353,33 @@ export default function App() {
   // Image > Calculations: two single-channel sources, a blend, opacity, an
   // optional mask, and where the grey result goes.
   const [showCalculationsDialog, setShowCalculationsDialog] = useState(false);
-  const [calcSource1, setCalcSource1] = useState<CalcSource>({ layer: null, channel: "rgb", invert: false });
-  const [calcSource2, setCalcSource2] = useState<CalcSource>({ layer: null, channel: "rgb", invert: false });
-  const [calcArithmetic, setCalcArithmetic] = useState<ApplyBlend["kind"]>("mode");
+  const [calcSource1, setCalcSource1] = useState<CalcSource>({
+    layer: null,
+    channel: "rgb",
+    invert: false,
+  });
+  const [calcSource2, setCalcSource2] = useState<CalcSource>({
+    layer: null,
+    channel: "rgb",
+    invert: false,
+  });
+  const [calcArithmetic, setCalcArithmetic] =
+    useState<ApplyBlend["kind"]>("mode");
   const [calcBlend, setCalcBlend] = useState<BlendMode>("multiply");
   const [calcScale, setCalcScale] = useState(1);
   const [calcOffset, setCalcOffset] = useState(0);
   const [calcOpacity, setCalcOpacity] = useState(100);
   const [calcMasked, setCalcMasked] = useState(false);
-  const [calcMask, setCalcMask] = useState<ApplyMask>({ source: null, channel: "rgb", invert: false });
+  const [calcMask, setCalcMask] = useState<ApplyMask>({
+    source: null,
+    channel: "rgb",
+    invert: false,
+  });
   const [calcResult, setCalcResult] = useState<CalcResult>("newChannel");
   // The Channels panel: what the canvas shows, and the thumbnail size.
-  const [channelView, setChannelView] = useState<ChannelView>({ kind: "composite" });
+  const [channelView, setChannelView] = useState<ChannelView>({
+    kind: "composite",
+  });
   const [channelThumbs, setChannelThumbs] = useState<ChannelThumbs>("small");
   // View > Proof Colors: a colour-blindness proof of the composite, or off.
   const [proof, setProof] = useState<Proof | "off">("off");
@@ -1245,9 +1417,9 @@ export default function App() {
   const [cylinderTilt, setCylinderTilt] = useState(0);
   // Filter > Liquify's Twirl, Pucker, Bloat, and Forward Warp tools: brush centre, radius, strength/push.
   const [showLiquifyDialog, setShowLiquifyDialog] = useState(false);
-  const [liquifyTool, setLiquifyTool] = useState<LiquifyTool | "forward" | "reconstruct" | "freeze" | "thaw">(
-    "twirl",
-  );
+  const [liquifyTool, setLiquifyTool] = useState<
+    LiquifyTool | "forward" | "reconstruct" | "freeze" | "thaw"
+  >("twirl");
   const [liquifyCenter, setLiquifyCenter] = useState<[number, number]>([0, 0]);
   const [liquifyRadius, setLiquifyRadius] = useState(50);
   const [liquifyStrength, setLiquifyStrength] = useState(50);
@@ -1260,7 +1432,8 @@ export default function App() {
   const [liquifyMesh, setLiquifyMesh] = useState<LiquifyMesh | null>(null);
   // Filter > Vanishing Point > Stamp: a single perspective-correct clone
   // over a plane defined by four image-pixel corners.
-  const [showVanishingPointDialog, setShowVanishingPointDialog] = useState(false);
+  const [showVanishingPointDialog, setShowVanishingPointDialog] =
+    useState(false);
   const [vanishingPointPlane, setVanishingPointPlane] = useState<
     [[number, number], [number, number], [number, number], [number, number]]
   >([
@@ -1269,8 +1442,12 @@ export default function App() {
     [100, 100],
     [0, 100],
   ]);
-  const [vanishingPointSource, setVanishingPointSource] = useState<[number, number]>([20, 20]);
-  const [vanishingPointTarget, setVanishingPointTarget] = useState<[number, number]>([60, 60]);
+  const [vanishingPointSource, setVanishingPointSource] = useState<
+    [number, number]
+  >([20, 20]);
+  const [vanishingPointTarget, setVanishingPointTarget] = useState<
+    [number, number]
+  >([60, 60]);
   const [vanishingPointRadius, setVanishingPointRadius] = useState(20);
   // Reconstruct's "original": the layer's pixels captured with layer_pixels
   // before any Liquify tool has run, so Reconstruct has something to blend
@@ -1285,7 +1462,9 @@ export default function App() {
   // own estimated landmark points (see `face_landmarks`), each reusing an
   // already-shipped Liquify tool -- no pixel-level code of its own.
   const [showFaceLiquifyDialog, setShowFaceLiquifyDialog] = useState(false);
-  const [faceLandmarks, setFaceLandmarks] = useState<FaceLandmarks | null>(null);
+  const [faceLandmarks, setFaceLandmarks] = useState<FaceLandmarks | null>(
+    null,
+  );
   const [faceEyeSize, setFaceEyeSize] = useState(0);
   const [faceEyeWidth, setFaceEyeWidth] = useState(0);
   const [faceNoseWidth, setFaceNoseWidth] = useState(0);
@@ -1297,7 +1476,8 @@ export default function App() {
   const [faceChinHeight, setFaceChinHeight] = useState(0);
   const [faceWidth, setFaceWidth] = useState(0);
   // Filter > Lens Correction: Distortion, Vignette, and Chromatic Aberration.
-  const [showLensCorrectionDialog, setShowLensCorrectionDialog] = useState(false);
+  const [showLensCorrectionDialog, setShowLensCorrectionDialog] =
+    useState(false);
   const [lensDistortion, setLensDistortion] = useState(0);
   const [lensVignette, setLensVignette] = useState(0);
   const [lensRedCyan, setLensRedCyan] = useState(0);
@@ -1305,7 +1485,8 @@ export default function App() {
   // Filter > Adaptive Wide Angle: one marked line, entered numerically as
   // three points -- the same fixed-point-count numeric entry Vanishing
   // Point's own plane corners already use, rather than click-to-mark.
-  const [showAdaptiveWideAngleDialog, setShowAdaptiveWideAngleDialog] = useState(false);
+  const [showAdaptiveWideAngleDialog, setShowAdaptiveWideAngleDialog] =
+    useState(false);
   const [adaptiveWideAngleLine, setAdaptiveWideAngleLine] = useState<
     [[number, number], [number, number], [number, number]]
   >([
@@ -1318,7 +1499,8 @@ export default function App() {
   // this app's own network-capable features, fully wired end to end,
   // waiting only on the user's own provider details. See the External
   // Services dialog below for the one contract each endpoint must speak.
-  const [showExternalServicesDialog, setShowExternalServicesDialog] = useState(false);
+  const [showExternalServicesDialog, setShowExternalServicesDialog] =
+    useState(false);
   // Edit > Preferences > Interface: theme, highlight colour, UI font size
   // -- kept in the browser, applied as root attributes the stylesheet's
   // token sets key on (main.tsx applies them again before first paint).
@@ -1330,48 +1512,64 @@ export default function App() {
     setShowTour(false);
     markTourSeen();
   }, []);
-  const [interfacePreferences, setInterfacePreferences] = useState<InterfacePreferences>(() => {
-    try {
-      return parseInterface(localStorage.getItem(INTERFACE_STORAGE_KEY));
-    } catch {
-      return { ...INTERFACE_DEFAULTS };
-    }
-  });
-  const updateInterface = useCallback((patch: Partial<InterfacePreferences>) => {
-    setInterfacePreferences((previous) => {
-      const next = { ...previous, ...patch };
-      applyInterface(window.document.documentElement, next);
+  const [interfacePreferences, setInterfacePreferences] =
+    useState<InterfacePreferences>(() => {
       try {
-        localStorage.setItem(INTERFACE_STORAGE_KEY, JSON.stringify(next));
+        return parseInterface(localStorage.getItem(INTERFACE_STORAGE_KEY));
       } catch {
-        // ignore
+        return { ...INTERFACE_DEFAULTS };
       }
-      return next;
     });
-  }, []);
+  const updateInterface = useCallback(
+    (patch: Partial<InterfacePreferences>) => {
+      setInterfacePreferences((previous) => {
+        const next = { ...previous, ...patch };
+        applyInterface(window.document.documentElement, next);
+        try {
+          localStorage.setItem(INTERFACE_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
+    },
+    [],
+  );
   const [generativeAiEndpoint, setGenerativeAiEndpoint] = useState(
     () => localStorage.getItem(GENERATIVE_AI_ENDPOINT_STORAGE_KEY) ?? "",
   );
   const [generativeAiApiKey, setGenerativeAiApiKey] = useState(
     () => localStorage.getItem(GENERATIVE_AI_API_KEY_STORAGE_KEY) ?? "",
   );
-  const [cloudEndpoint, setCloudEndpoint] = useState(() => localStorage.getItem(CLOUD_ENDPOINT_STORAGE_KEY) ?? "");
-  const [cloudToken, setCloudToken] = useState(() => localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY) ?? "");
-  const [showGenerativeFillDialog, setShowGenerativeFillDialog] = useState(false);
-  const [generativeModel, setGenerativeModel] = useState<"device" | "endpoint">(() =>
-    localStorage.getItem(GENERATIVE_MODEL_STORAGE_KEY) === "endpoint" ? "endpoint" : "device",
+  const [cloudEndpoint, setCloudEndpoint] = useState(
+    () => localStorage.getItem(CLOUD_ENDPOINT_STORAGE_KEY) ?? "",
+  );
+  const [cloudToken, setCloudToken] = useState(
+    () => localStorage.getItem(CLOUD_TOKEN_STORAGE_KEY) ?? "",
+  );
+  const [showGenerativeFillDialog, setShowGenerativeFillDialog] =
+    useState(false);
+  const [generativeModel, setGenerativeModel] = useState<"device" | "endpoint">(
+    () =>
+      localStorage.getItem(GENERATIVE_MODEL_STORAGE_KEY) === "endpoint"
+        ? "endpoint"
+        : "device",
   );
   // Generate Image: a prompt, a seed and the sampler's settings for the
   // on-device model (`generate_image`), or the same prompt to the
   // endpoint; `understood` is what the on-device model will hear of it.
   const [showGenerateImageDialog, setShowGenerateImageDialog] = useState(false);
-  const [generatePrompt, setGeneratePrompt] = useState("a mountain lake at dawn");
+  const [generatePrompt, setGeneratePrompt] = useState(
+    "a mountain lake at dawn",
+  );
   const [generateSeed, setGenerateSeed] = useState(1);
   const [generateSteps, setGenerateSteps] = useState(25);
   const [generateGuidance, setGenerateGuidance] = useState(2);
-  const [understood, setUnderstood] = useState<{ category: string | null; words: string[]; categories: string[] } | null>(
-    null,
-  );
+  const [understood, setUnderstood] = useState<{
+    category: string | null;
+    words: string[];
+    categories: string[];
+  } | null>(null);
   const [generateBusy, setGenerateBusy] = useState(false);
   // AI Assisted Editor: the transcript shown, the conversation as the
   // Messages API holds it (opaque here), and the user's own key.
@@ -1380,16 +1578,21 @@ export default function App() {
   const [assistantLines, setAssistantLines] = useState<AssistantLine[]>([]);
   const [assistantMessages, setAssistantMessages] = useState<unknown[]>([]);
   const [assistantBusy, setAssistantBusy] = useState(false);
-  const [assistantApiKey, setAssistantApiKey] = useState(() => localStorage.getItem(ASSISTANT_API_KEY_STORAGE_KEY) ?? "");
+  const [assistantApiKey, setAssistantApiKey] = useState(
+    () => localStorage.getItem(ASSISTANT_API_KEY_STORAGE_KEY) ?? "",
+  );
   // Reference Images: the layer a generation starts from (SDEdit), and
   // how far it is noised first; Prompt to Edit and Generative Upscale
   // share the same sampler settings with their own strengths.
-  const [generateReference, setGenerateReference] = useState<number | null>(null);
+  const [generateReference, setGenerateReference] = useState<number | null>(
+    null,
+  );
   const [generateStrength, setGenerateStrength] = useState(0.6);
   const [showPromptToEditDialog, setShowPromptToEditDialog] = useState(false);
   const [editPrompt, setEditPrompt] = useState("");
   const [editStrength, setEditStrength] = useState(0.5);
-  const [showGenerativeUpscaleDialog, setShowGenerativeUpscaleDialog] = useState(false);
+  const [showGenerativeUpscaleDialog, setShowGenerativeUpscaleDialog] =
+    useState(false);
   const [upscalePrompt, setUpscalePrompt] = useState("");
   const [upscaleStrength, setUpscaleStrength] = useState(0.25);
   const [upscaleSteps, setUpscaleSteps] = useState(10);
@@ -1431,7 +1634,9 @@ export default function App() {
   const [libraryGradientName, setLibraryGradientName] = useState("");
   const [libraryAdjustmentName, setLibraryAdjustmentName] = useState("");
   const [libraryShareUser, setLibraryShareUser] = useState("");
-  const [libraryShareRole, setLibraryShareRole] = useState<"edit" | "view">("edit");
+  const [libraryShareRole, setLibraryShareRole] = useState<"edit" | "view">(
+    "edit",
+  );
   const [libraryBusy, setLibraryBusy] = useState(false);
   // PART XXX > Turn a Photograph into Linework: Find Edges into
   // Threshold at this level, the audit's own named recipe.
@@ -1451,12 +1656,17 @@ export default function App() {
   const puppetSvgRef = useRef<SVGSVGElement | null>(null);
   // Channels panel > New Spot Channel / Spot Channel Options / Convert.
   const [spotDialog, setSpotDialog] = useState<
-    { mode: "new" } | { mode: "edit"; name: string } | { mode: "convert"; name: string } | null
+    | { mode: "new" }
+    | { mode: "edit"; name: string }
+    | { mode: "convert"; name: string }
+    | null
   >(null);
   const [spotName, setSpotName] = useState("");
   const [spotColor, setSpotColor] = useState("#00aeef");
   const [spotSolidity, setSpotSolidity] = useState(100);
-  const [spotLibrary, setSpotLibrary] = useState<[string, [number, number, number]][]>([]);
+  const [spotLibrary, setSpotLibrary] = useState<
+    [string, [number, number, number]][]
+  >([]);
   const [distortCorners, setDistortCorners] = useState<number[][]>([
     [0, 0],
     [0, 0],
@@ -1480,7 +1690,8 @@ export default function App() {
   const [showCanvasSizeDialog, setShowCanvasSizeDialog] = useState(false);
   const [canvasSizeWidth, setCanvasSizeWidth] = useState(1);
   const [canvasSizeHeight, setCanvasSizeHeight] = useState(1);
-  const [canvasSizeAnchor, setCanvasSizeAnchor] = useState<ReferencePoint>("center");
+  const [canvasSizeAnchor, setCanvasSizeAnchor] =
+    useState<ReferencePoint>("center");
   const [canvasSizeGenerative, setCanvasSizeGenerative] = useState(false);
   const [freeTransform, setFreeTransform] = useState({
     widthPercent: 100,
@@ -1493,7 +1704,9 @@ export default function App() {
   });
   // Free Transform's options bar: reference point, X/Y position (absolute
   // or relative), and the aspect-ratio link.
-  const [ftReference, setFtReference] = useState<"canvas" | ReferencePoint>("canvas");
+  const [ftReference, setFtReference] = useState<"canvas" | ReferencePoint>(
+    "canvas",
+  );
   const [ftUsePosition, setFtUsePosition] = useState(false);
   const [ftX, setFtX] = useState(0);
   const [ftY, setFtY] = useState(0);
@@ -1515,11 +1728,16 @@ export default function App() {
   const [brushDynamicsOn, setBrushDynamicsOn] = useState(false);
   const [showBrushSettings, setShowBrushSettings] = useState(false);
   // Edit > Content-Aware Fill…: Photoshop's own fill options.
-  const [showContentAwareFillDialog, setShowContentAwareFillDialog] = useState(false);
+  const [showContentAwareFillDialog, setShowContentAwareFillDialog] =
+    useState(false);
   const [cafSamplingMargin, setCafSamplingMargin] = useState(0);
   const [cafMirror, setCafMirror] = useState(false);
-  const [cafRotation, setCafRotation] = useState<"none" | "low" | "medium" | "high" | "full">("none");
-  const [cafColorAdaptation, setCafColorAdaptation] = useState<"none" | "default" | "high" | "veryHigh">("default");
+  const [cafRotation, setCafRotation] = useState<
+    "none" | "low" | "medium" | "high" | "full"
+  >("none");
+  const [cafColorAdaptation, setCafColorAdaptation] = useState<
+    "none" | "default" | "high" | "veryHigh"
+  >("default");
   const [cafSeed, setCafSeed] = useState(1);
   const [brushDynamics, setBrushDynamics] = useState<BrushDynamics>({
     spacingPercent: 25,
@@ -1571,12 +1789,19 @@ export default function App() {
   // Photoshop's Interpolation option for every transform: the combined
   // single-resample path at this method (Bicubic by default), or
   // "sequential" for the earlier per-stage nearest-neighbour path.
-  const [transformInterpolation, setTransformInterpolation] = useState<Interpolation | "sequential">("bicubic");
-  const interpolationArg = transformInterpolation === "sequential" ? null : transformInterpolation;
+  const [transformInterpolation, setTransformInterpolation] = useState<
+    Interpolation | "sequential"
+  >("bicubic");
+  const interpolationArg =
+    transformInterpolation === "sequential" ? null : transformInterpolation;
   // Rotating from the transform controls: a drag started just outside a
   // corner handle turns the box about its centre and commits a rotation.
   const [controlRotation, setControlRotation] = useState<number | null>(null);
-  const rotateDrag = useRef<{ centerX: number; centerY: number; startAngle: number } | null>(null);
+  const rotateDrag = useRef<{
+    centerX: number;
+    centerY: number;
+    startAngle: number;
+  } | null>(null);
   const [controlBounds, setControlBounds] = useState<{
     x0: number;
     y0: number;
@@ -1608,12 +1833,16 @@ export default function App() {
   // Color Range's Select list: "sampled" with a list of samples, or a preset;
   // Localized Color Clusters with its Range; Invert; and the Grayscale
   // Selection Preview drawn from `color_range_bits`.
-  const [colorRangeSelect, setColorRangeSelect] = useState<"sampled" | ColorRangePreset>("sampled");
+  const [colorRangeSelect, setColorRangeSelect] = useState<
+    "sampled" | ColorRangePreset
+  >("sampled");
   const [colorRangeSamples, setColorRangeSamples] = useState<ColorSample[]>([]);
   const [colorRangeLocalized, setColorRangeLocalized] = useState(false);
   const [colorRangeRange, setColorRangeRange] = useState(50);
   const [colorRangeInvert, setColorRangeInvert] = useState(false);
-  const [colorRangePreview, setColorRangePreview] = useState<"none" | "grayscale">("none");
+  const [colorRangePreview, setColorRangePreview] = useState<
+    "none" | "grayscale"
+  >("none");
   const [colorRangeSampling, setColorRangeSampling] = useState(false);
   const colorRangePreviewCanvas = useRef<HTMLCanvasElement | null>(null);
   // Apply Image's Preview checkbox.
@@ -1631,9 +1860,13 @@ export default function App() {
   });
   const [showCameraRawDialog, setShowCameraRawDialog] = useState(false);
   // Camera Raw Filter > Masking: none, or one of the three masks.
-  const [rawMaskKind, setRawMaskKind] = useState<"none" | "subject" | "radial" | "colorRange">("none");
+  const [rawMaskKind, setRawMaskKind] = useState<
+    "none" | "subject" | "radial" | "colorRange"
+  >("none");
   const [rawMaskTolerance, setRawMaskTolerance] = useState(32);
-  const [rawMaskEllipse, setRawMaskEllipse] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [rawMaskEllipse, setRawMaskEllipse] = useState<
+    [number, number, number, number]
+  >([0, 0, 1, 1]);
   const [rawMaskFeather, setRawMaskFeather] = useState(50);
   const [rawMaskInvert, setRawMaskInvert] = useState(false);
   const [rawMaskColor, setRawMaskColor] = useState("#ff0000");
@@ -1651,7 +1884,8 @@ export default function App() {
   // Camera Raw Filter > Optics and the Targeted Adjustment Tool.
   const [opticsDistortion, setOpticsDistortion] = useState(0);
   const [opticsVignette, setOpticsVignette] = useState(0);
-  const [targetedMode, setTargetedMode] = useState<TargetedMode>("parametricCurve");
+  const [targetedMode, setTargetedMode] =
+    useState<TargetedMode>("parametricCurve");
   const [targetedPoint, setTargetedPoint] = useState<[number, number]>([0, 0]);
   const [targetedAmount, setTargetedAmount] = useState(0);
   const [cameraRaw, setCameraRaw] = useState({
@@ -1665,8 +1899,11 @@ export default function App() {
     pointCurve: IDENTITY_CURVE,
     defringe: 0,
   });
-  const [showParametricCurveDialog, setShowParametricCurveDialog] = useState(false);
-  const [parametricCurve, setParametricCurve] = useState<number[]>([0, 0, 0, 0]);
+  const [showParametricCurveDialog, setShowParametricCurveDialog] =
+    useState(false);
+  const [parametricCurve, setParametricCurve] = useState<number[]>([
+    0, 0, 0, 0,
+  ]);
   const [showPointColorDialog, setShowPointColorDialog] = useState(false);
   const [pointColorTarget, setPointColorTarget] = useState("#ff0000");
   const [pointColorRange, setPointColorRange] = useState(40);
@@ -1697,7 +1934,8 @@ export default function App() {
   const [gradientMapHighlight, setGradientMapHighlight] = useState("#ffffff");
 
   const [showChannelMixerDialog, setShowChannelMixerDialog] = useState(false);
-  const [showSelectiveColorDialog, setShowSelectiveColorDialog] = useState(false);
+  const [showSelectiveColorDialog, setShowSelectiveColorDialog] =
+    useState(false);
   const [selectiveColorCyan, setSelectiveColorCyan] = useState(0);
   const [selectiveColorMagenta, setSelectiveColorMagenta] = useState(0);
   const [selectiveColorYellow, setSelectiveColorYellow] = useState(0);
@@ -1706,15 +1944,20 @@ export default function App() {
   const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
   const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
   const [strokeOutlineOpacity, setStrokeOutlineOpacity] = useState(100);
-  const [strokeOutlinePosition, setStrokeOutlinePosition] = useState<"outside" | "inside" | "center">("outside");
+  const [strokeOutlinePosition, setStrokeOutlinePosition] = useState<
+    "outside" | "inside" | "center"
+  >("outside");
   const [showColorOverlayDialog, setShowColorOverlayDialog] = useState(false);
   const [colorOverlayColor, setColorOverlayColor] = useState("#ff0000");
   const [colorOverlayOpacity, setColorOverlayOpacity] = useState(100);
-  const [showGradientOverlayDialog, setShowGradientOverlayDialog] = useState(false);
+  const [showGradientOverlayDialog, setShowGradientOverlayDialog] =
+    useState(false);
   const [gradientOverlayColor1, setGradientOverlayColor1] = useState("#000000");
   const [gradientOverlayColor2, setGradientOverlayColor2] = useState("#ffffff");
   const [gradientOverlayOpacity, setGradientOverlayOpacity] = useState(100);
-  const [gradientOverlayStyle, setGradientOverlayStyle] = useState<"linear" | "radial" | "angle" | "reflected" | "diamond">("linear");
+  const [gradientOverlayStyle, setGradientOverlayStyle] = useState<
+    "linear" | "radial" | "angle" | "reflected" | "diamond"
+  >("linear");
   const [gradientOverlayAngle, setGradientOverlayAngle] = useState(90);
   const [gradientOverlayScale, setGradientOverlayScale] = useState(100);
   const [gradientOverlayReverse, setGradientOverlayReverse] = useState(false);
@@ -1747,7 +1990,8 @@ export default function App() {
   const [satinColor, setSatinColor] = useState("#000000");
   const [satinOpacity, setSatinOpacity] = useState(50);
   const [satinInvert, setSatinInvert] = useState(true);
-  const [showPatternOverlayDialog, setShowPatternOverlayDialog] = useState(false);
+  const [showPatternOverlayDialog, setShowPatternOverlayDialog] =
+    useState(false);
   const [patternOverlayScale, setPatternOverlayScale] = useState(10);
   const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
   const [patternOverlayColor2, setPatternOverlayColor2] = useState("#ffffff");
@@ -1755,8 +1999,12 @@ export default function App() {
   const [showBevelEmbossDialog, setShowBevelEmbossDialog] = useState(false);
   const [bevelEmbossSize, setBevelEmbossSize] = useState(5);
   // Bevel & Emboss's Structure and Shading options (README Phase 353).
-  const [bevelStyle, setBevelStyle] = useState<"innerBevel" | "outerBevel" | "emboss" | "pillowEmboss">("innerBevel");
-  const [bevelTechnique, setBevelTechnique] = useState<"smooth" | "chiselHard" | "chiselSoft">("smooth");
+  const [bevelStyle, setBevelStyle] = useState<
+    "innerBevel" | "outerBevel" | "emboss" | "pillowEmboss"
+  >("innerBevel");
+  const [bevelTechnique, setBevelTechnique] = useState<
+    "smooth" | "chiselHard" | "chiselSoft"
+  >("smooth");
   const [bevelDepth, setBevelDepth] = useState(100);
   const [bevelUp, setBevelUp] = useState(true);
   const [bevelSoften, setBevelSoften] = useState(0);
@@ -1781,6 +2029,7 @@ export default function App() {
   const [texturizerRelief, setTexturizerRelief] = useState(10);
   const [texturizerLightDirection, setTexturizerLightDirection] = useState(7);
   const [texturizerInvert, setTexturizerInvert] = useState(false);
+  const [texturizerTexture, setTexturizerTexture] = useState("canvas");
   const [channelMixerMatrix, setChannelMixerMatrix] = useState<number[][]>(
     IDENTITY_CHANNEL_MIXER,
   );
@@ -1801,7 +2050,8 @@ export default function App() {
   const [showGuidesDialog, setShowGuidesDialog] = useState(false);
   // Adjustment layer dialog: the kind and its parameters.
   const [showAdjustmentDialog, setShowAdjustmentDialog] = useState(false);
-  const [adjustmentKind, setAdjustmentKind] = useState<Adjustment["kind"]>("invert");
+  const [adjustmentKind, setAdjustmentKind] =
+    useState<Adjustment["kind"]>("invert");
   const [adjustmentBrightness, setAdjustmentBrightness] = useState(0);
   const [adjustmentContrast, setAdjustmentContrast] = useState(0);
   const [adjustmentLevel, setAdjustmentLevel] = useState(128);
@@ -1811,7 +2061,8 @@ export default function App() {
   const [smartFilterList, setSmartFilterList] = useState<Adjustment[]>([]);
   // Fill layer dialog: which of the three live fills to add or re-tune.
   const [showFillLayerDialog, setShowFillLayerDialog] = useState(false);
-  const [fillLayerKind, setFillLayerKind] = useState<Fill["kind"]>("solidColor");
+  const [fillLayerKind, setFillLayerKind] =
+    useState<Fill["kind"]>("solidColor");
   // The Type tools: a text layer's type, new or edited.
   const [showTypeDialog, setShowTypeDialog] = useState(false);
   const [typeText, setTypeText] = useState("Type");
@@ -1838,36 +2089,50 @@ export default function App() {
   const [cloudBoards, setCloudBoards] = useState<CloudBoard[]>([]);
   const [activeBoardId, setActiveBoardId] = useState<number | null>(null);
   const [boardItems, setBoardItems] = useState<BoardItem[]>([]);
-  const [boardThumbnails, setBoardThumbnails] = useState<Record<number, string>>({});
+  const [boardThumbnails, setBoardThumbnails] = useState<
+    Record<number, string>
+  >({});
   const [newBoardName, setNewBoardName] = useState("");
   const [boardText, setBoardText] = useState("");
   const [boardShareUser, setBoardShareUser] = useState("");
   const [boardShareRole, setBoardShareRole] = useState<"edit" | "view">("edit");
   const [boardBusy, setBoardBusy] = useState(false);
-  const boardDrag = useRef<{ id: number; startX: number; startY: number; originX: number; originY: number; scale: number } | null>(null);
+  const boardDrag = useRef<{
+    id: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+    scale: number;
+  } | null>(null);
   // The shape tools' Shape mode and the Custom Shape tool.
   const [showShapeLayerDialog, setShowShapeLayerDialog] = useState(false);
   const [shapeKind, setShapeKind] = useState<ShapeSpec["kind"]>("rectangle");
-  const [shapeBox, setShapeBox] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [shapeBox, setShapeBox] = useState<[number, number, number, number]>([
+    0, 0, 1, 1,
+  ]);
   // Smart Objects: the members to wrap and the transform to show through.
   const [showSmartDialog, setShowSmartDialog] = useState(false);
   const [smartMembers, setSmartMembers] = useState<number[]>([]);
   // The Frame tool and Select > Focus Area.
   const [showFrameDialog, setShowFrameDialog] = useState(false);
-  const [frameBox, setFrameBox] = useState<[number, number, number, number]>([0, 0, 1, 1]);
+  const [frameBox, setFrameBox] = useState<[number, number, number, number]>([
+    0, 0, 1, 1,
+  ]);
   const [frameElliptical, setFrameElliptical] = useState(false);
   const [frameTarget, setFrameTarget] = useState<number | null>(null);
   const [showFocusDialog, setShowFocusDialog] = useState(false);
   const [focusRange, setFocusRange] = useState(50);
   const [focusSpread, setFocusSpread] = useState(2);
   const [customPoints, setCustomPoints] = useState("0,0\n1,0\n0.5,1");
-  const [guideOrientation, setGuideOrientation] = useState<GuideOrientation>("horizontal");
+  const [guideOrientation, setGuideOrientation] =
+    useState<GuideOrientation>("horizontal");
   const [guidePosition, setGuidePosition] = useState(0);
   const [guideColumns, setGuideColumns] = useState(3);
   const [guideRows, setGuideRows] = useState(2);
-  const [levelsEyedropper, setLevelsEyedropper] = useState<"black" | "gray" | "white" | null>(
-    null,
-  );
+  const [levelsEyedropper, setLevelsEyedropper] = useState<
+    "black" | "gray" | "white" | null
+  >(null);
 
   const [showCurvesDialog, setShowCurvesDialog] = useState(false);
   // Curves > Point mode: free (input, output) control points instead of
@@ -1889,12 +2154,38 @@ export default function App() {
   const [curveStore, setCurveStore] = useState<
     Record<LevelsChannel, { points: number[]; nodes: [number, number][] }>
   >({
-    rgb: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-    red: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-    green: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-    blue: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+    rgb: {
+      points: IDENTITY_CURVE,
+      nodes: [
+        [0, 0],
+        [255, 255],
+      ],
+    },
+    red: {
+      points: IDENTITY_CURVE,
+      nodes: [
+        [0, 0],
+        [255, 255],
+      ],
+    },
+    green: {
+      points: IDENTITY_CURVE,
+      nodes: [
+        [0, 0],
+        [255, 255],
+      ],
+    },
+    blue: {
+      points: IDENTITY_CURVE,
+      nodes: [
+        [0, 0],
+        [255, 255],
+      ],
+    },
   });
-  const [curveLuts, setCurveLuts] = useState<Partial<Record<LevelsChannel, number[]>>>({});
+  const [curveLuts, setCurveLuts] = useState<
+    Partial<Record<LevelsChannel, number[]>>
+  >({});
   // Show Clipping: how many pixels the current curves drive to black/white.
   const [curveShowClipping, setCurveShowClipping] = useState(false);
   // Pencil mode: a freehand 256-entry table drawn on the graph.
@@ -1907,15 +2198,24 @@ export default function App() {
   // the pixel's tone and a vertical drag moves the curve there.
   const [curveOnImage, setCurveOnImage] = useState(false);
   const curveDrag = useRef<{ input: number; startY: number } | null>(null);
-  const [curveClipping, setCurveClipping] = useState<[number, number] | null>(null);
+  const [curveClipping, setCurveClipping] = useState<[number, number] | null>(
+    null,
+  );
   const [curvePoints, setCurvePoints] = useState<number[]>(IDENTITY_CURVE);
 
   const [showColorBalanceDialog, setShowColorBalanceDialog] = useState(false);
-  const [colorBalanceShadows, setColorBalanceShadows] = useState<number[]>([0, 0, 0]);
-  const [colorBalanceMidtones, setColorBalanceMidtones] = useState<number[]>([0, 0, 0]);
-  const [colorBalanceHighlights, setColorBalanceHighlights] = useState<number[]>([0, 0, 0]);
+  const [colorBalanceShadows, setColorBalanceShadows] = useState<number[]>([
+    0, 0, 0,
+  ]);
+  const [colorBalanceMidtones, setColorBalanceMidtones] = useState<number[]>([
+    0, 0, 0,
+  ]);
+  const [colorBalanceHighlights, setColorBalanceHighlights] = useState<
+    number[]
+  >([0, 0, 0]);
 
-  const [showSolidColorFillDialog, setShowSolidColorFillDialog] = useState(false);
+  const [showSolidColorFillDialog, setShowSolidColorFillDialog] =
+    useState(false);
   const [solidColorFill, setSolidColorFill] = useState("#ffffff");
 
   const [showGradientFillDialog, setShowGradientFillDialog] = useState(false);
@@ -1929,7 +2229,8 @@ export default function App() {
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
   const [showShapeBlurDialog, setShowShapeBlurDialog] = useState(false);
   const [shapeBlurRadius, setShapeBlurRadius] = useState(4);
-  const [shapeBlurKernel, setShapeBlurKernel] = useState<ShapeBlurKernel>("circle");
+  const [shapeBlurKernel, setShapeBlurKernel] =
+    useState<ShapeBlurKernel>("circle");
   const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
   const [gaussianBlurRadius, setGaussianBlurRadius] = useState(2);
   const [showSurfaceBlurDialog, setShowSurfaceBlurDialog] = useState(false);
@@ -1992,7 +2293,12 @@ export default function App() {
   const [showSpinBlurDialog, setShowSpinBlurDialog] = useState(false);
   // Blur Gallery > Path Blur: the path's points and the options bar.
   const [showPathBlurDialog, setShowPathBlurDialog] = useState(false);
-  const [pathBlur, setPathBlur] = useState<PathBlurOptions>({ points: [], speed: 10, taper: 0, centered: true });
+  const [pathBlur, setPathBlur] = useState<PathBlurOptions>({
+    points: [],
+    speed: 10,
+    taper: 0,
+    centered: true,
+  });
   const [spinBlurCenterX, setSpinBlurCenterX] = useState(0);
   const [spinBlurCenterY, setSpinBlurCenterY] = useState(0);
   const [spinBlurAngle, setSpinBlurAngle] = useState(15);
@@ -2023,14 +2329,20 @@ export default function App() {
   const [shearControlPoints, setShearControlPoints] = useState([0, 0, 0, 0, 0]);
   const [shearWrapAround, setShearWrapAround] = useState(false);
   const [showDisplaceDialog, setShowDisplaceDialog] = useState(false);
-  const [displaceMapLayerId, setDisplaceMapLayerId] = useState<number | null>(null);
+  const [displaceMapLayerId, setDisplaceMapLayerId] = useState<number | null>(
+    null,
+  );
   const [showMatchColorDialog, setShowMatchColorDialog] = useState(false);
-  const [matchColorSourceLayerId, setMatchColorSourceLayerId] = useState<number | null>(null);
+  const [matchColorSourceLayerId, setMatchColorSourceLayerId] = useState<
+    number | null
+  >(null);
   const [matchColorFade, setMatchColorFade] = useState(100);
   const [showHarmonizeDialog, setShowHarmonizeDialog] = useState(false);
   const [harmonizeFade, setHarmonizeFade] = useState(100);
-  const [showJpegArtifactsRemovalDialog, setShowJpegArtifactsRemovalDialog] = useState(false);
-  const [jpegArtifactsRemovalStrength, setJpegArtifactsRemovalStrength] = useState(100);
+  const [showJpegArtifactsRemovalDialog, setShowJpegArtifactsRemovalDialog] =
+    useState(false);
+  const [jpegArtifactsRemovalStrength, setJpegArtifactsRemovalStrength] =
+    useState(100);
   const [displaceHorizontalScale, setDisplaceHorizontalScale] = useState(10);
   const [displaceVerticalScale, setDisplaceVerticalScale] = useState(10);
   const [displaceWrapAround, setDisplaceWrapAround] = useState(false);
@@ -2077,7 +2389,8 @@ export default function App() {
   const [showInkOutlinesDialog, setShowInkOutlinesDialog] = useState(false);
   const [inkOutlinesStrokeLength, setInkOutlinesStrokeLength] = useState(1);
   const [inkOutlinesDarkIntensity, setInkOutlinesDarkIntensity] = useState(20);
-  const [inkOutlinesLightIntensity, setInkOutlinesLightIntensity] = useState(10);
+  const [inkOutlinesLightIntensity, setInkOutlinesLightIntensity] =
+    useState(10);
   const [showSpatterDialog, setShowSpatterDialog] = useState(false);
   const [spatterSprayRadius, setSpatterSprayRadius] = useState(5);
   const [spatterSmoothness, setSpatterSmoothness] = useState(3);
@@ -2090,10 +2403,13 @@ export default function App() {
   const [accentedEdgesBrightness, setAccentedEdgesBrightness] = useState(20);
   const [accentedEdgesSmoothness, setAccentedEdgesSmoothness] = useState(3);
   const [showAngledStrokesDialog, setShowAngledStrokesDialog] = useState(false);
-  const [angledStrokesDirectionBalance, setAngledStrokesDirectionBalance] = useState(50);
-  const [angledStrokesStrokeLength, setAngledStrokesStrokeLength] = useState(10);
+  const [angledStrokesDirectionBalance, setAngledStrokesDirectionBalance] =
+    useState(50);
+  const [angledStrokesStrokeLength, setAngledStrokesStrokeLength] =
+    useState(10);
   const [angledStrokesSharpness, setAngledStrokesSharpness] = useState(3);
-  const [showSprayedStrokesDialog, setShowSprayedStrokesDialog] = useState(false);
+  const [showSprayedStrokesDialog, setShowSprayedStrokesDialog] =
+    useState(false);
   const [sprayedStrokesLength, setSprayedStrokesLength] = useState(10);
   const [sprayedStrokesRadius, setSprayedStrokesRadius] = useState(10);
   const [sprayedStrokesDirection, setSprayedStrokesDirection] = useState(1);
@@ -2113,7 +2429,8 @@ export default function App() {
   const [paletteKnifeStrokeDetail, setPaletteKnifeStrokeDetail] = useState(2);
   const [paletteKnifeSoftness, setPaletteKnifeSoftness] = useState(2);
   const [showPlasticWrapDialog, setShowPlasticWrapDialog] = useState(false);
-  const [plasticWrapHighlightStrength, setPlasticWrapHighlightStrength] = useState(15);
+  const [plasticWrapHighlightStrength, setPlasticWrapHighlightStrength] =
+    useState(15);
   const [plasticWrapDetail, setPlasticWrapDetail] = useState(7);
   const [plasticWrapSmoothness, setPlasticWrapSmoothness] = useState(7);
   const [showFrescoDialog, setShowFrescoDialog] = useState(false);
@@ -2126,7 +2443,8 @@ export default function App() {
   const [roughPastelsRelief, setRoughPastelsRelief] = useState(10);
   const [showUnderpaintingDialog, setShowUnderpaintingDialog] = useState(false);
   const [underpaintingBrushSize, setUnderpaintingBrushSize] = useState(8);
-  const [underpaintingTextureCoverage, setUnderpaintingTextureCoverage] = useState(20);
+  const [underpaintingTextureCoverage, setUnderpaintingTextureCoverage] =
+    useState(20);
   const [showStampDialog, setShowStampDialog] = useState(false);
   const [stampLightDarkBalance, setStampLightDarkBalance] = useState(12);
   const [stampSmoothness, setStampSmoothness] = useState(5);
@@ -2135,16 +2453,20 @@ export default function App() {
   const [photocopyDarkness, setPhotocopyDarkness] = useState(20);
   const [showReticulationDialog, setShowReticulationDialog] = useState(false);
   const [reticulationDensity, setReticulationDensity] = useState(15);
-  const [reticulationForegroundLevel, setReticulationForegroundLevel] = useState(10);
-  const [reticulationBackgroundLevel, setReticulationBackgroundLevel] = useState(40);
+  const [reticulationForegroundLevel, setReticulationForegroundLevel] =
+    useState(10);
+  const [reticulationBackgroundLevel, setReticulationBackgroundLevel] =
+    useState(40);
   const [showNotePaperDialog, setShowNotePaperDialog] = useState(false);
   const [notePaperImageBalance, setNotePaperImageBalance] = useState(25);
   const [notePaperGraininess, setNotePaperGraininess] = useState(5);
   const [showGraphicPenDialog, setShowGraphicPenDialog] = useState(false);
   const [graphicPenStrokeLength, setGraphicPenStrokeLength] = useState(5);
-  const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] = useState(25);
+  const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] =
+    useState(25);
   const [graphicPenDirection, setGraphicPenDirection] = useState(1);
-  const [showChalkAndCharcoalDialog, setShowChalkAndCharcoalDialog] = useState(false);
+  const [showChalkAndCharcoalDialog, setShowChalkAndCharcoalDialog] =
+    useState(false);
   // Filter Gallery > Sketch > Conté Crayon: levels and the paper texture.
   const [showConteDialog, setShowConteDialog] = useState(false);
   const [conteForeground, setConteForeground] = useState(11);
@@ -2153,9 +2475,11 @@ export default function App() {
   const [conteRelief, setConteRelief] = useState(4);
   const [conteLight, setConteLight] = useState(7);
   const [conteInvert, setConteInvert] = useState(false);
-  const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] = useState(10);
+  const [chalkAndCharcoalCharcoalArea, setChalkAndCharcoalCharcoalArea] =
+    useState(10);
   const [chalkAndCharcoalChalkArea, setChalkAndCharcoalChalkArea] = useState(5);
-  const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] = useState(1);
+  const [chalkAndCharcoalStrokePressure, setChalkAndCharcoalStrokePressure] =
+    useState(1);
   const [showPlasterDialog, setShowPlasterDialog] = useState(false);
   const [plasterImageBalance, setPlasterImageBalance] = useState(20);
   const [plasterSmoothness, setPlasterSmoothness] = useState(5);
@@ -2172,7 +2496,8 @@ export default function App() {
   const [basReliefDetail, setBasReliefDetail] = useState(8);
   const [basReliefSmoothness, setBasReliefSmoothness] = useState(5);
   const [basReliefLightDirection, setBasReliefLightDirection] = useState(2);
-  const [showHalftonePatternDialog, setShowHalftonePatternDialog] = useState(false);
+  const [showHalftonePatternDialog, setShowHalftonePatternDialog] =
+    useState(false);
   const [halftonePatternSize, setHalftonePatternSize] = useState(4);
   const [halftonePatternContrast, setHalftonePatternContrast] = useState(0);
   const [halftonePatternType, setHalftonePatternType] = useState(0);
@@ -2186,6 +2511,9 @@ export default function App() {
   const [showGlassDialog, setShowGlassDialog] = useState(false);
   const [glassDistortion, setGlassDistortion] = useState(5);
   const [glassSmoothness, setGlassSmoothness] = useState(4);
+  const [glassTexture, setGlassTexture] = useState("frosted");
+  const [glassScaling, setGlassScaling] = useState(100);
+  const [glassInvert, setGlassInvert] = useState(false);
   const [showOceanRippleDialog, setShowOceanRippleDialog] = useState(false);
   const [oceanRippleSize, setOceanRippleSize] = useState(7);
   const [oceanRippleMagnitude, setOceanRippleMagnitude] = useState(10);
@@ -2195,6 +2523,7 @@ export default function App() {
   const [showGrainDialog, setShowGrainDialog] = useState(false);
   const [grainIntensity, setGrainIntensity] = useState(20);
   const [grainContrast, setGrainContrast] = useState(10);
+  const [grainType, setGrainType] = useState("regular");
   const [showTilesDialog, setShowTilesDialog] = useState(false);
   const [tilesTileSize, setTilesTileSize] = useState(6);
   const [tilesMaxOffset, setTilesMaxOffset] = useState(50);
@@ -2207,8 +2536,10 @@ export default function App() {
   const [patchworkRelief, setPatchworkRelief] = useState(10);
   const [showStainedGlassDialog, setShowStainedGlassDialog] = useState(false);
   const [stainedGlassCellSize, setStainedGlassCellSize] = useState(10);
-  const [stainedGlassBorderThickness, setStainedGlassBorderThickness] = useState(2);
-  const [stainedGlassLightIntensity, setStainedGlassLightIntensity] = useState(3);
+  const [stainedGlassBorderThickness, setStainedGlassBorderThickness] =
+    useState(2);
+  const [stainedGlassLightIntensity, setStainedGlassLightIntensity] =
+    useState(3);
   const [showCraquelureDialog, setShowCraquelureDialog] = useState(false);
   const [craquelureCrackSpacing, setCraquelureCrackSpacing] = useState(10);
   const [craquelureCrackDepth, setCraquelureCrackDepth] = useState(4);
@@ -2221,9 +2552,12 @@ export default function App() {
   const [showCloudsDialog, setShowCloudsDialog] = useState(false);
   const [cloudsForeground, setCloudsForeground] = useState("#ffffff");
   const [cloudsBackground, setCloudsBackground] = useState("#000000");
-  const [showDifferenceCloudsDialog, setShowDifferenceCloudsDialog] = useState(false);
-  const [differenceCloudsForeground, setDifferenceCloudsForeground] = useState("#ffffff");
-  const [differenceCloudsBackground, setDifferenceCloudsBackground] = useState("#000000");
+  const [showDifferenceCloudsDialog, setShowDifferenceCloudsDialog] =
+    useState(false);
+  const [differenceCloudsForeground, setDifferenceCloudsForeground] =
+    useState("#ffffff");
+  const [differenceCloudsBackground, setDifferenceCloudsBackground] =
+    useState("#000000");
   const [showFibersDialog, setShowFibersDialog] = useState(false);
   const [fibersVariance, setFibersVariance] = useState(50);
   const [fibersStrength, setFibersStrength] = useState(4);
@@ -2233,7 +2567,8 @@ export default function App() {
   const [lensFlareCenterX, setLensFlareCenterX] = useState(0);
   const [lensFlareCenterY, setLensFlareCenterY] = useState(0);
   const [lensFlareBrightness, setLensFlareBrightness] = useState(100);
-  const [showLightingEffectsDialog, setShowLightingEffectsDialog] = useState(false);
+  const [showLightingEffectsDialog, setShowLightingEffectsDialog] =
+    useState(false);
   const [lightingLightX, setLightingLightX] = useState(0);
   const [lightingLightY, setLightingLightY] = useState(0);
   const [lightingLightHeight, setLightingLightHeight] = useState(30);
@@ -2254,7 +2589,8 @@ export default function App() {
   const [smartSharpenReduceNoise, setSmartSharpenReduceNoise] = useState(10);
   const [showReduceNoiseDialog, setShowReduceNoiseDialog] = useState(false);
   const [reduceNoiseStrength, setReduceNoiseStrength] = useState(6);
-  const [reduceNoisePreserveDetails, setReduceNoisePreserveDetails] = useState(60);
+  const [reduceNoisePreserveDetails, setReduceNoisePreserveDetails] =
+    useState(60);
 
   const [showMotionBlurDialog, setShowMotionBlurDialog] = useState(false);
   const [motionBlurAngle, setMotionBlurAngle] = useState(0);
@@ -2263,7 +2599,8 @@ export default function App() {
   const [showMedianDialog, setShowMedianDialog] = useState(false);
   const [medianRadius, setMedianRadius] = useState(1);
 
-  const [showDustAndScratchesDialog, setShowDustAndScratchesDialog] = useState(false);
+  const [showDustAndScratchesDialog, setShowDustAndScratchesDialog] =
+    useState(false);
   const [dustRadius, setDustRadius] = useState(1);
   const [dustThreshold, setDustThreshold] = useState(0);
 
@@ -2304,8 +2641,10 @@ export default function App() {
       return new Set();
     }
   });
-  const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] = useState(false);
-  const [showCustomizeMenusDialog, setShowCustomizeMenusDialog] = useState(false);
+  const [showCustomizeToolbarDialog, setShowCustomizeToolbarDialog] =
+    useState(false);
+  const [showCustomizeMenusDialog, setShowCustomizeMenusDialog] =
+    useState(false);
   // Window > Workspace > Lock Workspace: Photoshop's own locks panels
   // against accidental dragging/resizing -- now that Panel Docking
   // (below) gives this app real draggable panels of its own, Lock
@@ -2334,10 +2673,17 @@ export default function App() {
   // zone (or floating position) each of this app's own panels is in --
   // Layers and Channels today, the only two panels this app has that
   // aren't a modal dialog.
-  const [panelLayout, setPanelLayout] = useState<Record<string, PanelPlacement>>(() => {
+  const [panelLayout, setPanelLayout] = useState<
+    Record<string, PanelPlacement>
+  >(() => {
     try {
       const saved = localStorage.getItem(PANEL_LAYOUT_STORAGE_KEY);
-      return saved ? { ...DEFAULT_PANEL_LAYOUT, ...(JSON.parse(saved) as Record<string, PanelPlacement>) } : DEFAULT_PANEL_LAYOUT;
+      return saved
+        ? {
+            ...DEFAULT_PANEL_LAYOUT,
+            ...(JSON.parse(saved) as Record<string, PanelPlacement>),
+          }
+        : DEFAULT_PANEL_LAYOUT;
     } catch {
       return DEFAULT_PANEL_LAYOUT;
     }
@@ -2359,14 +2705,16 @@ export default function App() {
     [lockWorkspace],
   );
   // Window > Panel Groups: which panel is tabbed under which other one.
-  const [panelGroupOf, setPanelGroupOf] = useState<Record<string, string>>(() => {
-    try {
-      const saved = localStorage.getItem(PANEL_GROUPS_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as Record<string, string>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [panelGroupOf, setPanelGroupOf] = useState<Record<string, string>>(
+    () => {
+      try {
+        const saved = localStorage.getItem(PANEL_GROUPS_STORAGE_KEY);
+        return saved ? (JSON.parse(saved) as Record<string, string>) : {};
+      } catch {
+        return {};
+      }
+    },
+  );
   const groupPanelWith = useCallback(
     (draggedId: string, targetId: string) => {
       if (lockWorkspace || draggedId === targetId) return;
@@ -2431,21 +2779,26 @@ export default function App() {
   );
   // Window > Panel Stacking: explicit height for a panel sharing a dock
   // zone with another one.
-  const [stackHeights, setStackHeights] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem(PANEL_STACK_HEIGHTS_STORAGE_KEY);
-      return saved ? (JSON.parse(saved) as Record<string, number>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [stackHeights, setStackHeights] = useState<Record<string, number>>(
+    () => {
+      try {
+        const saved = localStorage.getItem(PANEL_STACK_HEIGHTS_STORAGE_KEY);
+        return saved ? (JSON.parse(saved) as Record<string, number>) : {};
+      } catch {
+        return {};
+      }
+    },
+  );
   const resizeStackedPanel = useCallback(
     (id: string, height: number) => {
       if (lockWorkspace) return;
       setStackHeights((current) => {
         const next = { ...current, [id]: height };
         try {
-          localStorage.setItem(PANEL_STACK_HEIGHTS_STORAGE_KEY, JSON.stringify(next));
+          localStorage.setItem(
+            PANEL_STACK_HEIGHTS_STORAGE_KEY,
+            JSON.stringify(next),
+          );
         } catch {
           // ignore
         }
@@ -2460,21 +2813,27 @@ export default function App() {
   // a documented scope cut this project has no such content to ship.
   const [showDiscoverDialog, setShowDiscoverDialog] = useState(false);
   const [discoverQuery, setDiscoverQuery] = useState("");
-  const toggleToolHidden = useCallback((id: Tool) => {
-    if (lockWorkspace) return;
-    setHiddenTools((previous) => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      try {
-        localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify([...next]));
-      } catch {
-        // Storage unavailable (private browsing, quota) -- the toggle
-        // still applies for this session, just does not persist.
-      }
-      return next;
-    });
-  }, [lockWorkspace]);
+  const toggleToolHidden = useCallback(
+    (id: Tool) => {
+      if (lockWorkspace) return;
+      setHiddenTools((previous) => {
+        const next = new Set(previous);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        try {
+          localStorage.setItem(
+            HIDDEN_TOOLS_STORAGE_KEY,
+            JSON.stringify([...next]),
+          );
+        } catch {
+          // Storage unavailable (private browsing, quota) -- the toggle
+          // still applies for this session, just does not persist.
+        }
+        return next;
+      });
+    },
+    [lockWorkspace],
+  );
   const resetHiddenTools = useCallback(() => {
     if (lockWorkspace) return;
     setHiddenTools(new Set());
@@ -2533,14 +2892,16 @@ export default function App() {
   // Edit > Menus (Custom Menus): commands hidden from the menu bar, kept
   // in the browser like hiddenTools above by each command's own key --
   // its menu path and label, e.g. "Edit > Transform > Rotate…".
-  const [hiddenMenuCommands, setHiddenMenuCommands] = useState<Set<string>>(() => {
-    try {
-      const saved = localStorage.getItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
-      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
+  const [hiddenMenuCommands, setHiddenMenuCommands] = useState<Set<string>>(
+    () => {
+      try {
+        const saved = localStorage.getItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY);
+        return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+      } catch {
+        return new Set();
+      }
+    },
+  );
   const toggleMenuCommandHidden = useCallback(
     (label: string) => {
       if (lockWorkspace) return;
@@ -2549,7 +2910,10 @@ export default function App() {
         if (next.has(label)) next.delete(label);
         else next.add(label);
         try {
-          localStorage.setItem(HIDDEN_MENU_COMMANDS_STORAGE_KEY, JSON.stringify([...next]));
+          localStorage.setItem(
+            HIDDEN_MENU_COMMANDS_STORAGE_KEY,
+            JSON.stringify([...next]),
+          );
         } catch {
           // ignore
         }
@@ -2569,18 +2933,28 @@ export default function App() {
   }, [lockWorkspace]);
   // Edit > Keyboard Shortcuts: this app's Ctrl/Cmd shortcuts, rebindable
   // and kept in the browser like hiddenTools above.
-  const [keyBindings, setKeyBindings] = useState<Record<ShortcutAction, KeyBinding>>(() => {
+  const [keyBindings, setKeyBindings] = useState<
+    Record<ShortcutAction, KeyBinding>
+  >(() => {
     try {
       const saved = localStorage.getItem(KEY_BINDINGS_STORAGE_KEY);
       return saved
-        ? { ...DEFAULT_KEY_BINDINGS, ...(JSON.parse(saved) as Partial<Record<ShortcutAction, KeyBinding>>) }
+        ? {
+            ...DEFAULT_KEY_BINDINGS,
+            ...(JSON.parse(saved) as Partial<
+              Record<ShortcutAction, KeyBinding>
+            >),
+          }
         : { ...DEFAULT_KEY_BINDINGS };
     } catch {
       return { ...DEFAULT_KEY_BINDINGS };
     }
   });
-  const [showKeyboardShortcutsDialog, setShowKeyboardShortcutsDialog] = useState(false);
-  const [rebindingAction, setRebindingAction] = useState<ShortcutAction | null>(null);
+  const [showKeyboardShortcutsDialog, setShowKeyboardShortcutsDialog] =
+    useState(false);
+  const [rebindingAction, setRebindingAction] = useState<ShortcutAction | null>(
+    null,
+  );
   const [keyBindingError, setKeyBindingError] = useState<string | null>(null);
   const setKeyBinding = useCallback(
     (action: ShortcutAction, binding: KeyBinding) => {
@@ -2650,9 +3024,18 @@ export default function App() {
       setKeyBindings({ ...DEFAULT_KEY_BINDINGS, ...workspace.keyBindings });
       setCompactToolbar(workspace.compactToolbar ?? true);
       try {
-        localStorage.setItem(HIDDEN_TOOLS_STORAGE_KEY, JSON.stringify(workspace.hiddenTools));
-        localStorage.setItem(KEY_BINDINGS_STORAGE_KEY, JSON.stringify(workspace.keyBindings));
-        localStorage.setItem(COMPACT_TOOLBAR_STORAGE_KEY, JSON.stringify(workspace.compactToolbar ?? true));
+        localStorage.setItem(
+          HIDDEN_TOOLS_STORAGE_KEY,
+          JSON.stringify(workspace.hiddenTools),
+        );
+        localStorage.setItem(
+          KEY_BINDINGS_STORAGE_KEY,
+          JSON.stringify(workspace.keyBindings),
+        );
+        localStorage.setItem(
+          COMPACT_TOOLBAR_STORAGE_KEY,
+          JSON.stringify(workspace.compactToolbar ?? true),
+        );
       } catch {
         // ignore
       }
@@ -2770,13 +3153,16 @@ export default function App() {
           const next = { ...tape, steps: [...tape.steps, step] };
           recordingRef.current = next;
           setRecording(next);
-          void invoke("save_action", { action: next }).catch((err) => setActionsError(String(err)));
+          void invoke("save_action", { action: next }).catch((err) =>
+            setActionsError(String(err)),
+          );
         }
         setError(null);
         // Color Settings > Missing Profile Warning / Ask When Opening: only
         // meaningful right after loading a project, since `profileWasMissing`
         // stays set to whatever the most recent load left it at otherwise.
-        const justLoadedAProject = command === "open_project" || command === "import_project_bytes";
+        const justLoadedAProject =
+          command === "open_project" || command === "import_project_bytes";
         if (justLoadedAProject) {
           setColorMismatchNotice(null);
         }
@@ -2792,15 +3178,20 @@ export default function App() {
 
         const { layers } = snapshot.document;
         setSelectedId((current) => {
-          if (selectAfter === "top") return layers[layers.length - 1]?.id ?? null;
+          if (selectAfter === "top")
+            return layers[layers.length - 1]?.id ?? null;
           if (selectAfter && typeof selectAfter === "object") {
             // A layer that was just inserted directly above `above` (e.g.
             // Duplicate Layer) rather than at the very top of the stack.
-            const index = layers.findIndex((layer) => layer.id === selectAfter.above);
-            if (index !== -1) return layers[index + 1]?.id ?? layers[index]?.id ?? null;
+            const index = layers.findIndex(
+              (layer) => layer.id === selectAfter.above,
+            );
+            if (index !== -1)
+              return layers[index + 1]?.id ?? layers[index]?.id ?? null;
           }
           // Keep the selection unless that layer is gone.
-          if (current !== null && layers.some((layer) => layer.id === current)) return current;
+          if (current !== null && layers.some((layer) => layer.id === current))
+            return current;
           return layers[layers.length - 1]?.id ?? null;
         });
 
@@ -2899,7 +3290,10 @@ export default function App() {
   const redo = useCallback(() => void runCommand("redo"), [runCommand]);
   const deselect = useCallback(() => void runCommand("deselect"), [runCommand]);
   const reselect = useCallback(() => void runCommand("reselect"), [runCommand]);
-  const selectAll = useCallback(() => void runCommand("select_all"), [runCommand]);
+  const selectAll = useCallback(
+    () => void runCommand("select_all"),
+    [runCommand],
+  );
   const invertSelection = useCallback(
     () => void runCommand("invert_selection"),
     [runCommand],
@@ -2927,7 +3321,8 @@ export default function App() {
     } else if (modifyMode === "feather") {
       await runCommand("feather_selection", { radius: modifyAmount });
     } else {
-      const command = modifyMode === "expand" ? "expand_selection" : "contract_selection";
+      const command =
+        modifyMode === "expand" ? "expand_selection" : "contract_selection";
       await runCommand(command, { amount: modifyAmount });
     }
     setModifyMode(null);
@@ -2958,7 +3353,11 @@ export default function App() {
 
   const applySelectAndMask = useCallback(async () => {
     if (edgeRadius > 0 && selectedId !== null) {
-      await runCommand("edge_detect_selection", { id: selectedId, radius: edgeRadius, smart: smartRadius });
+      await runCommand("edge_detect_selection", {
+        id: selectedId,
+        radius: edgeRadius,
+        smart: smartRadius,
+      });
     }
     await runCommand("refine_selection", { refine });
     if (selectAndMaskOutput !== "selection" && selectedId !== null) {
@@ -2969,7 +3368,16 @@ export default function App() {
       });
     }
     setShowSelectAndMask(false);
-  }, [runCommand, refine, selectAndMaskOutput, selectedId, edgeRadius, smartRadius, decontaminate, decontaminateAmount]);
+  }, [
+    runCommand,
+    refine,
+    selectAndMaskOutput,
+    selectedId,
+    edgeRadius,
+    smartRadius,
+    decontaminate,
+    decontaminateAmount,
+  ]);
 
   const applyThreshold = useCallback(async () => {
     if (selectedId === null) return;
@@ -2985,13 +3393,22 @@ export default function App() {
 
   const applyBrightnessContrast = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("brightness_contrast", { id: selectedId, brightness, contrast });
+    await runCommand("brightness_contrast", {
+      id: selectedId,
+      brightness,
+      contrast,
+    });
     setShowBrightnessContrastDialog(false);
   }, [runCommand, selectedId, brightness, contrast]);
 
   const applyHueSaturation = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("hue_saturation", { id: selectedId, hue, saturation, lightness });
+    await runCommand("hue_saturation", {
+      id: selectedId,
+      hue,
+      saturation,
+      lightness,
+    });
     setShowHueSaturationDialog(false);
   }, [runCommand, selectedId, hue, saturation, lightness]);
 
@@ -3079,27 +3496,42 @@ export default function App() {
       invoke<number[][]>("histogram", { id: selectedId }),
       invoke<[number, number, number]>("shadow_clipping", { id: selectedId }),
     ])
-      .then(([counts, shadowClipping]) => setHistogramData({ counts, shadowClipping }))
+      .then(([counts, shadowClipping]) =>
+        setHistogramData({ counts, shadowClipping }),
+      )
       .catch((err) => setError(String(err)));
   }, [selectedId]);
 
   const setPointCurvePoint = useCallback((index: number, value: number) => {
-    setPointCurvePoints((points) => points.map((p, i) => (i === index ? value : p)));
+    setPointCurvePoints((points) =>
+      points.map((p, i) => (i === index ? value : p)),
+    );
   }, []);
 
   const applyPointCurve = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("camera_raw_point_curve", { id: selectedId, points: pointCurvePoints });
+    await runCommand("camera_raw_point_curve", {
+      id: selectedId,
+      points: pointCurvePoints,
+    });
     setShowPointCurveDialog(false);
   }, [runCommand, selectedId, pointCurvePoints]);
 
-  const setColorGradingValue = useCallback((range: number, slot: 0 | 1, value: number) => {
-    setColorGrading((wheels) =>
-      wheels.map((wheel, i) =>
-        i === range ? ((slot === 0 ? [value, wheel[1]] : [wheel[0], value]) as [number, number]) : wheel,
-      ),
-    );
-  }, []);
+  const setColorGradingValue = useCallback(
+    (range: number, slot: 0 | 1, value: number) => {
+      setColorGrading((wheels) =>
+        wheels.map((wheel, i) =>
+          i === range
+            ? ((slot === 0 ? [value, wheel[1]] : [wheel[0], value]) as [
+                number,
+                number,
+              ])
+            : wheel,
+        ),
+      );
+    },
+    [],
+  );
 
   const applyColorGrading = useCallback(async () => {
     if (selectedId === null) return;
@@ -3153,20 +3585,38 @@ export default function App() {
     pointColorLuminance,
   ]);
 
-  const setParametricCurveValue = useCallback((index: number, value: number) => {
-    setParametricCurve((values) => values.map((v, i) => (i === index ? value : v)));
-  }, []);
+  const setParametricCurveValue = useCallback(
+    (index: number, value: number) => {
+      setParametricCurve((values) =>
+        values.map((v, i) => (i === index ? value : v)),
+      );
+    },
+    [],
+  );
 
   const applyParametricCurve = useCallback(async () => {
     if (selectedId === null) return;
     const [highlights, lights, darks, shadows] = parametricCurve;
-    await runCommand("parametric_curve", { id: selectedId, highlights, lights, darks, shadows });
+    await runCommand("parametric_curve", {
+      id: selectedId,
+      highlights,
+      lights,
+      darks,
+      shadows,
+    });
     setShowParametricCurveDialog(false);
   }, [runCommand, selectedId, parametricCurve]);
 
   const setCameraRawSlider = useCallback(
     (
-      key: "temperature" | "tint" | "highlights" | "shadows" | "clarity" | "saturation" | "defringe",
+      key:
+        | "temperature"
+        | "tint"
+        | "highlights"
+        | "shadows"
+        | "clarity"
+        | "saturation"
+        | "defringe",
       value: number,
     ) => {
       setCameraRaw((settings) => ({ ...settings, [key]: value }));
@@ -3200,12 +3650,24 @@ export default function App() {
               invert: rawMaskInvert,
             }
           : rawMaskKind === "colorRange"
-            ? { kind: "colorRange", color: hexToRgb(rawMaskColor), fuzziness: rawMaskFuzziness, invert: rawMaskInvert }
+            ? {
+                kind: "colorRange",
+                color: hexToRgb(rawMaskColor),
+                fuzziness: rawMaskFuzziness,
+                invert: rawMaskInvert,
+              }
             : null;
     if (mask) {
-      await runCommand("camera_raw_masked", { id: selectedId, settings: cameraRaw, mask });
+      await runCommand("camera_raw_masked", {
+        id: selectedId,
+        settings: cameraRaw,
+        mask,
+      });
     } else {
-      await runCommand("camera_raw_filter", { id: selectedId, settings: cameraRaw });
+      await runCommand("camera_raw_filter", {
+        id: selectedId,
+        settings: cameraRaw,
+      });
     }
     setShowCameraRawDialog(false);
   }, [
@@ -3227,7 +3689,10 @@ export default function App() {
       id: selectedId,
       spot: {
         ...retouch,
-        source: retouch.mode === "remove" || retouch.mode === "generativeRemove" ? null : retouch.source,
+        source:
+          retouch.mode === "remove" || retouch.mode === "generativeRemove"
+            ? null
+            : retouch.source,
       },
     });
   }, [runCommand, selectedId, retouch]);
@@ -3237,13 +3702,21 @@ export default function App() {
     if (!name) return;
     const [r, g, b] = hexToRgb(brushColor);
     const [er, eg, eb] = hexToRgb(gradientEndColor);
-    await runCommand("save_gradient_preset", { name, startColor: [r, g, b, 255], endColor: [er, eg, eb, 255] });
+    await runCommand("save_gradient_preset", {
+      name,
+      startColor: [r, g, b, 255],
+      endColor: [er, eg, eb, 255],
+    });
     setPresetName("");
   }, [runCommand, presetName, brushColor, gradientEndColor]);
 
   const applyOptics = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("camera_raw_optics", { id: selectedId, distortion: opticsDistortion, vignette: opticsVignette });
+    await runCommand("camera_raw_optics", {
+      id: selectedId,
+      distortion: opticsDistortion,
+      vignette: opticsVignette,
+    });
   }, [runCommand, selectedId, opticsDistortion, opticsVignette]);
 
   const applyTargetedAdjustment = useCallback(async () => {
@@ -3259,7 +3732,11 @@ export default function App() {
 
   const applyRotate = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("rotate", { id: selectedId, degrees: rotateDegrees, interpolation: interpolationArg });
+    await runCommand("rotate", {
+      id: selectedId,
+      degrees: rotateDegrees,
+      interpolation: interpolationArg,
+    });
     setShowRotateDialog(false);
   }, [runCommand, selectedId, rotateDegrees, interpolationArg]);
 
@@ -3274,7 +3751,8 @@ export default function App() {
   const openApplyImageDialog = useCallback(() => {
     if (selectedId === null) return;
     setApplyImageSource((current) =>
-      current === "merged" || (document?.layers ?? []).some((layer) => layer.id === current)
+      current === "merged" ||
+      (document?.layers ?? []).some((layer) => layer.id === current)
         ? current
         : "merged",
     );
@@ -3287,10 +3765,15 @@ export default function App() {
     const blend: ApplyBlend =
       applyImageArithmetic === "mode"
         ? { kind: "mode", mode: applyImageBlend }
-        : { kind: applyImageArithmetic, scale: applyImageScale, offset: applyImageOffset };
+        : {
+            kind: applyImageArithmetic,
+            scale: applyImageScale,
+            offset: applyImageOffset,
+          };
     const mask: ApplyMask | null = applyImageMasked
       ? {
-          source: applyImageMaskSource === "merged" ? null : applyImageMaskSource,
+          source:
+            applyImageMaskSource === "merged" ? null : applyImageMaskSource,
           channel: applyImageMaskChannel,
           invert: applyImageMaskInvert,
         }
@@ -3322,7 +3805,10 @@ export default function App() {
 
   const applyApplyImage = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("apply_image", { target: selectedId, ...currentApplyImageParams() });
+    await runCommand("apply_image", {
+      target: selectedId,
+      ...currentApplyImageParams(),
+    });
     setShowApplyImageDialog(false);
   }, [runCommand, selectedId, currentApplyImageParams]);
 
@@ -3361,7 +3847,9 @@ export default function App() {
 
   const openLoadSelectionDialog = useCallback(() => {
     const names = document?.savedSelections ?? [];
-    setLoadSelectionName((current) => (names.includes(current) ? current : (names[0] ?? "")));
+    setLoadSelectionName((current) =>
+      names.includes(current) ? current : (names[0] ?? ""),
+    );
     setShowLoadSelectionDialog(true);
   }, [document]);
 
@@ -3372,7 +3860,9 @@ export default function App() {
 
   const openLoadChannelDialog = useCallback(() => {
     const names = document?.channels ?? [];
-    setLoadChannelName((current) => (names.includes(current) ? current : (names[0] ?? "")));
+    setLoadChannelName((current) =>
+      names.includes(current) ? current : (names[0] ?? ""),
+    );
     setShowLoadChannelDialog(true);
   }, [document]);
 
@@ -3384,11 +3874,15 @@ export default function App() {
   const openCalculationsDialog = useCallback(() => {
     const ids = (document?.layers ?? []).map((layer) => layer.id);
     const keep = (source: CalcSource): CalcSource =>
-      source.layer !== null && !ids.includes(source.layer) ? { ...source, layer: null } : source;
+      source.layer !== null && !ids.includes(source.layer)
+        ? { ...source, layer: null }
+        : source;
     setCalcSource1(keep);
     setCalcSource2(keep);
     setCalcMask((mask) =>
-      mask.source !== null && !ids.includes(mask.source) ? { ...mask, source: null } : mask,
+      mask.source !== null && !ids.includes(mask.source)
+        ? { ...mask, source: null }
+        : mask,
     );
     setShowCalculationsDialog(true);
   }, [document]);
@@ -3421,13 +3915,19 @@ export default function App() {
     calcResult,
   ]);
 
-  const setGeometryField = useCallback((key: keyof typeof geometry, value: number) => {
-    setGeometry((settings) => ({ ...settings, [key]: value }));
-  }, []);
+  const setGeometryField = useCallback(
+    (key: keyof typeof geometry, value: number) => {
+      setGeometry((settings) => ({ ...settings, [key]: value }));
+    },
+    [],
+  );
 
   const applyGeometry = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("camera_raw_geometry", { id: selectedId, settings: geometry });
+    await runCommand("camera_raw_geometry", {
+      id: selectedId,
+      settings: geometry,
+    });
     setShowGeometryDialog(false);
   }, [runCommand, selectedId, geometry]);
 
@@ -3437,8 +3937,11 @@ export default function App() {
     if (colorRangeSelect !== "sampled") return { kind: colorRangeSelect };
     const [r, g, b] = hexToRgb(colorRangeColor);
     const samples =
-      colorRangeSamples.length > 0 ? colorRangeSamples : [{ color: [r, g, b] as [number, number, number], position: null }];
-    const localized = colorRangeLocalized && samples.every((s) => s.position !== null);
+      colorRangeSamples.length > 0
+        ? colorRangeSamples
+        : [{ color: [r, g, b] as [number, number, number], position: null }];
+    const localized =
+      colorRangeLocalized && samples.every((s) => s.position !== null);
     return {
       kind: "sampled",
       samples,
@@ -3496,12 +3999,18 @@ export default function App() {
 
   const growSelection = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("grow_selection", { id: selectedId, tolerance: magicWandTolerance });
+    await runCommand("grow_selection", {
+      id: selectedId,
+      tolerance: magicWandTolerance,
+    });
   }, [runCommand, selectedId, magicWandTolerance]);
 
   const selectSimilar = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("select_similar", { id: selectedId, tolerance: magicWandTolerance });
+    await runCommand("select_similar", {
+      id: selectedId,
+      tolerance: magicWandTolerance,
+    });
   }, [runCommand, selectedId, magicWandTolerance]);
 
   const applyScale = useCallback(async () => {
@@ -3513,7 +4022,13 @@ export default function App() {
       interpolation: interpolationArg,
     });
     setShowScaleDialog(false);
-  }, [runCommand, selectedId, scaleWidthPercent, scaleHeightPercent, interpolationArg]);
+  }, [
+    runCommand,
+    selectedId,
+    scaleWidthPercent,
+    scaleHeightPercent,
+    interpolationArg,
+  ]);
 
   const applySkew = useCallback(async () => {
     if (selectedId === null) return;
@@ -3581,7 +4096,11 @@ export default function App() {
         anchor: canvasSizeAnchor,
       });
     } else {
-      await runCommand("resize_canvas", { width, height, anchor: canvasSizeAnchor });
+      await runCommand("resize_canvas", {
+        width,
+        height,
+        anchor: canvasSizeAnchor,
+      });
     }
     setShowCanvasSizeDialog(false);
   }, [
@@ -3630,11 +4149,16 @@ export default function App() {
     setShowDistortDialog(true);
   }, [document]);
 
-  const setDistortCorner = useCallback((corner: number, axis: 0 | 1, value: number) => {
-    setDistortCorners((corners) =>
-      corners.map((c, i) => (i === corner ? (axis === 0 ? [value, c[1]] : [c[0], value]) : c)),
-    );
-  }, []);
+  const setDistortCorner = useCallback(
+    (corner: number, axis: 0 | 1, value: number) => {
+      setDistortCorners((corners) =>
+        corners.map((c, i) =>
+          i === corner ? (axis === 0 ? [value, c[1]] : [c[0], value]) : c,
+        ),
+      );
+    },
+    [],
+  );
 
   const openPerspectiveWarp = useCallback(() => {
     if (!document) return;
@@ -3646,7 +4170,9 @@ export default function App() {
       [w, h],
       [0, h],
     ];
-    setWarpPlanes([{ source: quad, target: quad.map((p) => [...p] as [number, number]) }]);
+    setWarpPlanes([
+      { source: quad, target: quad.map((p) => [...p] as [number, number]) },
+    ]);
     setWarpMode("layout");
     setShowPerspectiveWarp(true);
   }, [document]);
@@ -3658,11 +4184,19 @@ export default function App() {
           if (i !== plane) return p;
           const key = warpMode === "layout" ? "source" : "target";
           const quad = p[key].map((c, j) =>
-            j === corner ? ((axis === 0 ? [value, c[1]] : [c[0], value]) as [number, number]) : c,
+            j === corner
+              ? ((axis === 0 ? [value, c[1]] : [c[0], value]) as [
+                  number,
+                  number,
+                ])
+              : c,
           );
           // In Layout mode the warped corners follow the layout until dragged.
           return warpMode === "layout"
-            ? { source: quad, target: quad.map((c) => [...c] as [number, number]) }
+            ? {
+                source: quad,
+                target: quad.map((c) => [...c] as [number, number]),
+              }
             : { ...p, target: quad };
         }),
       );
@@ -3680,13 +4214,19 @@ export default function App() {
       [w, h],
       [0, h],
     ];
-    setWarpPlanes((planes) => [...planes, { source: quad, target: quad.map((p) => [...p] as [number, number]) }]);
+    setWarpPlanes((planes) => [
+      ...planes,
+      { source: quad, target: quad.map((p) => [...p] as [number, number]) },
+    ]);
   }, [document]);
 
   const autoWarp = useCallback(
     async (auto: PerspectiveAuto) => {
       try {
-        const planes = await invoke<PerspectivePlane[]>("perspective_auto", { planes: warpPlanes, auto });
+        const planes = await invoke<PerspectivePlane[]>("perspective_auto", {
+          planes: warpPlanes,
+          auto,
+        });
         setWarpPlanes(planes);
       } catch (err) {
         setError(String(err));
@@ -3706,10 +4246,21 @@ export default function App() {
   }, [runCommand, selectedId, warpPlanes, interpolationArg]);
 
   const loadWarpMesh = useCallback(
-    async (style: WarpStyle, bend: number, horizontal: number, vertical: number) => {
+    async (
+      style: WarpStyle,
+      bend: number,
+      horizontal: number,
+      vertical: number,
+    ) => {
       if (selectedId === null) return;
       try {
-        const mesh = await invoke<WarpMesh>("warp_mesh", { id: selectedId, style, bend, horizontal, vertical });
+        const mesh = await invoke<WarpMesh>("warp_mesh", {
+          id: selectedId,
+          style,
+          bend,
+          horizontal,
+          vertical,
+        });
         setWarpMesh(mesh);
       } catch (err) {
         setError(String(err));
@@ -3743,27 +4294,40 @@ export default function App() {
   const setWarpPoint = useCallback((index: number, x: number, y: number) => {
     setWarpStyle("custom");
     setWarpMesh((mesh) =>
-      mesh ? { points: mesh.points.map((p, i) => (i === index ? [x, y] : p)) } : mesh,
+      mesh
+        ? { points: mesh.points.map((p, i) => (i === index ? [x, y] : p)) }
+        : mesh,
     );
   }, []);
 
   // A pointer position inside the mesh preview, in document pixel-index
   // coordinates (the SVG's viewBox is the canvas plus a margin).
-  const warpSvgPoint = useCallback((event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
-    const svg = warpSvgRef.current;
-    if (!svg) return null;
-    const box = svg.getBoundingClientRect();
-    const view = svg.viewBox.baseVal;
-    if (box.width === 0 || box.height === 0) return null;
-    return [
-      Math.round((view.x + ((event.clientX - box.left) / box.width) * view.width) * 2) / 2,
-      Math.round((view.y + ((event.clientY - box.top) / box.height) * view.height) * 2) / 2,
-    ];
-  }, []);
+  const warpSvgPoint = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
+      const svg = warpSvgRef.current;
+      if (!svg) return null;
+      const box = svg.getBoundingClientRect();
+      const view = svg.viewBox.baseVal;
+      if (box.width === 0 || box.height === 0) return null;
+      return [
+        Math.round(
+          (view.x + ((event.clientX - box.left) / box.width) * view.width) * 2,
+        ) / 2,
+        Math.round(
+          (view.y + ((event.clientY - box.top) / box.height) * view.height) * 2,
+        ) / 2,
+      ];
+    },
+    [],
+  );
 
   const applyWarp = useCallback(async () => {
     if (selectedId === null || !warpMesh) return;
-    await runCommand("warp", { id: selectedId, mesh: warpMesh, interpolation: interpolationArg ?? "bicubic" });
+    await runCommand("warp", {
+      id: selectedId,
+      mesh: warpMesh,
+      interpolation: interpolationArg ?? "bicubic",
+    });
     setShowWarpDialog(false);
   }, [runCommand, selectedId, warpMesh, interpolationArg]);
 
@@ -3784,15 +4348,24 @@ export default function App() {
   }, [runCommand, selectedId, cylinderAngle, cylinderTilt, interpolationArg]);
 
   const openLiquifyDialog = useCallback(async () => {
-    if (document) setLiquifyCenter([Math.round(document.width / 2), Math.round(document.height / 2)]);
+    if (document)
+      setLiquifyCenter([
+        Math.round(document.width / 2),
+        Math.round(document.height / 2),
+      ]);
     setShowLiquifyDialog(true);
     // Reconstruct always blends back toward the layer as it was when this
     // dialog opened, the same "session baseline" Photoshop's own
     // Reconstruct reverts toward, whatever tools ran on it since.
-    liquifyOriginal.current = selectedId === null ? null : await invoke<number[]>("layer_pixels", { id: selectedId });
+    liquifyOriginal.current =
+      selectedId === null
+        ? null
+        : await invoke<number[]>("layer_pixels", { id: selectedId });
     // The Freeze Mask starts fully thawed every time the dialog opens,
     // the same session-scoped lifetime as `liquifyOriginal`.
-    liquifyMask.current = document ? new Array(document.width * document.height).fill(0) : null;
+    liquifyMask.current = document
+      ? new Array(document.width * document.height).fill(0)
+      : null;
     setLiquifyMesh(null);
   }, [document, selectedId]);
 
@@ -3801,7 +4374,8 @@ export default function App() {
     const [cx, cy] = liquifyCenter;
     if (liquifyTool === "freeze" || liquifyTool === "thaw") {
       const mask =
-        liquifyMask.current ?? new Array(document.width * document.height).fill(0);
+        liquifyMask.current ??
+        new Array(document.width * document.height).fill(0);
       liquifyMask.current = await invoke<number[]>("liquify_paint_mask", {
         mask,
         width: document.width,
@@ -3817,7 +4391,9 @@ export default function App() {
     const mask = liquifyMask.current ?? undefined;
     if (liquifyTool === "reconstruct") {
       if (liquifyOriginal.current === null) {
-        liquifyOriginal.current = await invoke<number[]>("layer_pixels", { id: selectedId });
+        liquifyOriginal.current = await invoke<number[]>("layer_pixels", {
+          id: selectedId,
+        });
       }
       await runCommand("liquify_reconstruct", {
         id: selectedId,
@@ -3832,7 +4408,15 @@ export default function App() {
     }
     if (liquifyTool === "forward") {
       const [dx, dy] = liquifyPush;
-      await runCommand("liquify_forward_warp", { id: selectedId, cx, cy, radius: liquifyRadius, dx, dy, mask });
+      await runCommand("liquify_forward_warp", {
+        id: selectedId,
+        cx,
+        cy,
+        radius: liquifyRadius,
+        dx,
+        dy,
+        mask,
+      });
       return;
     }
     await runCommand("liquify_radial", {
@@ -3841,7 +4425,8 @@ export default function App() {
       cx,
       cy,
       radius: liquifyRadius,
-      strength: liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
+      strength:
+        liquifyTool === "twirl" ? liquifyStrength : Math.abs(liquifyStrength),
       mask,
     });
   }, [
@@ -3909,7 +4494,9 @@ export default function App() {
     setFaceChinHeight(0);
     setFaceWidth(0);
     try {
-      setFaceLandmarks(await invoke<FaceLandmarks>("face_landmarks", { id: selectedId }));
+      setFaceLandmarks(
+        await invoke<FaceLandmarks>("face_landmarks", { id: selectedId }),
+      );
     } catch {
       setFaceLandmarks(null);
     }
@@ -3923,7 +4510,11 @@ export default function App() {
   const applyFaceAwareLiquify = useCallback(async () => {
     if (selectedId === null || !faceLandmarks) return;
     const r = faceLandmarks.radius;
-    const radial = (strength: number, [cx, cy]: [number, number], radiusScale: number) => {
+    const radial = (
+      strength: number,
+      [cx, cy]: [number, number],
+      radiusScale: number,
+    ) => {
       if (strength === 0) return Promise.resolve();
       return runCommand("liquify_radial", {
         id: selectedId,
@@ -3934,11 +4525,21 @@ export default function App() {
         strength: Math.abs(strength),
       }).then(() => undefined);
     };
-    const push = (dx: number, dy: number, [cx, cy]: [number, number], radiusScale: number) => {
+    const push = (
+      dx: number,
+      dy: number,
+      [cx, cy]: [number, number],
+      radiusScale: number,
+    ) => {
       if (dx === 0 && dy === 0) return Promise.resolve();
-      return runCommand("liquify_forward_warp", { id: selectedId, cx, cy, radius: r * radiusScale, dx, dy }).then(
-        () => undefined,
-      );
+      return runCommand("liquify_forward_warp", {
+        id: selectedId,
+        cx,
+        cy,
+        radius: r * radiusScale,
+        dx,
+        dy,
+      }).then(() => undefined);
     };
     await radial(faceEyeSize, faceLandmarks.leftEye, 0.5);
     await radial(faceEyeSize, faceLandmarks.rightEye, 0.5);
@@ -4001,32 +4602,55 @@ export default function App() {
       blueYellow: lensBlueYellow,
     });
     setShowLensCorrectionDialog(false);
-  }, [runCommand, selectedId, lensDistortion, lensVignette, lensRedCyan, lensBlueYellow]);
+  }, [
+    runCommand,
+    selectedId,
+    lensDistortion,
+    lensVignette,
+    lensRedCyan,
+    lensBlueYellow,
+  ]);
 
   // Filter > Adaptive Wide Angle: fits Distortion to the marked line and
   // applies it through the already-shipped `lens_correction`, all on the
   // Rust side -- nothing here but forwarding the marked points.
   const applyAdaptiveWideAngle = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("adaptive_wide_angle", { id: selectedId, lines: [adaptiveWideAngleLine] });
+    await runCommand("adaptive_wide_angle", {
+      id: selectedId,
+      lines: [adaptiveWideAngleLine],
+    });
     setShowAdaptiveWideAngleDialog(false);
   }, [runCommand, selectedId, adaptiveWideAngleLine]);
 
   const saveExternalServicesSettings = useCallback(() => {
-    localStorage.setItem(GENERATIVE_AI_ENDPOINT_STORAGE_KEY, generativeAiEndpoint);
+    localStorage.setItem(
+      GENERATIVE_AI_ENDPOINT_STORAGE_KEY,
+      generativeAiEndpoint,
+    );
     localStorage.setItem(GENERATIVE_AI_API_KEY_STORAGE_KEY, generativeAiApiKey);
     localStorage.setItem(CLOUD_ENDPOINT_STORAGE_KEY, cloudEndpoint);
     localStorage.setItem(CLOUD_TOKEN_STORAGE_KEY, cloudToken);
     localStorage.setItem(GENERATIVE_MODEL_STORAGE_KEY, generativeModel);
     localStorage.setItem(ASSISTANT_API_KEY_STORAGE_KEY, assistantApiKey);
     setShowExternalServicesDialog(false);
-  }, [generativeAiEndpoint, generativeAiApiKey, cloudEndpoint, cloudToken, generativeModel, assistantApiKey]);
-
+  }, [
+    generativeAiEndpoint,
+    generativeAiApiKey,
+    cloudEndpoint,
+    cloudToken,
+    generativeModel,
+    assistantApiKey,
+  ]);
 
   const understandPrompt = useCallback(async (prompt: string) => {
     try {
       setUnderstood(
-        await invoke<{ category: string | null; words: string[]; categories: string[] }>("understand_prompt", { prompt }),
+        await invoke<{
+          category: string | null;
+          words: string[];
+          categories: string[];
+        }>("understand_prompt", { prompt }),
       );
     } catch {
       setUnderstood(null);
@@ -4055,7 +4679,12 @@ export default function App() {
       } else {
         await runCommand(
           "generate_image",
-          { prompt: generatePrompt, seed: generateSeed, steps: generateSteps, guidance: generateGuidance },
+          {
+            prompt: generatePrompt,
+            seed: generateSeed,
+            steps: generateSteps,
+            guidance: generateGuidance,
+          },
           "top",
         );
       }
@@ -4063,7 +4692,9 @@ export default function App() {
       return;
     }
     if (!generativeAiEndpoint) {
-      setError("The Generative AI Endpoint model needs an endpoint -- set one in Edit > External Services.");
+      setError(
+        "The Generative AI Endpoint model needs an endpoint -- set one in Edit > External Services.",
+      );
       return;
     }
     setGenerateBusy(true);
@@ -4072,24 +4703,50 @@ export default function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(generativeAiApiKey ? { Authorization: `Bearer ${generativeAiApiKey}` } : {}),
+          ...(generativeAiApiKey
+            ? { Authorization: `Bearer ${generativeAiApiKey}` }
+            : {}),
         },
-        body: JSON.stringify({ prompt: generatePrompt, width: 192, height: 192, seed: generateSeed }),
+        body: JSON.stringify({
+          prompt: generatePrompt,
+          width: 192,
+          height: 192,
+          seed: generateSeed,
+        }),
       });
-      if (!response.ok) throw new Error(`The provider returned ${response.status}.`);
+      if (!response.ok)
+        throw new Error(`The provider returned ${response.status}.`);
       const body = (await response.json()) as { image?: string };
-      if (!body.image) throw new Error("The provider's response had no image field.");
+      if (!body.image)
+        throw new Error("The provider's response had no image field.");
       const binary = atob(body.image);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      await runCommand("add_layer_from_bytes", { name: generatePrompt.slice(0, 24), bytes: Array.from(bytes) }, "top");
+      await runCommand(
+        "add_layer_from_bytes",
+        { name: generatePrompt.slice(0, 24), bytes: Array.from(bytes) },
+        "top",
+      );
       setShowGenerateImageDialog(false);
     } catch (err) {
-      setError(`Generate Image failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Generate Image failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setGenerateBusy(false);
     }
-  }, [generatePrompt, generativeModel, generateSeed, generateSteps, generateGuidance, generateReference, generateStrength, generativeAiEndpoint, generativeAiApiKey, runCommand]);
+  }, [
+    generatePrompt,
+    generativeModel,
+    generateSeed,
+    generateSteps,
+    generateGuidance,
+    generateReference,
+    generateStrength,
+    generativeAiEndpoint,
+    generativeAiApiKey,
+    runCommand,
+  ]);
 
   // Prompt to Edit: the selection redrawn under a prompt, on the device.
   const promptToEdit = useCallback(async () => {
@@ -4103,7 +4760,15 @@ export default function App() {
       guidance: generateGuidance,
     });
     setShowPromptToEditDialog(false);
-  }, [runCommand, selectedId, editPrompt, generateSeed, editStrength, generateSteps, generateGuidance]);
+  }, [
+    runCommand,
+    selectedId,
+    editPrompt,
+    generateSeed,
+    editStrength,
+    generateSteps,
+    generateGuidance,
+  ]);
 
   // Generative Upscale: Super Zoom, then the model adds detail tile by tile.
   const generativeUpscale = useCallback(async () => {
@@ -4115,11 +4780,19 @@ export default function App() {
       guidance: generateGuidance,
     });
     setShowGenerativeUpscaleDialog(false);
-  }, [runCommand, upscalePrompt, generateSeed, upscaleStrength, upscaleSteps, generateGuidance]);
+  }, [
+    runCommand,
+    upscalePrompt,
+    generateSeed,
+    upscaleStrength,
+    upscaleSteps,
+    generateGuidance,
+  ]);
 
   // Generative Layers: the selected generated layer drawn again at the
   // next seed, its prompt and settings remembered by the document.
-  const selectedGeneratedLayer = document?.generatedLayers.find((g) => g.id === selectedId) ?? null;
+  const selectedGeneratedLayer =
+    document?.generatedLayers.find((g) => g.id === selectedId) ?? null;
   const regenerateLayer = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("regenerate_layer", { id: selectedId, seed: null });
@@ -4136,7 +4809,9 @@ export default function App() {
   const applyGenerativeFill = useCallback(async () => {
     if (selectedId === null || !document) return;
     if (!generativeAiEndpoint) {
-      setError("Generative Fill needs a provider endpoint -- set one in Edit > External Services.");
+      setError(
+        "Generative Fill needs a provider endpoint -- set one in Edit > External Services.",
+      );
       return;
     }
     setGenerativeFillBusy(true);
@@ -4145,24 +4820,45 @@ export default function App() {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(generativeAiApiKey ? { Authorization: `Bearer ${generativeAiApiKey}` } : {}),
+          ...(generativeAiApiKey
+            ? { Authorization: `Bearer ${generativeAiApiKey}` }
+            : {}),
         },
-        body: JSON.stringify({ prompt: generativeFillPrompt, width: document.width, height: document.height }),
+        body: JSON.stringify({
+          prompt: generativeFillPrompt,
+          width: document.width,
+          height: document.height,
+        }),
       });
-      if (!response.ok) throw new Error(`The provider returned ${response.status}.`);
+      if (!response.ok)
+        throw new Error(`The provider returned ${response.status}.`);
       const body = (await response.json()) as { image?: string };
-      if (!body.image) throw new Error("The provider's response had no image field.");
+      if (!body.image)
+        throw new Error("The provider's response had no image field.");
       const binary = atob(body.image);
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      await runCommand("add_layer_from_bytes", { name: "Generative Fill", bytes: Array.from(bytes) }, "top");
+      await runCommand(
+        "add_layer_from_bytes",
+        { name: "Generative Fill", bytes: Array.from(bytes) },
+        "top",
+      );
       setShowGenerativeFillDialog(false);
     } catch (err) {
-      setError(`Generative Fill failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Generative Fill failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setGenerativeFillBusy(false);
     }
-  }, [selectedId, document, generativeAiEndpoint, generativeAiApiKey, generativeFillPrompt, runCommand]);
+  }, [
+    selectedId,
+    document,
+    generativeAiEndpoint,
+    generativeAiApiKey,
+    generativeFillPrompt,
+    runCommand,
+  ]);
 
   // Cloud Documents: the same project-file bytes Save Project/Open
   // Project already round-trip through `export_project_bytes`/
@@ -4173,7 +4869,9 @@ export default function App() {
   // one already-agreed shape for "a document store."
   const saveToCloud = useCallback(async () => {
     if (!cloudEndpoint) {
-      setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+      setError(
+        "Cloud Documents needs an endpoint -- set one in Edit > External Services.",
+      );
       return;
     }
     setCloudBusy(true);
@@ -4190,9 +4888,12 @@ export default function App() {
           body: new Uint8Array(bytes),
         },
       );
-      if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+      if (!response.ok)
+        throw new Error(`The cloud endpoint returned ${response.status}.`);
     } catch (err) {
-      setError(`Save to Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Save to Cloud failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setCloudBusy(false);
     }
@@ -4201,21 +4902,32 @@ export default function App() {
   const loadFromCloud = useCallback(
     async (name?: string) => {
       if (!cloudEndpoint) {
-        setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+        setError(
+          "Cloud Documents needs an endpoint -- set one in Edit > External Services.",
+        );
         return;
       }
       setCloudBusy(true);
       try {
         const response = await fetch(
           `${cloudEndpoint.replace(/\/$/, "")}/documents/${encodeURIComponent(name ?? cloudDocumentName)}`,
-          { headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {} },
+          {
+            headers: cloudToken
+              ? { Authorization: `Bearer ${cloudToken}` }
+              : {},
+          },
         );
-        if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+        if (!response.ok)
+          throw new Error(`The cloud endpoint returned ${response.status}.`);
         const buffer = await response.arrayBuffer();
-        await runCommand("import_project_bytes", { bytes: Array.from(new Uint8Array(buffer)) });
+        await runCommand("import_project_bytes", {
+          bytes: Array.from(new Uint8Array(buffer)),
+        });
         if (name) setCloudDocumentName(name);
       } catch (err) {
-        setError(`Load from Cloud failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Load from Cloud failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setCloudBusy(false);
       }
@@ -4228,19 +4940,27 @@ export default function App() {
   // no server-side query contract to define beyond returning the list.
   const refreshCloudDocuments = useCallback(async () => {
     if (!cloudEndpoint) {
-      setError("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+      setError(
+        "Cloud Documents needs an endpoint -- set one in Edit > External Services.",
+      );
       return;
     }
     setCloudSearchBusy(true);
     try {
-      const response = await fetch(`${cloudEndpoint.replace(/\/$/, "")}/documents`, {
-        headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {},
-      });
-      if (!response.ok) throw new Error(`The cloud endpoint returned ${response.status}.`);
+      const response = await fetch(
+        `${cloudEndpoint.replace(/\/$/, "")}/documents`,
+        {
+          headers: cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {},
+        },
+      );
+      if (!response.ok)
+        throw new Error(`The cloud endpoint returned ${response.status}.`);
       const body = (await response.json()) as { documents?: string[] };
       setCloudDocumentList(Array.isArray(body.documents) ? body.documents : []);
     } catch (err) {
-      setError(`Search Your Cloud Files failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Search Your Cloud Files failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setCloudSearchBusy(false);
     }
@@ -4252,15 +4972,20 @@ export default function App() {
   const cloudFetch = useCallback(
     async (path: string, init?: RequestInit) => {
       if (!cloudEndpoint) {
-        throw new Error("Cloud Documents needs an endpoint -- set one in Edit > External Services.");
+        throw new Error(
+          "Cloud Documents needs an endpoint -- set one in Edit > External Services.",
+        );
       }
-      const response = await fetch(`${cloudEndpoint.replace(/\/$/, "")}${path}`, {
-        ...init,
-        headers: {
-          ...(init?.headers ?? {}),
-          ...(cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {}),
+      const response = await fetch(
+        `${cloudEndpoint.replace(/\/$/, "")}${path}`,
+        {
+          ...init,
+          headers: {
+            ...(init?.headers ?? {}),
+            ...(cloudToken ? { Authorization: `Bearer ${cloudToken}` } : {}),
+          },
         },
-      });
+      );
       if (!response.ok) {
         let detail = `The cloud endpoint returned ${response.status}.`;
         try {
@@ -4282,12 +5007,16 @@ export default function App() {
   const refreshCloudShares = useCallback(async () => {
     setShareBusy(true);
     try {
-      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/shares`);
+      const response = await cloudFetch(
+        `/documents/${encodeURIComponent(cloudDocumentName)}/shares`,
+      );
       const body = (await response.json()) as { shares?: CloudShare[] };
       setCloudShares(Array.isArray(body.shares) ? body.shares : []);
     } catch (err) {
       setCloudShares([]);
-      setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setShareBusy(false);
     }
@@ -4308,12 +5037,20 @@ export default function App() {
       );
       setInviteUser("");
     } catch (err) {
-      setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       setShareBusy(false);
       return;
     }
     await refreshCloudShares();
-  }, [cloudFetch, cloudDocumentName, inviteUser, inviteRole, refreshCloudShares]);
+  }, [
+    cloudFetch,
+    cloudDocumentName,
+    inviteUser,
+    inviteRole,
+    refreshCloudShares,
+  ]);
 
   const removeCloudShare = useCallback(
     async (user: string) => {
@@ -4324,7 +5061,9 @@ export default function App() {
           { method: "DELETE" },
         );
       } catch (err) {
-        setError(`Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Invite to Edit failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         setShareBusy(false);
         return;
       }
@@ -4338,17 +5077,23 @@ export default function App() {
   const refreshCloudReviews = useCallback(async () => {
     setReviewBusy(true);
     try {
-      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/reviews`);
+      const response = await cloudFetch(
+        `/documents/${encodeURIComponent(cloudDocumentName)}/reviews`,
+      );
       const body = (await response.json()) as { reviews?: CloudReview[] };
       const reviews = Array.isArray(body.reviews) ? body.reviews : [];
       setCloudReviews(reviews);
       setActiveReviewId((current) =>
-        current !== null && reviews.some((r) => r.id === current) ? current : (reviews[reviews.length - 1]?.id ?? null),
+        current !== null && reviews.some((r) => r.id === current)
+          ? current
+          : (reviews[reviews.length - 1]?.id ?? null),
       );
     } catch (err) {
       setCloudReviews([]);
       setActiveReviewId(null);
-      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Share for Review failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setReviewBusy(false);
     }
@@ -4358,16 +5103,21 @@ export default function App() {
     setReviewBusy(true);
     let created: string | null = null;
     try {
-      const response = await cloudFetch(`/documents/${encodeURIComponent(cloudDocumentName)}/reviews`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: reviewTitle }),
-      });
+      const response = await cloudFetch(
+        `/documents/${encodeURIComponent(cloudDocumentName)}/reviews`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: reviewTitle }),
+        },
+      );
       const body = (await response.json()) as { review?: CloudReview };
       created = body.review?.id ?? null;
       setReviewTitle("");
     } catch (err) {
-      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Share for Review failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       setReviewBusy(false);
       return;
     }
@@ -4382,20 +5132,32 @@ export default function App() {
     if (!author || !text) return;
     setReviewBusy(true);
     try {
-      await cloudFetch(`/reviews/${encodeURIComponent(activeReviewId)}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ author, text, parent: reviewReplyTo }),
-      });
+      await cloudFetch(
+        `/reviews/${encodeURIComponent(activeReviewId)}/comments`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ author, text, parent: reviewReplyTo }),
+        },
+      );
       setReviewCommentText("");
       setReviewReplyTo(null);
     } catch (err) {
-      setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Share for Review failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
       setReviewBusy(false);
       return;
     }
     await refreshCloudReviews();
-  }, [cloudFetch, activeReviewId, reviewCommentAuthor, reviewCommentText, reviewReplyTo, refreshCloudReviews]);
+  }, [
+    cloudFetch,
+    activeReviewId,
+    reviewCommentAuthor,
+    reviewCommentText,
+    reviewReplyTo,
+    refreshCloudReviews,
+  ]);
 
   // Libraries: the list, the shown library's assets, and every way in
   // and out of it. Names are unique within a kind on the server, so
@@ -4417,7 +5179,8 @@ export default function App() {
       const libraries = Array.isArray(body.libraries) ? body.libraries : [];
       setCloudLibraries(libraries);
       const shown =
-        activeLibraryId !== null && libraries.some((l) => l.id === activeLibraryId)
+        activeLibraryId !== null &&
+        libraries.some((l) => l.id === activeLibraryId)
           ? activeLibraryId
           : (libraries[0]?.id ?? null);
       setActiveLibraryId(shown);
@@ -4426,7 +5189,9 @@ export default function App() {
     } catch (err) {
       setCloudLibraries([]);
       setCloudAssets([]);
-      setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Libraries failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setLibraryBusy(false);
     }
@@ -4440,7 +5205,9 @@ export default function App() {
       try {
         await action();
       } catch (err) {
-        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Libraries failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         setLibraryBusy(false);
         return;
       }
@@ -4485,15 +5252,27 @@ export default function App() {
     const layer = document.layers.find((l) => l.id === selectedId);
     const name = libraryAssetName.trim() || layer?.name || "Graphic";
     await libraryAction(async () => {
-      const bytes = await invoke<number[]>("export_layer_bytes", { id: selectedId });
-      await cloudFetch(`/libraries/${libraryId}/graphics/${encodeURIComponent(name)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/octet-stream" },
-        body: new Uint8Array(bytes),
+      const bytes = await invoke<number[]>("export_layer_bytes", {
+        id: selectedId,
       });
+      await cloudFetch(
+        `/libraries/${libraryId}/graphics/${encodeURIComponent(name)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/octet-stream" },
+          body: new Uint8Array(bytes),
+        },
+      );
       setLibraryAssetName("");
     });
-  }, [cloudFetch, libraryAction, activeLibraryId, selectedId, document, libraryAssetName]);
+  }, [
+    cloudFetch,
+    libraryAction,
+    activeLibraryId,
+    selectedId,
+    document,
+    libraryAssetName,
+  ]);
 
   const useCloudAsset = useCallback(
     async (asset: CloudAsset) => {
@@ -4507,7 +5286,10 @@ export default function App() {
             break;
           }
           case "gradient": {
-            const data = asset.data as { startColor?: number[]; endColor?: number[] };
+            const data = asset.data as {
+              startColor?: number[];
+              endColor?: number[];
+            };
             await runCommand("save_gradient_preset", {
               name: asset.name,
               startColor: data.startColor,
@@ -4517,19 +5299,30 @@ export default function App() {
           }
           case "adjustment": {
             const data = asset.data as { adjustment?: unknown };
-            await runCommand("save_adjustment_preset", { name: asset.name, adjustment: data.adjustment });
+            await runCommand("save_adjustment_preset", {
+              name: asset.name,
+              adjustment: data.adjustment,
+            });
             break;
           }
           case "graphic": {
             setLibraryBusy(true);
-            const response = await cloudFetch(`/libraries/${libraryId}/assets/${asset.id}/blob`);
+            const response = await cloudFetch(
+              `/libraries/${libraryId}/assets/${asset.id}/blob`,
+            );
             const buffer = await response.arrayBuffer();
-            await runCommand("add_layer_from_bytes", { name: asset.name, bytes: Array.from(new Uint8Array(buffer)) }, "top");
+            await runCommand(
+              "add_layer_from_bytes",
+              { name: asset.name, bytes: Array.from(new Uint8Array(buffer)) },
+              "top",
+            );
             break;
           }
         }
       } catch (err) {
-        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Libraries failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setLibraryBusy(false);
       }
@@ -4542,7 +5335,9 @@ export default function App() {
       if (activeLibraryId === null) return;
       const libraryId = activeLibraryId;
       await libraryAction(async () => {
-        await cloudFetch(`/libraries/${libraryId}/assets/${asset.id}`, { method: "DELETE" });
+        await cloudFetch(`/libraries/${libraryId}/assets/${asset.id}`, {
+          method: "DELETE",
+        });
       });
     },
     [cloudFetch, libraryAction, activeLibraryId],
@@ -4562,14 +5357,23 @@ export default function App() {
     if (activeLibraryId === null || !user) return;
     const libraryId = activeLibraryId;
     await libraryAction(async () => {
-      await cloudFetch(`/libraries/${libraryId}/shares/${encodeURIComponent(user)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: libraryShareRole }),
-      });
+      await cloudFetch(
+        `/libraries/${libraryId}/shares/${encodeURIComponent(user)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: libraryShareRole }),
+        },
+      );
       setLibraryShareUser("");
     });
-  }, [cloudFetch, libraryAction, activeLibraryId, libraryShareUser, libraryShareRole]);
+  }, [
+    cloudFetch,
+    libraryAction,
+    activeLibraryId,
+    libraryShareUser,
+    libraryShareRole,
+  ]);
 
   // Boards: the list, the shown board's items (image items fetched once
   // into object URLs for thumbnails), and every way onto a board.
@@ -4583,7 +5387,9 @@ export default function App() {
       for (const item of items) {
         if (item.kind !== "image") continue;
         try {
-          const blob = await (await cloudFetch(`/boards/${boardId}/items/${item.id}/blob`)).blob();
+          const blob = await (
+            await cloudFetch(`/boards/${boardId}/items/${item.id}/blob`)
+          ).blob();
           thumbnails[item.id] = URL.createObjectURL(blob);
         } catch {
           // A thumbnail that will not load shows as its name.
@@ -4605,14 +5411,18 @@ export default function App() {
       const boards = Array.isArray(body.boards) ? body.boards : [];
       setCloudBoards(boards);
       const shown =
-        activeBoardId !== null && boards.some((b) => b.id === activeBoardId) ? activeBoardId : (boards[0]?.id ?? null);
+        activeBoardId !== null && boards.some((b) => b.id === activeBoardId)
+          ? activeBoardId
+          : (boards[0]?.id ?? null);
       setActiveBoardId(shown);
       if (shown !== null) await refreshBoardItems(shown);
       else setBoardItems([]);
     } catch (err) {
       setCloudBoards([]);
       setBoardItems([]);
-      setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Boards failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setBoardBusy(false);
     }
@@ -4624,7 +5434,9 @@ export default function App() {
       try {
         await action();
       } catch (err) {
-        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Boards failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         setBoardBusy(false);
         return;
       }
@@ -4671,20 +5483,31 @@ export default function App() {
       const boardId = activeBoardId;
       const layer = document.layers.find((l) => l.id === selectedId);
       if (source === "layer" && !layer) return;
-      const name = source === "layer" ? (layer?.name ?? "Layer") : cloudDocumentName;
+      const name =
+        source === "layer" ? (layer?.name ?? "Layer") : cloudDocumentName;
       await boardAction(async () => {
         const bytes =
           source === "layer"
             ? await invoke<number[]>("export_layer_bytes", { id: selectedId })
             : await invoke<number[]>("export_composite_bytes");
-        await cloudFetch(`/boards/${boardId}/images/${encodeURIComponent(name)}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/octet-stream" },
-          body: new Uint8Array(bytes),
-        });
+        await cloudFetch(
+          `/boards/${boardId}/images/${encodeURIComponent(name)}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/octet-stream" },
+            body: new Uint8Array(bytes),
+          },
+        );
       });
     },
-    [cloudFetch, boardAction, activeBoardId, document, selectedId, cloudDocumentName],
+    [
+      cloudFetch,
+      boardAction,
+      activeBoardId,
+      document,
+      selectedId,
+      cloudDocumentName,
+    ],
   );
 
   const placeBoardImage = useCallback(
@@ -4693,11 +5516,19 @@ export default function App() {
       const boardId = activeBoardId;
       setBoardBusy(true);
       try {
-        const response = await cloudFetch(`/boards/${boardId}/items/${item.id}/blob`);
+        const response = await cloudFetch(
+          `/boards/${boardId}/items/${item.id}/blob`,
+        );
         const buffer = await response.arrayBuffer();
-        await runCommand("add_layer_from_bytes", { name: item.name, bytes: Array.from(new Uint8Array(buffer)) }, "top");
+        await runCommand(
+          "add_layer_from_bytes",
+          { name: item.name, bytes: Array.from(new Uint8Array(buffer)) },
+          "top",
+        );
       } catch (err) {
-        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Boards failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setBoardBusy(false);
       }
@@ -4710,7 +5541,9 @@ export default function App() {
       if (activeBoardId === null) return;
       const boardId = activeBoardId;
       await boardAction(async () => {
-        await cloudFetch(`/boards/${boardId}/items/${item.id}`, { method: "DELETE" });
+        await cloudFetch(`/boards/${boardId}/items/${item.id}`, {
+          method: "DELETE",
+        });
       });
     },
     [cloudFetch, boardAction, activeBoardId],
@@ -4720,7 +5553,9 @@ export default function App() {
     async (item: BoardItem, x: number, y: number) => {
       if (activeBoardId === null) return;
       const boardId = activeBoardId;
-      setBoardItems((items) => items.map((i) => (i.id === item.id ? { ...i, x, y } : i)));
+      setBoardItems((items) =>
+        items.map((i) => (i.id === item.id ? { ...i, x, y } : i)),
+      );
       try {
         await cloudFetch(`/boards/${boardId}/items/${item.id}`, {
           method: "PATCH",
@@ -4728,7 +5563,9 @@ export default function App() {
           body: JSON.stringify({ x, y }),
         });
       } catch (err) {
-        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Boards failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         await refreshBoardItems(boardId).catch(() => undefined);
       }
     },
@@ -4740,11 +5577,14 @@ export default function App() {
     if (activeBoardId === null || !user) return;
     const boardId = activeBoardId;
     await boardAction(async () => {
-      await cloudFetch(`/boards/${boardId}/shares/${encodeURIComponent(user)}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role: boardShareRole }),
-      });
+      await cloudFetch(
+        `/boards/${boardId}/shares/${encodeURIComponent(user)}`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role: boardShareRole }),
+        },
+      );
       setBoardShareUser("");
     });
   }, [cloudFetch, boardAction, activeBoardId, boardShareUser, boardShareRole]);
@@ -4768,11 +5608,18 @@ export default function App() {
     setAssistantInput("");
     setAssistantLines((lines) => [...lines, { role: "you", text }]);
     setAssistantBusy(true);
-    let messages: unknown[] = [...assistantMessages, { role: "user", content: text }];
+    let messages: unknown[] = [
+      ...assistantMessages,
+      { role: "user", content: text },
+    ];
     const summary = () => ({
       width: document?.width ?? 0,
       height: document?.height ?? 0,
-      layers: (document?.layers ?? []).map((l) => ({ id: l.id, name: l.name, visible: l.visible })),
+      layers: (document?.layers ?? []).map((l) => ({
+        id: l.id,
+        name: l.name,
+        visible: l.visible,
+      })),
       selected_layer: selectedId,
       has_selection: hasSelection,
     });
@@ -4781,28 +5628,54 @@ export default function App() {
         const response = await cloudFetch("/assist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, api_key: assistantApiKey, document: summary(), messages }),
+          body: JSON.stringify({
+            message: text,
+            api_key: assistantApiKey,
+            document: summary(),
+            messages,
+          }),
         });
         const reply = (await response.json()) as AssistantReply;
-        if (reply.text) setAssistantLines((lines) => [...lines, { role: "assistant", text: reply.text }]);
-        if (reply.mode === "claude") messages = [...messages, { role: "assistant", content: reply.content }];
+        if (reply.text)
+          setAssistantLines((lines) => [
+            ...lines,
+            { role: "assistant", text: reply.text },
+          ]);
+        if (reply.mode === "claude")
+          messages = [
+            ...messages,
+            { role: "assistant", content: reply.content },
+          ];
         if (reply.actions.length === 0) break;
-        const results: { type: "tool_result"; tool_use_id: string; content: string }[] = [];
+        const results: {
+          type: "tool_result";
+          tool_use_id: string;
+          content: string;
+        }[] = [];
         for (const action of reply.actions) {
           let outcome: string;
           if (action.needs_layer && selectedId === null) {
             outcome = "error: no layer is selected";
           } else {
             try {
-              const args = action.needs_layer ? { id: selectedId, ...action.input } : action.input;
+              const args = action.needs_layer
+                ? { id: selectedId, ...action.input }
+                : action.input;
               await runCommand(action.name, args);
               outcome = "ok";
             } catch (err) {
               outcome = `error: ${err instanceof Error ? err.message : String(err)}`;
             }
           }
-          setAssistantLines((lines) => [...lines, { role: "note", text: `${action.name}: ${outcome}` }]);
-          results.push({ type: "tool_result", tool_use_id: action.id, content: outcome });
+          setAssistantLines((lines) => [
+            ...lines,
+            { role: "note", text: `${action.name}: ${outcome}` },
+          ]);
+          results.push({
+            type: "tool_result",
+            tool_use_id: action.id,
+            content: outcome,
+          });
         }
         if (reply.mode !== "claude") break;
         messages = [...messages, { role: "user", content: results }];
@@ -4811,12 +5684,25 @@ export default function App() {
     } catch (err) {
       setAssistantLines((lines) => [
         ...lines,
-        { role: "note", text: `Assistant failed: ${err instanceof Error ? err.message : String(err)}` },
+        {
+          role: "note",
+          text: `Assistant failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
       ]);
     } finally {
       setAssistantBusy(false);
     }
-  }, [assistantInput, cloudEndpoint, assistantMessages, assistantApiKey, document, selectedId, hasSelection, cloudFetch, runCommand]);
+  }, [
+    assistantInput,
+    cloudEndpoint,
+    assistantMessages,
+    assistantApiKey,
+    document,
+    selectedId,
+    hasSelection,
+    cloudFetch,
+    runCommand,
+  ]);
 
   // Select Subject -- Cloud Processing: the selected layer's pixels go to
   // image-editor-server's heavier detector (colour models and an exact
@@ -4826,38 +5712,62 @@ export default function App() {
   const selectSubjectInCloud = useCallback(async () => {
     if (selectedId === null) return;
     if (!cloudEndpoint) {
-      setError("Select Subject (Cloud) needs an endpoint -- set one in Edit > External Services.");
+      setError(
+        "Select Subject (Cloud) needs an endpoint -- set one in Edit > External Services.",
+      );
       return;
     }
     setCloudSubjectBusy(true);
     try {
-      const bytes = await invoke<number[]>("export_layer_bytes", { id: selectedId });
-      const response = await cloudFetch(`/select-subject?tolerance=${magicWandTolerance}`, {
-        method: "POST",
-        headers: { "Content-Type": "image/png" },
-        body: new Uint8Array(bytes),
+      const bytes = await invoke<number[]>("export_layer_bytes", {
+        id: selectedId,
       });
+      const response = await cloudFetch(
+        `/select-subject?tolerance=${magicWandTolerance}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "image/png" },
+          body: new Uint8Array(bytes),
+        },
+      );
       const mask = new Uint8Array(await response.arrayBuffer());
-      await runCommand("select_from_mask", { mask: Array.from(mask), mode: selectionMode });
+      await runCommand("select_from_mask", {
+        mask: Array.from(mask),
+        mode: selectionMode,
+      });
     } catch (err) {
-      setError(`Select Subject (Cloud) failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Select Subject (Cloud) failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setCloudSubjectBusy(false);
     }
-  }, [selectedId, cloudEndpoint, cloudFetch, magicWandTolerance, selectionMode, runCommand]);
+  }, [
+    selectedId,
+    cloudEndpoint,
+    cloudFetch,
+    magicWandTolerance,
+    selectionMode,
+    runCommand,
+  ]);
 
   const setReviewCommentResolved = useCallback(
     async (commentId: number, resolved: boolean) => {
       if (activeReviewId === null) return;
       setReviewBusy(true);
       try {
-        await cloudFetch(`/reviews/${encodeURIComponent(activeReviewId)}/comments/${commentId}/resolved`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ resolved }),
-        });
+        await cloudFetch(
+          `/reviews/${encodeURIComponent(activeReviewId)}/comments/${commentId}/resolved`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ resolved }),
+          },
+        );
       } catch (err) {
-        setError(`Share for Review failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Share for Review failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
         setReviewBusy(false);
         return;
       }
@@ -4881,7 +5791,12 @@ export default function App() {
 
   const openPuppetDialog = useCallback(() => {
     if (selectedId === null) return;
-    const options: PuppetWarpOptions = { mode: "normal", density: "normal", expansion: 2, pins: [] };
+    const options: PuppetWarpOptions = {
+      mode: "normal",
+      density: "normal",
+      expansion: 2,
+      pins: [],
+    };
     setPuppetOptions(options);
     setPuppetSelected(null);
     setPuppetDrag(null);
@@ -4891,21 +5806,30 @@ export default function App() {
     setShowPuppetDialog(true);
   }, [selectedId]);
 
-  const puppetSvgPoint = useCallback((event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
-    const svg = puppetSvgRef.current;
-    if (!svg) return null;
-    const box = svg.getBoundingClientRect();
-    const view = svg.viewBox.baseVal;
-    if (box.width === 0 || box.height === 0) return null;
-    return [
-      Math.round((view.x + ((event.clientX - box.left) / box.width) * view.width) * 2) / 2,
-      Math.round((view.y + ((event.clientY - box.top) / box.height) * view.height) * 2) / 2,
-    ];
-  }, []);
+  const puppetSvgPoint = useCallback(
+    (event: React.PointerEvent<SVGSVGElement>): [number, number] | null => {
+      const svg = puppetSvgRef.current;
+      if (!svg) return null;
+      const box = svg.getBoundingClientRect();
+      const view = svg.viewBox.baseVal;
+      if (box.width === 0 || box.height === 0) return null;
+      return [
+        Math.round(
+          (view.x + ((event.clientX - box.left) / box.width) * view.width) * 2,
+        ) / 2,
+        Math.round(
+          (view.y + ((event.clientY - box.top) / box.height) * view.height) * 2,
+        ) / 2,
+      ];
+    },
+    [],
+  );
 
   const setPuppetPin = useCallback(
     (index: number, pin: PuppetPin) => {
-      updatePuppet({ pins: puppetOptions.pins.map((p, i) => (i === index ? pin : p)) });
+      updatePuppet({
+        pins: puppetOptions.pins.map((p, i) => (i === index ? pin : p)),
+      });
     },
     [puppetOptions.pins, updatePuppet],
   );
@@ -4921,9 +5845,16 @@ export default function App() {
   }, [runCommand, selectedId, puppetOptions, interpolationArg]);
 
   const openSpotDialog = useCallback(
-    (dialog: { mode: "new" } | { mode: "edit"; name: string } | { mode: "convert"; name: string }) => {
+    (
+      dialog:
+        | { mode: "new" }
+        | { mode: "edit"; name: string }
+        | { mode: "convert"; name: string },
+    ) => {
       const existing =
-        dialog.mode === "edit" ? document?.spots.find((s) => s.name === dialog.name) : undefined;
+        dialog.mode === "edit"
+          ? document?.spots.find((s) => s.name === dialog.name)
+          : undefined;
       setSpotName(dialog.mode === "new" ? "" : dialog.name);
       setSpotColor(existing ? rgbToHex(...existing.color) : "#00aeef");
       setSpotSolidity(existing ? existing.solidity : 100);
@@ -4941,16 +5872,33 @@ export default function App() {
     if (!spotDialog) return;
     const color = hexToRgb(spotColor);
     if (spotDialog.mode === "new") {
-      await runCommand("new_spot_channel", { name: spotName, color, solidity: spotSolidity });
+      await runCommand("new_spot_channel", {
+        name: spotName,
+        color,
+        solidity: spotSolidity,
+      });
     } else if (spotDialog.mode === "edit") {
-      await runCommand("set_spot_channel", { name: spotDialog.name, newName: spotName, color, solidity: spotSolidity });
+      await runCommand("set_spot_channel", {
+        name: spotDialog.name,
+        newName: spotName,
+        color,
+        solidity: spotSolidity,
+      });
       setChannelView((current) =>
-        current.kind === "spot" && current.name === spotDialog.name ? { kind: "spot", name: spotName.trim() } : current,
+        current.kind === "spot" && current.name === spotDialog.name
+          ? { kind: "spot", name: spotName.trim() }
+          : current,
       );
     } else {
-      await runCommand("convert_channel_to_spot", { name: spotDialog.name, color, solidity: spotSolidity });
+      await runCommand("convert_channel_to_spot", {
+        name: spotDialog.name,
+        color,
+        solidity: spotSolidity,
+      });
       setChannelView((current) =>
-        current.kind === "alpha" && current.name === spotDialog.name ? { kind: "spot", name: spotDialog.name } : current,
+        current.kind === "alpha" && current.name === spotDialog.name
+          ? { kind: "spot", name: spotDialog.name }
+          : current,
       );
     }
     setSpotDialog(null);
@@ -5010,7 +5958,13 @@ export default function App() {
       interpolation: interpolationArg ?? "bicubic",
     });
     setShowPerspectiveDialog(false);
-  }, [runCommand, selectedId, perspectiveHorizontal, perspectiveVertical, interpolationArg]);
+  }, [
+    runCommand,
+    selectedId,
+    perspectiveHorizontal,
+    perspectiveVertical,
+    interpolationArg,
+  ]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;
@@ -5041,15 +5995,23 @@ export default function App() {
     setShowGradientMapDialog(false);
   }, [runCommand, selectedId, gradientMapShadow, gradientMapHighlight]);
 
-  const setChannelMixerCell = useCallback((row: number, col: number, value: number) => {
-    setChannelMixerMatrix((matrix) =>
-      matrix.map((r, ri) => (ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r)),
-    );
-  }, []);
+  const setChannelMixerCell = useCallback(
+    (row: number, col: number, value: number) => {
+      setChannelMixerMatrix((matrix) =>
+        matrix.map((r, ri) =>
+          ri === row ? r.map((c, ci) => (ci === col ? value : c)) : r,
+        ),
+      );
+    },
+    [],
+  );
 
   const applyChannelMixer = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("channel_mixer", { id: selectedId, matrix: channelMixerMatrix });
+    await runCommand("channel_mixer", {
+      id: selectedId,
+      matrix: channelMixerMatrix,
+    });
     setShowChannelMixerDialog(false);
   }, [runCommand, selectedId, channelMixerMatrix]);
 
@@ -5193,7 +6155,16 @@ export default function App() {
       invert: satinInvert,
     });
     setShowSatinDialog(false);
-  }, [runCommand, selectedId, satinDistance, satinAngle, satinSize, satinColor, satinOpacity, satinInvert]);
+  }, [
+    runCommand,
+    selectedId,
+    satinDistance,
+    satinAngle,
+    satinSize,
+    satinColor,
+    satinOpacity,
+    satinInvert,
+  ]);
 
   const applyInnerShadow = useCallback(async () => {
     if (selectedId === null) return;
@@ -5286,7 +6257,13 @@ export default function App() {
       strength: contourStrength,
     });
     setShowContourDialog(false);
-  }, [runCommand, selectedId, contourSize, contourLightDirection, contourStrength]);
+  }, [
+    runCommand,
+    selectedId,
+    contourSize,
+    contourLightDirection,
+    contourStrength,
+  ]);
 
   const applyTexture = useCallback(async () => {
     if (selectedId === null) return;
@@ -5311,8 +6288,9 @@ export default function App() {
 
   const applyTexturizer = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("texturizer", {
+    await runCommand("texturizer_with", {
       id: selectedId,
+      texture: texturizerTexture,
       scale: texturizerScale,
       relief: texturizerRelief,
       lightDirection: texturizerLightDirection,
@@ -5322,6 +6300,7 @@ export default function App() {
   }, [
     runCommand,
     selectedId,
+    texturizerTexture,
     texturizerScale,
     texturizerRelief,
     texturizerLightDirection,
@@ -5356,17 +6335,29 @@ export default function App() {
       default:
         return { kind: "invert" };
     }
-  }, [adjustmentKind, adjustmentBrightness, adjustmentContrast, adjustmentLevel, adjustmentLevels]);
+  }, [
+    adjustmentKind,
+    adjustmentBrightness,
+    adjustmentContrast,
+    adjustmentLevel,
+    adjustmentLevels,
+  ]);
 
   const addAdjustmentLayer = useCallback(async () => {
     const adjustment = currentAdjustment();
-    await runCommand("add_adjustment_layer", { name: `${adjustment.kind} adjustment`, adjustment });
+    await runCommand("add_adjustment_layer", {
+      name: `${adjustment.kind} adjustment`,
+      adjustment,
+    });
     setShowAdjustmentDialog(false);
   }, [runCommand, currentAdjustment]);
 
   const retuneAdjustmentLayer = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("set_adjustment", { id: selectedId, adjustment: currentAdjustment() });
+    await runCommand("set_adjustment", {
+      id: selectedId,
+      adjustment: currentAdjustment(),
+    });
     setShowAdjustmentDialog(false);
   }, [runCommand, selectedId, currentAdjustment]);
 
@@ -5390,7 +6381,10 @@ export default function App() {
 
   const addSmartFilter = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("add_smart_filter", { id: selectedId, adjustment: currentAdjustment() });
+    await runCommand("add_smart_filter", {
+      id: selectedId,
+      adjustment: currentAdjustment(),
+    });
   }, [runCommand, selectedId, currentAdjustment]);
 
   const removeSmartFilter = useCallback(
@@ -5410,7 +6404,11 @@ export default function App() {
         return { kind: "solidColor", color: [r, g, b, 255] };
       case "gradient": {
         const [er, eg, eb] = hexToRgb(gradientEndColor);
-        return { kind: "gradient", startColor: [r, g, b, 255], endColor: [er, eg, eb, 255] };
+        return {
+          kind: "gradient",
+          startColor: [r, g, b, 255],
+          endColor: [er, eg, eb, 255],
+        };
       }
       default:
         return { kind: "pattern" };
@@ -5452,7 +6450,8 @@ export default function App() {
   }, []);
 
   const openTypeDialog = useCallback(() => {
-    const existing = document?.layers.find((layer) => layer.id === selectedId)?.text ?? null;
+    const existing =
+      document?.layers.find((layer) => layer.id === selectedId)?.text ?? null;
     if (existing) {
       setTypeText(existing.text);
       setTypeX(existing.x);
@@ -5476,7 +6475,9 @@ export default function App() {
       setFontCatalogue(Array.isArray(body.fonts) ? body.fonts : []);
     } catch (err) {
       setFontCatalogue([]);
-      setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Fonts failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setFontsBusy(false);
     }
@@ -5486,18 +6487,28 @@ export default function App() {
     async (entry: FontEntry) => {
       setFontsBusy(true);
       try {
-        const query = entry.source === "local" ? "" : `?weight=${fontWeight}&italic=${fontItalic}`;
-        const response = await cloudFetch(`/fonts/${encodeURIComponent(entry.family)}/file${query}`);
+        const query =
+          entry.source === "local"
+            ? ""
+            : `?weight=${fontWeight}&italic=${fontItalic}`;
+        const response = await cloudFetch(
+          `/fonts/${encodeURIComponent(entry.family)}/file${query}`,
+        );
         const bytes = new Uint8Array(await response.arrayBuffer());
         const name =
           entry.source === "local"
             ? entry.family
             : `${entry.family}${fontWeight === "700" ? " Bold" : ""}${fontItalic ? " Italic" : ""}`;
-        const names = await invoke<string[]>("register_font", { name, bytes: Array.from(bytes) });
+        const names = await invoke<string[]>("register_font", {
+          name,
+          bytes: Array.from(bytes),
+        });
         setActivatedFonts(names);
         setTypeFont(name);
       } catch (err) {
-        setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+        setError(
+          `Fonts failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
       } finally {
         setFontsBusy(false);
       }
@@ -5506,14 +6517,19 @@ export default function App() {
   );
 
   const activateFontFile = useCallback(async () => {
-    const path = await open({ multiple: false, filters: [{ name: "Fonts", extensions: ["ttf", "otf"] }] });
+    const path = await open({
+      multiple: false,
+      filters: [{ name: "Fonts", extensions: ["ttf", "otf"] }],
+    });
     if (typeof path !== "string") return;
     setFontsBusy(true);
     try {
       const names = await invoke<string[]>("register_font_file", { path });
       setActivatedFonts(names);
     } catch (err) {
-      setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+      setError(
+        `Fonts failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
     } finally {
       setFontsBusy(false);
     }
@@ -5521,7 +6537,10 @@ export default function App() {
 
   const addTextLayer = useCallback(async () => {
     const text = currentText();
-    await runCommand("add_text_layer", { name: text.text.split("\n")[0].slice(0, 24) || "Type", text });
+    await runCommand("add_text_layer", {
+      name: text.text.split("\n")[0].slice(0, 24) || "Type",
+      text,
+    });
     setShowTypeDialog(false);
   }, [runCommand, currentText]);
 
@@ -5536,7 +6555,9 @@ export default function App() {
     return customPoints
       .split("\n")
       .map((line) => line.split(",").map((v) => Number(v.trim())))
-      .filter((pair) => pair.length === 2 && pair.every((v) => Number.isFinite(v)))
+      .filter(
+        (pair) => pair.length === 2 && pair.every((v) => Number.isFinite(v)),
+      )
       .map(([x, y]) => [x, y] as [number, number]);
   }, [customPoints]);
 
@@ -5553,21 +6574,50 @@ export default function App() {
           : shapeKind === "triangle"
             ? { kind: "triangle", x0, y0, x1, y1 }
             : shapeKind === "polygon"
-              ? { kind: "polygon", cx: x0, cy: y0, x: x1, y: y1, sides: polygonSides }
+              ? {
+                  kind: "polygon",
+                  cx: x0,
+                  cy: y0,
+                  x: x1,
+                  y: y1,
+                  sides: polygonSides,
+                }
               : shapeKind === "star"
-                ? { kind: "star", cx: x0, cy: y0, x: x1, y: y1, points: polygonSides, ratio: starRatio }
+                ? {
+                    kind: "star",
+                    cx: x0,
+                    cy: y0,
+                    x: x1,
+                    y: y1,
+                    points: polygonSides,
+                    ratio: starRatio,
+                  }
                 : shapeKind === "line"
                   ? { kind: "line", x0, y0, x1, y1, weight: lineWeight }
                   : { kind: "custom", points: parsedCustomPoints() };
     return {
       spec,
       fill: shapeFill ? [r, g, b, 255] : null,
-      stroke: shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null,
+      stroke:
+        shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null,
     };
-  }, [brushColor, shapeStrokeColor, shapeBox, shapeKind, shapeRadius, polygonSides, starRatio, lineWeight, parsedCustomPoints, shapeFill, shapeStrokeWidth]);
+  }, [
+    brushColor,
+    shapeStrokeColor,
+    shapeBox,
+    shapeKind,
+    shapeRadius,
+    polygonSides,
+    starRatio,
+    lineWeight,
+    parsedCustomPoints,
+    shapeFill,
+    shapeStrokeWidth,
+  ]);
 
   const openShapeLayerDialog = useCallback(() => {
-    const existing = document?.layers.find((layer) => layer.id === selectedId)?.shape ?? null;
+    const existing =
+      document?.layers.find((layer) => layer.id === selectedId)?.shape ?? null;
     if (existing) {
       setShapeKind(existing.spec.kind);
       const s = existing.spec;
@@ -5575,14 +6625,22 @@ export default function App() {
       else if ("cx" in s) setShapeBox([s.cx, s.cy, s.x, s.y]);
       else setCustomPoints(s.points.map(([x, y]) => `${x},${y}`).join("\n"));
     } else if (document) {
-      setShapeBox([Math.round(document.width / 4), Math.round(document.height / 4), Math.round((3 * document.width) / 4), Math.round((3 * document.height) / 4)]);
+      setShapeBox([
+        Math.round(document.width / 4),
+        Math.round(document.height / 4),
+        Math.round((3 * document.width) / 4),
+        Math.round((3 * document.height) / 4),
+      ]);
     }
     setShowShapeLayerDialog(true);
   }, [document, selectedId]);
 
   const addShapeLayer = useCallback(async () => {
     const shape = currentShape();
-    await runCommand("add_shape_layer", { name: `${shape.spec.kind} shape`, shape });
+    await runCommand("add_shape_layer", {
+      name: `${shape.spec.kind} shape`,
+      shape,
+    });
     setShowShapeLayerDialog(false);
   }, [runCommand, currentShape]);
 
@@ -5595,7 +6653,11 @@ export default function App() {
   const paintCustomShape = useCallback(async () => {
     if (selectedId === null) return;
     const [r, g, b] = hexToRgb(brushColor);
-    await runCommand("draw_custom_shape", { id: selectedId, points: parsedCustomPoints(), color: [r, g, b, 255] });
+    await runCommand("draw_custom_shape", {
+      id: selectedId,
+      points: parsedCustomPoints(),
+      color: [r, g, b, 255],
+    });
     setShowShapeLayerDialog(false);
   }, [runCommand, selectedId, brushColor, parsedCustomPoints]);
 
@@ -5629,7 +6691,17 @@ export default function App() {
       },
     });
     setShowSmartDialog(false);
-  }, [runCommand, selectedId, freeTransform, ftReference, ftUsePosition, ftX, ftY, ftRelative, ftMaintainAspect]);
+  }, [
+    runCommand,
+    selectedId,
+    freeTransform,
+    ftReference,
+    ftUsePosition,
+    ftX,
+    ftY,
+    ftRelative,
+    ftMaintainAspect,
+  ]);
 
   const rasterizeSmartObject = useCallback(async () => {
     if (selectedId === null) return;
@@ -5639,27 +6711,51 @@ export default function App() {
 
   const openFrameDialog = useCallback(() => {
     if (document) {
-      setFrameBox([Math.round(document.width / 4), Math.round(document.height / 4), Math.round((3 * document.width) / 4), Math.round((3 * document.height) / 4)]);
+      setFrameBox([
+        Math.round(document.width / 4),
+        Math.round(document.height / 4),
+        Math.round((3 * document.width) / 4),
+        Math.round((3 * document.height) / 4),
+      ]);
     }
-    setFrameTarget(document?.layers.find((layer) => layer.hasMask && layer.name.startsWith("Frame"))?.id ?? null);
+    setFrameTarget(
+      document?.layers.find(
+        (layer) => layer.hasMask && layer.name.startsWith("Frame"),
+      )?.id ?? null,
+    );
     setShowFrameDialog(true);
   }, [document]);
 
   const addFrameLayer = useCallback(async () => {
     const [x0, y0, x1, y1] = frameBox;
-    await runCommand("add_frame_layer", { name: "Frame", x0, y0, x1, y1, elliptical: frameElliptical });
+    await runCommand("add_frame_layer", {
+      name: "Frame",
+      x0,
+      y0,
+      x1,
+      y1,
+      elliptical: frameElliptical,
+    });
     setShowFrameDialog(false);
   }, [runCommand, frameBox, frameElliptical]);
 
   const placeIntoFrame = useCallback(async () => {
     if (selectedId === null || frameTarget === null) return;
-    await runCommand("place_into_frame", { frame: frameTarget, source: selectedId });
+    await runCommand("place_into_frame", {
+      frame: frameTarget,
+      source: selectedId,
+    });
     setShowFrameDialog(false);
   }, [runCommand, selectedId, frameTarget]);
 
   const applyFocusArea = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("select_focus_area", { id: selectedId, range: focusRange, spread: focusSpread, mode: selectionMode });
+    await runCommand("select_focus_area", {
+      id: selectedId,
+      range: focusRange,
+      spread: focusSpread,
+      mode: selectionMode,
+    });
     setShowFocusDialog(false);
   }, [runCommand, selectedId, focusRange, focusSpread, selectionMode]);
 
@@ -5692,7 +6788,10 @@ export default function App() {
 
   /** Every channel's point list, with the channel being edited taken from
    * the live state rather than the store. */
-  const curveLists = useCallback((): Record<LevelsChannel, [number, number][]> => {
+  const curveLists = useCallback((): Record<
+    LevelsChannel,
+    [number, number][]
+  > => {
     const listFor = (channel: LevelsChannel): [number, number][] => {
       const entry =
         channel === curveChannel
@@ -5702,7 +6801,12 @@ export default function App() {
         ? entry.nodes
         : IDENTITY_CURVE.map((input, i) => [input, entry.points[i] ?? input]);
     };
-    return { rgb: listFor("rgb"), red: listFor("red"), green: listFor("green"), blue: listFor("blue") };
+    return {
+      rgb: listFor("rgb"),
+      red: listFor("red"),
+      green: listFor("green"),
+      blue: listFor("blue"),
+    };
   }, [curveChannel, curvePoints, curveNodes, curveStore, curvesPointMode]);
 
   const applyCurves = useCallback(async () => {
@@ -5719,10 +6823,16 @@ export default function App() {
    * last sample with a straight run so a fast stroke stays continuous. */
   const pencilDraw = useCallback((event: React.PointerEvent<SVGSVGElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
-    const input = Math.max(0, Math.min(255, Math.round(((event.clientX - box.left) / box.width) * 255)));
+    const input = Math.max(
+      0,
+      Math.min(255, Math.round(((event.clientX - box.left) / box.width) * 255)),
+    );
     const output = Math.max(
       0,
-      Math.min(255, Math.round(255 - ((event.clientY - box.top) / box.height) * 255)),
+      Math.min(
+        255,
+        Math.round(255 - ((event.clientY - box.top) / box.height) * 255),
+      ),
     );
     const last = pencilLast.current;
     pencilLast.current = [input, output];
@@ -5771,7 +6881,12 @@ export default function App() {
       .then((counts) =>
         setCurveHistogram(
           Array.from({ length: 256 }, (_, v) =>
-            Math.round(((counts[0]?.[v] ?? 0) + (counts[1]?.[v] ?? 0) + (counts[2]?.[v] ?? 0)) / 3),
+            Math.round(
+              ((counts[0]?.[v] ?? 0) +
+                (counts[1]?.[v] ?? 0) +
+                (counts[2]?.[v] ?? 0)) /
+                3,
+            ),
           ),
         ),
       )
@@ -5784,14 +6899,21 @@ export default function App() {
     const lists = curveLists();
     const channels: LevelsChannel[] = ["rgb", "red", "green", "blue"];
     void Promise.all(
-      channels.map((channel) => invoke<number[]>("curves_lookup", { points: lists[channel] })),
+      channels.map((channel) =>
+        invoke<number[]>("curves_lookup", { points: lists[channel] }),
+      ),
     )
       .then((luts) =>
-        setCurveLuts(Object.fromEntries(channels.map((channel, i) => [channel, luts[i]]))),
+        setCurveLuts(
+          Object.fromEntries(channels.map((channel, i) => [channel, luts[i]])),
+        ),
       )
       .catch(() => setCurveLuts({}));
     if (curveShowClipping && selectedId !== null) {
-      void invoke<[number, number]>("curves_clipping", { id: selectedId, ...lists })
+      void invoke<[number, number]>("curves_clipping", {
+        id: selectedId,
+        ...lists,
+      })
         .then(setCurveClipping)
         .catch(() => setCurveClipping(null));
     } else {
@@ -5799,17 +6921,28 @@ export default function App() {
     }
   }, [showCurvesDialog, curveLists, curveShowClipping, selectedId]);
 
-  const setCurveNode = useCallback((index: number, axis: 0 | 1, value: number) => {
-    const clamped = Math.max(0, Math.min(255, Math.round(value)));
-    setCurveNodes((nodes) =>
-      nodes.map((node, i) =>
-        i === index ? (axis === 0 ? [clamped, node[1]] : [node[0], clamped]) : node,
-      ),
-    );
-  }, []);
+  const setCurveNode = useCallback(
+    (index: number, axis: 0 | 1, value: number) => {
+      const clamped = Math.max(0, Math.min(255, Math.round(value)));
+      setCurveNodes((nodes) =>
+        nodes.map((node, i) =>
+          i === index
+            ? axis === 0
+              ? [clamped, node[1]]
+              : [node[0], clamped]
+            : node,
+        ),
+      );
+    },
+    [],
+  );
 
   const setColorBalanceValue = useCallback(
-    (setter: (updater: (values: number[]) => number[]) => void, index: number, value: number) => {
+    (
+      setter: (updater: (values: number[]) => number[]) => void,
+      index: number,
+      value: number,
+    ) => {
       setter((values) => values.map((v, i) => (i === index ? value : v)));
     },
     [],
@@ -5824,7 +6957,13 @@ export default function App() {
       highlights: colorBalanceHighlights,
     });
     setShowColorBalanceDialog(false);
-  }, [runCommand, selectedId, colorBalanceShadows, colorBalanceMidtones, colorBalanceHighlights]);
+  }, [
+    runCommand,
+    selectedId,
+    colorBalanceShadows,
+    colorBalanceMidtones,
+    colorBalanceHighlights,
+  ]);
 
   const applySolidColorFill = useCallback(async () => {
     const [r, g, b] = hexToRgb(solidColorFill);
@@ -5870,7 +7009,10 @@ export default function App() {
   // since it depends on whatever is on the clipboard right now, not on
   // any state kept between pastes.
   const pasteClipboard = useCallback(async () => {
-    const mismatch = await invoke<ColorProfile | null>("clipboard_profile_mismatch", {});
+    const mismatch = await invoke<ColorProfile | null>(
+      "clipboard_profile_mismatch",
+      {},
+    );
     if (mismatch) {
       setPasteMismatchFromProfile(mismatch);
       setShowPasteMismatchDialog(true);
@@ -5887,7 +7029,10 @@ export default function App() {
   const applyFill = useCallback(async () => {
     if (selectedId === null) return;
     const [r, g, b] = hexToRgb(fillColor);
-    await runCommand("fill_selection", { id: selectedId, color: [r, g, b, 255] });
+    await runCommand("fill_selection", {
+      id: selectedId,
+      color: [r, g, b, 255],
+    });
     setShowFillDialog(false);
   }, [runCommand, selectedId, fillColor]);
 
@@ -5909,7 +7054,10 @@ export default function App() {
 
   const applyGaussianBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("gaussian_blur", { id: selectedId, radius: gaussianBlurRadius });
+    await runCommand("gaussian_blur", {
+      id: selectedId,
+      radius: gaussianBlurRadius,
+    });
     setShowGaussianBlurDialog(false);
   }, [runCommand, selectedId, gaussianBlurRadius]);
 
@@ -5942,7 +7090,11 @@ export default function App() {
   // Neural Filter falls back to Current Layer, same as that has always
   // meant, since it has no NeuralFilterKind for a smart object to keep.
   const applyNeuralFilterOutput = useCallback(
-    async (command: string, args: Record<string, unknown>, targetId: number) => {
+    async (
+      command: string,
+      args: Record<string, unknown>,
+      targetId: number,
+    ) => {
       let id = targetId;
       const kind = NEURAL_FILTER_KIND_BY_COMMAND[command];
       if (neuralFilterOutput === "smartFilter" && kind) {
@@ -5965,14 +7117,20 @@ export default function App() {
       }
       await runCommand(command, { ...args, id });
       if (neuralFilterOutput === "newMasked") {
-        const masked = await invoke<Snapshot>("add_layer_mask", { id, source: "revealAll" });
+        const masked = await invoke<Snapshot>("add_layer_mask", {
+          id,
+          source: "revealAll",
+        });
         setDocument(masked.document);
         setGeneration(masked.generation);
         setCanUndo(masked.canUndo);
         setCanRedo(masked.canRedo);
         setHasHistorySource(masked.hasHistorySource);
       } else if (neuralFilterOutput === "newDocument") {
-        const destination = await save({ filters: PNG_FILTER, defaultPath: "untitled.png" });
+        const destination = await save({
+          filters: PNG_FILTER,
+          defaultPath: "untitled.png",
+        });
         if (typeof destination === "string") {
           await invoke("export_layer", { id, path: destination });
         }
@@ -6052,7 +7210,13 @@ export default function App() {
       smoothness: glowSmoothness,
     });
     setShowGlowingEdgesDialog(false);
-  }, [runCommand, selectedId, glowEdgeWidth, glowEdgeBrightness, glowSmoothness]);
+  }, [
+    runCommand,
+    selectedId,
+    glowEdgeWidth,
+    glowEdgeBrightness,
+    glowSmoothness,
+  ]);
 
   const applyMosaic = useCallback(async () => {
     if (selectedId === null) return;
@@ -6062,7 +7226,8 @@ export default function App() {
 
   const applyRipple = useCallback(async () => {
     if (selectedId === null) return;
-    const wavelength = RIPPLE_SIZES.find(([value]) => value === rippleSize)?.[2] ?? 16;
+    const wavelength =
+      RIPPLE_SIZES.find(([value]) => value === rippleSize)?.[2] ?? 16;
     // 100 % on the Small size is a one-pixel ripple; the amplitude scales
     // with the wavelength so each size keeps Photoshop's proportions.
     const amplitude = (rippleAmount / 100) * (wavelength / 8);
@@ -6101,7 +7266,10 @@ export default function App() {
 
   const applyPolarCoordinates = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("polar_coordinates", { id: selectedId, toPolar: polarToPolar });
+    await runCommand("polar_coordinates", {
+      id: selectedId,
+      toPolar: polarToPolar,
+    });
     setShowPolarDialog(false);
   }, [runCommand, selectedId, polarToPolar]);
 
@@ -6192,7 +7360,11 @@ export default function App() {
   // matching, not an AI model.
   const applyHarmonize = useCallback(async () => {
     if (selectedId === null) return;
-    await applyNeuralFilterOutput("harmonize", { fade: harmonizeFade }, selectedId);
+    await applyNeuralFilterOutput(
+      "harmonize",
+      { fade: harmonizeFade },
+      selectedId,
+    );
     setShowHarmonizeDialog(false);
   }, [applyNeuralFilterOutput, selectedId, harmonizeFade]);
 
@@ -6220,11 +7392,19 @@ export default function App() {
       selectedId,
     );
     setShowMatchColorDialog(false);
-  }, [applyNeuralFilterOutput, selectedId, matchColorSourceLayerId, matchColorFade]);
+  }, [
+    applyNeuralFilterOutput,
+    selectedId,
+    matchColorSourceLayerId,
+    matchColorFade,
+  ]);
 
   const applyColorHalftone = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("color_halftone", { id: selectedId, maxRadius: colorHalftoneRadius });
+    await runCommand("color_halftone", {
+      id: selectedId,
+      maxRadius: colorHalftoneRadius,
+    });
     setShowColorHalftoneDialog(false);
   }, [runCommand, selectedId, colorHalftoneRadius]);
 
@@ -6232,7 +7412,11 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Add Noise/Crystallize.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("mezzotint", { id: selectedId, cellSize: mezzotintCellSize, seed });
+    await runCommand("mezzotint", {
+      id: selectedId,
+      cellSize: mezzotintCellSize,
+      seed,
+    });
     setShowMezzotintDialog(false);
   }, [runCommand, selectedId, mezzotintCellSize]);
 
@@ -6259,7 +7443,13 @@ export default function App() {
       paperBrightness: coloredPencilPaper,
     });
     setShowColoredPencilDialog(false);
-  }, [runCommand, selectedId, coloredPencilWidth, coloredPencilPressure, coloredPencilPaper]);
+  }, [
+    runCommand,
+    selectedId,
+    coloredPencilWidth,
+    coloredPencilPressure,
+    coloredPencilPaper,
+  ]);
 
   const applyCutout = useCallback(async () => {
     if (selectedId === null) return;
@@ -6293,7 +7483,13 @@ export default function App() {
       seed,
     });
     setShowFilmGrainDialog(false);
-  }, [runCommand, selectedId, filmGrainAmount, filmGrainHighlightArea, filmGrainIntensity]);
+  }, [
+    runCommand,
+    selectedId,
+    filmGrainAmount,
+    filmGrainHighlightArea,
+    filmGrainIntensity,
+  ]);
 
   const applyNeonGlow = useCallback(async () => {
     if (selectedId === null) return;
@@ -6316,7 +7512,13 @@ export default function App() {
       levels: posterEdgesLevels,
     });
     setShowPosterEdgesDialog(false);
-  }, [runCommand, selectedId, posterEdgesThickness, posterEdgesIntensity, posterEdgesLevels]);
+  }, [
+    runCommand,
+    selectedId,
+    posterEdgesThickness,
+    posterEdgesIntensity,
+    posterEdgesLevels,
+  ]);
 
   const applySponge = useCallback(async () => {
     if (selectedId === null) return;
@@ -6339,7 +7541,12 @@ export default function App() {
       shadowIntensity: watercolorShadowIntensity,
     });
     setShowWatercolorDialog(false);
-  }, [runCommand, selectedId, watercolorBrushDetail, watercolorShadowIntensity]);
+  }, [
+    runCommand,
+    selectedId,
+    watercolorBrushDetail,
+    watercolorShadowIntensity,
+  ]);
 
   const applyDarkStrokes = useCallback(async () => {
     if (selectedId === null) return;
@@ -6397,7 +7604,13 @@ export default function App() {
       strength: crosshatchStrength,
     });
     setShowCrosshatchDialog(false);
-  }, [runCommand, selectedId, crosshatchStrokeLength, crosshatchSharpness, crosshatchStrength]);
+  }, [
+    runCommand,
+    selectedId,
+    crosshatchStrokeLength,
+    crosshatchSharpness,
+    crosshatchStrength,
+  ]);
 
   const applyAccentedEdges = useCallback(async () => {
     if (selectedId === null) return;
@@ -6408,7 +7621,13 @@ export default function App() {
       smoothness: accentedEdgesSmoothness,
     });
     setShowAccentedEdgesDialog(false);
-  }, [runCommand, selectedId, accentedEdgesWidth, accentedEdgesBrightness, accentedEdgesSmoothness]);
+  }, [
+    runCommand,
+    selectedId,
+    accentedEdgesWidth,
+    accentedEdgesBrightness,
+    accentedEdgesSmoothness,
+  ]);
 
   const applyAngledStrokes = useCallback(async () => {
     if (selectedId === null) return;
@@ -6419,7 +7638,13 @@ export default function App() {
       sharpness: angledStrokesSharpness,
     });
     setShowAngledStrokesDialog(false);
-  }, [runCommand, selectedId, angledStrokesDirectionBalance, angledStrokesStrokeLength, angledStrokesSharpness]);
+  }, [
+    runCommand,
+    selectedId,
+    angledStrokesDirectionBalance,
+    angledStrokesStrokeLength,
+    angledStrokesSharpness,
+  ]);
 
   const applySprayedStrokes = useCallback(async () => {
     if (selectedId === null) return;
@@ -6430,7 +7655,13 @@ export default function App() {
       direction: sprayedStrokesDirection,
     });
     setShowSprayedStrokesDialog(false);
-  }, [runCommand, selectedId, sprayedStrokesLength, sprayedStrokesRadius, sprayedStrokesDirection]);
+  }, [
+    runCommand,
+    selectedId,
+    sprayedStrokesLength,
+    sprayedStrokesRadius,
+    sprayedStrokesDirection,
+  ]);
 
   const applySumiE = useCallback(async () => {
     if (selectedId === null) return;
@@ -6441,7 +7672,13 @@ export default function App() {
       contrast: sumiEContrast,
     });
     setShowSumiEDialog(false);
-  }, [runCommand, selectedId, sumiEStrokeWidth, sumiEStrokePressure, sumiEContrast]);
+  }, [
+    runCommand,
+    selectedId,
+    sumiEStrokeWidth,
+    sumiEStrokePressure,
+    sumiEContrast,
+  ]);
 
   const applySmudgeStick = useCallback(async () => {
     if (selectedId === null) return;
@@ -6452,7 +7689,13 @@ export default function App() {
       intensity: smudgeStickIntensity,
     });
     setShowSmudgeStickDialog(false);
-  }, [runCommand, selectedId, smudgeStickStrokeLength, smudgeStickHighlightArea, smudgeStickIntensity]);
+  }, [
+    runCommand,
+    selectedId,
+    smudgeStickStrokeLength,
+    smudgeStickHighlightArea,
+    smudgeStickIntensity,
+  ]);
 
   const applyPaintDaubs = useCallback(async () => {
     if (selectedId === null) return;
@@ -6473,7 +7716,13 @@ export default function App() {
       softness: paletteKnifeSoftness,
     });
     setShowPaletteKnifeDialog(false);
-  }, [runCommand, selectedId, paletteKnifeStrokeSize, paletteKnifeStrokeDetail, paletteKnifeSoftness]);
+  }, [
+    runCommand,
+    selectedId,
+    paletteKnifeStrokeSize,
+    paletteKnifeStrokeDetail,
+    paletteKnifeSoftness,
+  ]);
 
   const applyPlasticWrap = useCallback(async () => {
     if (selectedId === null) return;
@@ -6484,7 +7733,13 @@ export default function App() {
       smoothness: plasticWrapSmoothness,
     });
     setShowPlasticWrapDialog(false);
-  }, [runCommand, selectedId, plasticWrapHighlightStrength, plasticWrapDetail, plasticWrapSmoothness]);
+  }, [
+    runCommand,
+    selectedId,
+    plasticWrapHighlightStrength,
+    plasticWrapDetail,
+    plasticWrapSmoothness,
+  ]);
 
   const applyFresco = useCallback(async () => {
     if (selectedId === null) return;
@@ -6495,7 +7750,13 @@ export default function App() {
       texture: frescoTexture,
     });
     setShowFrescoDialog(false);
-  }, [runCommand, selectedId, frescoBrushSize, frescoBrushDetail, frescoTexture]);
+  }, [
+    runCommand,
+    selectedId,
+    frescoBrushSize,
+    frescoBrushDetail,
+    frescoTexture,
+  ]);
 
   const applyRoughPastels = useCallback(async () => {
     if (selectedId === null) return;
@@ -6506,7 +7767,13 @@ export default function App() {
       relief: roughPastelsRelief,
     });
     setShowRoughPastelsDialog(false);
-  }, [runCommand, selectedId, roughPastelsStrokeLength, roughPastelsStrokeDetail, roughPastelsRelief]);
+  }, [
+    runCommand,
+    selectedId,
+    roughPastelsStrokeLength,
+    roughPastelsStrokeDetail,
+    roughPastelsRelief,
+  ]);
 
   const applyUnderpainting = useCallback(async () => {
     if (selectedId === null) return;
@@ -6516,7 +7783,12 @@ export default function App() {
       textureCoverage: underpaintingTextureCoverage,
     });
     setShowUnderpaintingDialog(false);
-  }, [runCommand, selectedId, underpaintingBrushSize, underpaintingTextureCoverage]);
+  }, [
+    runCommand,
+    selectedId,
+    underpaintingBrushSize,
+    underpaintingTextureCoverage,
+  ]);
 
   const applyStamp = useCallback(async () => {
     if (selectedId === null) return;
@@ -6550,7 +7822,13 @@ export default function App() {
       seed,
     });
     setShowReticulationDialog(false);
-  }, [runCommand, selectedId, reticulationDensity, reticulationForegroundLevel, reticulationBackgroundLevel]);
+  }, [
+    runCommand,
+    selectedId,
+    reticulationDensity,
+    reticulationForegroundLevel,
+    reticulationBackgroundLevel,
+  ]);
 
   const applyNotePaper = useCallback(async () => {
     if (selectedId === null) return;
@@ -6574,7 +7852,13 @@ export default function App() {
       direction: graphicPenDirection,
     });
     setShowGraphicPenDialog(false);
-  }, [runCommand, selectedId, graphicPenStrokeLength, graphicPenLightDarkBalance, graphicPenDirection]);
+  }, [
+    runCommand,
+    selectedId,
+    graphicPenStrokeLength,
+    graphicPenLightDarkBalance,
+    graphicPenDirection,
+  ]);
 
   const applyChalkAndCharcoal = useCallback(async () => {
     if (selectedId === null) return;
@@ -6585,7 +7869,13 @@ export default function App() {
       strokePressure: chalkAndCharcoalStrokePressure,
     });
     setShowChalkAndCharcoalDialog(false);
-  }, [runCommand, selectedId, chalkAndCharcoalCharcoalArea, chalkAndCharcoalChalkArea, chalkAndCharcoalStrokePressure]);
+  }, [
+    runCommand,
+    selectedId,
+    chalkAndCharcoalCharcoalArea,
+    chalkAndCharcoalChalkArea,
+    chalkAndCharcoalStrokePressure,
+  ]);
 
   const applyConteCrayon = useCallback(async () => {
     if (selectedId === null) return;
@@ -6599,7 +7889,16 @@ export default function App() {
       invert: conteInvert,
     });
     setShowConteDialog(false);
-  }, [runCommand, selectedId, conteForeground, conteBackground, conteScale, conteRelief, conteLight, conteInvert]);
+  }, [
+    runCommand,
+    selectedId,
+    conteForeground,
+    conteBackground,
+    conteScale,
+    conteRelief,
+    conteLight,
+    conteInvert,
+  ]);
 
   const applyPlaster = useCallback(async () => {
     if (selectedId === null) return;
@@ -6610,7 +7909,13 @@ export default function App() {
       lightDirection: plasterLightDirection,
     });
     setShowPlasterDialog(false);
-  }, [runCommand, selectedId, plasterImageBalance, plasterSmoothness, plasterLightDirection]);
+  }, [
+    runCommand,
+    selectedId,
+    plasterImageBalance,
+    plasterSmoothness,
+    plasterLightDirection,
+  ]);
 
   const applyWaterPaper = useCallback(async () => {
     if (selectedId === null) return;
@@ -6621,7 +7926,13 @@ export default function App() {
       contrast: waterPaperContrast,
     });
     setShowWaterPaperDialog(false);
-  }, [runCommand, selectedId, waterPaperFiberLength, waterPaperBrightness, waterPaperContrast]);
+  }, [
+    runCommand,
+    selectedId,
+    waterPaperFiberLength,
+    waterPaperBrightness,
+    waterPaperContrast,
+  ]);
 
   const applyTornEdges = useCallback(async () => {
     if (selectedId === null) return;
@@ -6635,7 +7946,13 @@ export default function App() {
       seed,
     });
     setShowTornEdgesDialog(false);
-  }, [runCommand, selectedId, tornEdgesImageBalance, tornEdgesSmoothness, tornEdgesContrast]);
+  }, [
+    runCommand,
+    selectedId,
+    tornEdgesImageBalance,
+    tornEdgesSmoothness,
+    tornEdgesContrast,
+  ]);
 
   const applyBasRelief = useCallback(async () => {
     if (selectedId === null) return;
@@ -6646,7 +7963,13 @@ export default function App() {
       lightDirection: basReliefLightDirection,
     });
     setShowBasReliefDialog(false);
-  }, [runCommand, selectedId, basReliefDetail, basReliefSmoothness, basReliefLightDirection]);
+  }, [
+    runCommand,
+    selectedId,
+    basReliefDetail,
+    basReliefSmoothness,
+    basReliefLightDirection,
+  ]);
 
   const applyHalftonePattern = useCallback(async () => {
     if (selectedId === null) return;
@@ -6657,7 +7980,13 @@ export default function App() {
       patternType: halftonePatternType,
     });
     setShowHalftonePatternDialog(false);
-  }, [runCommand, selectedId, halftonePatternSize, halftonePatternContrast, halftonePatternType]);
+  }, [
+    runCommand,
+    selectedId,
+    halftonePatternSize,
+    halftonePatternContrast,
+    halftonePatternType,
+  ]);
 
   const applyChrome = useCallback(async () => {
     if (selectedId === null) return;
@@ -6691,14 +8020,25 @@ export default function App() {
   const applyGlass = useCallback(async () => {
     if (selectedId === null) return;
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("glass", {
+    await runCommand("glass_with", {
       id: selectedId,
       distortion: glassDistortion,
       smoothness: glassSmoothness,
       seed,
+      texture: glassTexture,
+      scaling: glassScaling,
+      invert: glassInvert,
     });
     setShowGlassDialog(false);
-  }, [runCommand, selectedId, glassDistortion, glassSmoothness]);
+  }, [
+    runCommand,
+    selectedId,
+    glassDistortion,
+    glassSmoothness,
+    glassTexture,
+    glassScaling,
+    glassInvert,
+  ]);
 
   const applyOceanRipple = useCallback(async () => {
     if (selectedId === null) return;
@@ -6725,14 +8065,15 @@ export default function App() {
   const applyGrain = useCallback(async () => {
     if (selectedId === null) return;
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("grain", {
+    await runCommand("grain_with", {
       id: selectedId,
       intensity: grainIntensity,
       contrast: grainContrast,
       seed,
+      kind: grainType,
     });
     setShowGrainDialog(false);
-  }, [runCommand, selectedId, grainIntensity, grainContrast]);
+  }, [runCommand, selectedId, grainIntensity, grainContrast, grainType]);
 
   const applyTiles = useCallback(async () => {
     if (selectedId === null) return;
@@ -6815,7 +8156,11 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Add Noise: the backend is deterministic per seed.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("crystallize", { id: selectedId, cellSize: crystallizeCellSize, seed });
+    await runCommand("crystallize", {
+      id: selectedId,
+      cellSize: crystallizeCellSize,
+      seed,
+    });
     setShowCrystallizeDialog(false);
   }, [runCommand, selectedId, crystallizeCellSize]);
 
@@ -6867,7 +8212,12 @@ export default function App() {
       seed,
     });
     setShowDifferenceCloudsDialog(false);
-  }, [runCommand, selectedId, differenceCloudsForeground, differenceCloudsBackground]);
+  }, [
+    runCommand,
+    selectedId,
+    differenceCloudsForeground,
+    differenceCloudsBackground,
+  ]);
 
   const applyFibers = useCallback(async () => {
     if (selectedId === null) return;
@@ -6884,7 +8234,14 @@ export default function App() {
       seed,
     });
     setShowFibersDialog(false);
-  }, [runCommand, selectedId, fibersVariance, fibersStrength, fibersForeground, fibersBackground]);
+  }, [
+    runCommand,
+    selectedId,
+    fibersVariance,
+    fibersStrength,
+    fibersForeground,
+    fibersBackground,
+  ]);
 
   const openLensFlareDialog = useCallback(() => {
     setLensFlareCenterX(Math.round((document?.width ?? 2) / 2));
@@ -6907,7 +8264,13 @@ export default function App() {
       centerY: radialBlurCenterY,
     });
     setShowRadialBlurDialog(false);
-  }, [runCommand, selectedId, radialBlurAmount, radialBlurCenterX, radialBlurCenterY]);
+  }, [
+    runCommand,
+    selectedId,
+    radialBlurAmount,
+    radialBlurCenterX,
+    radialBlurCenterY,
+  ]);
 
   const openTiltShiftDialog = useCallback(() => {
     setTiltShiftFocusRow(Math.round((document?.height ?? 2) / 2));
@@ -6923,7 +8286,13 @@ export default function App() {
       blurRadius: tiltShiftBlurRadius,
     });
     setShowTiltShiftDialog(false);
-  }, [runCommand, selectedId, tiltShiftFocusRow, tiltShiftHalfHeight, tiltShiftBlurRadius]);
+  }, [
+    runCommand,
+    selectedId,
+    tiltShiftFocusRow,
+    tiltShiftHalfHeight,
+    tiltShiftBlurRadius,
+  ]);
 
   const openIrisBlurDialog = useCallback(() => {
     setIrisBlurCenterX(Math.round((document?.width ?? 2) / 2));
@@ -7013,12 +8382,17 @@ export default function App() {
     setShowPathBlurDialog(true);
   }, [document]);
 
-  const setPathBlurPoint = useCallback((index: number, axis: 0 | 1, value: number) => {
-    setPathBlur((options) => ({
-      ...options,
-      points: options.points.map((p, i) => (i === index ? (axis === 0 ? [value, p[1]] : [p[0], value]) : p)),
-    }));
-  }, []);
+  const setPathBlurPoint = useCallback(
+    (index: number, axis: 0 | 1, value: number) => {
+      setPathBlur((options) => ({
+        ...options,
+        points: options.points.map((p, i) =>
+          i === index ? (axis === 0 ? [value, p[1]] : [p[0], value]) : p,
+        ),
+      }));
+    },
+    [],
+  );
 
   const applyPathBlur = useCallback(async () => {
     if (selectedId === null) return;
@@ -7045,7 +8419,13 @@ export default function App() {
       brightness: lensFlareBrightness,
     });
     setShowLensFlareDialog(false);
-  }, [runCommand, selectedId, lensFlareCenterX, lensFlareCenterY, lensFlareBrightness]);
+  }, [
+    runCommand,
+    selectedId,
+    lensFlareCenterX,
+    lensFlareCenterY,
+    lensFlareBrightness,
+  ]);
 
   const openLightingEffectsDialog = useCallback(() => {
     setLightingLightX(Math.round((document?.width ?? 2) / 2));
@@ -7096,7 +8476,13 @@ export default function App() {
       threshold: unsharpMaskThreshold,
     });
     setShowUnsharpMaskDialog(false);
-  }, [runCommand, selectedId, unsharpMaskRadius, unsharpMaskAmount, unsharpMaskThreshold]);
+  }, [
+    runCommand,
+    selectedId,
+    unsharpMaskRadius,
+    unsharpMaskAmount,
+    unsharpMaskThreshold,
+  ]);
 
   const applySmartSharpen = useCallback(async () => {
     if (selectedId === null) return;
@@ -7107,7 +8493,13 @@ export default function App() {
       reduceNoise: smartSharpenReduceNoise,
     });
     setShowSmartSharpenDialog(false);
-  }, [runCommand, selectedId, smartSharpenRadius, smartSharpenAmount, smartSharpenReduceNoise]);
+  }, [
+    runCommand,
+    selectedId,
+    smartSharpenRadius,
+    smartSharpenAmount,
+    smartSharpenReduceNoise,
+  ]);
 
   const applyReduceNoise = useCallback(async () => {
     if (selectedId === null) return;
@@ -7208,7 +8600,11 @@ export default function App() {
 
   const applyTraceContour = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("trace_contour", { id: selectedId, level: traceLevel, upper: traceUpper });
+    await runCommand("trace_contour", {
+      id: selectedId,
+      level: traceLevel,
+      upper: traceUpper,
+    });
     setShowTraceContourDialog(false);
   }, [runCommand, selectedId, traceLevel, traceUpper]);
 
@@ -7233,7 +8629,11 @@ export default function App() {
         if (delta) {
           event.preventDefault();
           if (move) {
-            void runCommand("move_pixels", { id: selectedId, dx: delta[0], dy: delta[1] });
+            void runCommand("move_pixels", {
+              id: selectedId,
+              dx: delta[0],
+              dy: delta[1],
+            });
           } else {
             void runCommand("move_selection", { dx: delta[0], dy: delta[1] });
           }
@@ -7330,7 +8730,10 @@ export default function App() {
         return;
       }
       if (["Shift", "Control", "Meta", "Alt"].includes(event.key)) return;
-      const binding: KeyBinding = { key: event.key.toLowerCase(), shift: event.shiftKey };
+      const binding: KeyBinding = {
+        key: event.key.toLowerCase(),
+        shift: event.shiftKey,
+      };
       const conflict = SHORTCUT_ORDER.find(
         (other) =>
           other !== rebindingAction &&
@@ -7338,7 +8741,9 @@ export default function App() {
           keyBindings[other].shift === binding.shift,
       );
       if (conflict) {
-        setKeyBindingError(`${SHORTCUT_LABELS[conflict]} already uses ${formatKeyBinding(binding)}.`);
+        setKeyBindingError(
+          `${SHORTCUT_LABELS[conflict]} already uses ${formatKeyBinding(binding)}.`,
+        );
         return;
       }
       setKeyBindingError(null);
@@ -7350,10 +8755,12 @@ export default function App() {
   }, [rebindingAction, keyBindings, setKeyBinding]);
 
   useEffect(() => {
-    invoke<BlendModeInfo[]>("blend_modes").then(setBlendModes).catch(() => {
-      // A failure here only costs the picker its labels; the canvas still works.
-      setBlendModes([]);
-    });
+    invoke<BlendModeInfo[]>("blend_modes")
+      .then(setBlendModes)
+      .catch(() => {
+        // A failure here only costs the picker its labels; the canvas still works.
+        setBlendModes([]);
+      });
   }, []);
 
   // Window > Actions -- see README Phase 350.
@@ -7396,13 +8803,17 @@ export default function App() {
     recordingRef.current = next;
     setRecording(next);
     setStopMessage("");
-    await invoke("save_action", { action: next }).catch((err) => setActionsError(String(err)));
+    await invoke("save_action", { action: next }).catch((err) =>
+      setActionsError(String(err)),
+    );
     refreshActions();
   }, [stopMessage, refreshActions]);
   const deleteAction = useCallback(
     async (name: string) => {
       if (recordingRef.current?.name === name) stopRecording();
-      await invoke("delete_action", { name }).catch((err) => setActionsError(String(err)));
+      await invoke("delete_action", { name }).catch((err) =>
+        setActionsError(String(err)),
+      );
       if (selectedActionName === name) setSelectedActionName(null);
       refreshActions();
     },
@@ -7437,7 +8848,9 @@ export default function App() {
           try {
             args = playArgs(step.args, selectedIdRef.current);
           } catch (err) {
-            setError(`Step ${index + 1} of "${action.name}": ${err instanceof Error ? err.message : String(err)}`);
+            setError(
+              `Step ${index + 1} of "${action.name}": ${err instanceof Error ? err.message : String(err)}`,
+            );
             finished = false;
             break;
           }
@@ -7446,7 +8859,11 @@ export default function App() {
             break;
           }
         }
-        setProgress({ stage: `Playing ${action.name}`, done: index + 1, total });
+        setProgress({
+          stage: `Playing ${action.name}`,
+          done: index + 1,
+          total,
+        });
       }
       setProgress(null);
       return finished;
@@ -7457,9 +8874,17 @@ export default function App() {
   // opened, played, and exported under its own name into another folder.
   const batchAction = useCallback(
     async (action: RecordedAction) => {
-      const source = await open({ directory: true, multiple: false, title: "Batch: the folder of PNGs to process" });
+      const source = await open({
+        directory: true,
+        multiple: false,
+        title: "Batch: the folder of PNGs to process",
+      });
       if (typeof source !== "string") return;
-      const destination = await open({ directory: true, multiple: false, title: "Batch: the folder to save the results in" });
+      const destination = await open({
+        directory: true,
+        multiple: false,
+        title: "Batch: the folder to save the results in",
+      });
       if (typeof destination !== "string") return;
       let files: string[];
       try {
@@ -7472,12 +8897,18 @@ export default function App() {
         setError("That folder has no PNG files.");
         return;
       }
-      const separator = destination.includes("\\") && !destination.includes("/") ? "\\" : "/";
+      const separator =
+        destination.includes("\\") && !destination.includes("/") ? "\\" : "/";
       playbackCancelRef.current = false;
       for (let index = 0; index < files.length; index++) {
         if (playbackCancelRef.current) break;
-        setProgress({ stage: `Batch ${action.name}`, done: index, total: files.length });
-        if (!(await runCommand("open_document", { path: files[index] }, "top"))) break;
+        setProgress({
+          stage: `Batch ${action.name}`,
+          done: index,
+          total: files.length,
+        });
+        if (!(await runCommand("open_document", { path: files[index] }, "top")))
+          break;
         if (!(await playAction(action))) break;
         try {
           await invoke("export_png", {
@@ -7495,18 +8926,32 @@ export default function App() {
   );
 
   const openDocument = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: PNG_FILTER });
-    if (typeof selected === "string") await runCommand("open_document", { path: selected }, "top");
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: PNG_FILTER,
+    });
+    if (typeof selected === "string")
+      await runCommand("open_document", { path: selected }, "top");
   }, [runCommand]);
 
   const addLayer = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: PNG_FILTER });
-    if (typeof selected === "string") await runCommand("add_layer", { path: selected }, "top");
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: PNG_FILTER,
+    });
+    if (typeof selected === "string")
+      await runCommand("add_layer", { path: selected }, "top");
   }, [runCommand]);
 
   const applyColorLookup = useCallback(async () => {
     if (selectedId === null) return;
-    const selected = await open({ multiple: false, directory: false, filters: CUBE_FILTER });
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: CUBE_FILTER,
+    });
     if (typeof selected === "string") {
       await runCommand("color_lookup", { id: selectedId, path: selected });
     }
@@ -7514,7 +8959,8 @@ export default function App() {
 
   // File > Export > Content Credentials: whether the next Export PNG embeds
   // a real manifest of this session's own real edit history.
-  const [includeContentCredentials, setIncludeContentCredentials] = useState(false);
+  const [includeContentCredentials, setIncludeContentCredentials] =
+    useState(false);
   // Unlike runCommand, exporting reads the open document but never mutates
   // it — there is no new Snapshot to apply, only success or an error to show.
   // File > Export > Content Credentials: when includeContentCredentials is
@@ -7523,17 +8969,21 @@ export default function App() {
   // exported file — see content_credentials.rs for the real PNG tEXt
   // chunk this becomes.
   const exportDocument = useCallback(async () => {
-    const destination = await save({ filters: PNG_FILTER, defaultPath: "untitled.png" });
+    const destination = await save({
+      filters: PNG_FILTER,
+      defaultPath: "untitled.png",
+    });
     if (typeof destination !== "string") return;
     setBusy(true);
     try {
-      const contentCredentials: ContentCredentialsManifest | null = includeContentCredentials
-        ? {
-            generator: "LegeLabs Photo Editing Suite",
-            createdAt: new Date().toISOString(),
-            actions: editHistoryRef.current,
-          }
-        : null;
+      const contentCredentials: ContentCredentialsManifest | null =
+        includeContentCredentials
+          ? {
+              generator: "LegeLabs Photo Editing Suite",
+              createdAt: new Date().toISOString(),
+              actions: editHistoryRef.current,
+            }
+          : null;
       await invoke("export_png", { path: destination, contentCredentials });
       setError(null);
     } catch (err) {
@@ -7549,7 +8999,10 @@ export default function App() {
   // (not just this button's own disabled state) unless the document is
   // actually set to 32 Bits/Channel.
   const exportTiff32f = useCallback(async () => {
-    const destination = await save({ filters: TIFF_32F_FILTER, defaultPath: "untitled.tiff" });
+    const destination = await save({
+      filters: TIFF_32F_FILTER,
+      defaultPath: "untitled.tiff",
+    });
     if (typeof destination !== "string") return;
     setBusy(true);
     try {
@@ -7566,7 +9019,10 @@ export default function App() {
   // one named artboard's rectangle. Reads the open document but never
   // mutates it.
   const exportArtboard = useCallback(async (name: string) => {
-    const destination = await save({ filters: PNG_FILTER, defaultPath: `${name}.png` });
+    const destination = await save({
+      filters: PNG_FILTER,
+      defaultPath: `${name}.png`,
+    });
     if (typeof destination !== "string") return;
     setBusy(true);
     try {
@@ -7584,7 +9040,10 @@ export default function App() {
   // project file, not just the flattened composite — the counterpart to
   // openProject below. Reads the open document but never mutates it.
   const saveProject = useCallback(async () => {
-    const destination = await save({ filters: PROJECT_FILTER, defaultPath: "untitled.iep" });
+    const destination = await save({
+      filters: PROJECT_FILTER,
+      defaultPath: "untitled.iep",
+    });
     if (typeof destination !== "string") return;
     setBusy(true);
     try {
@@ -7609,7 +9068,8 @@ export default function App() {
   const autosaveTimer = useRef<number | null>(null);
   useEffect(() => {
     if (generation === null || !hasDocumentRef.current) return;
-    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    if (autosaveTimer.current !== null)
+      window.clearTimeout(autosaveTimer.current);
     autosaveTimer.current = window.setTimeout(() => {
       autosaveTimer.current = null;
       invoke<number>("autosave_project")
@@ -7617,7 +9077,8 @@ export default function App() {
         .catch(() => undefined);
     }, AUTOSAVE_DELAY_MS);
     return () => {
-      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+      if (autosaveTimer.current !== null)
+        window.clearTimeout(autosaveTimer.current);
     };
   }, [generation]);
 
@@ -7643,12 +9104,21 @@ export default function App() {
   }, []);
 
   const openProject = useCallback(async () => {
-    const selected = await open({ multiple: false, directory: false, filters: PROJECT_FILTER });
-    if (typeof selected === "string") await runCommand("open_project", { path: selected }, "top");
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: PROJECT_FILTER,
+    });
+    if (typeof selected === "string")
+      await runCommand("open_project", { path: selected }, "top");
   }, [runCommand]);
 
   const createNewDocument = useCallback(async () => {
-    await runCommand("new_document", { width: newWidth, height: newHeight }, "top");
+    await runCommand(
+      "new_document",
+      { width: newWidth, height: newHeight },
+      "top",
+    );
     setShowNewDialog(false);
   }, [runCommand, newWidth, newHeight]);
 
@@ -7687,7 +9157,11 @@ export default function App() {
     (points: [number, number][]) => {
       if (selectedId === null) return;
       const mirrored = symmetry === "off" ? null : symmetry;
-      const dynamics = () => ({ ...brushDynamics, seed: (strokeSeed.current = (strokeSeed.current * 1103515245 + 12345) >>> 0) });
+      const dynamics = () => ({
+        ...brushDynamics,
+        seed: (strokeSeed.current =
+          (strokeSeed.current * 1103515245 + 12345) >>> 0),
+      });
       if (tool === "eraser" && brushDynamicsOn) {
         void runCommand("paint_stroke_dynamic", {
           id: selectedId,
@@ -7749,11 +9223,18 @@ export default function App() {
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
           ...(tool === "sharpen"
-            ? { protectDetail: sharpenProtectDetail, sampleAllLayers: sharpenSampleAll }
+            ? {
+                protectDetail: sharpenProtectDetail,
+                sampleAllLayers: sharpenSampleAll,
+              }
             : {}),
         });
       } else if (tool === "historyBrush") {
-        void runCommand("history_stroke", { id: selectedId, points, radius: brushSize });
+        void runCommand("history_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+        });
       } else if (tool === "mixerBrush") {
         const [r, g, b] = hexToRgb(brushColor);
         void runCommand("mixer_stroke", {
@@ -7775,9 +9256,17 @@ export default function App() {
           tolerance: artTolerance,
         });
       } else if (tool === "remove") {
-        void runCommand("remove_stroke", { id: selectedId, points, radius: brushSize });
+        void runCommand("remove_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+        });
       } else if (tool === "spotHealingBrush") {
-        void runCommand("spot_heal_stroke", { id: selectedId, points, radius: brushSize });
+        void runCommand("spot_heal_stroke", {
+          id: selectedId,
+          points,
+          radius: brushSize,
+        });
       } else if (tool === "healingBrush") {
         void runCommand("heal_stroke", {
           id: selectedId,
@@ -7805,20 +9294,33 @@ export default function App() {
         // colour's luma (black brushes full ink on a spot channel).
         const [r, g, b] = hexToRgb(brushColor);
         const grey = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-        void runCommand(channelView.kind === "alpha" ? "paint_channel" : "paint_spot_channel", {
-          name: channelView.name,
-          points,
-          radius: brushSize,
-          grey,
-        });
+        void runCommand(
+          channelView.kind === "alpha" ? "paint_channel" : "paint_spot_channel",
+          {
+            name: channelView.name,
+            points,
+            radius: brushSize,
+            grey,
+          },
+        );
       } else {
         const [r, g, b] = hexToRgb(brushColor);
         const alpha = Math.round(brushOpacity * 255);
         if (useBrushTip && document?.hasBrushTip) {
           if (brushDynamicsOn) {
-            void runCommand("tip_stroke_dynamic", { id: selectedId, points, color: [r, g, b, alpha], dynamics: dynamics() });
+            void runCommand("tip_stroke_dynamic", {
+              id: selectedId,
+              points,
+              color: [r, g, b, alpha],
+              dynamics: dynamics(),
+            });
           } else {
-            void runCommand("tip_stroke", { id: selectedId, points, color: [r, g, b, alpha], spacing: tipSpacing });
+            void runCommand("tip_stroke", {
+              id: selectedId,
+              points,
+              color: [r, g, b, alpha],
+              spacing: tipSpacing,
+            });
           }
           return;
         }
@@ -7861,14 +9363,22 @@ export default function App() {
   );
 
   useEffect(() => {
-    if (!showTransformControls || tool !== "move" || selectedId === null || !document) {
+    if (
+      !showTransformControls ||
+      tool !== "move" ||
+      selectedId === null ||
+      !document
+    ) {
       setControlBounds(null);
       return;
     }
     let cancelled = false;
-    void invoke<{ x0: number; y0: number; x1: number; y1: number } | null>("layer_bounds", {
-      id: selectedId,
-    })
+    void invoke<{ x0: number; y0: number; x1: number; y1: number } | null>(
+      "layer_bounds",
+      {
+        id: selectedId,
+      },
+    )
       .then((bounds) => {
         if (!cancelled) setControlBounds(bounds);
       })
@@ -7942,18 +9452,34 @@ export default function App() {
       }
       if (!next || !drag || selectedId === null) return;
       const { x0, y0, x1, y1 } = next;
-      if (x0 === drag.start.x0 && y0 === drag.start.y0 && x1 === drag.start.x1 && y1 === drag.start.y1) {
+      if (
+        x0 === drag.start.x0 &&
+        y0 === drag.start.y0 &&
+        x1 === drag.start.x1 &&
+        y1 === drag.start.y1
+      ) {
         return;
       }
-      void runCommand("transform_to_bounds", { id: selectedId, x0, y0, x1, y1, interpolation: interpolationArg });
+      void runCommand("transform_to_bounds", {
+        id: selectedId,
+        x0,
+        y0,
+        x1,
+        y1,
+        interpolation: interpolationArg,
+      });
     },
     [draggedRect, selectedId, runCommand, interpolationArg],
   );
 
   /** The pointer's angle about a screen-space centre, in degrees. */
   const rotateAngleAt = useCallback(
-    (event: React.PointerEvent<HTMLElement>, center: { x: number; y: number }) =>
-      (Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180) / Math.PI,
+    (
+      event: React.PointerEvent<HTMLElement>,
+      center: { x: number; y: number },
+    ) =>
+      (Math.atan2(event.clientY - center.y, event.clientX - center.x) * 180) /
+      Math.PI,
     [],
   );
 
@@ -7966,10 +9492,20 @@ export default function App() {
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
       const center = {
-        x: rect.left + ((controlBounds.x0 + controlBounds.x1) / 2 / document.width) * rect.width,
-        y: rect.top + ((controlBounds.y0 + controlBounds.y1) / 2 / document.height) * rect.height,
+        x:
+          rect.left +
+          ((controlBounds.x0 + controlBounds.x1) / 2 / document.width) *
+            rect.width,
+        y:
+          rect.top +
+          ((controlBounds.y0 + controlBounds.y1) / 2 / document.height) *
+            rect.height,
       };
-      rotateDrag.current = { centerX: center.x, centerY: center.y, startAngle: rotateAngleAt(event, center) };
+      rotateDrag.current = {
+        centerX: center.x,
+        centerY: center.y,
+        startAngle: rotateAngleAt(event, center),
+      };
       setControlRotation(0);
     },
     [controlBounds, document, rotateAngleAt],
@@ -7979,7 +9515,9 @@ export default function App() {
     (event: React.PointerEvent<HTMLElement>) => {
       const drag = rotateDrag.current;
       if (!drag) return;
-      let degrees = rotateAngleAt(event, { x: drag.centerX, y: drag.centerY }) - drag.startAngle;
+      let degrees =
+        rotateAngleAt(event, { x: drag.centerX, y: drag.centerY }) -
+        drag.startAngle;
       if (event.shiftKey) degrees = Math.round(degrees / 15) * 15;
       setControlRotation(degrees);
     },
@@ -7995,7 +9533,13 @@ export default function App() {
       }
       const degrees = controlRotation;
       setControlRotation(null);
-      if (!drag || selectedId === null || degrees === null || Math.abs(degrees) < 0.05) return;
+      if (
+        !drag ||
+        selectedId === null ||
+        degrees === null ||
+        Math.abs(degrees) < 0.05
+      )
+        return;
       void runCommand("free_transform", {
         id: selectedId,
         transform: {
@@ -8063,7 +9607,14 @@ export default function App() {
         opacity: Math.round(brushOpacity * 255),
       });
     },
-    [document, selectedId, runCommand, magicWandTolerance, magicWandContiguous, brushOpacity],
+    [
+      document,
+      selectedId,
+      runCommand,
+      magicWandTolerance,
+      magicWandContiguous,
+      brushOpacity,
+    ],
   );
 
   const isRedEye = tool === "redEye";
@@ -8079,7 +9630,8 @@ export default function App() {
   const isObjectSelect = tool === "objectSelect";
   const isObjectSelectLasso = tool === "objectSelectLasso";
   // The Quick Selection tool shares the Selection Brush's stroke capture.
-  const isSelectionBrush = tool === "selectionBrush" || tool === "quickSelection";
+  const isSelectionBrush =
+    tool === "selectionBrush" || tool === "quickSelection";
   const isPen = tool === "pen";
   const isFreeformPen = tool === "freeformPen";
   const isCurvaturePen = tool === "curvaturePen";
@@ -8120,9 +9672,16 @@ export default function App() {
   const saveNote = useCallback(async () => {
     if (!noteDialog) return;
     if (noteDialog.index === null) {
-      await runCommand("add_note", { x: noteDialog.x, y: noteDialog.y, text: noteDialog.text });
+      await runCommand("add_note", {
+        x: noteDialog.x,
+        y: noteDialog.y,
+        text: noteDialog.text,
+      });
     } else {
-      await runCommand("set_note_text", { index: noteDialog.index, text: noteDialog.text });
+      await runCommand("set_note_text", {
+        index: noteDialog.index,
+        text: noteDialog.text,
+      });
     }
     setNoteDialog(null);
   }, [runCommand, noteDialog]);
@@ -8157,7 +9716,9 @@ export default function App() {
       const y = Math.floor(fy);
       if (x < 0 || y < 0 || x >= document.width || y >= document.height) return;
       // Photoshop caps samplers at ten; a click beyond that is ignored.
-      setColorSamplers((current) => (current.length >= 10 ? current : [...current, [x, y]]));
+      setColorSamplers((current) =>
+        current.length >= 10 ? current : [...current, [x, y]],
+      );
     },
     [document],
   );
@@ -8172,7 +9733,9 @@ export default function App() {
     const inside = colorSamplers.filter(
       ([x, y]) => x < document.width && y < document.height,
     );
-    void invoke<[number, number, number, number][]>("sample_points", { points: inside })
+    void invoke<[number, number, number, number][]>("sample_points", {
+      points: inside,
+    })
       .then(setSamplerReadouts)
       .catch(() => setSamplerReadouts([]));
   }, [document, colorSamplers]);
@@ -8197,8 +9760,18 @@ export default function App() {
       const [x, y] = toDocPoint(event, document);
       const bounds =
         tool === "selectRow"
-          ? { x0: 0, y0: Math.floor(y), x1: document.width, y1: Math.floor(y) + 1 }
-          : { x0: Math.floor(x), y0: 0, x1: Math.floor(x) + 1, y1: document.height };
+          ? {
+              x0: 0,
+              y0: Math.floor(y),
+              x1: document.width,
+              y1: Math.floor(y) + 1,
+            }
+          : {
+              x0: Math.floor(x),
+              y0: 0,
+              x1: Math.floor(x) + 1,
+              y1: document.height,
+            };
       void runCommand("select_rectangle", bounds);
     },
     [document, tool, runCommand],
@@ -8248,9 +9821,16 @@ export default function App() {
         const [x, y] = toDocPoint(event, document);
         const px = Math.floor(x);
         const py = Math.floor(y);
-        void invoke<[number, number, number, number]>("rgb_levels", { id: selectedId, x: px, y: py })
+        void invoke<[number, number, number, number]>("rgb_levels", {
+          id: selectedId,
+          x: px,
+          y: py,
+        })
           .then(([r, g, b]) => {
-            setColorRangeSamples((samples) => [...samples, { color: [r, g, b], position: [px, py] }]);
+            setColorRangeSamples((samples) => [
+              ...samples,
+              { color: [r, g, b], position: [px, py] },
+            ]);
           })
           .catch((err) => setError(String(err)))
           .finally(() => {
@@ -8284,7 +9864,11 @@ export default function App() {
               : levelsEyedropper === "gray"
                 ? "levels_gray_point"
                 : "levels_white_point";
-          void runCommand(command, { id: selectedId, x: Math.floor(x), y: Math.floor(y) });
+          void runCommand(command, {
+            id: selectedId,
+            x: Math.floor(x),
+            y: Math.floor(y),
+          });
         }
         setLevelsEyedropper(null);
         return;
@@ -8330,14 +9914,24 @@ export default function App() {
             .then(async (id) => {
               if (id !== null) setSelectedId(id);
               if (moveAutoSelectGroup) {
-                moveGroupIndex.current = await invoke<number | null>("group_at", { x, y });
+                moveGroupIndex.current = await invoke<number | null>(
+                  "group_at",
+                  { x, y },
+                );
               }
             })
             .catch((err) => setError(String(err)));
         }
         return;
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush || isFreeformPen) {
+      if (
+        isLasso ||
+        isMagneticLasso ||
+        isObjectSelectLasso ||
+        isVectorMask ||
+        isSelectionBrush ||
+        isFreeformPen
+      ) {
         event.currentTarget.setPointerCapture(event.pointerId);
         const start = toDocPoint(event, document);
         lassoTrail.current = [start];
@@ -8358,20 +9952,30 @@ export default function App() {
         if (nearPathStart(document.currentPath, point)) {
           void runCommand("close_current_path", {});
         } else {
-          void runCommand("curvature_pen_add_anchor", { x: point[0], y: point[1] });
+          void runCommand("curvature_pen_add_anchor", {
+            x: point[0],
+            y: point[1],
+          });
         }
         return;
       }
       if (isAddAnchorPoint) {
         const path = document.currentPath;
-        const hit = path && nearestPathSegment(path, toDocPoint(event, document));
-        if (hit) void runCommand("add_anchor_point", { segment: hit.segment, t: hit.t });
+        const hit =
+          path && nearestPathSegment(path, toDocPoint(event, document));
+        if (hit)
+          void runCommand("add_anchor_point", {
+            segment: hit.segment,
+            t: hit.t,
+          });
         return;
       }
       if (isDeleteAnchorPoint) {
         const path = document.currentPath;
-        const index = path && nearestPathAnchor(path, toDocPoint(event, document));
-        if (index !== null && index !== undefined) void runCommand("delete_anchor_point", { index });
+        const index =
+          path && nearestPathAnchor(path, toDocPoint(event, document));
+        if (index !== null && index !== undefined)
+          void runCommand("delete_anchor_point", { index });
         return;
       }
       if (isConvertPoint) {
@@ -8538,7 +10142,11 @@ export default function App() {
       const key = `${selectedId}:${x}:${y}`;
       if (lastLevelsPixel.current === key) return;
       lastLevelsPixel.current = key;
-      void invoke<[number, number, number, number]>("rgb_levels", { id: selectedId, x, y })
+      void invoke<[number, number, number, number]>("rgb_levels", {
+        id: selectedId,
+        x,
+        y,
+      })
         .then((levels) => setRgbLevels(levels))
         .catch(() => setRgbLevels(null));
     },
@@ -8563,14 +10171,19 @@ export default function App() {
         const key = `${Math.floor(fx)}:${Math.floor(fy)}`;
         if (lastHoverPixel.current !== key) {
           lastHoverPixel.current = key;
-          void invoke<number | null>("layer_at", { x: Math.floor(fx), y: Math.floor(fy) })
+          void invoke<number | null>("layer_at", {
+            x: Math.floor(fx),
+            y: Math.floor(fy),
+          })
             .then((id) =>
               id === null
                 ? null
-                : invoke<{ x0: number; y0: number; x1: number; y1: number } | null>(
-                    "layer_bounds",
-                    { id },
-                  ),
+                : invoke<{
+                    x0: number;
+                    y0: number;
+                    x1: number;
+                    y1: number;
+                  } | null>("layer_bounds", { id }),
             )
             .then((bounds) => setHoverBounds(bounds))
             .catch(() => setHoverBounds(null));
@@ -8578,7 +10191,14 @@ export default function App() {
       } else if (hoverBounds !== null) {
         setHoverBounds(null);
       }
-      if (isLasso || isMagneticLasso || isObjectSelectLasso || isVectorMask || isSelectionBrush || isFreeformPen) {
+      if (
+        isLasso ||
+        isMagneticLasso ||
+        isObjectSelectLasso ||
+        isVectorMask ||
+        isSelectionBrush ||
+        isFreeformPen
+      ) {
         if (lassoTrail.current === null) return;
         lassoTrail.current.push(toDocPoint(event, document));
         setLassoPoints([...lassoTrail.current]);
@@ -8586,7 +10206,10 @@ export default function App() {
       }
       if (isMarqueeTool || isRectangle || isObjectSelect) {
         if (marqueeStart.current === null) return;
-        setMarqueePreview({ start: marqueeStart.current, current: toDocPoint(event, document) });
+        setMarqueePreview({
+          start: marqueeStart.current,
+          current: toDocPoint(event, document),
+        });
         return;
       }
       if (lastPoint.current === null) return;
@@ -8627,7 +10250,10 @@ export default function App() {
           void invoke<[number, number][]>("curve_with_point", {
             points: curvesPointMode
               ? curveNodes
-              : IDENTITY_CURVE.map((input, i) => [input, curvePoints[i] ?? input]),
+              : IDENTITY_CURVE.map((input, i) => [
+                  input,
+                  curvePoints[i] ?? input,
+                ]),
             input: drag.input,
             delta,
           })
@@ -8676,7 +10302,11 @@ export default function App() {
         if (start && document) {
           const end = toDocPoint(event, document);
           const dragged = Math.hypot(end[0] - start[0], end[1] - start[1]) > 1;
-          void runCommand("pen_add_anchor", { x: start[0], y: start[1], handle: dragged ? end : null });
+          void runCommand("pen_add_anchor", {
+            x: start[0],
+            y: start[1],
+            handle: dragged ? end : null,
+          });
         }
         return;
       }
@@ -8688,7 +10318,10 @@ export default function App() {
         if (index !== null && start && document) {
           const end = toDocPoint(event, document);
           const dragged = Math.hypot(end[0] - start[0], end[1] - start[1]) > 1;
-          void runCommand("convert_anchor_point", { index, handle: dragged ? end : null });
+          void runCommand("convert_anchor_point", {
+            index,
+            handle: dragged ? end : null,
+          });
         }
         return;
       }
@@ -8712,7 +10345,8 @@ export default function App() {
           const end = toDocPoint(event, document);
           const dx = end[0] - start[0];
           const dy = end[1] - start[1];
-          if (dx !== 0 || dy !== 0) void runCommand("move_anchor", { index, dx, dy });
+          if (dx !== 0 || dy !== 0)
+            void runCommand("move_anchor", { index, dx, dy });
         }
         return;
       }
@@ -8722,7 +10356,11 @@ export default function App() {
         setLassoPoints([]);
         if (trail && trail.length >= 3 && selectedId !== null) {
           // Alt hides the path's inside instead of revealing it.
-          void runCommand("add_vector_mask", { id: selectedId, points: trail, reveal: !event.altKey });
+          void runCommand("add_vector_mask", {
+            id: selectedId,
+            points: trail,
+            reveal: !event.altKey,
+          });
         }
         return;
       }
@@ -8730,7 +10368,8 @@ export default function App() {
         const trail = lassoTrail.current;
         lassoTrail.current = null;
         setLassoPoints([]);
-        if (trail && trail.length >= 2) void runCommand("freeform_pen", { points: trail });
+        if (trail && trail.length >= 2)
+          void runCommand("freeform_pen", { points: trail });
         return;
       }
       if (isObjectSelectLasso) {
@@ -8785,7 +10424,11 @@ export default function App() {
         if (trail && trail.length >= 1) {
           // The Selection Brush adds by default; Alt subtracts, Shift+Alt intersects.
           const mode: SelectionMode =
-            event.shiftKey && event.altKey ? "intersect" : event.altKey ? "subtract" : "add";
+            event.shiftKey && event.altKey
+              ? "intersect"
+              : event.altKey
+                ? "subtract"
+                : "add";
           if (tool === "quickSelection") {
             if (selectedId === null) return;
             void runCommand("quick_select", {
@@ -8803,7 +10446,11 @@ export default function App() {
             const radius = Math.max(0.5, Math.hypot(ex - cx, ey - cy));
             void runCommand("select_circle", { cx, cy, radius, mode });
           } else {
-            void runCommand("select_brush", { points: trail, radius: brushSize, mode });
+            void runCommand("select_brush", {
+              points: trail,
+              radius: brushSize,
+              mode,
+            });
           }
         }
         return;
@@ -8834,14 +10481,23 @@ export default function App() {
           const dy = Math.round(y1 - start[1]);
           if (dx !== 0 || dy !== 0) {
             const command =
-              tool === "contentAwareMove" ? "content_aware_move" : isPatch ? "patch" : "move_pixels";
+              tool === "contentAwareMove"
+                ? "content_aware_move"
+                : isPatch
+                  ? "patch"
+                  : "move_pixels";
             const groupIndex = moveGroupIndex.current;
             moveGroupIndex.current = null;
             if (isMove && groupIndex !== null) {
               void runCommand("move_group", { index: groupIndex, dx, dy });
             } else if (isMove && smartGuides) {
               const id = selectedId;
-              void invoke<[number, number]>("snap_move", { id, dx, dy, threshold: 8 })
+              void invoke<[number, number]>("snap_move", {
+                id,
+                dx,
+                dy,
+                threshold: 8,
+              })
                 .then(([sx, sy]) => runCommand(command, { id, dx: sx, dy: sy }))
                 .catch((err) => setError(String(err)));
             } else {
@@ -8856,7 +10512,12 @@ export default function App() {
         rulerStart.current = null;
         if (start && document) {
           const [x1, y1] = toDocPoint(event, document);
-          void invoke<Measurement>("ruler_measure", { x0: start[0], y0: start[1], x1, y1 })
+          void invoke<Measurement>("ruler_measure", {
+            x0: start[0],
+            y0: start[1],
+            x1,
+            y1,
+          })
             .then(setRulerReadout)
             .catch((err) => setError(String(err)));
         }
@@ -8874,7 +10535,10 @@ export default function App() {
             const [r, g, b] = hexToRgb(brushColor);
             const [sr, sg, sb] = hexToRgb(shapeStrokeColor);
             const fill = shapeFill ? [r, g, b, 255] : null;
-            const stroke = shapeStrokeWidth > 0 ? [[sr, sg, sb, 255], shapeStrokeWidth] : null;
+            const stroke =
+              shapeStrokeWidth > 0
+                ? [[sr, sg, sb, 255], shapeStrokeWidth]
+                : null;
             if (tool === "triangle") {
               void runCommand("draw_triangle", {
                 id: selectedId,
@@ -8916,7 +10580,15 @@ export default function App() {
                 color: [r, g, b, 255],
               });
             } else if (tool === "ellipse") {
-              void runCommand("draw_ellipse", { id: selectedId, x0, y0, x1, y1, fill, stroke });
+              void runCommand("draw_ellipse", {
+                id: selectedId,
+                x0,
+                y0,
+                x1,
+                y1,
+                fill,
+                stroke,
+              });
             } else {
               void runCommand("draw_rectangle", {
                 id: selectedId,
@@ -8944,7 +10616,8 @@ export default function App() {
           // rather than round-tripping to the backend just to show its
           // "must cover at least one pixel" error for an everyday click.
           if (x0 !== x1 || y0 !== y1) {
-            const command = tool === "selectRect" ? "select_rectangle" : "select_ellipse";
+            const command =
+              tool === "selectRect" ? "select_rectangle" : "select_ellipse";
             // Photoshop's modifiers override the Mode picker for this drag.
             const mode: SelectionMode =
               event.shiftKey && event.altKey
@@ -9043,7 +10716,8 @@ export default function App() {
   const layers = document?.layers ?? [];
   // A selected alpha channel that no longer exists falls back to the composite.
   const shownChannel: ChannelView =
-    channelView.kind === "alpha" && !(document?.channels ?? []).includes(channelView.name)
+    channelView.kind === "alpha" &&
+    !(document?.channels ?? []).includes(channelView.name)
       ? { kind: "composite" }
       : channelView;
   const proofQuery =
@@ -9057,7 +10731,9 @@ export default function App() {
   const compositeSrc =
     generation !== null
       ? `composite://composite.png?g=${generation}${
-          shownChannel.kind === "composite" ? proofQuery : `&channel=${channelQuery(shownChannel)}`
+          shownChannel.kind === "composite"
+            ? proofQuery
+            : `&channel=${channelQuery(shownChannel)}`
         }`
       : null;
 
@@ -9069,30 +10745,54 @@ export default function App() {
   // Apply activate() calls are gated on canPaint below rather than risking
   // a dialog whose own Apply silently does nothing.
   const DISCOVER_ACTIONS: { label: string; activate: () => void }[] = [
-    { label: "Accented Edges", activate: () => setShowAccentedEdgesDialog(true) },
-    { label: "Adaptive Wide Angle", activate: () => setShowAdaptiveWideAngleDialog(true) },
+    {
+      label: "Accented Edges",
+      activate: () => setShowAccentedEdgesDialog(true),
+    },
+    {
+      label: "Adaptive Wide Angle",
+      activate: () => setShowAdaptiveWideAngleDialog(true),
+    },
     { label: "Add Noise", activate: () => setShowAddNoiseDialog(true) },
-    { label: "Angled Strokes", activate: () => setShowAngledStrokesDialog(true) },
+    {
+      label: "Angled Strokes",
+      activate: () => setShowAngledStrokesDialog(true),
+    },
     { label: "Bas Relief", activate: () => setShowBasReliefDialog(true) },
     { label: "Bevel Emboss", activate: () => setShowBevelEmbossDialog(true) },
     { label: "Box Blur", activate: () => setShowBoxBlurDialog(true) },
-    { label: "Brightness Contrast", activate: () => setShowBrightnessContrastDialog(true) },
+    {
+      label: "Brightness Contrast",
+      activate: () => setShowBrightnessContrastDialog(true),
+    },
     { label: "Camera Raw", activate: () => setShowCameraRawDialog(true) },
-    { label: "Camera Raw Saturation", activate: () => setShowCameraRawSaturationDialog(true) },
+    {
+      label: "Camera Raw Saturation",
+      activate: () => setShowCameraRawSaturationDialog(true),
+    },
     { label: "Canvas Size", activate: () => openCanvasSizeDialog(false) },
     { label: "Content-Aware Scale", activate: () => setShowCasDialog(true) },
-    { label: "Chalk & Charcoal", activate: () => setShowChalkAndCharcoalDialog(true) },
+    {
+      label: "Chalk & Charcoal",
+      activate: () => setShowChalkAndCharcoalDialog(true),
+    },
     { label: "Channel Mixer", activate: () => setShowChannelMixerDialog(true) },
     { label: "Chrome", activate: () => setShowChromeDialog(true) },
     { label: "Clarity", activate: () => setShowClarityDialog(true) },
     { label: "Clouds", activate: () => setShowCloudsDialog(true) },
     { label: "Color Balance", activate: () => setShowColorBalanceDialog(true) },
     { label: "Color Grading", activate: () => setShowColorGradingDialog(true) },
-    { label: "Color Halftone", activate: () => setShowColorHalftoneDialog(true) },
+    {
+      label: "Color Halftone",
+      activate: () => setShowColorHalftoneDialog(true),
+    },
     { label: "Color Mixer", activate: () => setShowColorMixerDialog(true) },
     { label: "Color Overlay", activate: () => setShowColorOverlayDialog(true) },
     { label: "Color Range", activate: () => setShowColorRangeDialog(true) },
-    { label: "Colored Pencil", activate: () => setShowColoredPencilDialog(true) },
+    {
+      label: "Colored Pencil",
+      activate: () => setShowColoredPencilDialog(true),
+    },
     { label: "Conté Crayon", activate: () => setShowConteDialog(true) },
     { label: "Contour", activate: () => setShowContourDialog(true) },
     { label: "Craquelure", activate: () => setShowCraquelureDialog(true) },
@@ -9102,38 +10802,65 @@ export default function App() {
     { label: "Cutout", activate: () => setShowCutoutDialog(true) },
     { label: "Dark Strokes", activate: () => setShowDarkStrokesDialog(true) },
     { label: "Defringe", activate: () => setShowDefringeDialog(true) },
-    { label: "Difference Clouds", activate: () => setShowDifferenceCloudsDialog(true) },
+    {
+      label: "Difference Clouds",
+      activate: () => setShowDifferenceCloudsDialog(true),
+    },
     { label: "Diffuse", activate: () => setShowDiffuseDialog(true) },
     { label: "Diffuse Glow", activate: () => setShowDiffuseGlowDialog(true) },
     { label: "Drop Shadow", activate: () => setShowDropShadowDialog(true) },
     { label: "Dry Brush", activate: () => setShowDryBrushDialog(true) },
-    { label: "Dust & Scratches", activate: () => setShowDustAndScratchesDialog(true) },
+    {
+      label: "Dust & Scratches",
+      activate: () => setShowDustAndScratchesDialog(true),
+    },
     { label: "Emboss", activate: () => setShowEmbossDialog(true) },
     { label: "Exposure", activate: () => setShowExposureDialog(true) },
     { label: "Extrude", activate: () => setShowExtrudeDialog(true) },
     { label: "Fibers", activate: () => setShowFibersDialog(true) },
     { label: "Film Grain", activate: () => setShowFilmGrainDialog(true) },
-    { label: "Free Transform", activate: () => setShowFreeTransformDialog(true) },
+    {
+      label: "Free Transform",
+      activate: () => setShowFreeTransformDialog(true),
+    },
     { label: "Fresco", activate: () => setShowFrescoDialog(true) },
     { label: "Gaussian Blur", activate: () => setShowGaussianBlurDialog(true) },
-    { label: "Generate Similar", activate: () => void runCommand("generate_similar") },
+    {
+      label: "Generate Similar",
+      activate: () => void runCommand("generate_similar"),
+    },
     { label: "Generative Expand", activate: () => openCanvasSizeDialog(true) },
     { label: "Geometry", activate: () => setShowGeometryDialog(true) },
     { label: "Glass", activate: () => setShowGlassDialog(true) },
     { label: "Glowing Edges", activate: () => setShowGlowingEdgesDialog(true) },
     { label: "Gradient Map", activate: () => setShowGradientMapDialog(true) },
-    { label: "Gradient Overlay", activate: () => setShowGradientOverlayDialog(true) },
+    {
+      label: "Gradient Overlay",
+      activate: () => setShowGradientOverlayDialog(true),
+    },
     { label: "Grain", activate: () => setShowGrainDialog(true) },
     { label: "Graphic Pen", activate: () => setShowGraphicPenDialog(true) },
-    { label: "Halftone Pattern", activate: () => setShowHalftonePatternDialog(true) },
+    {
+      label: "Halftone Pattern",
+      activate: () => setShowHalftonePatternDialog(true),
+    },
     { label: "High Pass", activate: () => setShowHighPassDialog(true) },
-    { label: "Highlights Shadows", activate: () => setShowHighlightsShadowsDialog(true) },
-    { label: "Hue Saturation", activate: () => setShowHueSaturationDialog(true) },
+    {
+      label: "Highlights Shadows",
+      activate: () => setShowHighlightsShadowsDialog(true),
+    },
+    {
+      label: "Hue Saturation",
+      activate: () => setShowHueSaturationDialog(true),
+    },
     { label: "Ink Outlines", activate: () => setShowInkOutlinesDialog(true) },
     { label: "Inner Glow", activate: () => setShowInnerGlowDialog(true) },
     { label: "Inner Shadow", activate: () => setShowInnerShadowDialog(true) },
     { label: "Lens Blur", activate: () => setShowLensBlurDialog(true) },
-    { label: "Lens Correction", activate: () => setShowLensCorrectionDialog(true) },
+    {
+      label: "Lens Correction",
+      activate: () => setShowLensCorrectionDialog(true),
+    },
     { label: "Levels", activate: () => setShowLevelsDialog(true) },
     { label: "Maximum", activate: () => setShowMaximumDialog(true) },
     { label: "Median", activate: () => setShowMedianDialog(true) },
@@ -9149,9 +10876,15 @@ export default function App() {
     { label: "Outer Glow", activate: () => setShowOuterGlowDialog(true) },
     { label: "Paint Daubs", activate: () => setShowPaintDaubsDialog(true) },
     { label: "Palette Knife", activate: () => setShowPaletteKnifeDialog(true) },
-    { label: "Parametric Curve", activate: () => setShowParametricCurveDialog(true) },
+    {
+      label: "Parametric Curve",
+      activate: () => setShowParametricCurveDialog(true),
+    },
     { label: "Patchwork", activate: () => setShowPatchworkDialog(true) },
-    { label: "Pattern Overlay", activate: () => setShowPatternOverlayDialog(true) },
+    {
+      label: "Pattern Overlay",
+      activate: () => setShowPatternOverlayDialog(true),
+    },
     { label: "Perspective", activate: () => setShowPerspectiveDialog(true) },
     { label: "Photo Filter", activate: () => setShowPhotoFilterDialog(true) },
     { label: "Photocopy", activate: () => setShowPhotocopyDialog(true) },
@@ -9172,7 +10905,10 @@ export default function App() {
     { label: "Rough Pastels", activate: () => setShowRoughPastelsDialog(true) },
     { label: "Satin", activate: () => setShowSatinDialog(true) },
     { label: "Scale", activate: () => setShowScaleDialog(true) },
-    { label: "Selective Color", activate: () => setShowSelectiveColorDialog(true) },
+    {
+      label: "Selective Color",
+      activate: () => setShowSelectiveColorDialog(true),
+    },
     { label: "Shape Blur", activate: () => setShowShapeBlurDialog(true) },
     { label: "Shear", activate: () => setShowShearDialog(true) },
     { label: "Skew", activate: () => setShowSkewDialog(true) },
@@ -9181,11 +10917,20 @@ export default function App() {
     { label: "Spatter", activate: () => setShowSpatterDialog(true) },
     { label: "Spherize", activate: () => setShowSpherizeDialog(true) },
     { label: "Sponge", activate: () => setShowSpongeDialog(true) },
-    { label: "Sprayed Strokes", activate: () => setShowSprayedStrokesDialog(true) },
+    {
+      label: "Sprayed Strokes",
+      activate: () => setShowSprayedStrokesDialog(true),
+    },
     { label: "Stained Glass", activate: () => setShowStainedGlassDialog(true) },
     { label: "Stamp (Sketch)", activate: () => setShowStampDialog(true) },
-    { label: "Stroke Outline", activate: () => setShowStrokeOutlineDialog(true) },
-    { label: "Skin Smoothing", activate: () => setShowSkinSmoothingDialog(true) },
+    {
+      label: "Stroke Outline",
+      activate: () => setShowStrokeOutlineDialog(true),
+    },
+    {
+      label: "Skin Smoothing",
+      activate: () => setShowSkinSmoothingDialog(true),
+    },
     { label: "Harmonize", activate: () => setShowHarmonizeDialog(true) },
     {
       label: "JPEG Artifacts Removal",
@@ -9193,7 +10938,10 @@ export default function App() {
     },
     { label: "Sumi-e", activate: () => setShowSumiEDialog(true) },
     { label: "Surface Blur", activate: () => setShowSurfaceBlurDialog(true) },
-    { label: "Temperature Tint", activate: () => setShowTemperatureTintDialog(true) },
+    {
+      label: "Temperature Tint",
+      activate: () => setShowTemperatureTintDialog(true),
+    },
     { label: "Texture", activate: () => setShowTextureDialog(true) },
     { label: "Texturizer", activate: () => setShowTexturizerDialog(true) },
     { label: "Threshold", activate: () => setShowThresholdDialog(true) },
@@ -9201,14 +10949,18 @@ export default function App() {
     { label: "Torn Edges", activate: () => setShowTornEdgesDialog(true) },
     { label: "Trace Contour", activate: () => setShowTraceContourDialog(true) },
     { label: "Twirl", activate: () => setShowTwirlDialog(true) },
-    { label: "Underpainting", activate: () => setShowUnderpaintingDialog(true) },
+    {
+      label: "Underpainting",
+      activate: () => setShowUnderpaintingDialog(true),
+    },
     { label: "Unsharp Mask", activate: () => setShowUnsharpMaskDialog(true) },
     { label: "Vibrance", activate: () => setShowVibranceDialog(true) },
     { label: "Water Paper", activate: () => setShowWaterPaperDialog(true) },
     { label: "Watercolor", activate: () => setShowWatercolorDialog(true) },
     { label: "Wave", activate: () => setShowWaveDialog(true) },
     { label: "Wind", activate: () => setShowWindDialog(true) },
-    { label: "ZigZag", activate: () => setShowZigZagDialog(true) },  ];
+    { label: "ZigZag", activate: () => setShowZigZagDialog(true) },
+  ];
 
   // Window > Panel Docking / Panel Groups: Layers and Channels, this
   // app's own two non-modal panels, as a data-driven list of members so
@@ -9224,24 +10976,44 @@ export default function App() {
       blendModes={blendModes}
       disabled={busy}
       onSelect={setSelectedId}
-      onToggleVisible={(id, visible) => void runCommand("set_layer_visible", { id, visible })}
-      onToggleLocked={(id, locked) => void runCommand("set_layer_locked", { id, locked })}
-      onToggleLinked={(id, linked) => void runCommand("set_layer_linked", { id, linked })}
-      onToggleClipped={(id, clipped) => void runCommand("set_layer_clipped", { id, clipped })}
+      onToggleVisible={(id, visible) =>
+        void runCommand("set_layer_visible", { id, visible })
+      }
+      onToggleLocked={(id, locked) =>
+        void runCommand("set_layer_locked", { id, locked })
+      }
+      onToggleLinked={(id, linked) =>
+        void runCommand("set_layer_linked", { id, linked })
+      }
+      onToggleClipped={(id, clipped) =>
+        void runCommand("set_layer_clipped", { id, clipped })
+      }
       groups={document?.groups ?? []}
-      onGroupVisible={(index, visible) => void runCommand("set_group_visible", { index, visible })}
+      onGroupVisible={(index, visible) =>
+        void runCommand("set_group_visible", { index, visible })
+      }
       onUngroup={(index) => void runCommand("ungroup", { index })}
-      onOpacity={(id, opacity) => void runCommand("set_layer_opacity", { id, opacity })}
+      onOpacity={(id, opacity) =>
+        void runCommand("set_layer_opacity", { id, opacity })
+      }
       onOpacityDragStart={checkpoint}
-      onBlendMode={(id, blendMode: BlendMode) => void runCommand("set_layer_blend_mode", { id, blendMode })}
-      onMove={(id, direction: MoveDirection) => void runCommand("move_layer", { id, direction })}
+      onBlendMode={(id, blendMode: BlendMode) =>
+        void runCommand("set_layer_blend_mode", { id, blendMode })
+      }
+      onMove={(id, direction: MoveDirection) =>
+        void runCommand("move_layer", { id, direction })
+      }
       onRemove={(id) => void runCommand("remove_layer", { id })}
-      onDuplicate={(id) => void runCommand("duplicate_layer", { id }, { above: id })}
+      onDuplicate={(id) =>
+        void runCommand("duplicate_layer", { id }, { above: id })
+      }
       onMergeVisible={() => void runCommand("merge_visible")}
       onFlattenImage={() => void runCommand("flatten_image")}
       onMergeDown={(id) => void runCommand("merge_down", { id })}
       onRasterize={(id) => void runCommand("rasterize_layer", { id })}
-      onFlipHorizontal={(id) => void runCommand("flip_layer_horizontal", { id })}
+      onFlipHorizontal={(id) =>
+        void runCommand("flip_layer_horizontal", { id })
+      }
       onFlipVertical={(id) => void runCommand("flip_layer_vertical", { id })}
       onRotate180={(id) => void runCommand("rotate_layer_180", { id })}
     />
@@ -9268,23 +11040,31 @@ export default function App() {
             );
           });
         }}
-        onMove={(name, direction) => void runCommand("move_channel", { name, direction })}
+        onMove={(name, direction) =>
+          void runCommand("move_channel", { name, direction })
+        }
         onDelete={(name) => void runCommand("delete_channel", { name })}
         onLoad={(name) => void runCommand("load_channel", { name })}
         onNewSpot={() => openSpotDialog({ mode: "new" })}
         onEditSpot={(name) => openSpotDialog({ mode: "edit", name })}
-        onMoveSpot={(name, direction) => void runCommand("move_spot_channel", { name, direction })}
+        onMoveSpot={(name, direction) =>
+          void runCommand("move_spot_channel", { name, direction })
+        }
         onDeleteSpot={(name) => {
           void runCommand("delete_spot_channel", { name }).then(() => {
             setChannelView((current) =>
-              current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+              current.kind === "spot" && current.name === name
+                ? { kind: "composite" }
+                : current,
             );
           });
         }}
         onMergeSpot={(name) => {
           void runCommand("merge_spot_channel", { name }).then(() => {
             setChannelView((current) =>
-              current.kind === "spot" && current.name === name ? { kind: "composite" } : current,
+              current.kind === "spot" && current.name === name
+                ? { kind: "composite" }
+                : current,
             );
           });
         }}
@@ -9295,7 +11075,9 @@ export default function App() {
 
   const panelDefs: PanelGroupMember[] = [
     { id: "layers", title: "Layers", content: layersContent },
-    ...(channelsContent ? [{ id: "channels", title: "Channels", content: channelsContent }] : []),
+    ...(channelsContent
+      ? [{ id: "channels", title: "Channels", content: channelsContent }]
+      : []),
   ];
   const availablePanelIds = new Set(panelDefs.map((def) => def.id));
   const leaderOf = (panelId: string): string => {
@@ -9320,7 +11102,8 @@ export default function App() {
   const rightDocked: { id: string; node: React.ReactNode }[] = [];
   const floatingPanels: React.ReactNode[] = [];
   for (const [leaderId, members] of groupsByLeader) {
-    const placement = panelLayout[leaderId] ?? DEFAULT_PANEL_LAYOUT[leaderId] ?? { zone: "right" };
+    const placement = panelLayout[leaderId] ??
+      DEFAULT_PANEL_LAYOUT[leaderId] ?? { zone: "right" };
     const node =
       members.length > 1 ? (
         <TabbedPanelGroup
@@ -9344,7 +11127,8 @@ export default function App() {
         </DockablePanel>
       );
     if (placement.zone === "left") leftDocked.push({ id: leaderId, node });
-    else if (placement.zone === "right") rightDocked.push({ id: leaderId, node });
+    else if (placement.zone === "right")
+      rightDocked.push({ id: leaderId, node });
     else floatingPanels.push(node);
   }
 
@@ -9358,7 +11142,9 @@ export default function App() {
   // the common case once Panel Groups lets the two combine into one) is
   // untouched: no splitter, no forced flex, identical to Panel Docking's
   // own original single-panel behavior.
-  const stackZone = (entries: { id: string; node: React.ReactNode }[]): React.ReactNode[] => {
+  const stackZone = (
+    entries: { id: string; node: React.ReactNode }[],
+  ): React.ReactNode[] => {
     if (entries.length <= 1) return entries.map((entry) => entry.node);
     const out: React.ReactNode[] = [];
     entries.forEach((entry, index) => {
@@ -9377,9 +11163,15 @@ export default function App() {
       out.push(
         <div
           key={entry.id}
-          className={fill ? "dock-zone__slot dock-zone__slot--fill" : "dock-zone__slot"}
+          className={
+            fill ? "dock-zone__slot dock-zone__slot--fill" : "dock-zone__slot"
+          }
           style={{
-            flex: isLast ? "1 1 0" : explicitHeight ? `0 0 ${explicitHeight}px` : "0 1 auto",
+            flex: isLast
+              ? "1 1 0"
+              : explicitHeight
+                ? `0 0 ${explicitHeight}px`
+                : "0 1 auto",
             minHeight: 0,
           }}
         >
@@ -9388,7 +11180,10 @@ export default function App() {
       );
       if (!isLast) {
         out.push(
-          <DockZoneSplitter key={`split-${entry.id}`} onResize={(height) => resizeStackedPanel(entry.id, height)} />,
+          <DockZoneSplitter
+            key={`split-${entry.id}`}
+            onResize={(height) => resizeStackedPanel(entry.id, height)}
+          />,
         );
       }
     });
@@ -9400,25 +11195,37 @@ export default function App() {
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
       <style>
-        {[...hiddenTools].map((id) => `[data-tool="${id}"]{display:none!important}`).join("") +
-          optionsRule(tool)}
+        {[...hiddenTools]
+          .map((id) => `[data-tool="${id}"]{display:none!important}`)
+          .join("") + optionsRule(tool)}
       </style>
       <MenuBar entries={menuEntries} hidden={hiddenMenuCommands} />
       <header
         className={`toolbar${compactToolbar ? " toolbar--compact" : ""}${showColorSettings ? "" : " toolbar--no-color"}`}
       >
         <h1 className="toolbar__title">LegeLabs: Photo Editing Suite</h1>
-        <button title="File > New…"
+        <button
+          title="File > New…"
           className="button"
           onClick={() => setShowNewDialog(true)}
           disabled={busy}
         >
           New…
         </button>
-        <button title="File > Open PNG…" className="button" onClick={openDocument} disabled={busy}>
+        <button
+          title="File > Open PNG…"
+          className="button"
+          onClick={openDocument}
+          disabled={busy}
+        >
           Open PNG…
         </button>
-        <button title="Layer > New > Add layer…" className="button button--quiet" onClick={addLayer} disabled={busy || !hasDocument}>
+        <button
+          title="Layer > New > Add layer…"
+          className="button button--quiet"
+          onClick={addLayer}
+          disabled={busy || !hasDocument}
+        >
           Add layer…
         </button>
         <button
@@ -9432,7 +11239,8 @@ export default function App() {
         <button
           className="button button--quiet"
           onClick={() => {
-            if (selectedId !== null) void runCommand("define_pattern", { id: selectedId });
+            if (selectedId !== null)
+              void runCommand("define_pattern", { id: selectedId });
           }}
           disabled={busy || selectedId === null}
           title="Edit > Define Pattern (the selected layer's pixels inside a rectangular selection, or the whole layer)"
@@ -9442,7 +11250,8 @@ export default function App() {
         <button
           className="button button--quiet"
           onClick={() => {
-            if (selectedId !== null) void runCommand("define_brush_tip", { id: selectedId });
+            if (selectedId !== null)
+              void runCommand("define_brush_tip", { id: selectedId });
           }}
           disabled={busy || selectedId === null}
           title="Edit > Define Brush Preset: the selected layer's opaque pixels as a tip, dark paint covering most"
@@ -9521,18 +11330,41 @@ export default function App() {
         >
           Artboards…
         </button>
-        <label data-tool-option={TIP_OPTION} className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
-          <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
+        <label
+          data-tool-option={TIP_OPTION}
+          className="tools__slider"
+          title="Paint the Brush tool with the defined tip instead of the round brush"
+        >
+          <input
+            type="checkbox"
+            checked={useBrushTip}
+            disabled={!document?.hasBrushTip}
+            onChange={(event) => setUseBrushTip(event.target.checked)}
+          />
           Tip {document?.hasBrushTip ? "" : "(none defined)"}
         </label>
         {useBrushTip && !brushDynamicsOn && (
           <label data-tool-option={TIP_OPTION} className="tools__slider">
             Spacing {tipSpacing}
-            <input type="range" min={1} max={50} value={tipSpacing} onChange={(event) => setTipSpacing(Number(event.target.value))} />
+            <input
+              type="range"
+              min={1}
+              max={50}
+              value={tipSpacing}
+              onChange={(event) => setTipSpacing(Number(event.target.value))}
+            />
           </label>
         )}
-        <label data-tool-option={TIP_OPTION} className="tools__slider" title="Brush Settings: paint dab by dab with spacing, shape dynamics, scattering, opacity jitter and hardness">
-          <input type="checkbox" checked={brushDynamicsOn} onChange={(event) => setBrushDynamicsOn(event.target.checked)} />
+        <label
+          data-tool-option={TIP_OPTION}
+          className="tools__slider"
+          title="Brush Settings: paint dab by dab with spacing, shape dynamics, scattering, opacity jitter and hardness"
+        >
+          <input
+            type="checkbox"
+            checked={brushDynamicsOn}
+            onChange={(event) => setBrushDynamicsOn(event.target.checked)}
+          />
           Brush Settings
         </label>
         <button
@@ -9565,7 +11397,8 @@ export default function App() {
         >
           Pattern Fill
         </button>
-        <button title="File > Export > Export PNG…"
+        <button
+          title="File > Export > Export PNG…"
           className="button button--quiet"
           onClick={exportDocument}
           disabled={busy || !hasDocument}
@@ -9579,12 +11412,15 @@ export default function App() {
           <input
             type="checkbox"
             checked={includeContentCredentials}
-            onChange={(event) => setIncludeContentCredentials(event.target.checked)}
+            onChange={(event) =>
+              setIncludeContentCredentials(event.target.checked)
+            }
           />
           Content Credentials
         </label>
         {document?.bitDepth === "thirtyTwo" && (
-          <button data-section="color"
+          <button
+            data-section="color"
             className="button button--quiet"
             onClick={() => void exportTiff32f()}
             disabled={busy || !hasDocument}
@@ -9593,10 +11429,16 @@ export default function App() {
             Export TIFF (32-bit float)…
           </button>
         )}
-        <button title="File > Open Project…" className="button button--quiet" onClick={openProject} disabled={busy}>
+        <button
+          title="File > Open Project…"
+          className="button button--quiet"
+          onClick={openProject}
+          disabled={busy}
+        >
           Open Project…
         </button>
-        <button title="File > Save Project…"
+        <button
+          title="File > Save Project…"
           className="button button--quiet"
           onClick={saveProject}
           disabled={busy || !hasDocument}
@@ -9604,7 +11446,10 @@ export default function App() {
           Save Project…
         </button>
         {lastAutosaveAt !== null && (
-          <span className="autosave-note" title="Crash-safe autosave: the open document is written to a recovery file 30 seconds after each edit">
+          <span
+            className="autosave-note"
+            title="Crash-safe autosave: the open document is written to a recovery file 30 seconds after each edit"
+          >
             Autosaved {new Date(lastAutosaveAt).toLocaleTimeString()}
           </span>
         )}
@@ -9767,7 +11612,11 @@ export default function App() {
           >
             Calculations…
           </button>
-          <label data-section="color" className="tools__slider" title="Image > Mode">
+          <label
+            data-section="color"
+            className="tools__slider"
+            title="Image > Mode"
+          >
             Mode
             <select
               value={document?.mode ?? "rgb"}
@@ -9803,7 +11652,9 @@ export default function App() {
               value={document?.bitDepth ?? "eight"}
               disabled={busy || !hasDocument}
               onChange={(event) =>
-                void runCommand("set_bit_depth", { depth: event.target.value as BitDepth })
+                void runCommand("set_bit_depth", {
+                  depth: event.target.value as BitDepth,
+                })
               }
               title="Image > Mode > 8/16/32 Bits/Channel: this editor's own layer storage stays real 8-bit either way -- what genuinely changes is Export PNG's own output, encoding a real 16-bit-per-channel PNG (widened losslessly, v * 257) any real reader will report as such, not a relabelled 8-bit file. 32 Bits/Channel is real, persisted state with no 32-bit float PNG encoder built yet, so export still uses the real 16-bit path until that lands."
             >
@@ -9812,11 +11663,14 @@ export default function App() {
               <option value="thirtyTwo">32 Bits/Channel</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title={`Image > Mode > HDR Support: imports a real Radiance .hdr file -- real scene-referred float samples that can genuinely exceed 1.0 (an "overbright" highlight no normal byte can represent), kept separate from this document's own 8-bit layer pipeline for real HDR Histogram analysis.${hdrSource ? ` Loaded: ${hdrSource.width}x${hdrSource.height}, max luma ${hdrSource.maxLuma.toFixed(2)}.` : " None loaded."}`}
           >
-            <button data-section="color" title="File > Import > Import HDR (.hdr)…"
+            <button
+              data-section="color"
+              title="File > Import > Import HDR (.hdr)…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadHdrSource()}
@@ -9828,7 +11682,8 @@ export default function App() {
               {hdrSource ? `${hdrSource.width}×${hdrSource.height}` : "None"}
             </span>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Edit > Assign Profile: relabels the working space without touching a pixel"
           >
@@ -9837,7 +11692,9 @@ export default function App() {
               value={document?.profile ?? "srgb"}
               disabled={busy || !hasDocument}
               onChange={(event) =>
-                void runCommand("assign_profile", { profile: event.target.value as ColorProfile })
+                void runCommand("assign_profile", {
+                  profile: event.target.value as ColorProfile,
+                })
               }
             >
               <option value="srgb">sRGB</option>
@@ -9845,7 +11702,8 @@ export default function App() {
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile: the profile the button below remaps every layer's own pixels into, unlike Assign Profile"
           >
@@ -9853,14 +11711,17 @@ export default function App() {
             <select
               value={convertToProfileTarget}
               disabled={busy || !hasDocument}
-              onChange={(event) => setConvertToProfileTarget(event.target.value as ColorProfile)}
+              onChange={(event) =>
+                setConvertToProfileTarget(event.target.value as ColorProfile)
+              }
             >
               <option value="srgb">sRGB</option>
               <option value="adobeRgb1998">Adobe RGB (1998)</option>
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <button data-section="color"
+          <button
+            data-section="color"
             className="button button--quiet"
             onClick={() => {
               if (useDitherForProfile) {
@@ -9885,7 +11746,8 @@ export default function App() {
           >
             Convert…
           </button>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile > Rendering Intent: Relative Colorimetric adapts the source's own white onto the destination's before converting (this app's original, still-default behavior); Absolute Colorimetric skips that adaptation, preserving the real colorimetric relationship instead -- a visible tint whenever the two profiles' own native white points genuinely differ (only ProPhoto RGB's D50 does, against sRGB/Adobe RGB's shared D65); Perceptual and Saturation each compress an out-of-gamut colour toward a real anchor (a fixed mid-grey, or the colour's own luma) instead of clipping each channel independently."
           >
@@ -9893,15 +11755,22 @@ export default function App() {
             <select
               value={renderingIntent}
               disabled={busy || !hasDocument}
-              onChange={(event) => setRenderingIntent(event.target.value as RenderingIntent)}
+              onChange={(event) =>
+                setRenderingIntent(event.target.value as RenderingIntent)
+              }
             >
-              <option value="relativeColorimetric">Relative Colorimetric</option>
-              <option value="absoluteColorimetric">Absolute Colorimetric</option>
+              <option value="relativeColorimetric">
+                Relative Colorimetric
+              </option>
+              <option value="absoluteColorimetric">
+                Absolute Colorimetric
+              </option>
               <option value="perceptual">Perceptual</option>
               <option value="saturation">Saturation</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Color Settings > Conversion Engine: which of two real implementations computes the conversion above. Analytic evaluates the exact published RGB<->XYZ matrices per pixel (this app's original, still-default behavior). Look Up Table is the technique real CMMs (littleCMS, Apple ColorSync, Adobe's own ACE) use internally: the same analytic pipeline is sampled once onto a coarse 3D grid, then every pixel is resolved by trilinear interpolation through that grid instead -- byte-identical to Analytic only where a pixel lands exactly on one of the grid's own vertices, and genuinely, visibly different everywhere else."
           >
@@ -9909,13 +11778,16 @@ export default function App() {
             <select
               value={conversionEngine}
               disabled={busy || !hasDocument}
-              onChange={(event) => setConversionEngine(event.target.value as ConversionEngine)}
+              onChange={(event) =>
+                setConversionEngine(event.target.value as ConversionEngine)
+              }
             >
               <option value="analytic">Analytic</option>
               <option value="lookupTable">Look Up Table</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile > Use Dither: perturbs each channel's own rounding to break up gradient banding"
           >
@@ -9939,12 +11811,19 @@ export default function App() {
             <input
               type="checkbox"
               checked={useBlackPointCompensation}
-              disabled={busy || !hasDocument || renderingIntent === "absoluteColorimetric"}
-              onChange={(event) => setUseBlackPointCompensation(event.target.checked)}
+              disabled={
+                busy ||
+                !hasDocument ||
+                renderingIntent === "absoluteColorimetric"
+              }
+              onChange={(event) =>
+                setUseBlackPointCompensation(event.target.checked)
+              }
             />
             Black Point Compensation
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="Color Settings > Color Management Policies: what happens when a project is opened with an embedded profile that differs from the working space below. Preserve keeps the file's own profile untouched (this app's original behavior); Convert to Working Space remaps it right after loading. A project missing a profile outright is Ask When Opening's own, separately-scoped dialog, not this."
           >
@@ -9953,14 +11832,17 @@ export default function App() {
               value={colorManagementPolicy}
               disabled={busy}
               onChange={(event) =>
-                setColorManagementPolicyPersisted(event.target.value as "preserve" | "convert")
+                setColorManagementPolicyPersisted(
+                  event.target.value as "preserve" | "convert",
+                )
               }
             >
               <option value="preserve">Preserve Embedded Profiles</option>
               <option value="convert">Convert to Working Space</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title="The working space Color Management Policy's own Convert to Working Space option converts an opened project into."
           >
@@ -9968,18 +11850,23 @@ export default function App() {
             <select
               value={defaultWorkingSpace}
               disabled={busy || colorManagementPolicy !== "convert"}
-              onChange={(event) => setDefaultWorkingSpace(event.target.value as ColorProfile)}
+              onChange={(event) =>
+                setDefaultWorkingSpace(event.target.value as ColorProfile)
+              }
             >
               <option value="srgb">sRGB</option>
               <option value="adobeRgb1998">Adobe RGB (1998)</option>
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title={`Color Settings > Monitor Profile: a real, parsed .icc/.icm file describing the display's own colour response.${monitorProfile ? ` Currently: ${monitorProfile.description ?? monitorProfile.colorSpace} (${monitorProfile.deviceClass}).` : " None imported."}`}
           >
-            <button data-section="color" title="Edit > Color Settings > Monitor Profile…"
+            <button
+              data-section="color"
+              title="Edit > Color Settings > Monitor Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importMonitorProfile()}
@@ -9988,14 +11875,19 @@ export default function App() {
               Monitor Profile…
             </button>
             <span className="tools__profileLabel">
-              {monitorProfile ? (monitorProfile.description ?? monitorProfile.colorSpace) : "None"}
+              {monitorProfile
+                ? (monitorProfile.description ?? monitorProfile.colorSpace)
+                : "None"}
             </span>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title={`Color Settings > Input Device Profile: a real, parsed .icc/.icm file for a scanner or camera's own colour response.${inputDeviceProfile ? ` Currently: ${inputDeviceProfile.description ?? inputDeviceProfile.colorSpace} (${inputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button data-section="color" title="Edit > Color Settings > Input Device Profile…"
+            <button
+              data-section="color"
+              title="Edit > Color Settings > Input Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importInputDeviceProfile()}
@@ -10005,15 +11897,19 @@ export default function App() {
             </button>
             <span className="tools__profileLabel">
               {inputDeviceProfile
-                ? (inputDeviceProfile.description ?? inputDeviceProfile.colorSpace)
+                ? (inputDeviceProfile.description ??
+                  inputDeviceProfile.colorSpace)
                 : "None"}
             </span>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title={`Color Settings > Output Device Profile: a real, parsed .icc/.icm file for a printer or other output device's own colour response.${outputDeviceProfile ? ` Currently: ${outputDeviceProfile.description ?? outputDeviceProfile.colorSpace} (${outputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button data-section="color" title="Edit > Color Settings > Output Device Profile…"
+            <button
+              data-section="color"
+              title="Edit > Color Settings > Output Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importOutputDeviceProfile()}
@@ -10023,15 +11919,19 @@ export default function App() {
             </button>
             <span className="tools__profileLabel">
               {outputDeviceProfile
-                ? (outputDeviceProfile.description ?? outputDeviceProfile.colorSpace)
+                ? (outputDeviceProfile.description ??
+                  outputDeviceProfile.colorSpace)
                 : "None"}
             </span>
           </label>
-          <label data-section="color"
+          <label
+            data-section="color"
             className="tools__slider"
             title={`Color Settings > OpenColorIO Configuration: a real, parsed .ocio config file -- its own real colour spaces become available below as OCIO Input Color Space Assignment's From/To choices.${ocioConfig ? ` Loaded: ${ocioConfig.colorspaceNames.length} colour space(s)${ocioConfig.ocioProfileVersion !== null ? `, profile version ${ocioConfig.ocioProfileVersion}` : ""}.` : " None loaded."}`}
           >
-            <button data-section="color" title="Edit > Color Settings > Load OCIO Configuration…"
+            <button
+              data-section="color"
+              title="Edit > Color Settings > Load OCIO Configuration…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadOcioConfig()}
@@ -10040,11 +11940,14 @@ export default function App() {
               Load OCIO Configuration…
             </button>
             <span className="tools__profileLabel">
-              {ocioConfig ? `${ocioConfig.colorspaceNames.length} colour spaces` : "None"}
+              {ocioConfig
+                ? `${ocioConfig.colorspaceNames.length} colour spaces`
+                : "None"}
             </span>
           </label>
           {ocioConfig && Object.keys(ocioConfig.roles).length > 0 && (
-            <label data-section="color"
+            <label
+              data-section="color"
               className="tools__slider"
               title="Color Settings > OpenColorIO Working Space: the loaded config's own real role this document treats as its OCIO working space -- picking one re-points OCIO Input Color Space Assignment's own To select at that role's real colour space"
             >
@@ -10052,7 +11955,9 @@ export default function App() {
               <select
                 value={ocioWorkingSpaceRole}
                 disabled={busy}
-                onChange={(event) => applyOcioWorkingSpaceRole(event.target.value, ocioConfig)}
+                onChange={(event) =>
+                  applyOcioWorkingSpaceRole(event.target.value, ocioConfig)
+                }
               >
                 {Object.entries(ocioConfig.roles).map(([role, colorSpace]) => (
                   <option key={role} value={role}>
@@ -10063,7 +11968,8 @@ export default function App() {
             </label>
           )}
           {ocioConfig && (
-            <button data-section="color"
+            <button
+              data-section="color"
               type="button"
               className="button button--quiet"
               onClick={() => setShowOcioPanel((shown) => !shown)}
@@ -10072,12 +11978,18 @@ export default function App() {
               {showOcioPanel ? "Hide OCIO Panel" : "Show OCIO Panel"}
             </button>
           )}
-          <label data-section="color" className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
+          <label
+            data-section="color"
+            className="tools__slider"
+            title="View > Proof Setup, shown with Proof Colors on"
+          >
             Proof
             <select
               value={proof}
               disabled={busy || !hasDocument}
-              onChange={(event) => setProof(event.target.value as Proof | "off")}
+              onChange={(event) =>
+                setProof(event.target.value as Proof | "off")
+              }
             >
               <option value="off">Off</option>
               <option value="protanopia">Protanopia-type</option>
@@ -10087,15 +11999,28 @@ export default function App() {
             </select>
           </label>
           {proof === "paperink" && (
-            <label data-section="color" className="tools__slider" title="Proof Setup > Custom's Simulate Paper Color and Simulate Black Ink">
+            <label
+              data-section="color"
+              className="tools__slider"
+              title="Proof Setup > Custom's Simulate Paper Color and Simulate Black Ink"
+            >
               Paper
-              <input type="color" value={proofPaperColor} onChange={(event) => setProofPaperColor(event.target.value)} />
+              <input
+                type="color"
+                value={proofPaperColor}
+                onChange={(event) => setProofPaperColor(event.target.value)}
+              />
               Ink
-              <input type="color" value={proofInkColor} onChange={(event) => setProofInkColor(event.target.value)} />
+              <input
+                type="color"
+                value={proofInkColor}
+                onChange={(event) => setProofInkColor(event.target.value)}
+              />
             </label>
           )}
           {proof === "gamut" && (
-            <label data-section="color"
+            <label
+              data-section="color"
               className="tools__slider"
               title="View > Gamut Warning: flags any pixel whose naive CMYK ink split exceeds this app's own reachable Total Ink Limit"
             >
@@ -10166,7 +12091,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("generative_fill", { id: selectedId });
+              if (selectedId !== null)
+                void runCommand("generative_fill", { id: selectedId });
             }}
             disabled={busy || !canPaint || !hasSelection}
             title="Filter > Generative Fill (AI) — this project's own on-device model hallucinates the selection from its surroundings; no text prompt, no provider endpoint needed. Filter > Generative Fill… opens the prompt-driven, external-provider version instead."
@@ -10216,7 +12142,9 @@ export default function App() {
         <div className="tools" role="group" aria-label="Image rotation">
           <button
             className="button button--quiet"
-            onClick={() => void runCommand("rotate_document_90", { clockwise: true })}
+            onClick={() =>
+              void runCommand("rotate_document_90", { clockwise: true })
+            }
             disabled={busy || !hasDocument}
             title="Image > Image Rotation > 90° Clockwise"
           >
@@ -10224,7 +12152,9 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => void runCommand("rotate_document_90", { clockwise: false })}
+            onClick={() =>
+              void runCommand("rotate_document_90", { clockwise: false })
+            }
             disabled={busy || !hasDocument}
             title="Image > Image Rotation > 90° Counter Clockwise"
           >
@@ -10297,9 +12227,12 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("transform_again", { id: selectedId });
+              if (selectedId !== null)
+                void runCommand("transform_again", { id: selectedId });
             }}
-            disabled={busy || !canPaint || !(document?.canTransformAgain ?? false)}
+            disabled={
+              busy || !canPaint || !(document?.canTransformAgain ?? false)
+            }
             title="Edit > Transform > Again (repeat the last transform on the selected layer)"
           >
             Transform Again
@@ -10627,7 +12560,11 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("select_sky", { id: selectedId, mode: selectionMode });
+              if (selectedId !== null)
+                void runCommand("select_sky", {
+                  id: selectedId,
+                  mode: selectionMode,
+                });
             }}
             disabled={busy || selectedId === null}
             title="Select > Sky: sky-coloured pixels joined to the top edge"
@@ -10637,14 +12574,19 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("select_people", { id: selectedId, mode: selectionMode });
+              if (selectedId !== null)
+                void runCommand("select_people", {
+                  id: selectedId,
+                  mode: selectionMode,
+                });
             }}
             disabled={busy || selectedId === null}
             title="Select > People: the largest connected skin-toned region (this app's stand-in for neural person detection)"
           >
             Select People
           </button>
-          <label data-tool-option={PEOPLE_OPTION}
+          <label
+            data-tool-option={PEOPLE_OPTION}
             className="tools__slider"
             title="Select > People > Individual Person Selection: the Nth-largest separate skin-toned region, 0 = the largest"
           >
@@ -10653,7 +12595,11 @@ export default function App() {
               type="number"
               min={0}
               value={personIndex}
-              onChange={(event) => setPersonIndex(Math.max(0, Math.round(Number(event.target.value))))}
+              onChange={(event) =>
+                setPersonIndex(
+                  Math.max(0, Math.round(Number(event.target.value))),
+                )
+              }
               style={{ width: "3em" }}
             />
           </label>
@@ -10675,19 +12621,29 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("select_hair", { id: selectedId, mode: selectionMode });
+              if (selectedId !== null)
+                void runCommand("select_hair", {
+                  id: selectedId,
+                  mode: selectionMode,
+                });
             }}
             disabled={busy || selectedId === null}
             title="Select > Hair: non-skin pixels bordering a face within a head-sized margin (this app's stand-in for neural hair-strand detection)"
           >
             Select Hair
           </button>
-          <label data-tool-option={PEOPLE_OPTION}
+          <label
+            data-tool-option={PEOPLE_OPTION}
             className="tools__slider"
             title="Select > Subject > Person Components: which part of the person to select"
           >
             Component
-            <select value={personComponent} onChange={(event) => setPersonComponent(event.target.value as PersonComponent)}>
+            <select
+              value={personComponent}
+              onChange={(event) =>
+                setPersonComponent(event.target.value as PersonComponent)
+              }
+            >
               <option value="face">Face</option>
               <option value="hair">Hair</option>
               <option value="body">Body</option>
@@ -10712,7 +12668,10 @@ export default function App() {
             className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
-              void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
+              void runCommand("remove_background", {
+                id: selectedId,
+                tolerance: magicWandTolerance,
+              })
             }
             disabled={busy || !canPaint}
             title="Layer > Remove Background: keep the subject and make everything else transparent"
@@ -10723,7 +12682,10 @@ export default function App() {
             className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
-              void runCommand("mask_all_objects", { id: selectedId, tolerance: magicWandTolerance })
+              void runCommand("mask_all_objects", {
+                id: selectedId,
+                tolerance: magicWandTolerance,
+              })
             }
             disabled={busy || !canPaint}
             title="Layer > Mask All Objects: save every object on the layer as a selection named Object 1, 2, … and select them all"
@@ -10734,7 +12696,10 @@ export default function App() {
             className="button button--quiet"
             onClick={() => {
               if (selectedId === null) return;
-              invoke<ObjectBox[]>("find_objects", { id: selectedId, tolerance: magicWandTolerance })
+              invoke<ObjectBox[]>("find_objects", {
+                id: selectedId,
+                tolerance: magicWandTolerance,
+              })
                 .then(setFoundObjects)
                 .catch((err) => setError(String(err)));
             }}
@@ -10751,7 +12716,12 @@ export default function App() {
                   key={i}
                   onClick={() => {
                     if (selectedId !== null) {
-                      void runCommand("select_found_object", { id: selectedId, tolerance: magicWandTolerance, index: i, mode: selectionMode });
+                      void runCommand("select_found_object", {
+                        id: selectedId,
+                        tolerance: magicWandTolerance,
+                        index: i,
+                        mode: selectionMode,
+                      });
                     }
                   }}
                   title={`Object ${i + 1}: ${box.x1 - box.x0}×${box.y1 - box.y0} at (${box.x0}, ${box.y0})`}
@@ -10759,7 +12729,11 @@ export default function App() {
                   Object {i + 1}
                 </button>
               ))}
-              <button className="button button--quiet" onClick={() => setFoundObjects(null)} title="Hide the Object Finder">
+              <button
+                className="button button--quiet"
+                onClick={() => setFoundObjects(null)}
+                title="Hide the Object Finder"
+              >
                 ×
               </button>
             </span>
@@ -10777,7 +12751,10 @@ export default function App() {
             onClick={() => {
               if (!document || selectedId === null) return;
               const ids = Array.from(
-                new Set([selectedId, ...document.layers.filter((l) => l.linked).map((l) => l.id)]),
+                new Set([
+                  selectedId,
+                  ...document.layers.filter((l) => l.linked).map((l) => l.id),
+                ]),
               );
               void runCommand("group_layers", {
                 ids,
@@ -10806,7 +12783,11 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("add_layer_mask", { id: selectedId, source: "hideAll" })
+              selectedId !== null &&
+              void runCommand("add_layer_mask", {
+                id: selectedId,
+                source: "hideAll",
+              })
             }
             disabled={busy || !canPaint}
             title="Layer > Layer Mask > Hide All"
@@ -10816,9 +12797,17 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("remove_layer_mask", { id: selectedId, apply: true })
+              selectedId !== null &&
+              void runCommand("remove_layer_mask", {
+                id: selectedId,
+                apply: true,
+              })
             }
-            disabled={busy || !canPaint || !layers.find((l) => l.id === selectedId)?.hasMask}
+            disabled={
+              busy ||
+              !canPaint ||
+              !layers.find((l) => l.id === selectedId)?.hasMask
+            }
             title="Layer > Layer Mask > Apply: bake the mask into the layer's transparency"
           >
             Apply Mask
@@ -10826,9 +12815,17 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("remove_layer_mask", { id: selectedId, apply: false })
+              selectedId !== null &&
+              void runCommand("remove_layer_mask", {
+                id: selectedId,
+                apply: false,
+              })
             }
-            disabled={busy || !canPaint || !layers.find((l) => l.id === selectedId)?.hasMask}
+            disabled={
+              busy ||
+              !canPaint ||
+              !layers.find((l) => l.id === selectedId)?.hasMask
+            }
             title="Layer > Layer Mask > Delete"
           >
             Delete Mask
@@ -11084,7 +13081,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() => {
-              if (selectedId !== null) void runCommand("constrain_crop", { id: selectedId });
+              if (selectedId !== null)
+                void runCommand("constrain_crop", { id: selectedId });
             }}
             disabled={busy || !canPaint}
             title="Camera Raw Filter > Geometry > Constrain Crop (crop the document to the selected layer's largest fully opaque rectangle)"
@@ -11325,7 +13323,9 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("blur", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null && void runCommand("blur", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Filter > Blur > Blur (one-click, radius 1)"
           >
@@ -11334,7 +13334,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("blur_more", { id: selectedId })
+              selectedId !== null &&
+              void runCommand("blur_more", { id: selectedId })
             }
             disabled={busy || !canPaint}
             title="Filter > Blur > Blur More (one-click, radius 3)"
@@ -11343,7 +13344,10 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("sharpen", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("sharpen", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Filter > Sharpen > Sharpen (one-click, 50%)"
           >
@@ -11352,7 +13356,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("sharpen_more", { id: selectedId })
+              selectedId !== null &&
+              void runCommand("sharpen_more", { id: selectedId })
             }
             disabled={busy || !canPaint}
             title="Filter > Sharpen > Sharpen More (one-click, 100%)"
@@ -11362,7 +13367,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("sharpen_edges", { id: selectedId })
+              selectedId !== null &&
+              void runCommand("sharpen_edges", { id: selectedId })
             }
             disabled={busy || !canPaint}
             title="Filter > Sharpen > Sharpen Edges (one-click, 100% gated behind an edge threshold of 20)"
@@ -11380,7 +13386,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("despeckle", { id: selectedId })
+              selectedId !== null &&
+              void runCommand("despeckle", { id: selectedId })
             }
             disabled={busy || !canPaint}
             title="Filter > Noise > Despeckle (one-click, 3x3 median)"
@@ -11407,7 +13414,10 @@ export default function App() {
             className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
-              void runCommand("equalize", { id: selectedId, entireImage: false })
+              void runCommand("equalize", {
+                id: selectedId,
+                entireImage: false,
+              })
             }
             disabled={busy || !canPaint}
             title="Image > Adjustments > Equalize (with a selection: equalize the selected area only)"
@@ -11427,7 +13437,10 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("auto_tone", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("auto_tone", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Image > Adjustments > Auto Tone"
           >
@@ -11436,7 +13449,8 @@ export default function App() {
           <button
             className="button button--quiet"
             onClick={() =>
-              selectedId !== null && void runCommand("auto_contrast", { id: selectedId })
+              selectedId !== null &&
+              void runCommand("auto_contrast", { id: selectedId })
             }
             disabled={busy || !canPaint}
             title="Image > Adjustments > Auto Contrast"
@@ -11468,7 +13482,8 @@ export default function App() {
           </button>
           {ocioConfig && (
             <>
-              <label data-section="color"
+              <label
+                data-section="color"
                 className="tools__slider"
                 title="Color Settings > OCIO Input Color Space Assignment: reassign the selected layer's own pixels from this real colour space into the one below, through the loaded OpenColorIO configuration's own transform chain"
               >
@@ -11476,7 +13491,9 @@ export default function App() {
                 <select
                   value={ocioFromColorSpace}
                   disabled={busy}
-                  onChange={(event) => setOcioFromColorSpace(event.target.value)}
+                  onChange={(event) =>
+                    setOcioFromColorSpace(event.target.value)
+                  }
                 >
                   {ocioConfig.colorspaceNames.map((name) => (
                     <option key={name} value={name}>
@@ -11485,7 +13502,11 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <label data-section="color" className="tools__slider" title="The real colour space OCIO Input Color Space Assignment converts into">
+              <label
+                data-section="color"
+                className="tools__slider"
+                title="The real colour space OCIO Input Color Space Assignment converts into"
+              >
                 OCIO To
                 <select
                   value={ocioToColorSpace}
@@ -11499,7 +13520,8 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <button data-section="color"
+              <button
+                data-section="color"
                 className="button button--quiet"
                 onClick={() =>
                   selectedId !== null &&
@@ -11509,7 +13531,9 @@ export default function App() {
                     to: ocioToColorSpace,
                   })
                 }
-                disabled={busy || !canPaint || !ocioFromColorSpace || !ocioToColorSpace}
+                disabled={
+                  busy || !canPaint || !ocioFromColorSpace || !ocioToColorSpace
+                }
                 title="Color Settings > OCIO Input Color Space Assignment: apply the conversion above to the selected layer"
               >
                 OCIO Convert…
@@ -11558,7 +13582,10 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("find_edges", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("find_edges", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Filter > Stylize > Find Edges"
           >
@@ -11575,7 +13602,12 @@ export default function App() {
               max={255}
               value={lineworkThreshold}
               onChange={(event) =>
-                setLineworkThreshold(Math.min(255, Math.max(1, Math.round(Number(event.target.value)))))
+                setLineworkThreshold(
+                  Math.min(
+                    255,
+                    Math.max(1, Math.round(Number(event.target.value))),
+                  ),
+                )
               }
               style={{ width: "4em" }}
             />
@@ -11584,7 +13616,10 @@ export default function App() {
             className="button button--quiet"
             onClick={() =>
               selectedId !== null &&
-              void runCommand("photograph_to_linework", { id: selectedId, level: lineworkThreshold })
+              void runCommand("photograph_to_linework", {
+                id: selectedId,
+                level: lineworkThreshold,
+              })
             }
             disabled={busy || !canPaint}
             title="Filter > Turn into Linework: Find Edges into Threshold, the audit's own named recipe"
@@ -11593,7 +13628,10 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("solarize", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("solarize", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Filter > Stylize > Solarize"
           >
@@ -12001,7 +14039,10 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => selectedId !== null && void runCommand("fragment", { id: selectedId })}
+            onClick={() =>
+              selectedId !== null &&
+              void runCommand("fragment", { id: selectedId })
+            }
             disabled={busy || !canPaint}
             title="Filter > Pixelate > Fragment"
           >
@@ -12286,7 +14327,9 @@ export default function App() {
                 max={12}
                 value={polygonSides}
                 disabled={!canPaint}
-                onChange={(event) => setPolygonSides(Number(event.target.value))}
+                onChange={(event) =>
+                  setPolygonSides(Number(event.target.value))
+                }
               />
               {polygonSides}
             </label>
@@ -12338,7 +14381,9 @@ export default function App() {
                   max={50}
                   value={shapeStrokeWidth}
                   disabled={!canPaint}
-                  onChange={(event) => setShapeStrokeWidth(Number(event.target.value))}
+                  onChange={(event) =>
+                    setShapeStrokeWidth(Number(event.target.value))
+                  }
                 />
                 {shapeStrokeWidth === 0 ? "none" : `${shapeStrokeWidth}px`}
               </label>
@@ -12359,7 +14404,9 @@ export default function App() {
                     max={100}
                     value={shapeRadius}
                     disabled={!canPaint}
-                    onChange={(event) => setShapeRadius(Number(event.target.value))}
+                    onChange={(event) =>
+                      setShapeRadius(Number(event.target.value))
+                    }
                   />
                   {shapeRadius}px
                 </label>
@@ -12383,7 +14430,9 @@ export default function App() {
                 type="checkbox"
                 checked={moveAutoSelectGroup}
                 disabled={!canPaint}
-                onChange={(event) => setMoveAutoSelectGroup(event.target.checked)}
+                onChange={(event) =>
+                  setMoveAutoSelectGroup(event.target.checked)
+                }
               />
               Group
             </label>
@@ -12400,22 +14449,34 @@ export default function App() {
             </label>
           )}
           {tool === "move" && (
-            <label className="tools__slider" title="Show Transform Controls: drag a handle to scale the layer's content onto a new rectangle">
+            <label
+              className="tools__slider"
+              title="Show Transform Controls: drag a handle to scale the layer's content onto a new rectangle"
+            >
               <input
                 type="checkbox"
                 checked={showTransformControls}
                 disabled={!canPaint}
-                onChange={(event) => setShowTransformControls(event.target.checked)}
+                onChange={(event) =>
+                  setShowTransformControls(event.target.checked)
+                }
               />
               Show Transform Controls
             </label>
           )}
           {tool === "move" && (
-            <label className="tools__slider" title="Interpolation: how every transform resamples -- Photoshop's Bicubic by default; Sequential is the earlier per-stage nearest-neighbour path">
+            <label
+              className="tools__slider"
+              title="Interpolation: how every transform resamples -- Photoshop's Bicubic by default; Sequential is the earlier per-stage nearest-neighbour path"
+            >
               Interpolation
               <select
                 value={transformInterpolation}
-                onChange={(event) => setTransformInterpolation(event.target.value as Interpolation | "sequential")}
+                onChange={(event) =>
+                  setTransformInterpolation(
+                    event.target.value as Interpolation | "sequential",
+                  )
+                }
               >
                 <option value="bicubic">Bicubic</option>
                 <option value="bilinear">Bilinear</option>
@@ -12434,7 +14495,9 @@ export default function App() {
                   max={64}
                   value={magneticWidth}
                   disabled={!canPaint}
-                  onChange={(event) => setMagneticWidth(Number(event.target.value))}
+                  onChange={(event) =>
+                    setMagneticWidth(Number(event.target.value))
+                  }
                 />
                 {magneticWidth}px
               </label>
@@ -12446,7 +14509,9 @@ export default function App() {
                   max={255}
                   value={magneticContrast}
                   disabled={!canPaint}
-                  onChange={(event) => setMagneticContrast(Number(event.target.value))}
+                  onChange={(event) =>
+                    setMagneticContrast(Number(event.target.value))
+                  }
                 />
                 {magneticContrast}
               </label>
@@ -12459,7 +14524,9 @@ export default function App() {
                   type="checkbox"
                   checked={sharpenProtectDetail}
                   disabled={!canPaint}
-                  onChange={(event) => setSharpenProtectDetail(event.target.checked)}
+                  onChange={(event) =>
+                    setSharpenProtectDetail(event.target.checked)
+                  }
                 />
                 Protect Detail
               </label>
@@ -12468,7 +14535,9 @@ export default function App() {
                   type="checkbox"
                   checked={sharpenSampleAll}
                   disabled={!canPaint}
-                  onChange={(event) => setSharpenSampleAll(event.target.checked)}
+                  onChange={(event) =>
+                    setSharpenSampleAll(event.target.checked)
+                  }
                 />
                 Sample All Layers
               </label>
@@ -12487,13 +14556,16 @@ export default function App() {
                 max={255}
                 value={magicWandTolerance}
                 disabled={!canPaint}
-                onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
+                onChange={(event) =>
+                  setMagicWandTolerance(Number(event.target.value))
+                }
               />
             </label>
           )}
           {colorRangeSampling && (
             <span className="tools__slider">
-              Click the picture to add that pixel&apos;s colour to the Color Range samples
+              Click the picture to add that pixel&apos;s colour to the Color
+              Range samples
               <button
                 className="button button--quiet"
                 onClick={() => {
@@ -12544,7 +14616,13 @@ export default function App() {
               ).map(([label, value, set]) => (
                 <label className="tools__slider" key={label}>
                   {label} {value}%
-                  <input type="range" min={0} max={100} value={value} onChange={(event) => set(Number(event.target.value))} />
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={value}
+                    onChange={(event) => set(Number(event.target.value))}
+                  />
                 </label>
               ))}
             </>
@@ -12561,7 +14639,12 @@ export default function App() {
               </button>
               <label className="tools__slider">
                 Style
-                <select value={artStyle} onChange={(event) => setArtStyle(event.target.value as ArtStyle)}>
+                <select
+                  value={artStyle}
+                  onChange={(event) =>
+                    setArtStyle(event.target.value as ArtStyle)
+                  }
+                >
                   <option value="dab">Dab</option>
                   <option value="tight">Tight</option>
                   <option value="loose">Loose</option>
@@ -12569,11 +14652,25 @@ export default function App() {
               </label>
               <label className="tools__slider">
                 Area {artArea}
-                <input type="range" min={0} max={50} value={artArea} onChange={(event) => setArtArea(Number(event.target.value))} />
+                <input
+                  type="range"
+                  min={0}
+                  max={50}
+                  value={artArea}
+                  onChange={(event) => setArtArea(Number(event.target.value))}
+                />
               </label>
               <label className="tools__slider">
                 Tolerance {artTolerance}
-                <input type="range" min={0} max={255} value={artTolerance} onChange={(event) => setArtTolerance(Number(event.target.value))} />
+                <input
+                  type="range"
+                  min={0}
+                  max={255}
+                  value={artTolerance}
+                  onChange={(event) =>
+                    setArtTolerance(Number(event.target.value))
+                  }
+                />
               </label>
             </>
           )}
@@ -12629,7 +14726,9 @@ export default function App() {
               Clear Notes
             </button>
           )}
-          {(tool === "brush" || tool === "eraser" || tool === "patternStamp") && (
+          {(tool === "brush" ||
+            tool === "eraser" ||
+            tool === "patternStamp") && (
             <label className="tools__slider">
               Symmetry
               <select
@@ -12637,7 +14736,9 @@ export default function App() {
                 disabled={!canPaint}
                 aria-label="Paint symmetry"
                 title="Paint Symmetry: mirror each stroke about the canvas centre"
-                onChange={(event) => setSymmetry(event.target.value as Symmetry | "off")}
+                onChange={(event) =>
+                  setSymmetry(event.target.value as Symmetry | "off")
+                }
               >
                 <option value="off">Off</option>
                 <option value="vertical">Vertical</option>
@@ -12653,7 +14754,9 @@ export default function App() {
                 value={spongeSaturate ? "saturate" : "desaturate"}
                 disabled={!canPaint}
                 aria-label="Sponge mode"
-                onChange={(event) => setSpongeSaturate(event.target.value === "saturate")}
+                onChange={(event) =>
+                  setSpongeSaturate(event.target.value === "saturate")
+                }
               >
                 <option value="desaturate">Desaturate</option>
                 <option value="saturate">Saturate</option>
@@ -12662,7 +14765,9 @@ export default function App() {
           )}
           {isPolygonLasso && (
             <>
-              <span className="tools__slider">{lassoPoints.length} vertices</span>
+              <span className="tools__slider">
+                {lassoPoints.length} vertices
+              </span>
               <button
                 className="button button--quiet"
                 onClick={() => closeLasso(selectionMode)}
@@ -12688,7 +14793,9 @@ export default function App() {
                 disabled={!hasDocument}
                 aria-label="Selection mode"
                 title="How the next marquee combines with the current selection (Shift adds, Alt subtracts, Shift+Alt intersects while dragging)"
-                onChange={(event) => setSelectionMode(event.target.value as SelectionMode)}
+                onChange={(event) =>
+                  setSelectionMode(event.target.value as SelectionMode)
+                }
               >
                 <option value="new">New</option>
                 <option value="add">Add</option>
@@ -12698,7 +14805,10 @@ export default function App() {
             </label>
           )}
           {isMarqueeTool && (
-            <label className="tools__slider" title="Feather: soften the edge of each new marquee by this many pixels">
+            <label
+              className="tools__slider"
+              title="Feather: soften the edge of each new marquee by this many pixels"
+            >
               Feather
               <input
                 type="number"
@@ -12708,14 +14818,22 @@ export default function App() {
                 value={marqueeFeather}
                 disabled={!hasDocument}
                 onChange={(event) =>
-                  setMarqueeFeather(Math.max(0, Math.min(250, Math.round(Number(event.target.value)))))
+                  setMarqueeFeather(
+                    Math.max(
+                      0,
+                      Math.min(250, Math.round(Number(event.target.value))),
+                    ),
+                  )
                 }
               />
               px
             </label>
           )}
           {tool === "selectEllipse" && (
-            <label className="tools__slider" title="Anti-alias: give the ellipse's edge fractional coverage instead of a hard pixel step">
+            <label
+              className="tools__slider"
+              title="Anti-alias: give the ellipse's edge fractional coverage instead of a hard pixel step"
+            >
               <input
                 type="checkbox"
                 checked={marqueeAntiAlias}
@@ -12726,7 +14844,10 @@ export default function App() {
             </label>
           )}
           {tool === "quickSelection" && (
-            <label className="tools__slider" title="Hardness: how much of the brush seeds the selection; a softer brush follows colour from its core">
+            <label
+              className="tools__slider"
+              title="Hardness: how much of the brush seeds the selection; a softer brush follows colour from its core"
+            >
               Hardness
               <input
                 type="range"
@@ -12734,14 +14855,19 @@ export default function App() {
                 max={100}
                 value={quickHardness}
                 disabled={!canPaint}
-                onChange={(event) => setQuickHardness(Number(event.target.value))}
+                onChange={(event) =>
+                  setQuickHardness(Number(event.target.value))
+                }
               />
               {quickHardness}%
             </label>
           )}
           {tool === "selectionBrush" && (
             <>
-              <label className="tools__slider" title="Circle Selection: press for the centre and drag out the radius instead of painting">
+              <label
+                className="tools__slider"
+                title="Circle Selection: press for the centre and drag out the radius instead of painting"
+              >
                 <input
                   type="checkbox"
                   checked={brushCircleMode}
@@ -12750,7 +14876,10 @@ export default function App() {
                 />
                 Circle
               </label>
-              <label className="tools__slider" title="Opacity of the selection overlay drawn while you brush">
+              <label
+                className="tools__slider"
+                title="Opacity of the selection overlay drawn while you brush"
+              >
                 Opacity
                 <input
                   type="range"
@@ -12758,7 +14887,9 @@ export default function App() {
                   max={100}
                   value={selectionOverlayOpacity}
                   disabled={!hasDocument}
-                  onChange={(event) => setSelectionOverlayOpacity(Number(event.target.value))}
+                  onChange={(event) =>
+                    setSelectionOverlayOpacity(Number(event.target.value))
+                  }
                 />
                 {selectionOverlayOpacity}%
               </label>
@@ -12774,7 +14905,9 @@ export default function App() {
                   max={255}
                   value={magicWandTolerance}
                   disabled={!canPaint}
-                  onChange={(event) => setMagicWandTolerance(Number(event.target.value))}
+                  onChange={(event) =>
+                    setMagicWandTolerance(Number(event.target.value))
+                  }
                 />
               </label>
               <label className="tools__slider">
@@ -12782,7 +14915,9 @@ export default function App() {
                   type="checkbox"
                   checked={magicWandContiguous}
                   disabled={!canPaint}
-                  onChange={(event) => setMagicWandContiguous(event.target.checked)}
+                  onChange={(event) =>
+                    setMagicWandContiguous(event.target.checked)
+                  }
                 />
                 Contiguous
               </label>
@@ -12807,7 +14942,9 @@ export default function App() {
               max={100}
               value={Math.round(brushOpacity * 100)}
               disabled={!canPaint || tool === "eraser"}
-              onChange={(event) => setBrushOpacity(Number(event.target.value) / 100)}
+              onChange={(event) =>
+                setBrushOpacity(Number(event.target.value) / 100)
+              }
             />
           </label>
         </div>
@@ -12828,7 +14965,11 @@ export default function App() {
       )}
 
       {showOcioPanel && ocioConfig && (
-        <div className="ocio-panel" role="region" aria-label="OpenColorIO Panel">
+        <div
+          className="ocio-panel"
+          role="region"
+          aria-label="OpenColorIO Panel"
+        >
           <div className="ocio-panel__section">
             <span className="ocio-panel__label">Colour spaces:</span>
             <span>{ocioConfig.colorspaceNames.join(", ")}</span>
@@ -12851,18 +14992,25 @@ export default function App() {
           <div className="ocio-panel__section">
             <span className="ocio-panel__label">HDR Histogram:</span>
             <span>
-              max luma {hdrHistogram.maxLuma.toFixed(2)}, {hdrHistogram.overbrightPixelCount}{" "}
-              overbright pixel(s)
+              max luma {hdrHistogram.maxLuma.toFixed(2)},{" "}
+              {hdrHistogram.overbrightPixelCount} overbright pixel(s)
             </span>
           </div>
-          <div className="hdr-histogram" title="Real luma bins, 0.0 up to this image's own real maximum. Bins past the amber marker hold real content above 1.0 -- overbright highlights no normal 0-255 histogram could ever show.">
+          <div
+            className="hdr-histogram"
+            title="Real luma bins, 0.0 up to this image's own real maximum. Bins past the amber marker hold real content above 1.0 -- overbright highlights no normal 0-255 histogram could ever show."
+          >
             {hdrHistogram.bins.map((count, index) => {
               const max = Math.max(...hdrHistogram.bins, 1);
               const overbright = index >= hdrHistogram.inGamutBinCount;
               return (
                 <div
                   key={index}
-                  className={overbright ? "hdr-histogram__bar hdr-histogram__bar--overbright" : "hdr-histogram__bar"}
+                  className={
+                    overbright
+                      ? "hdr-histogram__bar hdr-histogram__bar--overbright"
+                      : "hdr-histogram__bar"
+                  }
                   style={{ height: `${(count / max) * 100}%` }}
                   title={`${count} pixel(s)${overbright ? " (overbright)" : ""}`}
                 />
@@ -12906,7 +15054,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowNewDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowNewDialog(false)}
+              >
                 Cancel
               </button>
               <button
@@ -12933,19 +15084,28 @@ export default function App() {
             aria-label={MODIFY_SELECTION_LABELS[modifyMode].heading}
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">{MODIFY_SELECTION_LABELS[modifyMode].heading}</h2>
+            <h2 className="modal__heading">
+              {MODIFY_SELECTION_LABELS[modifyMode].heading}
+            </h2>
             <label className="control">
-              <span className="control__label">{MODIFY_SELECTION_LABELS[modifyMode].control}</span>
+              <span className="control__label">
+                {MODIFY_SELECTION_LABELS[modifyMode].control}
+              </span>
               <input
                 type="number"
                 min={1}
                 max={4000}
                 value={modifyAmount}
-                onChange={(event) => setModifyAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setModifyAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setModifyMode(null)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setModifyMode(null)}
+              >
                 Cancel
               </button>
               <button
@@ -12983,7 +15143,9 @@ export default function App() {
                 min={1}
                 max={255}
                 value={thresholdLevel}
-                onChange={(event) => setThresholdLevel(Number(event.target.value))}
+                onChange={(event) =>
+                  setThresholdLevel(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -12993,7 +15155,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyThreshold} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyThreshold}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13024,7 +15190,9 @@ export default function App() {
                 min={2}
                 max={64}
                 value={posterizeLevels}
-                onChange={(event) => setPosterizeLevels(Number(event.target.value))}
+                onChange={(event) =>
+                  setPosterizeLevels(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13034,7 +15202,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPosterize} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPosterize}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13088,7 +15260,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyBrightnessContrast} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyBrightnessContrast}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13155,7 +15331,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyHueSaturation} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyHueSaturation}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13175,7 +15355,9 @@ export default function App() {
             aria-label="Replace Color"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Image &gt; Adjustments &gt; Replace Color</h2>
+            <h2 className="modal__heading">
+              Image &gt; Adjustments &gt; Replace Color
+            </h2>
             <label className="control control--row">
               <span className="control__label">Target Color</span>
               <input
@@ -13194,7 +15376,9 @@ export default function App() {
                 min={0}
                 max={200}
                 value={replaceColorFuzziness}
-                onChange={(event) => setReplaceColorFuzziness(Number(event.target.value))}
+                onChange={(event) =>
+                  setReplaceColorFuzziness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13207,7 +15391,9 @@ export default function App() {
                 min={-180}
                 max={180}
                 value={replaceColorHue}
-                onChange={(event) => setReplaceColorHue(Number(event.target.value))}
+                onChange={(event) =>
+                  setReplaceColorHue(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13220,7 +15406,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={replaceColorSaturation}
-                onChange={(event) => setReplaceColorSaturation(Number(event.target.value))}
+                onChange={(event) =>
+                  setReplaceColorSaturation(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13233,7 +15421,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={replaceColorLightness}
-                onChange={(event) => setReplaceColorLightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setReplaceColorLightness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13243,7 +15433,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyReplaceColor} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyReplaceColor}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13263,17 +15457,22 @@ export default function App() {
             aria-label="Match Color"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Image &gt; Adjustments &gt; Match Color</h2>
+            <h2 className="modal__heading">
+              Image &gt; Adjustments &gt; Match Color
+            </h2>
             <p className="modal__hint">
-              Neural Filters &gt; Color Transfer is this same statistical transfer under its
-              newer name — Apply as Color Transfer runs the identical Source Layer and Fade
-              below through that command instead.
+              Neural Filters &gt; Color Transfer is this same statistical
+              transfer under its newer name — Apply as Color Transfer runs the
+              identical Source Layer and Fade below through that command
+              instead.
             </p>
             <label className="control control--row">
               <span className="control__label">Source Layer</span>
               <select
                 value={matchColorSourceLayerId ?? ""}
-                onChange={(event) => setMatchColorSourceLayerId(Number(event.target.value))}
+                onChange={(event) =>
+                  setMatchColorSourceLayerId(Number(event.target.value))
+                }
               >
                 {(document?.layers ?? [])
                   .filter((layer) => layer.id !== selectedId)
@@ -13294,11 +15493,16 @@ export default function App() {
                 min={0}
                 max={100}
                 value={matchColorFade}
-                onChange={(event) => setMatchColorFade(Number(event.target.value))}
+                onChange={(event) =>
+                  setMatchColorFade(Number(event.target.value))
+                }
               />
             </label>
             <div title="Only Apply as Color Transfer, a Neural Filter, offers an Output choice — plain Match Color always edits the current layer">
-              <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
+              <NeuralFilterOutput
+                value={neuralFilterOutput}
+                onChange={setNeuralFilterOutput}
+              />
             </div>
             <div className="modal__actions">
               <button
@@ -13341,9 +15545,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Neural Filters &gt; Harmonize</h2>
             <p className="modal__hint">
-              Matches this layer's colors to the flattened composite of every other visible
-              layer — Match Color's own statistical transfer, with the "source" computed
-              automatically instead of picked by hand.
+              Matches this layer's colors to the flattened composite of every
+              other visible layer — Match Color's own statistical transfer, with
+              the "source" computed automatically instead of picked by hand.
             </p>
             <label className="control">
               <span className="control__label">
@@ -13355,10 +15559,15 @@ export default function App() {
                 min={0}
                 max={100}
                 value={harmonizeFade}
-                onChange={(event) => setHarmonizeFade(Number(event.target.value))}
+                onChange={(event) =>
+                  setHarmonizeFade(Number(event.target.value))
+                }
               />
             </label>
-            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
+            <NeuralFilterOutput
+              value={neuralFilterOutput}
+              onChange={setNeuralFilterOutput}
+            />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -13366,7 +15575,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={() => void applyHarmonize()} disabled={busy}>
+              <button
+                className="button"
+                onClick={() => void applyHarmonize()}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13386,15 +15599,20 @@ export default function App() {
             aria-label="JPEG Artifacts Removal"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Neural Filters &gt; JPEG Artifacts Removal</h2>
+            <h2 className="modal__heading">
+              Neural Filters &gt; JPEG Artifacts Removal
+            </h2>
             <p className="modal__hint">
-              Smooths pixels on or next to an 8x8 JPEG block boundary — a classic deblocking
-              filter, the same real technique video codecs use at their own block edges.
+              Smooths pixels on or next to an 8x8 JPEG block boundary — a
+              classic deblocking filter, the same real technique video codecs
+              use at their own block edges.
             </p>
             <label className="control">
               <span className="control__label">
                 Strength
-                <span className="control__value">{jpegArtifactsRemovalStrength}%</span>
+                <span className="control__value">
+                  {jpegArtifactsRemovalStrength}%
+                </span>
               </span>
               <input
                 type="range"
@@ -13406,7 +15624,10 @@ export default function App() {
                 }
               />
             </label>
-            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
+            <NeuralFilterOutput
+              value={neuralFilterOutput}
+              onChange={setNeuralFilterOutput}
+            />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -13462,7 +15683,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={vibranceSaturation}
-                onChange={(event) => setVibranceSaturation(Number(event.target.value))}
+                onChange={(event) =>
+                  setVibranceSaturation(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13472,7 +15695,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyVibrance} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyVibrance}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13512,7 +15739,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={photoFilterDensity}
-                onChange={(event) => setPhotoFilterDensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setPhotoFilterDensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13522,7 +15751,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPhotoFilter} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPhotoFilter}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13555,7 +15788,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={temperatureValue}
-                onChange={(event) => setTemperatureValue(Number(event.target.value))}
+                onChange={(event) =>
+                  setTemperatureValue(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13578,7 +15813,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyTemperatureTint} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTemperatureTint}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13611,7 +15850,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={highlightsValue}
-                onChange={(event) => setHighlightsValue(Number(event.target.value))}
+                onChange={(event) =>
+                  setHighlightsValue(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13624,7 +15865,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={shadowsValue}
-                onChange={(event) => setShadowsValue(Number(event.target.value))}
+                onChange={(event) =>
+                  setShadowsValue(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13634,7 +15877,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyHighlightsShadows} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyHighlightsShadows}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13665,11 +15912,16 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={clarityAmount}
-                onChange={(event) => setClarityAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setClarityAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowClarityDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowClarityDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyClarity} disabled={busy}>
@@ -13692,7 +15944,9 @@ export default function App() {
             aria-label="Camera Raw Saturation"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Camera Raw Filter &gt; Saturation</h2>
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Saturation
+            </h2>
             <label className="control">
               <span className="control__label">
                 Saturation
@@ -13703,7 +15957,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={cameraRawSaturation}
-                onChange={(event) => setCameraRawSaturation(Number(event.target.value))}
+                onChange={(event) =>
+                  setCameraRawSaturation(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13713,7 +15969,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCameraRawSaturation} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCameraRawSaturation}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13758,7 +16018,10 @@ export default function App() {
                       d={
                         `M0,100 ` +
                         counts
-                          .map((count, value) => `L${value},${100 - (count / peak) * 100}`)
+                          .map(
+                            (count, value) =>
+                              `L${value},${100 - (count / peak) * 100}`,
+                          )
                           .join(" ") +
                         " L255,100 Z"
                       }
@@ -13805,7 +16068,9 @@ export default function App() {
             aria-label="Point Curve"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Camera Raw Filter &gt; Curve &gt; Point Curve</h2>
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Curve &gt; Point Curve
+            </h2>
             {pointCurvePoints.map((value, index) => (
               <label className="control" key={index}>
                 <span className="control__label">
@@ -13817,7 +16082,9 @@ export default function App() {
                   min={0}
                   max={255}
                   value={value}
-                  onChange={(event) => setPointCurvePoint(index, Number(event.target.value))}
+                  onChange={(event) =>
+                    setPointCurvePoint(index, Number(event.target.value))
+                  }
                 />
               </label>
             ))}
@@ -13834,7 +16101,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPointCurve} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPointCurve}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13854,41 +16125,57 @@ export default function App() {
             aria-label="Color Grading"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Camera Raw Filter &gt; Color Grading</h2>
-            {(["Shadows", "Midtones", "Highlights"] as const).map((name, range) => (
-              <div key={name}>
-                <label className="control">
-                  <span className="control__label">
-                    {name} hue
-                    <span className="control__value">{colorGrading[range][0]}°</span>
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={360}
-                    value={colorGrading[range][0]}
-                    onChange={(event) =>
-                      setColorGradingValue(range, 0, Number(event.target.value))
-                    }
-                  />
-                </label>
-                <label className="control">
-                  <span className="control__label">
-                    {name} saturation
-                    <span className="control__value">{colorGrading[range][1]}</span>
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={colorGrading[range][1]}
-                    onChange={(event) =>
-                      setColorGradingValue(range, 1, Number(event.target.value))
-                    }
-                  />
-                </label>
-              </div>
-            ))}
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Color Grading
+            </h2>
+            {(["Shadows", "Midtones", "Highlights"] as const).map(
+              (name, range) => (
+                <div key={name}>
+                  <label className="control">
+                    <span className="control__label">
+                      {name} hue
+                      <span className="control__value">
+                        {colorGrading[range][0]}°
+                      </span>
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={360}
+                      value={colorGrading[range][0]}
+                      onChange={(event) =>
+                        setColorGradingValue(
+                          range,
+                          0,
+                          Number(event.target.value),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="control">
+                    <span className="control__label">
+                      {name} saturation
+                      <span className="control__value">
+                        {colorGrading[range][1]}
+                      </span>
+                    </span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={colorGrading[range][1]}
+                      onChange={(event) =>
+                        setColorGradingValue(
+                          range,
+                          1,
+                          Number(event.target.value),
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+              ),
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -13896,7 +16183,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorGrading} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorGrading}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13916,20 +16207,31 @@ export default function App() {
             aria-label="Color Mixer"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Camera Raw Filter &gt; Color Mixer</h2>
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Color Mixer
+            </h2>
             <label className="control">
               <span className="control__label">Range</span>
               <select
                 value={colorMixerRange}
-                onChange={(event) => setColorMixerRange(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorMixerRange(Number(event.target.value))
+                }
               >
-                {["Reds", "Oranges", "Yellows", "Greens", "Aquas", "Blues", "Purples", "Magentas"].map(
-                  (name, index) => (
-                    <option key={name} value={index}>
-                      {name}
-                    </option>
-                  ),
-                )}
+                {[
+                  "Reds",
+                  "Oranges",
+                  "Yellows",
+                  "Greens",
+                  "Aquas",
+                  "Blues",
+                  "Purples",
+                  "Magentas",
+                ].map((name, index) => (
+                  <option key={name} value={index}>
+                    {name}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="control">
@@ -13942,7 +16244,9 @@ export default function App() {
                 min={-180}
                 max={180}
                 value={colorMixerHue}
-                onChange={(event) => setColorMixerHue(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorMixerHue(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13955,7 +16259,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={colorMixerSaturation}
-                onChange={(event) => setColorMixerSaturation(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorMixerSaturation(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -13968,7 +16274,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={colorMixerLuminance}
-                onChange={(event) => setColorMixerLuminance(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorMixerLuminance(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -13978,7 +16286,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorMixer} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorMixer}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -13998,7 +16310,9 @@ export default function App() {
             aria-label="Point Color"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Camera Raw Filter &gt; Point Color</h2>
+            <h2 className="modal__heading">
+              Camera Raw Filter &gt; Point Color
+            </h2>
             <label className="control control--row">
               <span className="control__label">Color</span>
               <input
@@ -14017,7 +16331,9 @@ export default function App() {
                 min={0}
                 max={200}
                 value={pointColorRange}
-                onChange={(event) => setPointColorRange(Number(event.target.value))}
+                onChange={(event) =>
+                  setPointColorRange(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -14030,7 +16346,9 @@ export default function App() {
                 min={-180}
                 max={180}
                 value={pointColorHue}
-                onChange={(event) => setPointColorHue(Number(event.target.value))}
+                onChange={(event) =>
+                  setPointColorHue(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -14043,7 +16361,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={pointColorSaturation}
-                onChange={(event) => setPointColorSaturation(Number(event.target.value))}
+                onChange={(event) =>
+                  setPointColorSaturation(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -14056,7 +16376,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={pointColorLuminance}
-                onChange={(event) => setPointColorLuminance(Number(event.target.value))}
+                onChange={(event) =>
+                  setPointColorLuminance(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -14066,7 +16388,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPointColor} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPointColor}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -14089,23 +16415,27 @@ export default function App() {
             <h2 className="modal__heading">
               Camera Raw Filter &gt; Curve &gt; Parametric Curve
             </h2>
-            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map((name, index) => (
-              <label className="control" key={name}>
-                <span className="control__label">
-                  {name}
-                  <span className="control__value">{parametricCurve[index]}</span>
-                </span>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={parametricCurve[index]}
-                  onChange={(event) =>
-                    setParametricCurveValue(index, Number(event.target.value))
-                  }
-                />
-              </label>
-            ))}
+            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map(
+              (name, index) => (
+                <label className="control" key={name}>
+                  <span className="control__label">
+                    {name}
+                    <span className="control__value">
+                      {parametricCurve[index]}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={parametricCurve[index]}
+                    onChange={(event) =>
+                      setParametricCurveValue(index, Number(event.target.value))
+                    }
+                  />
+                </label>
+              ),
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -14119,7 +16449,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyParametricCurve} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyParametricCurve}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -14141,9 +16475,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Filter &gt; Camera Raw Filter</h2>
             <p className="modal__hint">
-              Every panel is applied together as a single undoable edit, in Camera
-              Raw's own order: white balance, tone, clarity, saturation, curves,
-              then optics. Panels left at their defaults are skipped.
+              Every panel is applied together as a single undoable edit, in
+              Camera Raw's own order: white balance, tone, clarity, saturation,
+              curves, then optics. Panels left at their defaults are skipped.
             </p>
             <h3 className="modal__section">Basic</h3>
             {(
@@ -14166,28 +16500,38 @@ export default function App() {
                   min={-100}
                   max={100}
                   value={cameraRaw[key]}
-                  onChange={(event) => setCameraRawSlider(key, Number(event.target.value))}
-                />
-              </label>
-            ))}
-            <h3 className="modal__section">Curve — Parametric</h3>
-            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map((name, index) => (
-              <label className="control" key={name}>
-                <span className="control__label">
-                  {name}
-                  <span className="control__value">{cameraRaw.parametricCurve[index]}</span>
-                </span>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={cameraRaw.parametricCurve[index]}
                   onChange={(event) =>
-                    setCameraRawCurvePoint("parametricCurve", index, Number(event.target.value))
+                    setCameraRawSlider(key, Number(event.target.value))
                   }
                 />
               </label>
             ))}
+            <h3 className="modal__section">Curve — Parametric</h3>
+            {(["Highlights", "Lights", "Darks", "Shadows"] as const).map(
+              (name, index) => (
+                <label className="control" key={name}>
+                  <span className="control__label">
+                    {name}
+                    <span className="control__value">
+                      {cameraRaw.parametricCurve[index]}
+                    </span>
+                  </span>
+                  <input
+                    type="range"
+                    min={-100}
+                    max={100}
+                    value={cameraRaw.parametricCurve[index]}
+                    onChange={(event) =>
+                      setCameraRawCurvePoint(
+                        "parametricCurve",
+                        index,
+                        Number(event.target.value),
+                      )
+                    }
+                  />
+                </label>
+              ),
+            )}
             <h3 className="modal__section">Curve — Point</h3>
             {cameraRaw.pointCurve.map((value, index) => (
               <label className="control" key={index}>
@@ -14201,7 +16545,11 @@ export default function App() {
                   max={255}
                   value={value}
                   onChange={(event) =>
-                    setCameraRawCurvePoint("pointCurve", index, Number(event.target.value))
+                    setCameraRawCurvePoint(
+                      "pointCurve",
+                      index,
+                      Number(event.target.value),
+                    )
                   }
                 />
               </label>
@@ -14217,7 +16565,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={cameraRaw.defringe}
-                onChange={(event) => setCameraRawSlider("defringe", Number(event.target.value))}
+                onChange={(event) =>
+                  setCameraRawSlider("defringe", Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -14228,7 +16578,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={opticsDistortion}
-                onChange={(event) => setOpticsDistortion(Number(event.target.value))}
+                onChange={(event) =>
+                  setOpticsDistortion(Number(event.target.value))
+                }
               />
               <span className="control__value">{opticsDistortion}</span>
               <span className="control__label">Vignette</span>
@@ -14237,34 +16589,67 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={opticsVignette}
-                onChange={(event) => setOpticsVignette(Number(event.target.value))}
+                onChange={(event) =>
+                  setOpticsVignette(Number(event.target.value))
+                }
               />
               <span className="control__value">{opticsVignette}</span>
-              <button className="button button--quiet" onClick={() => void applyOptics()} disabled={busy} title="Apply Optics now">
+              <button
+                className="button button--quiet"
+                onClick={() => void applyOptics()}
+                disabled={busy}
+                title="Apply Optics now"
+              >
                 Apply optics
               </button>
             </label>
             <label className="control control--row">
               <span className="control__label">Targeted Adjustment</span>
-              <select value={targetedMode} onChange={(event) => setTargetedMode(event.target.value as TargetedMode)}>
+              <select
+                value={targetedMode}
+                onChange={(event) =>
+                  setTargetedMode(event.target.value as TargetedMode)
+                }
+              >
                 <option value="parametricCurve">Parametric Curve</option>
                 <option value="hue">Hue</option>
                 <option value="saturation">Saturation</option>
                 <option value="luminance">Luminance</option>
               </select>
               <span className="control__label">Pixel X / Y</span>
-              <input type="number" min={0} value={targetedPoint[0]} onChange={(event) => setTargetedPoint((p) => [Number(event.target.value), p[1]])} />
-              <input type="number" min={0} value={targetedPoint[1]} onChange={(event) => setTargetedPoint((p) => [p[0], Number(event.target.value)])} />
+              <input
+                type="number"
+                min={0}
+                value={targetedPoint[0]}
+                onChange={(event) =>
+                  setTargetedPoint((p) => [Number(event.target.value), p[1]])
+                }
+              />
+              <input
+                type="number"
+                min={0}
+                value={targetedPoint[1]}
+                onChange={(event) =>
+                  setTargetedPoint((p) => [p[0], Number(event.target.value)])
+                }
+              />
               <span className="control__label">Amount</span>
               <input
                 type="range"
                 min={-100}
                 max={100}
                 value={targetedAmount}
-                onChange={(event) => setTargetedAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setTargetedAmount(Number(event.target.value))
+                }
               />
               <span className="control__value">{targetedAmount}</span>
-              <button className="button button--quiet" onClick={() => void applyTargetedAdjustment()} disabled={busy} title="Adjust the band or hue range under that pixel">
+              <button
+                className="button button--quiet"
+                onClick={() => void applyTargetedAdjustment()}
+                disabled={busy}
+                title="Adjust the band or hue range under that pixel"
+              >
                 Apply
               </button>
             </label>
@@ -14272,7 +16657,12 @@ export default function App() {
               <span className="control__label">Retouch</span>
               <select
                 value={retouch.mode}
-                onChange={(event) => setRetouch((r) => ({ ...r, mode: event.target.value as RetouchMode }))}
+                onChange={(event) =>
+                  setRetouch((r) => ({
+                    ...r,
+                    mode: event.target.value as RetouchMode,
+                  }))
+                }
                 title="Camera Raw Filter > Remove / Heal / Clone / Generative Remove"
               >
                 <option value="remove">Remove</option>
@@ -14281,29 +16671,56 @@ export default function App() {
                 <option value="generativeRemove">Generative Remove</option>
               </select>
               <span className="control__label">Spot X / Y</span>
-              <input type="number" step={0.5} value={retouch.x} onChange={(event) => setRetouch((r) => ({ ...r, x: Number(event.target.value) }))} />
-              <input type="number" step={0.5} value={retouch.y} onChange={(event) => setRetouch((r) => ({ ...r, y: Number(event.target.value) }))} />
-              {retouch.mode !== "remove" && retouch.mode !== "generativeRemove" && (
-                <>
-                  <span className="control__label">Source X / Y</span>
-                  <input
-                    type="number"
-                    step={0.5}
-                    value={retouch.source?.[0] ?? 0.5}
-                    onChange={(event) =>
-                      setRetouch((r) => ({ ...r, source: [Number(event.target.value), r.source?.[1] ?? 0.5] }))
-                    }
-                  />
-                  <input
-                    type="number"
-                    step={0.5}
-                    value={retouch.source?.[1] ?? 0.5}
-                    onChange={(event) =>
-                      setRetouch((r) => ({ ...r, source: [r.source?.[0] ?? 0.5, Number(event.target.value)] }))
-                    }
-                  />
-                </>
-              )}
+              <input
+                type="number"
+                step={0.5}
+                value={retouch.x}
+                onChange={(event) =>
+                  setRetouch((r) => ({ ...r, x: Number(event.target.value) }))
+                }
+              />
+              <input
+                type="number"
+                step={0.5}
+                value={retouch.y}
+                onChange={(event) =>
+                  setRetouch((r) => ({ ...r, y: Number(event.target.value) }))
+                }
+              />
+              {retouch.mode !== "remove" &&
+                retouch.mode !== "generativeRemove" && (
+                  <>
+                    <span className="control__label">Source X / Y</span>
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={retouch.source?.[0] ?? 0.5}
+                      onChange={(event) =>
+                        setRetouch((r) => ({
+                          ...r,
+                          source: [
+                            Number(event.target.value),
+                            r.source?.[1] ?? 0.5,
+                          ],
+                        }))
+                      }
+                    />
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={retouch.source?.[1] ?? 0.5}
+                      onChange={(event) =>
+                        setRetouch((r) => ({
+                          ...r,
+                          source: [
+                            r.source?.[0] ?? 0.5,
+                            Number(event.target.value),
+                          ],
+                        }))
+                      }
+                    />
+                  </>
+                )}
             </label>
             <label className="control control--row">
               <span className="control__label">Size</span>
@@ -14312,7 +16729,12 @@ export default function App() {
                 min={0.5}
                 step={0.5}
                 value={retouch.radius}
-                onChange={(event) => setRetouch((r) => ({ ...r, radius: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setRetouch((r) => ({
+                    ...r,
+                    radius: Number(event.target.value),
+                  }))
+                }
               />
               <span className="control__label">Feather %</span>
               <input
@@ -14320,7 +16742,12 @@ export default function App() {
                 min={0}
                 max={100}
                 value={retouch.feather}
-                onChange={(event) => setRetouch((r) => ({ ...r, feather: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setRetouch((r) => ({
+                    ...r,
+                    feather: Number(event.target.value),
+                  }))
+                }
               />
               <span className="control__value">{retouch.feather}</span>
               <span className="control__label">Opacity %</span>
@@ -14329,10 +16756,20 @@ export default function App() {
                 min={0}
                 max={100}
                 value={retouch.opacity}
-                onChange={(event) => setRetouch((r) => ({ ...r, opacity: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setRetouch((r) => ({
+                    ...r,
+                    opacity: Number(event.target.value),
+                  }))
+                }
               />
               <span className="control__value">{retouch.opacity}</span>
-              <button className="button button--quiet" onClick={() => void applyRetouchSpot()} disabled={busy} title="Apply this retouch spot now">
+              <button
+                className="button button--quiet"
+                onClick={() => void applyRetouchSpot()}
+                disabled={busy}
+                title="Apply this retouch spot now"
+              >
                 Apply spot
               </button>
             </label>
@@ -14368,7 +16805,9 @@ export default function App() {
                   min={0}
                   max={255}
                   value={rawMaskTolerance}
-                  onChange={(event) => setRawMaskTolerance(Number(event.target.value))}
+                  onChange={(event) =>
+                    setRawMaskTolerance(Number(event.target.value))
+                  }
                 />
                 <span className="control__value">{rawMaskTolerance}</span>
               </label>
@@ -14376,7 +16815,9 @@ export default function App() {
             {rawMaskKind === "radial" && (
               <>
                 <label className="control control--row">
-                  <span className="control__label">Ellipse (x0, y0, x1, y1)</span>
+                  <span className="control__label">
+                    Ellipse (x0, y0, x1, y1)
+                  </span>
                   {rawMaskEllipse.map((v, i) => (
                     <input
                       type="number"
@@ -14384,7 +16825,12 @@ export default function App() {
                       value={v}
                       key={i}
                       onChange={(event) =>
-                        setRawMaskEllipse((e) => e.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof e)
+                        setRawMaskEllipse(
+                          (e) =>
+                            e.map((old, j) =>
+                              j === i ? Number(event.target.value) : old,
+                            ) as typeof e,
+                        )
                       }
                     />
                   ))}
@@ -14396,7 +16842,9 @@ export default function App() {
                     min={0}
                     max={100}
                     value={rawMaskFeather}
-                    onChange={(event) => setRawMaskFeather(Number(event.target.value))}
+                    onChange={(event) =>
+                      setRawMaskFeather(Number(event.target.value))
+                    }
                   />
                   <span className="control__value">{rawMaskFeather}</span>
                 </label>
@@ -14405,21 +16853,31 @@ export default function App() {
             {rawMaskKind === "colorRange" && (
               <label className="control control--row">
                 <span className="control__label">Color</span>
-                <input type="color" value={rawMaskColor} onChange={(event) => setRawMaskColor(event.target.value)} />
+                <input
+                  type="color"
+                  value={rawMaskColor}
+                  onChange={(event) => setRawMaskColor(event.target.value)}
+                />
                 <span className="control__label">Fuzziness</span>
                 <input
                   type="range"
                   min={0}
                   max={200}
                   value={rawMaskFuzziness}
-                  onChange={(event) => setRawMaskFuzziness(Number(event.target.value))}
+                  onChange={(event) =>
+                    setRawMaskFuzziness(Number(event.target.value))
+                  }
                 />
                 <span className="control__value">{rawMaskFuzziness}</span>
               </label>
             )}
             {(rawMaskKind === "radial" || rawMaskKind === "colorRange") && (
               <label className="control control--row">
-                <input type="checkbox" checked={rawMaskInvert} onChange={(event) => setRawMaskInvert(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={rawMaskInvert}
+                  onChange={(event) => setRawMaskInvert(event.target.checked)}
+                />
                 <span className="control__label">Invert</span>
               </label>
             )}
@@ -14448,7 +16906,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCameraRaw} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCameraRaw}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -14470,16 +16932,19 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Color Range</h2>
             <p className="modal__hint">
-              Sampled Colors selects every pixel of the selected layer whose red, green,
-              and blue are each within Fuzziness of any sample, wherever it sits; the
-              presets pick a hue sector, a tone band, or skin tones.
+              Sampled Colors selects every pixel of the selected layer whose
+              red, green, and blue are each within Fuzziness of any sample,
+              wherever it sits; the presets pick a hue sector, a tone band, or
+              skin tones.
             </p>
             <label className="control control--row">
               <span className="control__label">Select</span>
               <select
                 value={colorRangeSelect}
                 onChange={(event) =>
-                  setColorRangeSelect(event.target.value as "sampled" | ColorRangePreset)
+                  setColorRangeSelect(
+                    event.target.value as "sampled" | ColorRangePreset,
+                  )
                 }
               >
                 <option value="sampled">Sampled Colors</option>
@@ -14508,7 +16973,10 @@ export default function App() {
                     className="button button--quiet"
                     onClick={() => {
                       const [r, g, b] = hexToRgb(colorRangeColor);
-                      setColorRangeSamples((samples) => [...samples, { color: [r, g, b], position: null }]);
+                      setColorRangeSamples((samples) => [
+                        ...samples,
+                        { color: [r, g, b], position: null },
+                      ]);
                     }}
                     title="Add this colour to the samples"
                   >
@@ -14534,10 +17002,14 @@ export default function App() {
                         className="button button--quiet"
                         style={{ background: `rgb(${sample.color.join(",")})` }}
                         onClick={() =>
-                          setColorRangeSamples((samples) => samples.filter((_, i) => i !== index))
+                          setColorRangeSamples((samples) =>
+                            samples.filter((_, i) => i !== index),
+                          )
                         }
                         title={`rgb(${sample.color.join(", ")})${
-                          sample.position ? ` at ${sample.position[0]}, ${sample.position[1]}` : ""
+                          sample.position
+                            ? ` at ${sample.position[0]}, ${sample.position[1]}`
+                            : ""
                         } — click to remove`}
                       >
                         {" "}
@@ -14548,14 +17020,18 @@ export default function App() {
                 <label className="control">
                   <span className="control__label">
                     Fuzziness
-                    <span className="control__value">{colorRangeFuzziness}</span>
+                    <span className="control__value">
+                      {colorRangeFuzziness}
+                    </span>
                   </span>
                   <input
                     type="range"
                     min={0}
                     max={255}
                     value={colorRangeFuzziness}
-                    onChange={(event) => setColorRangeFuzziness(Number(event.target.value))}
+                    onChange={(event) =>
+                      setColorRangeFuzziness(Number(event.target.value))
+                    }
                   />
                 </label>
                 <label className="control control--row">
@@ -14566,9 +17042,13 @@ export default function App() {
                       colorRangeSamples.length === 0 ||
                       colorRangeSamples.some((s) => s.position === null)
                     }
-                    onChange={(event) => setColorRangeLocalized(event.target.checked)}
+                    onChange={(event) =>
+                      setColorRangeLocalized(event.target.checked)
+                    }
                   />
-                  <span className="control__label">Localized Color Clusters (needs on-image samples)</span>
+                  <span className="control__label">
+                    Localized Color Clusters (needs on-image samples)
+                  </span>
                 </label>
                 {colorRangeLocalized && (
                   <label className="control">
@@ -14581,7 +17061,9 @@ export default function App() {
                       min={0}
                       max={100}
                       value={colorRangeRange}
-                      onChange={(event) => setColorRangeRange(Number(event.target.value))}
+                      onChange={(event) =>
+                        setColorRangeRange(Number(event.target.value))
+                      }
                     />
                   </label>
                 )}
@@ -14633,7 +17115,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorRange} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorRange}
+                disabled={busy}
+              >
                 Select
               </button>
             </div>
@@ -14655,9 +17141,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Camera Raw Filter &gt; Geometry</h2>
             <p className="modal__hint">
-              Manual corrections applied in order — perspective, rotate, aspect and
-              scale, then offset — as one edit. Upright's automatic modes are not
-              available.
+              Manual corrections applied in order — perspective, rotate, aspect
+              and scale, then offset — as one edit. Upright's automatic modes
+              are not available.
             </p>
             {(
               [
@@ -14676,7 +17162,9 @@ export default function App() {
                   type="number"
                   step={step}
                   value={geometry[key]}
-                  onChange={(event) => setGeometryField(key, Number(event.target.value))}
+                  onChange={(event) =>
+                    setGeometryField(key, Number(event.target.value))
+                  }
                 />
               </label>
             ))}
@@ -14703,7 +17191,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGeometry} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGeometry}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -14725,8 +17217,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Layer Comps</h2>
             <p className="modal__hint">
-              A comp records every layer&apos;s visibility, opacity, and blend mode. Applying
-              one restores them; layers added since are left as they are.
+              A comp records every layer&apos;s visibility, opacity, and blend
+              mode. Applying one restores them; layers added since are left as
+              they are.
             </p>
             {document.layerComps.length === 0 ? (
               <p className="modal__hint">No comps saved yet.</p>
@@ -14736,14 +17229,18 @@ export default function App() {
                   <span className="control__label">{name}</span>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("apply_layer_comp", { name })}
+                    onClick={() =>
+                      void runCommand("apply_layer_comp", { name })
+                    }
                     disabled={busy}
                   >
                     Apply
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_layer_comp", { name })}
+                    onClick={() =>
+                      void runCommand("delete_layer_comp", { name })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -14767,7 +17264,10 @@ export default function App() {
               </button>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowLayerCompsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLayerCompsDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -14789,7 +17289,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Presets</h2>
             <label className="control control--row">
-              <span className="control__label">Name (for Save and Rename below)</span>
+              <span className="control__label">
+                Name (for Save and Rename below)
+              </span>
               <input
                 type="text"
                 value={presetName}
@@ -14798,7 +17300,9 @@ export default function App() {
             </label>
 
             <h3 className="modal__subheading">Gradient Presets</h3>
-            <p className="modal__hint">Saves the current Set Foreground / gradient end colours.</p>
+            <p className="modal__hint">
+              Saves the current Set Foreground / gradient end colours.
+            </p>
             {document.gradientPresets.length === 0 ? (
               <p className="modal__hint">No gradient presets saved yet.</p>
             ) : (
@@ -14818,8 +17322,20 @@ export default function App() {
                   <button
                     className="button button--quiet"
                     onClick={() => {
-                      setBrushColor(rgbToHex(preset.startColor[0], preset.startColor[1], preset.startColor[2]));
-                      setGradientEndColor(rgbToHex(preset.endColor[0], preset.endColor[1], preset.endColor[2]));
+                      setBrushColor(
+                        rgbToHex(
+                          preset.startColor[0],
+                          preset.startColor[1],
+                          preset.startColor[2],
+                        ),
+                      );
+                      setGradientEndColor(
+                        rgbToHex(
+                          preset.endColor[0],
+                          preset.endColor[1],
+                          preset.endColor[2],
+                        ),
+                      );
                     }}
                     disabled={busy}
                   >
@@ -14827,7 +17343,12 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("rename_gradient_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    onClick={() =>
+                      void runCommand("rename_gradient_preset", {
+                        oldName: preset.name,
+                        newName: presetName.trim(),
+                      })
+                    }
                     disabled={busy || presetName.trim() === ""}
                     title="Rename to the Name field above"
                   >
@@ -14835,44 +17356,11 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_gradient_preset", { name: preset.name })}
-                    disabled={busy}
-                  >
-                    Delete
-                  </button>
-                </div>
-              ))
-            )}
-            <button className="button" onClick={savePresetFromCurrent} disabled={busy || presetName.trim() === ""}>
-              Save Gradient
-            </button>
-
-            <h3 className="modal__subheading">Pattern Presets</h3>
-            <p className="modal__hint">Saves the pattern currently defined with Edit &gt; Define Pattern.</p>
-            {document.patternPresets.length === 0 ? (
-              <p className="modal__hint">No pattern presets saved yet.</p>
-            ) : (
-              document.patternPresets.map((name) => (
-                <div className="control control--row" key={name}>
-                  <span className="control__label">{name}</span>
-                  <button
-                    className="button button--quiet"
-                    onClick={() => void runCommand("load_pattern_preset", { name })}
-                    disabled={busy}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    className="button button--quiet"
-                    onClick={() => void runCommand("rename_pattern_preset", { oldName: name, newName: presetName.trim() })}
-                    disabled={busy || presetName.trim() === ""}
-                    title="Rename to the Name field above"
-                  >
-                    Rename
-                  </button>
-                  <button
-                    className="button button--quiet"
-                    onClick={() => void runCommand("delete_pattern_preset", { name })}
+                    onClick={() =>
+                      void runCommand("delete_gradient_preset", {
+                        name: preset.name,
+                      })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -14882,30 +17370,39 @@ export default function App() {
             )}
             <button
               className="button"
-              onClick={() => void runCommand("save_pattern_preset", { name: presetName.trim() })}
+              onClick={savePresetFromCurrent}
               disabled={busy || presetName.trim() === ""}
             >
-              Save Pattern
+              Save Gradient
             </button>
 
-            <h3 className="modal__subheading">Adjustment Presets</h3>
-            <p className="modal__hint">Saves the adjustment currently set up in the Adjustment Layer dialog.</p>
-            {document.adjustmentPresets.length === 0 ? (
-              <p className="modal__hint">No adjustment presets saved yet.</p>
+            <h3 className="modal__subheading">Pattern Presets</h3>
+            <p className="modal__hint">
+              Saves the pattern currently defined with Edit &gt; Define Pattern.
+            </p>
+            {document.patternPresets.length === 0 ? (
+              <p className="modal__hint">No pattern presets saved yet.</p>
             ) : (
-              document.adjustmentPresets.map((preset) => (
-                <div className="control control--row" key={preset.name}>
-                  <span className="control__label">{preset.name}</span>
+              document.patternPresets.map((name) => (
+                <div className="control control--row" key={name}>
+                  <span className="control__label">{name}</span>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("apply_adjustment_preset", { name: preset.name })}
+                    onClick={() =>
+                      void runCommand("load_pattern_preset", { name })
+                    }
                     disabled={busy}
                   >
                     Apply
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("rename_adjustment_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    onClick={() =>
+                      void runCommand("rename_pattern_preset", {
+                        oldName: name,
+                        newName: presetName.trim(),
+                      })
+                    }
                     disabled={busy || presetName.trim() === ""}
                     title="Rename to the Name field above"
                   >
@@ -14913,7 +17410,9 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_adjustment_preset", { name: preset.name })}
+                    onClick={() =>
+                      void runCommand("delete_pattern_preset", { name })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -14924,7 +17423,71 @@ export default function App() {
             <button
               className="button"
               onClick={() =>
-                void runCommand("save_adjustment_preset", { name: presetName.trim(), adjustment: currentAdjustment() })
+                void runCommand("save_pattern_preset", {
+                  name: presetName.trim(),
+                })
+              }
+              disabled={busy || presetName.trim() === ""}
+            >
+              Save Pattern
+            </button>
+
+            <h3 className="modal__subheading">Adjustment Presets</h3>
+            <p className="modal__hint">
+              Saves the adjustment currently set up in the Adjustment Layer
+              dialog.
+            </p>
+            {document.adjustmentPresets.length === 0 ? (
+              <p className="modal__hint">No adjustment presets saved yet.</p>
+            ) : (
+              document.adjustmentPresets.map((preset) => (
+                <div className="control control--row" key={preset.name}>
+                  <span className="control__label">{preset.name}</span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() =>
+                      void runCommand("apply_adjustment_preset", {
+                        name: preset.name,
+                      })
+                    }
+                    disabled={busy}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() =>
+                      void runCommand("rename_adjustment_preset", {
+                        oldName: preset.name,
+                        newName: presetName.trim(),
+                      })
+                    }
+                    disabled={busy || presetName.trim() === ""}
+                    title="Rename to the Name field above"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() =>
+                      void runCommand("delete_adjustment_preset", {
+                        name: preset.name,
+                      })
+                    }
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              className="button"
+              onClick={() =>
+                void runCommand("save_adjustment_preset", {
+                  name: presetName.trim(),
+                  adjustment: currentAdjustment(),
+                })
               }
               disabled={busy || presetName.trim() === ""}
             >
@@ -14933,8 +17496,8 @@ export default function App() {
 
             <h3 className="modal__subheading">Custom Shapes</h3>
             <p className="modal__hint">
-              Saves the current work path (Pen tools), which must be closed. Place fills
-              the box below, scaled to fit.
+              Saves the current work path (Pen tools), which must be closed.
+              Place fills the box below, scaled to fit.
             </p>
             {document.customShapePresets.length === 0 ? (
               <p className="modal__hint">No custom shapes saved yet.</p>
@@ -14947,7 +17510,14 @@ export default function App() {
                     onClick={() => {
                       const [r, g, b] = hexToRgb(brushColor);
                       const [x0, y0, x1, y1] = shapeBox;
-                      void runCommand("place_custom_shape_preset", { name, x0, y0, x1, y1, color: [r, g, b, 255] });
+                      void runCommand("place_custom_shape_preset", {
+                        name,
+                        x0,
+                        y0,
+                        x1,
+                        y1,
+                        color: [r, g, b, 255],
+                      });
                     }}
                     disabled={busy}
                   >
@@ -14955,7 +17525,12 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("rename_custom_shape_preset", { oldName: name, newName: presetName.trim() })}
+                    onClick={() =>
+                      void runCommand("rename_custom_shape_preset", {
+                        oldName: name,
+                        newName: presetName.trim(),
+                      })
+                    }
                     disabled={busy || presetName.trim() === ""}
                     title="Rename to the Name field above"
                   >
@@ -14963,7 +17538,9 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_custom_shape_preset", { name })}
+                    onClick={() =>
+                      void runCommand("delete_custom_shape_preset", { name })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -14979,24 +17556,37 @@ export default function App() {
                   step={0.5}
                   value={v}
                   key={i}
-                  onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                  onChange={(event) =>
+                    setShapeBox(
+                      (box) =>
+                        box.map((old, j) =>
+                          j === i ? Number(event.target.value) : old,
+                        ) as typeof box,
+                    )
+                  }
                 />
               ))}
             </label>
             <button
               className="button"
-              onClick={() => void runCommand("save_custom_shape_preset", { name: presetName.trim() })}
-              disabled={busy || presetName.trim() === "" || !document.currentPath}
+              onClick={() =>
+                void runCommand("save_custom_shape_preset", {
+                  name: presetName.trim(),
+                })
+              }
+              disabled={
+                busy || presetName.trim() === "" || !document.currentPath
+              }
             >
               Save Shape
             </button>
 
             <h3 className="modal__subheading">Tool Presets</h3>
             <p className="modal__hint">
-              Saves the active tool ({tool}) with this project's own shared brush
-              parameters (size, opacity, colour, and the Gradient tool's end colour).
-              Mixer Brush's Wet/Load/Mix, Art History's own controls, and shape tools'
-              fill/stroke are a documented scope cut.
+              Saves the active tool ({tool}) with this project's own shared
+              brush parameters (size, opacity, colour, and the Gradient tool's
+              end colour). Mixer Brush's Wet/Load/Mix, Art History's own
+              controls, and shape tools' fill/stroke are a documented scope cut.
             </p>
             {document.toolPresets.length === 0 ? (
               <p className="modal__hint">No tool presets saved yet.</p>
@@ -15017,10 +17607,14 @@ export default function App() {
                           color?: string;
                           endColor?: string;
                         };
-                        if (typeof params.size === "number") setBrushSize(params.size);
-                        if (typeof params.opacity === "number") setBrushOpacity(params.opacity);
-                        if (typeof params.color === "string") setBrushColor(params.color);
-                        if (typeof params.endColor === "string") setGradientEndColor(params.endColor);
+                        if (typeof params.size === "number")
+                          setBrushSize(params.size);
+                        if (typeof params.opacity === "number")
+                          setBrushOpacity(params.opacity);
+                        if (typeof params.color === "string")
+                          setBrushColor(params.color);
+                        if (typeof params.endColor === "string")
+                          setGradientEndColor(params.endColor);
                       } catch {
                         // A preset saved by an incompatible future version of this
                         // app -- the tool switch above still applies.
@@ -15032,7 +17626,12 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("rename_tool_preset", { oldName: preset.name, newName: presetName.trim() })}
+                    onClick={() =>
+                      void runCommand("rename_tool_preset", {
+                        oldName: preset.name,
+                        newName: presetName.trim(),
+                      })
+                    }
                     disabled={busy || presetName.trim() === ""}
                     title="Rename to the Name field above"
                   >
@@ -15040,7 +17639,11 @@ export default function App() {
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_tool_preset", { name: preset.name })}
+                    onClick={() =>
+                      void runCommand("delete_tool_preset", {
+                        name: preset.name,
+                      })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -15068,7 +17671,10 @@ export default function App() {
             </button>
 
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPresetsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPresetsDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -15090,10 +17696,10 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Toolbar</h2>
             <p className="modal__hint">
-              Uncheck a tool to hide its button from the toolbar. This is a browser
-              preference, not document data — it stays the same across every document.
-              Reordering the toolbar and Photoshop's own tool groups are a documented
-              scope cut.
+              Uncheck a tool to hide its button from the toolbar. This is a
+              browser preference, not document data — it stays the same across
+              every document. Reordering the toolbar and Photoshop's own tool
+              groups are a documented scope cut.
             </p>
             <div className="toolbar-customize__list">
               {ALL_TOOLS.map(({ id, label }) => (
@@ -15110,9 +17716,10 @@ export default function App() {
             </div>
             <h2 className="modal__heading">Window &gt; Workspace</h2>
             <p className="modal__hint">
-              A named, saved combination of which toolbar buttons are hidden above and how
-              the keyboard shortcuts are bound — this app's own analogue of a saved panel
-              layout, since it has no dockable panels to lay out.
+              A named, saved combination of which toolbar buttons are hidden
+              above and how the keyboard shortcuts are bound — this app's own
+              analogue of a saved panel layout, since it has no dockable panels
+              to lay out.
             </p>
             {workspaces.length > 0 && (
               <div className="toolbar-customize__list">
@@ -15159,7 +17766,11 @@ export default function App() {
               className="control control--row"
               title="Photoshop's own Lock Workspace protects panels from accidental dragging; this app has none, so it protects the toolbar, keyboard shortcut, and menu customizations above instead"
             >
-              <input type="checkbox" checked={lockWorkspace} onChange={toggleLockWorkspace} />
+              <input
+                type="checkbox"
+                checked={lockWorkspace}
+                onChange={toggleLockWorkspace}
+              />
               <span className="control__label">Lock Workspace</span>
             </label>
             <div className="modal__actions">
@@ -15170,7 +17781,10 @@ export default function App() {
               >
                 Show All
               </button>
-              <button className="button" onClick={() => setShowCustomizeToolbarDialog(false)}>
+              <button
+                className="button"
+                onClick={() => setShowCustomizeToolbarDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -15192,16 +17806,21 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Menus</h2>
             <p className="modal__hint">
-              Uncheck a command to hide it from the menu bar; a submenu with nothing left
-              disappears with it. Hidden commands keep their toolbar buttons and shortcuts.
-              A browser preference, not document data. Colour-coding menu commands is a
-              documented scope cut.
+              Uncheck a command to hide it from the menu bar; a submenu with
+              nothing left disappears with it. Hidden commands keep their
+              toolbar buttons and shortcuts. A browser preference, not document
+              data. Colour-coding menu commands is a documented scope cut.
             </p>
             <div className="toolbar-customize__list">
-              {flattenMenuTree(buildMenuTree(toolbarEntries(window.document))).map((command, index) => {
+              {flattenMenuTree(
+                buildMenuTree(toolbarEntries(window.document)),
+              ).map((command, index) => {
                 const key = commandKey(command);
                 return (
-                  <label className="control control--row" key={`${key}-${index}`}>
+                  <label
+                    className="control control--row"
+                    key={`${key}-${index}`}
+                  >
                     <input
                       type="checkbox"
                       checked={!hiddenMenuCommands.has(key)}
@@ -15221,7 +17840,10 @@ export default function App() {
               >
                 Show All
               </button>
-              <button className="button" onClick={() => setShowCustomizeMenusDialog(false)}>
+              <button
+                className="button"
+                onClick={() => setShowCustomizeMenusDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -15247,15 +17869,24 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Keyboard Shortcuts</h2>
             <p className="modal__hint">
-              Press Change, then press the new key (held with Ctrl on Windows/Linux or
-              Cmd on macOS) — Escape cancels. Arrow-key selection and layer nudging are
-              a fixed convention, not rebindable here, a documented scope cut.
+              Press Change, then press the new key (held with Ctrl on
+              Windows/Linux or Cmd on macOS) — Escape cancels. Arrow-key
+              selection and layer nudging are a fixed convention, not rebindable
+              here, a documented scope cut.
             </p>
-            {keyBindingError && <p className="modal__hint modal__hint--error">{keyBindingError}</p>}
+            {keyBindingError && (
+              <p className="modal__hint modal__hint--error">
+                {keyBindingError}
+              </p>
+            )}
             {SHORTCUT_ORDER.map((action) => (
               <div className="control control--row" key={action}>
-                <span className="control__label">{SHORTCUT_LABELS[action]}</span>
-                <span className="control__value">{formatKeyBinding(keyBindings[action])}</span>
+                <span className="control__label">
+                  {SHORTCUT_LABELS[action]}
+                </span>
+                <span className="control__value">
+                  {formatKeyBinding(keyBindings[action])}
+                </span>
                 <button
                   className="button button--quiet"
                   onClick={() => {
@@ -15269,7 +17900,11 @@ export default function App() {
               </div>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={resetKeyBindings} disabled={lockWorkspace}>
+              <button
+                className="button button--quiet"
+                onClick={resetKeyBindings}
+                disabled={lockWorkspace}
+              >
                 Reset to Defaults
               </button>
               <button
@@ -15304,10 +17939,11 @@ export default function App() {
           >
             <h2 className="modal__heading">Discover</h2>
             <p className="modal__hint">
-              Search the Toolbox and every Adjustment/Filter/Layer Style dialog by name.
-              Tutorials, help articles, and contextual help — Photoshop's Discover
-              panel's other components — are a documented scope cut: this project has
-              no authored instructional content to search.
+              Search the Toolbox and every Adjustment/Filter/Layer Style dialog
+              by name. Tutorials, help articles, and contextual help —
+              Photoshop's Discover panel's other components — are a documented
+              scope cut: this project has no authored instructional content to
+              search.
             </p>
             <label className="control control--row">
               <span className="control__label">Search</span>
@@ -15321,12 +17957,18 @@ export default function App() {
             </label>
             {(() => {
               const query = discoverQuery.trim().toLowerCase();
-              const toolMatches = ALL_TOOLS.filter(({ label }) => label.toLowerCase().includes(query));
+              const toolMatches = ALL_TOOLS.filter(({ label }) =>
+                label.toLowerCase().includes(query),
+              );
               const actionMatches = DISCOVER_ACTIONS.filter(({ label }) =>
                 label.toLowerCase().includes(query),
               );
               if (toolMatches.length === 0 && actionMatches.length === 0) {
-                return <p className="modal__hint">No feature matches "{discoverQuery}".</p>;
+                return (
+                  <p className="modal__hint">
+                    No feature matches "{discoverQuery}".
+                  </p>
+                );
               }
               return (
                 <>
@@ -15352,8 +17994,13 @@ export default function App() {
                   )}
                   {actionMatches.length > 0 && (
                     <>
-                      <h3 className="modal__subheading">Adjustments, Filters &amp; Layer Styles</h3>
-                      <p className="modal__hint">Needs a paintable layer, like each one's own toolbar button.</p>
+                      <h3 className="modal__subheading">
+                        Adjustments, Filters &amp; Layer Styles
+                      </h3>
+                      <p className="modal__hint">
+                        Needs a paintable layer, like each one's own toolbar
+                        button.
+                      </p>
                       <div className="toolbar-customize__list">
                         {actionMatches.map(({ label, activate }) => (
                           <button
@@ -15412,14 +18059,23 @@ export default function App() {
               document.artboards.map((artboard) => (
                 <div className="control control--row" key={artboard.name}>
                   <span className="control__label">
-                    {artboard.name} ({artboard.rect.x1 - artboard.rect.x0}×{artboard.rect.y1 - artboard.rect.y0})
+                    {artboard.name} ({artboard.rect.x1 - artboard.rect.x0}×
+                    {artboard.rect.y1 - artboard.rect.y0})
                   </span>
-                  <button className="button button--quiet" onClick={() => void exportArtboard(artboard.name)} disabled={busy}>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void exportArtboard(artboard.name)}
+                    disabled={busy}
+                  >
                     Export…
                   </button>
                   <button
                     className="button button--quiet"
-                    onClick={() => void runCommand("delete_artboard", { name: artboard.name })}
+                    onClick={() =>
+                      void runCommand("delete_artboard", {
+                        name: artboard.name,
+                      })
+                    }
                     disabled={busy}
                   >
                     Delete
@@ -15429,7 +18085,11 @@ export default function App() {
             )}
             <label className="control control--row">
               <span className="control__label">Name</span>
-              <input type="text" value={artboardName} onChange={(event) => setArtboardName(event.target.value)} />
+              <input
+                type="text"
+                value={artboardName}
+                onChange={(event) => setArtboardName(event.target.value)}
+              />
             </label>
             <label className="control control--row">
               <span className="control__label">Box (x0, y0, x1, y1)</span>
@@ -15439,7 +18099,14 @@ export default function App() {
                   step={1}
                   value={v}
                   key={i}
-                  onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                  onChange={(event) =>
+                    setShapeBox(
+                      (box) =>
+                        box.map((old, j) =>
+                          j === i ? Number(event.target.value) : old,
+                        ) as typeof box,
+                    )
+                  }
                 />
               ))}
             </label>
@@ -15447,7 +18114,13 @@ export default function App() {
               className="button"
               onClick={() => {
                 const [x0, y0, x1, y1] = shapeBox.map((v) => Math.round(v));
-                void runCommand("add_artboard", { name: artboardName.trim(), x0, y0, x1, y1 });
+                void runCommand("add_artboard", {
+                  name: artboardName.trim(),
+                  x0,
+                  y0,
+                  x1,
+                  y1,
+                });
               }}
               disabled={busy || artboardName.trim() === ""}
             >
@@ -15455,7 +18128,10 @@ export default function App() {
             </button>
 
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowArtboardsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowArtboardsDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -15464,7 +18140,11 @@ export default function App() {
       )}
 
       {noteDialog && (
-        <div className="modal-overlay" onClick={() => setNoteDialog(null)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setNoteDialog(null)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -15472,11 +18152,13 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">
-              {noteDialog.index === null ? "New Note" : `Note ${noteDialog.index + 1}`}
+              {noteDialog.index === null
+                ? "New Note"
+                : `Note ${noteDialog.index + 1}`}
             </h2>
             <p className="modal__hint">
-              Pinned at ({noteDialog.x}, {noteDialog.y}). Notes are saved with the document and
-              undo like any edit.
+              Pinned at ({noteDialog.x}, {noteDialog.y}). Notes are saved with
+              the document and undo like any edit.
             </p>
             <label className="control">
               <span className="control__label">Text</span>
@@ -15485,17 +18167,26 @@ export default function App() {
                 value={noteDialog.text}
                 onChange={(event) =>
                   setNoteDialog((current) =>
-                    current ? { ...current, text: event.target.value } : current,
+                    current
+                      ? { ...current, text: event.target.value }
+                      : current,
                   )
                 }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setNoteDialog(null)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setNoteDialog(null)}
+              >
                 Cancel
               </button>
               {noteDialog.index !== null && (
-                <button className="button button--quiet" onClick={deleteNote} disabled={busy}>
+                <button
+                  className="button button--quiet"
+                  onClick={deleteNote}
+                  disabled={busy}
+                >
                   Delete
                 </button>
               )}
@@ -15525,16 +18216,23 @@ export default function App() {
           >
             <h2 className="modal__heading">Image &gt; Apply Image</h2>
             <p className="modal__hint">
-              Blends the source onto the selected layer as if it were stacked on top and
-              merged down. Preserve Transparency keeps the target&apos;s coverage as it is.
+              Blends the source onto the selected layer as if it were stacked on
+              top and merged down. Preserve Transparency keeps the target&apos;s
+              coverage as it is.
             </p>
             <label className="control control--row">
               <span className="control__label">Source</span>
               <select
-                value={applyImageSource === "merged" ? "merged" : String(applyImageSource)}
+                value={
+                  applyImageSource === "merged"
+                    ? "merged"
+                    : String(applyImageSource)
+                }
                 onChange={(event) =>
                   setApplyImageSource(
-                    event.target.value === "merged" ? "merged" : Number(event.target.value),
+                    event.target.value === "merged"
+                      ? "merged"
+                      : Number(event.target.value),
                   )
                 }
               >
@@ -15550,7 +18248,9 @@ export default function App() {
               <span className="control__label">Channel</span>
               <select
                 value={applyImageChannel}
-                onChange={(event) => setApplyImageChannel(event.target.value as ApplyChannel)}
+                onChange={(event) =>
+                  setApplyImageChannel(event.target.value as ApplyChannel)
+                }
               >
                 <option value="rgb">RGB</option>
                 <option value="red">Red</option>
@@ -15562,7 +18262,11 @@ export default function App() {
             <label className="control control--row">
               <span className="control__label">Blending</span>
               <select
-                value={applyImageArithmetic === "mode" ? applyImageBlend : applyImageArithmetic}
+                value={
+                  applyImageArithmetic === "mode"
+                    ? applyImageBlend
+                    : applyImageArithmetic
+                }
                 onChange={(event) => {
                   const value = event.target.value;
                   if (value === "add" || value === "subtract") {
@@ -15593,7 +18297,9 @@ export default function App() {
                     step={0.001}
                     value={applyImageScale}
                     onChange={(event) =>
-                      setApplyImageScale(Math.max(1, Math.min(2, Number(event.target.value))))
+                      setApplyImageScale(
+                        Math.max(1, Math.min(2, Number(event.target.value))),
+                      )
                     }
                   />
                 </label>
@@ -15607,7 +18313,10 @@ export default function App() {
                     value={applyImageOffset}
                     onChange={(event) =>
                       setApplyImageOffset(
-                        Math.max(-255, Math.min(255, Math.round(Number(event.target.value)))),
+                        Math.max(
+                          -255,
+                          Math.min(255, Math.round(Number(event.target.value))),
+                        ),
                       )
                     }
                   />
@@ -15623,7 +18332,9 @@ export default function App() {
                 step={1}
                 value={applyImageOpacity}
                 onChange={(event) =>
-                  setApplyImageOpacity(Math.max(0, Math.min(100, Number(event.target.value))))
+                  setApplyImageOpacity(
+                    Math.max(0, Math.min(100, Number(event.target.value))),
+                  )
                 }
               />
             </label>
@@ -15639,7 +18350,9 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={applyImagePreserve}
-                onChange={(event) => setApplyImagePreserve(event.target.checked)}
+                onChange={(event) =>
+                  setApplyImagePreserve(event.target.checked)
+                }
               />
               <span className="control__label">Preserve Transparency</span>
             </label>
@@ -15656,10 +18369,16 @@ export default function App() {
                 <label className="control control--row">
                   <span className="control__label">Mask Image</span>
                   <select
-                    value={applyImageMaskSource === "merged" ? "merged" : String(applyImageMaskSource)}
+                    value={
+                      applyImageMaskSource === "merged"
+                        ? "merged"
+                        : String(applyImageMaskSource)
+                    }
                     onChange={(event) =>
                       setApplyImageMaskSource(
-                        event.target.value === "merged" ? "merged" : Number(event.target.value),
+                        event.target.value === "merged"
+                          ? "merged"
+                          : Number(event.target.value),
                       )
                     }
                   >
@@ -15675,7 +18394,11 @@ export default function App() {
                   <span className="control__label">Mask Channel</span>
                   <select
                     value={applyImageMaskChannel}
-                    onChange={(event) => setApplyImageMaskChannel(event.target.value as ApplyChannel)}
+                    onChange={(event) =>
+                      setApplyImageMaskChannel(
+                        event.target.value as ApplyChannel,
+                      )
+                    }
                   >
                     <option value="rgb">Gray (luma)</option>
                     <option value="red">Red</option>
@@ -15688,7 +18411,9 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={applyImageMaskInvert}
-                    onChange={(event) => setApplyImageMaskInvert(event.target.checked)}
+                    onChange={(event) =>
+                      setApplyImageMaskInvert(event.target.checked)
+                    }
                   />
                   <span className="control__label">Invert Mask</span>
                 </label>
@@ -15729,7 +18454,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyApplyImage} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyApplyImage}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -15751,7 +18480,8 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Save Selection</h2>
             <p className="modal__hint">
-              Saving under a name that already exists replaces that saved selection.
+              Saving under a name that already exists replaces that saved
+              selection.
             </p>
             <label className="control control--row">
               <span className="control__label">Name</span>
@@ -15794,20 +18524,27 @@ export default function App() {
           >
             <h2 className="modal__heading">Image &gt; Calculations</h2>
             <p className="modal__hint">
-              Blends Source 1 onto Source 2 as greys (Source 2 is the base, so Subtract is
-              Source 2 − Source 1) and sends the result to a new document, a new alpha
-              channel, or the selection.
+              Blends Source 1 onto Source 2 as greys (Source 2 is the base, so
+              Subtract is Source 2 − Source 1) and sends the result to a new
+              document, a new alpha channel, or the selection.
             </p>
             <fieldset className="control">
               <legend className="control__label">Source 1</legend>
               <label className="control control--row">
                 <span className="control__label">Layer</span>
                 <select
-                  value={calcSource1.layer === null ? "merged" : String(calcSource1.layer)}
+                  value={
+                    calcSource1.layer === null
+                      ? "merged"
+                      : String(calcSource1.layer)
+                  }
                   onChange={(event) =>
                     setCalcSource1((s) => ({
                       ...s,
-                      layer: event.target.value === "merged" ? null : Number(event.target.value),
+                      layer:
+                        event.target.value === "merged"
+                          ? null
+                          : Number(event.target.value),
                     }))
                   }
                 >
@@ -15824,7 +18561,10 @@ export default function App() {
                 <select
                   value={calcSource1.channel}
                   onChange={(event) =>
-                    setCalcSource1((s) => ({ ...s, channel: event.target.value as ApplyChannel }))
+                    setCalcSource1((s) => ({
+                      ...s,
+                      channel: event.target.value as ApplyChannel,
+                    }))
                   }
                 >
                   <option value="rgb">Gray (luma)</option>
@@ -15838,7 +18578,12 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={calcSource1.invert}
-                  onChange={(event) => setCalcSource1((s) => ({ ...s, invert: event.target.checked }))}
+                  onChange={(event) =>
+                    setCalcSource1((s) => ({
+                      ...s,
+                      invert: event.target.checked,
+                    }))
+                  }
                 />
                 <span className="control__label">Invert</span>
               </label>
@@ -15848,11 +18593,18 @@ export default function App() {
               <label className="control control--row">
                 <span className="control__label">Layer</span>
                 <select
-                  value={calcSource2.layer === null ? "merged" : String(calcSource2.layer)}
+                  value={
+                    calcSource2.layer === null
+                      ? "merged"
+                      : String(calcSource2.layer)
+                  }
                   onChange={(event) =>
                     setCalcSource2((s) => ({
                       ...s,
-                      layer: event.target.value === "merged" ? null : Number(event.target.value),
+                      layer:
+                        event.target.value === "merged"
+                          ? null
+                          : Number(event.target.value),
                     }))
                   }
                 >
@@ -15869,7 +18621,10 @@ export default function App() {
                 <select
                   value={calcSource2.channel}
                   onChange={(event) =>
-                    setCalcSource2((s) => ({ ...s, channel: event.target.value as ApplyChannel }))
+                    setCalcSource2((s) => ({
+                      ...s,
+                      channel: event.target.value as ApplyChannel,
+                    }))
                   }
                 >
                   <option value="rgb">Gray (luma)</option>
@@ -15883,7 +18638,12 @@ export default function App() {
                 <input
                   type="checkbox"
                   checked={calcSource2.invert}
-                  onChange={(event) => setCalcSource2((s) => ({ ...s, invert: event.target.checked }))}
+                  onChange={(event) =>
+                    setCalcSource2((s) => ({
+                      ...s,
+                      invert: event.target.checked,
+                    }))
+                  }
                 />
                 <span className="control__label">Invert</span>
               </label>
@@ -15922,7 +18682,9 @@ export default function App() {
                     step={0.001}
                     value={calcScale}
                     onChange={(event) =>
-                      setCalcScale(Math.max(1, Math.min(2, Number(event.target.value))))
+                      setCalcScale(
+                        Math.max(1, Math.min(2, Number(event.target.value))),
+                      )
                     }
                   />
                 </label>
@@ -15936,7 +18698,10 @@ export default function App() {
                     value={calcOffset}
                     onChange={(event) =>
                       setCalcOffset(
-                        Math.max(-255, Math.min(255, Math.round(Number(event.target.value)))),
+                        Math.max(
+                          -255,
+                          Math.min(255, Math.round(Number(event.target.value))),
+                        ),
                       )
                     }
                   />
@@ -15952,7 +18717,9 @@ export default function App() {
                 step={1}
                 value={calcOpacity}
                 onChange={(event) =>
-                  setCalcOpacity(Math.max(0, Math.min(100, Number(event.target.value))))
+                  setCalcOpacity(
+                    Math.max(0, Math.min(100, Number(event.target.value))),
+                  )
                 }
               />
             </label>
@@ -15969,11 +18736,18 @@ export default function App() {
                 <label className="control control--row">
                   <span className="control__label">Mask Image</span>
                   <select
-                    value={calcMask.source === null ? "merged" : String(calcMask.source)}
+                    value={
+                      calcMask.source === null
+                        ? "merged"
+                        : String(calcMask.source)
+                    }
                     onChange={(event) =>
                       setCalcMask((m) => ({
                         ...m,
-                        source: event.target.value === "merged" ? null : Number(event.target.value),
+                        source:
+                          event.target.value === "merged"
+                            ? null
+                            : Number(event.target.value),
                       }))
                     }
                   >
@@ -15990,7 +18764,10 @@ export default function App() {
                   <select
                     value={calcMask.channel}
                     onChange={(event) =>
-                      setCalcMask((m) => ({ ...m, channel: event.target.value as ApplyChannel }))
+                      setCalcMask((m) => ({
+                        ...m,
+                        channel: event.target.value as ApplyChannel,
+                      }))
                     }
                   >
                     <option value="rgb">Gray (luma)</option>
@@ -16004,7 +18781,12 @@ export default function App() {
                   <input
                     type="checkbox"
                     checked={calcMask.invert}
-                    onChange={(event) => setCalcMask((m) => ({ ...m, invert: event.target.checked }))}
+                    onChange={(event) =>
+                      setCalcMask((m) => ({
+                        ...m,
+                        invert: event.target.checked,
+                      }))
+                    }
                   />
                   <span className="control__label">Invert Mask</span>
                 </label>
@@ -16014,11 +18796,15 @@ export default function App() {
               <span className="control__label">Result</span>
               <select
                 value={calcResult}
-                onChange={(event) => setCalcResult(event.target.value as CalcResult)}
+                onChange={(event) =>
+                  setCalcResult(event.target.value as CalcResult)
+                }
               >
                 <option value="newChannel">New Channel</option>
                 <option value="selection">Selection</option>
-                <option value="newDocument">New Document (replaces the open one)</option>
+                <option value="newDocument">
+                  New Document (replaces the open one)
+                </option>
               </select>
             </label>
             <div className="modal__actions">
@@ -16028,7 +18814,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCalculations} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCalculations}
+                disabled={busy}
+              >
                 OK
               </button>
             </div>
@@ -16037,7 +18827,11 @@ export default function App() {
       )}
 
       {showSelectAndMask && (
-        <div className="modal-overlay" onClick={() => setShowSelectAndMask(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSelectAndMask(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -16046,8 +18840,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Select and Mask</h2>
             <p className="modal__hint">
-              Edge Detection re-decides the selection&apos;s edge from the picture, the Global
-              Refinements soften it, then the result goes to its output.
+              Edge Detection re-decides the selection&apos;s edge from the
+              picture, the Global Refinements soften it, then the result goes to
+              its output.
             </p>
             <label className="control">
               <span className="control__label">
@@ -16078,7 +18873,9 @@ export default function App() {
                 disabled={selectedId === null}
                 onChange={(event) => setSmartRadius(event.target.checked)}
               />
-              <span className="control__label">Smart Radius (keep crisp edges hard)</span>
+              <span className="control__label">
+                Smart Radius (keep crisp edges hard)
+              </span>
             </label>
             {(
               [
@@ -16098,7 +18895,12 @@ export default function App() {
                   min={min}
                   max={max}
                   value={refine[key]}
-                  onChange={(event) => setRefine((r) => ({ ...r, [key]: Number(event.target.value) }))}
+                  onChange={(event) =>
+                    setRefine((r) => ({
+                      ...r,
+                      [key]: Number(event.target.value),
+                    }))
+                  }
                 />
               </label>
             ))}
@@ -16106,19 +18908,28 @@ export default function App() {
               <span className="control__label">Output To</span>
               <select
                 value={selectAndMaskOutput}
-                onChange={(event) => setSelectAndMaskOutput(event.target.value as SelectAndMaskOutput)}
+                onChange={(event) =>
+                  setSelectAndMaskOutput(
+                    event.target.value as SelectAndMaskOutput,
+                  )
+                }
               >
                 <option value="selection">Selection</option>
                 <option value="layerMask">Layer Mask</option>
                 <option value="newLayer">New Layer</option>
-                <option value="newLayerWithMask">New Layer with Layer Mask</option>
+                <option value="newLayerWithMask">
+                  New Layer with Layer Mask
+                </option>
               </select>
             </label>
             <label className="control control--row">
               <input
                 type="checkbox"
                 checked={decontaminate}
-                disabled={selectAndMaskOutput === "selection" || selectAndMaskOutput === "layerMask"}
+                disabled={
+                  selectAndMaskOutput === "selection" ||
+                  selectAndMaskOutput === "layerMask"
+                }
                 onChange={(event) => setDecontaminate(event.target.checked)}
               />
               <span className="control__label">Decontaminate Colors</span>
@@ -16128,18 +18939,26 @@ export default function App() {
                 max={100}
                 value={decontaminateAmount}
                 disabled={!decontaminate}
-                onChange={(event) => setDecontaminateAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setDecontaminateAmount(Number(event.target.value))
+                }
               />
               <span className="control__value">{decontaminateAmount}%</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSelectAndMask(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSelectAndMask(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button"
                 onClick={applySelectAndMask}
-                disabled={busy || (selectAndMaskOutput !== "selection" && selectedId === null)}
+                disabled={
+                  busy ||
+                  (selectAndMaskOutput !== "selection" && selectedId === null)
+                }
               >
                 OK
               </button>
@@ -16162,14 +18981,16 @@ export default function App() {
           >
             <h2 className="modal__heading">Image &gt; Mode &gt; Bitmap</h2>
             <p className="modal__hint">
-              Every layer becomes black and white by luma. Brush strokes and fills then lay
-              down only black or white.
+              Every layer becomes black and white by luma. Brush strokes and
+              fills then lay down only black or white.
             </p>
             <label className="control control--row">
               <span className="control__label">Method</span>
               <select
                 value={bitmapMethod}
-                onChange={(event) => setBitmapMethod(event.target.value as BitmapMethod)}
+                onChange={(event) =>
+                  setBitmapMethod(event.target.value as BitmapMethod)
+                }
               >
                 <option value="threshold">50% Threshold</option>
                 <option value="patternDither">Pattern Dither</option>
@@ -16177,13 +18998,19 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowBitmapDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBitmapDialog(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button"
                 onClick={() => {
-                  void runCommand("convert_mode", { mode: "bitmap", method: bitmapMethod });
+                  void runCommand("convert_mode", {
+                    mode: "bitmap",
+                    method: bitmapMethod,
+                  });
                   setShowBitmapDialog(false);
                 }}
                 disabled={busy}
@@ -16207,16 +19034,20 @@ export default function App() {
             aria-label="Indexed Color"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Image &gt; Mode &gt; Indexed Color</h2>
+            <h2 className="modal__heading">
+              Image &gt; Mode &gt; Indexed Color
+            </h2>
             <p className="modal__hint">
-              Builds a colour table and snaps every pixel to its nearest entry; paint and
-              fills then use table colours only.
+              Builds a colour table and snaps every pixel to its nearest entry;
+              paint and fills then use table colours only.
             </p>
             <label className="control control--row">
               <span className="control__label">Palette</span>
               <select
                 value={indexedPalette}
-                onChange={(event) => setIndexedPalette(event.target.value as Palette["kind"])}
+                onChange={(event) =>
+                  setIndexedPalette(event.target.value as Palette["kind"])
+                }
               >
                 <option value="exact">Exact (up to 256 colours)</option>
                 <option value="uniform">Uniform (web 216)</option>
@@ -16233,13 +19064,21 @@ export default function App() {
                   step={1}
                   value={indexedColors}
                   onChange={(event) =>
-                    setIndexedColors(Math.max(2, Math.min(256, Math.round(Number(event.target.value)))))
+                    setIndexedColors(
+                      Math.max(
+                        2,
+                        Math.min(256, Math.round(Number(event.target.value))),
+                      ),
+                    )
                   }
                 />
               </label>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowIndexedDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowIndexedDialog(false)}
+              >
                 Cancel
               </button>
               <button
@@ -16275,8 +19114,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Image &gt; Mode &gt; Duotone</h2>
             <p className="modal__hint">
-              Every layer becomes its grey printed through the inks, darkest where every ink
-              is full; one ink is a monotone, four a quadtone. Curves are straight here.
+              Every layer becomes its grey printed through the inks, darkest
+              where every ink is full; one ink is a monotone, four a quadtone.
+              Curves are straight here.
             </p>
             <label className="control control--row">
               <span className="control__label">Type</span>
@@ -16287,7 +19127,13 @@ export default function App() {
                   setDuotoneInks((inks) =>
                     inks.length >= count
                       ? inks.slice(0, count)
-                      : [...inks, ...["#ff8000", "#8000ff"].slice(0, count - inks.length)],
+                      : [
+                          ...inks,
+                          ...["#ff8000", "#8000ff"].slice(
+                            0,
+                            count - inks.length,
+                          ),
+                        ],
                   );
                 }}
               >
@@ -16304,19 +19150,29 @@ export default function App() {
                   type="color"
                   value={ink}
                   onChange={(event) =>
-                    setDuotoneInks((inks) => inks.map((c, i) => (i === index ? event.target.value : c)))
+                    setDuotoneInks((inks) =>
+                      inks.map((c, i) =>
+                        i === index ? event.target.value : c,
+                      ),
+                    )
                   }
                 />
               </label>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowDuotoneDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDuotoneDialog(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button"
                 onClick={() => {
-                  const inks: Ink[] = duotoneInks.map((hex) => ({ color: hexToRgb(hex), curve: [] }));
+                  const inks: Ink[] = duotoneInks.map((hex) => ({
+                    color: hexToRgb(hex),
+                    curve: [],
+                  }));
                   void runCommand("convert_to_duotone", { inks });
                   setShowDuotoneDialog(false);
                 }}
@@ -16433,8 +19289,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Select &gt; Transform Selection</h2>
             <p className="modal__hint">
-              Scales and rotates the outline about its own centre, then moves it; pixels stay
-              put. The result is a pixel-mask selection clipped to the canvas.
+              Scales and rotates the outline about its own centre, then moves
+              it; pixels stay put. The result is a pixel-mask selection clipped
+              to the canvas.
             </p>
             {(
               [
@@ -16467,7 +19324,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyTransformSelection} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTransformSelection}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -16489,8 +19350,8 @@ export default function App() {
           >
             <h2 className="modal__heading">Move Selection</h2>
             <p className="modal__hint">
-              Shifts the selection outline only; pixels stay put. A selection pushed past the
-              canvas edge is clipped there.
+              Shifts the selection outline only; pixels stay put. A selection
+              pushed past the canvas edge is clipped there.
             </p>
             <label className="control control--row">
               <span className="control__label">Horizontal (px)</span>
@@ -16498,7 +19359,9 @@ export default function App() {
                 type="number"
                 step={1}
                 value={moveSelectionX}
-                onChange={(event) => setMoveSelectionX(Number(event.target.value))}
+                onChange={(event) =>
+                  setMoveSelectionX(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -16507,7 +19370,9 @@ export default function App() {
                 type="number"
                 step={1}
                 value={moveSelectionY}
-                onChange={(event) => setMoveSelectionY(Number(event.target.value))}
+                onChange={(event) =>
+                  setMoveSelectionY(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -16517,7 +19382,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyMoveSelection} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyMoveSelection}
+                disabled={busy}
+              >
                 Move
               </button>
             </div>
@@ -16539,8 +19408,9 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Transform &gt; Rotate</h2>
             <p className="modal__hint">
-              Positive angles turn clockwise about the canvas centre. Corners that
-              leave the canvas are clipped; uncovered pixels become transparent.
+              Positive angles turn clockwise about the canvas centre. Corners
+              that leave the canvas are clipped; uncovered pixels become
+              transparent.
             </p>
             <label className="control control--row">
               <span className="control__label">Angle (°)</span>
@@ -16548,7 +19418,9 @@ export default function App() {
                 type="number"
                 step={0.1}
                 value={rotateDegrees}
-                onChange={(event) => setRotateDegrees(Number(event.target.value))}
+                onChange={(event) =>
+                  setRotateDegrees(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -16558,7 +19430,9 @@ export default function App() {
                 max={180}
                 step={1}
                 value={rotateDegrees}
-                onChange={(event) => setRotateDegrees(Number(event.target.value))}
+                onChange={(event) =>
+                  setRotateDegrees(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -16600,7 +19474,9 @@ export default function App() {
                 min={1}
                 step={1}
                 value={scaleWidthPercent}
-                onChange={(event) => setScaleWidthPercent(Number(event.target.value))}
+                onChange={(event) =>
+                  setScaleWidthPercent(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -16610,7 +19486,9 @@ export default function App() {
                 min={1}
                 step={1}
                 value={scaleHeightPercent}
-                onChange={(event) => setScaleHeightPercent(Number(event.target.value))}
+                onChange={(event) =>
+                  setScaleHeightPercent(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -16665,7 +19543,9 @@ export default function App() {
                 min={-89}
                 max={89}
                 value={skewHorizontal}
-                onChange={(event) => setSkewHorizontal(Number(event.target.value))}
+                onChange={(event) =>
+                  setSkewHorizontal(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -16678,7 +19558,9 @@ export default function App() {
                 min={-89}
                 max={89}
                 value={skewVertical}
-                onChange={(event) => setSkewVertical(Number(event.target.value))}
+                onChange={(event) =>
+                  setSkewVertical(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -16719,15 +19601,19 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Free Transform</h2>
             <p className="modal__hint">
-              Applied in order — scale, rotate, skew, move — about the reference point
-              (the canvas centre by default), as a single undoable edit. Stages left at
-              their defaults are skipped.
+              Applied in order — scale, rotate, skew, move — about the reference
+              point (the canvas centre by default), as a single undoable edit.
+              Stages left at their defaults are skipped.
             </p>
             <label className="control control--row">
               <span className="control__label">Reference point</span>
               <select
                 value={ftReference}
-                onChange={(event) => setFtReference(event.target.value as "canvas" | ReferencePoint)}
+                onChange={(event) =>
+                  setFtReference(
+                    event.target.value as "canvas" | ReferencePoint,
+                  )
+                }
                 title="Reference Point Locator: the point of the layer's content the transform pivots on"
               >
                 <option value="canvas">Canvas centre</option>
@@ -16746,13 +19632,19 @@ export default function App() {
               <span className="control__label">Interpolation</span>
               <select
                 value={transformInterpolation}
-                onChange={(event) => setTransformInterpolation(event.target.value as Interpolation | "sequential")}
+                onChange={(event) =>
+                  setTransformInterpolation(
+                    event.target.value as Interpolation | "sequential",
+                  )
+                }
                 title="Bicubic, Bilinear or Nearest Neighbor resample the composed transform once; Sequential is the earlier per-stage nearest-neighbour path"
               >
                 <option value="bicubic">Bicubic (one resample)</option>
                 <option value="bilinear">Bilinear (one resample)</option>
                 <option value="nearest">Nearest Neighbor (one resample)</option>
-                <option value="sequential">Sequential (nearest per stage)</option>
+                <option value="sequential">
+                  Sequential (nearest per stage)
+                </option>
               </select>
             </label>
             <label className="control control--row">
@@ -16762,11 +19654,16 @@ export default function App() {
                 onChange={(event) => {
                   setFtMaintainAspect(event.target.checked);
                   if (event.target.checked) {
-                    setFreeTransformField("heightPercent", freeTransform.widthPercent);
+                    setFreeTransformField(
+                      "heightPercent",
+                      freeTransform.widthPercent,
+                    );
                   }
                 }}
               />
-              <span className="control__label">Maintain aspect ratio (height follows width)</span>
+              <span className="control__label">
+                Maintain aspect ratio (height follows width)
+              </span>
             </label>
             {(
               [
@@ -16804,13 +19701,23 @@ export default function App() {
                 checked={ftUsePosition}
                 onChange={(event) => setFtUsePosition(event.target.checked)}
               />
-              <span className="control__label">Set reference point position</span>
+              <span className="control__label">
+                Set reference point position
+              </span>
               {ftUsePosition && (
                 <>
                   <span className="control__label">X</span>
-                  <input type="number" value={ftX} onChange={(event) => setFtX(Number(event.target.value))} />
+                  <input
+                    type="number"
+                    value={ftX}
+                    onChange={(event) => setFtX(Number(event.target.value))}
+                  />
                   <span className="control__label">Y</span>
-                  <input type="number" value={ftY} onChange={(event) => setFtY(Number(event.target.value))} />
+                  <input
+                    type="number"
+                    value={ftY}
+                    onChange={(event) => setFtY(Number(event.target.value))}
+                  />
                   <label className="control control--row">
                     <input
                       type="checkbox"
@@ -16853,7 +19760,11 @@ export default function App() {
               >
                 Warp
               </button>
-              <button className="button" onClick={applyFreeTransform} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyFreeTransform}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -16862,7 +19773,11 @@ export default function App() {
       )}
 
       {showPerspectiveWarp && (
-        <div className="modal-overlay" onClick={() => setShowPerspectiveWarp(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPerspectiveWarp(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--wide"
             role="dialog"
@@ -16871,69 +19786,107 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Perspective Warp</h2>
             <p className="modal__hint">
-              Layout: the planes&apos; quads on the picture (corners top-left, top-right,
-              bottom-right, bottom-left). Warp: where each corner moves. Planes sharing a
-              corner are connected; keep their shared corners equal.
+              Layout: the planes&apos; quads on the picture (corners top-left,
+              top-right, bottom-right, bottom-left). Warp: where each corner
+              moves. Planes sharing a corner are connected; keep their shared
+              corners equal.
             </p>
             <label className="control control--row">
               <span className="control__label">Mode</span>
-              <select value={warpMode} onChange={(event) => setWarpMode(event.target.value as "layout" | "warp")}>
+              <select
+                value={warpMode}
+                onChange={(event) =>
+                  setWarpMode(event.target.value as "layout" | "warp")
+                }
+              >
                 <option value="layout">Layout</option>
                 <option value="warp">Warp</option>
               </select>
-              <button className="button button--quiet" onClick={addWarpPlane} title="Add a plane">
+              <button
+                className="button button--quiet"
+                onClick={addWarpPlane}
+                title="Add a plane"
+              >
                 Add plane
               </button>
             </label>
             {warpPlanes.map((plane, i) => (
               <div className="control" key={i}>
                 <span className="control__label">Plane {i + 1}</span>
-                {(warpMode === "layout" ? plane.source : plane.target).map((corner, j) => (
-                  <span className="control control--row" key={j}>
-                    <span className="control__label">{["TL", "TR", "BR", "BL"][j]}</span>
-                    <input
-                      type="number"
-                      step={0.5}
-                      value={corner[0]}
-                      onChange={(event) => setWarpCorner(i, j, 0, Number(event.target.value))}
-                    />
-                    <input
-                      type="number"
-                      step={0.5}
-                      value={corner[1]}
-                      onChange={(event) => setWarpCorner(i, j, 1, Number(event.target.value))}
-                    />
-                    {warpMode === "warp" && (
-                      <button
-                        className="button button--quiet"
-                        onClick={() => void autoWarp({ kind: "edge", plane: i, edge: j })}
-                        title="Straighten Edge: this corner's edge to the next corner"
-                      >
-                        Straighten edge
-                      </button>
-                    )}
-                  </span>
-                ))}
+                {(warpMode === "layout" ? plane.source : plane.target).map(
+                  (corner, j) => (
+                    <span className="control control--row" key={j}>
+                      <span className="control__label">
+                        {["TL", "TR", "BR", "BL"][j]}
+                      </span>
+                      <input
+                        type="number"
+                        step={0.5}
+                        value={corner[0]}
+                        onChange={(event) =>
+                          setWarpCorner(i, j, 0, Number(event.target.value))
+                        }
+                      />
+                      <input
+                        type="number"
+                        step={0.5}
+                        value={corner[1]}
+                        onChange={(event) =>
+                          setWarpCorner(i, j, 1, Number(event.target.value))
+                        }
+                      />
+                      {warpMode === "warp" && (
+                        <button
+                          className="button button--quiet"
+                          onClick={() =>
+                            void autoWarp({ kind: "edge", plane: i, edge: j })
+                          }
+                          title="Straighten Edge: this corner's edge to the next corner"
+                        >
+                          Straighten edge
+                        </button>
+                      )}
+                    </span>
+                  ),
+                )}
               </div>
             ))}
             {warpMode === "warp" && (
               <div className="control control--row">
-                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "level" })}>
+                <button
+                  className="button button--quiet"
+                  onClick={() => void autoWarp({ kind: "level" })}
+                >
                   Auto Level
                 </button>
-                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "vertical" })}>
+                <button
+                  className="button button--quiet"
+                  onClick={() => void autoWarp({ kind: "vertical" })}
+                >
                   Auto Straighten Vertical
                 </button>
-                <button className="button button--quiet" onClick={() => void autoWarp({ kind: "both" })}>
+                <button
+                  className="button button--quiet"
+                  onClick={() => void autoWarp({ kind: "both" })}
+                >
                   Auto Warp Horizontal &amp; Vertical
                 </button>
               </div>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPerspectiveWarp(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPerspectiveWarp(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPerspectiveWarp} disabled={busy || warpPlanes.length === 0} title="Commit Perspective Warp">
+              <button
+                className="button"
+                onClick={applyPerspectiveWarp}
+                disabled={busy || warpPlanes.length === 0}
+                title="Commit Perspective Warp"
+              >
                 OK
               </button>
             </div>
@@ -16942,7 +19895,11 @@ export default function App() {
       )}
 
       {showWarpDialog && (
-        <div className="modal-overlay" onClick={() => setShowWarpDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowWarpDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--wide"
             role="dialog"
@@ -16951,16 +19908,21 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Transform &gt; Warp</h2>
             <p className="modal__hint">
-              Pick a Warp Style and its Bend, or drag the sixteen control points of the
-              mesh over the layer&apos;s bounds (Custom). Horizontal and Vertical
-              distortion tilt the mesh in perspective.
+              Pick a Warp Style and its Bend, or drag the sixteen control points
+              of the mesh over the layer&apos;s bounds (Custom). Horizontal and
+              Vertical distortion tilt the mesh in perspective.
             </p>
             <label className="control control--row">
               <span className="control__label">Warp</span>
               <select
                 value={warpStyle}
                 onChange={(event) =>
-                  setWarpOption(event.target.value as WarpStyle, warpBend, warpDistortH, warpDistortV)
+                  setWarpOption(
+                    event.target.value as WarpStyle,
+                    warpBend,
+                    warpDistortH,
+                    warpDistortV,
+                  )
                 }
               >
                 <option value="custom">Custom</option>
@@ -16983,9 +19945,24 @@ export default function App() {
             </label>
             {(
               [
-                ["Bend %", warpBend, (v: number) => setWarpOption(warpStyle, v, warpDistortH, warpDistortV)],
-                ["H %", warpDistortH, (v: number) => setWarpOption(warpStyle, warpBend, v, warpDistortV)],
-                ["V %", warpDistortV, (v: number) => setWarpOption(warpStyle, warpBend, warpDistortH, v)],
+                [
+                  "Bend %",
+                  warpBend,
+                  (v: number) =>
+                    setWarpOption(warpStyle, v, warpDistortH, warpDistortV),
+                ],
+                [
+                  "H %",
+                  warpDistortH,
+                  (v: number) =>
+                    setWarpOption(warpStyle, warpBend, v, warpDistortV),
+                ],
+                [
+                  "V %",
+                  warpDistortV,
+                  (v: number) =>
+                    setWarpOption(warpStyle, warpBend, warpDistortH, v),
+                ],
               ] as const
             ).map(([label, value, set]) => (
               <label className="control control--row" key={label}>
@@ -17014,7 +19991,13 @@ export default function App() {
                 onPointerUp={() => setWarpDrag(null)}
                 onPointerLeave={() => setWarpDrag(null)}
               >
-                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                <rect
+                  className="warp-mesh__canvas"
+                  x={-0.5}
+                  y={-0.5}
+                  width={document.width}
+                  height={document.height}
+                />
                 {warpCurves(warpMesh).map((d, i) => (
                   <path className="warp-mesh__curve" d={d} key={i} />
                 ))}
@@ -17038,10 +20021,43 @@ export default function App() {
                 {warpMesh.points.map(([x, y], i) => (
                   <span className="control control--row" key={i}>
                     <span className="control__label">
-                      {["TL", "T1", "T2", "TR", "L1", "C1", "C2", "R1", "L2", "C3", "C4", "R2", "BL", "B1", "B2", "BR"][i]}
+                      {
+                        [
+                          "TL",
+                          "T1",
+                          "T2",
+                          "TR",
+                          "L1",
+                          "C1",
+                          "C2",
+                          "R1",
+                          "L2",
+                          "C3",
+                          "C4",
+                          "R2",
+                          "BL",
+                          "B1",
+                          "B2",
+                          "BR",
+                        ][i]
+                      }
                     </span>
-                    <input type="number" step={0.5} value={x} onChange={(event) => setWarpPoint(i, Number(event.target.value), y)} />
-                    <input type="number" step={0.5} value={y} onChange={(event) => setWarpPoint(i, x, Number(event.target.value))} />
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={x}
+                      onChange={(event) =>
+                        setWarpPoint(i, Number(event.target.value), y)
+                      }
+                    />
+                    <input
+                      type="number"
+                      step={0.5}
+                      value={y}
+                      onChange={(event) =>
+                        setWarpPoint(i, x, Number(event.target.value))
+                      }
+                    />
                   </span>
                 ))}
               </div>
@@ -17054,13 +20070,26 @@ export default function App() {
               >
                 Reset
               </button>
-              <button className="button button--quiet" onClick={openCylinderDialog} title="Cylindrical Transform Warp">
+              <button
+                className="button button--quiet"
+                onClick={openCylinderDialog}
+                title="Cylindrical Transform Warp"
+              >
                 Cylinder…
               </button>
-              <button className="button button--quiet" onClick={() => setShowWarpDialog(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowWarpDialog(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyWarp} disabled={busy || !warpMesh} title="Commit Warp">
+              <button
+                className="button"
+                onClick={applyWarp}
+                disabled={busy || !warpMesh}
+                title="Commit Warp"
+              >
                 OK
               </button>
             </div>
@@ -17069,8 +20098,17 @@ export default function App() {
       )}
 
       {spotDialog && (
-        <div className="modal-overlay" onClick={() => setSpotDialog(null)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Spot Channel" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setSpotDialog(null)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Spot Channel"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">
               {spotDialog.mode === "new"
                 ? "New Spot Channel"
@@ -17098,15 +20136,22 @@ export default function App() {
             )}
             <label className="control control--row">
               <span className="control__label">Color</span>
-              <input type="color" value={spotColor} onChange={(event) => setSpotColor(event.target.value)} />
+              <input
+                type="color"
+                value={spotColor}
+                onChange={(event) => setSpotColor(event.target.value)}
+              />
               <span className="control__label">Library</span>
               <select
                 value=""
                 onChange={(event) => {
-                  const entry = spotLibrary.find(([name]) => name === event.target.value);
+                  const entry = spotLibrary.find(
+                    ([name]) => name === event.target.value,
+                  );
                   if (entry) {
                     setSpotColor(rgbToHex(...entry[1]));
-                    if (spotDialog.mode === "new" && spotName.trim() === "") setSpotName(entry[0]);
+                    if (spotDialog.mode === "new" && spotName.trim() === "")
+                      setSpotName(entry[0]);
                   }
                 }}
                 title="Color Libraries: conventional ink names with approximate screen colours"
@@ -17126,15 +20171,26 @@ export default function App() {
                 min={0}
                 max={100}
                 value={spotSolidity}
-                onChange={(event) => setSpotSolidity(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpotSolidity(Number(event.target.value))
+                }
               />
               <span className="control__value">{spotSolidity}</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setSpotDialog(null)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setSpotDialog(null)}
+                title="Cancel"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applySpotDialog} disabled={busy} title="OK">
+              <button
+                className="button"
+                onClick={applySpotDialog}
+                disabled={busy}
+                title="OK"
+              >
                 OK
               </button>
             </div>
@@ -17143,14 +20199,23 @@ export default function App() {
       )}
 
       {showCylinderDialog && (
-        <div className="modal-overlay" onClick={() => setShowCylinderDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Cylindrical Transform Warp" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCylinderDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Cylindrical Transform Warp"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Cylindrical Transform Warp</h2>
             <p className="modal__hint">
-              Wraps the layer&apos;s bounds around a vertical cylinder. Arc is how much of
-              the cylinder the layer covers (180° is a full half-cylinder, its sides
-              compressed to nothing); Tilt views it from above or below, bowing the top
-              and bottom edges.
+              Wraps the layer&apos;s bounds around a vertical cylinder. Arc is
+              how much of the cylinder the layer covers (180° is a full
+              half-cylinder, its sides compressed to nothing); Tilt views it
+              from above or below, bowing the top and bottom edges.
             </p>
             <label className="control control--row">
               <span className="control__label">Arc (°)</span>
@@ -17159,7 +20224,9 @@ export default function App() {
                 min={1}
                 max={180}
                 value={cylinderAngle}
-                onChange={(event) => setCylinderAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setCylinderAngle(Number(event.target.value))
+                }
               />
               <span className="control__value">{cylinderAngle}</span>
             </label>
@@ -17170,15 +20237,26 @@ export default function App() {
                 min={-89}
                 max={89}
                 value={cylinderTilt}
-                onChange={(event) => setCylinderTilt(Number(event.target.value))}
+                onChange={(event) =>
+                  setCylinderTilt(Number(event.target.value))
+                }
               />
               <span className="control__value">{cylinderTilt}</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowCylinderDialog(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCylinderDialog(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyCylinderWarp} disabled={busy} title="Commit the cylinder warp">
+              <button
+                className="button"
+                onClick={applyCylinderWarp}
+                disabled={busy}
+                title="Commit the cylinder warp"
+              >
                 OK
               </button>
             </div>
@@ -17187,30 +20265,49 @@ export default function App() {
       )}
 
       {showLiquifyDialog && (
-        <div className="modal-overlay" onClick={() => setShowLiquifyDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Liquify" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLiquifyDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Liquify"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Filter &gt; Liquify</h2>
             <p className="modal__hint">
-              Twirl rotates, Pucker pinches in, Bloat pushes out, Forward Warp pushes by
-              (Push X, Push Y), and Reconstruct blends back toward the layer as it was when
-              this dialog opened, by Amount — all over a circular brush centred at (Centre
-              X, Centre Y) with a falloff strongest in the middle and zero at the Radius.
-              Freeze Mask and Thaw Mask instead raise or lower a freeze mask by Amount, held
-              for as long as this dialog stays open: every other tool above scales its effect
-              down over frozen pixels instead of touching them outright. Apply repeatedly at
-              different centres to build up an effect. Show Mesh previews Twirl, Pucker,
-              Bloat, and Forward Warp's own pending distortion as a grid, run forward instead
-              of the exact backward offset resampling uses; Face-Aware Liquify remains a
-              documented scope cut.
+              Twirl rotates, Pucker pinches in, Bloat pushes out, Forward Warp
+              pushes by (Push X, Push Y), and Reconstruct blends back toward the
+              layer as it was when this dialog opened, by Amount — all over a
+              circular brush centred at (Centre X, Centre Y) with a falloff
+              strongest in the middle and zero at the Radius. Freeze Mask and
+              Thaw Mask instead raise or lower a freeze mask by Amount, held for
+              as long as this dialog stays open: every other tool above scales
+              its effect down over frozen pixels instead of touching them
+              outright. Apply repeatedly at different centres to build up an
+              effect. Show Mesh previews Twirl, Pucker, Bloat, and Forward
+              Warp's own pending distortion as a grid, run forward instead of
+              the exact backward offset resampling uses; Face-Aware Liquify
+              remains a documented scope cut.
             </p>
             <label className="control control--row">
               <span className="control__label">Tool</span>
               <select
                 value={liquifyTool}
                 onChange={(event) => {
-                  const next = event.target.value as LiquifyTool | "forward" | "reconstruct" | "freeze" | "thaw";
+                  const next = event.target.value as
+                    | LiquifyTool
+                    | "forward"
+                    | "reconstruct"
+                    | "freeze"
+                    | "thaw";
                   setLiquifyTool(next);
-                  if (next === "pucker" || next === "bloat") setLiquifyStrength((value) => Math.min(100, Math.abs(value)));
+                  if (next === "pucker" || next === "bloat")
+                    setLiquifyStrength((value) =>
+                      Math.min(100, Math.abs(value)),
+                    );
                 }}
               >
                 <option value="twirl">Twirl</option>
@@ -17227,12 +20324,16 @@ export default function App() {
               <input
                 type="number"
                 value={liquifyCenter[0]}
-                onChange={(event) => setLiquifyCenter(([, y]) => [Number(event.target.value), y])}
+                onChange={(event) =>
+                  setLiquifyCenter(([, y]) => [Number(event.target.value), y])
+                }
               />
               <input
                 type="number"
                 value={liquifyCenter[1]}
-                onChange={(event) => setLiquifyCenter(([x]) => [x, Number(event.target.value)])}
+                onChange={(event) =>
+                  setLiquifyCenter(([x]) => [x, Number(event.target.value)])
+                }
               />
             </label>
             <label className="control control--row">
@@ -17242,7 +20343,9 @@ export default function App() {
                 min={1}
                 max={500}
                 value={liquifyRadius}
-                onChange={(event) => setLiquifyRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setLiquifyRadius(Number(event.target.value))
+                }
               />
               <span className="control__value">{liquifyRadius}</span>
             </label>
@@ -17252,15 +20355,21 @@ export default function App() {
                 <input
                   type="number"
                   value={liquifyPush[0]}
-                  onChange={(event) => setLiquifyPush(([, y]) => [Number(event.target.value), y])}
+                  onChange={(event) =>
+                    setLiquifyPush(([, y]) => [Number(event.target.value), y])
+                  }
                 />
                 <input
                   type="number"
                   value={liquifyPush[1]}
-                  onChange={(event) => setLiquifyPush(([x]) => [x, Number(event.target.value)])}
+                  onChange={(event) =>
+                    setLiquifyPush(([x]) => [x, Number(event.target.value)])
+                  }
                 />
               </label>
-            ) : liquifyTool === "reconstruct" || liquifyTool === "freeze" || liquifyTool === "thaw" ? (
+            ) : liquifyTool === "reconstruct" ||
+              liquifyTool === "freeze" ||
+              liquifyTool === "thaw" ? (
               <label className="control control--row">
                 <span className="control__label">Amount</span>
                 <input
@@ -17268,19 +20377,25 @@ export default function App() {
                   min={0}
                   max={100}
                   value={liquifyAmount}
-                  onChange={(event) => setLiquifyAmount(Number(event.target.value))}
+                  onChange={(event) =>
+                    setLiquifyAmount(Number(event.target.value))
+                  }
                 />
                 <span className="control__value">{liquifyAmount}</span>
               </label>
             ) : (
               <label className="control control--row">
-                <span className="control__label">{liquifyTool === "twirl" ? "Twirl Rate" : "Pressure"}</span>
+                <span className="control__label">
+                  {liquifyTool === "twirl" ? "Twirl Rate" : "Pressure"}
+                </span>
                 <input
                   type="range"
                   min={liquifyTool === "twirl" ? -180 : 0}
                   max={liquifyTool === "twirl" ? 180 : 100}
                   value={liquifyStrength}
-                  onChange={(event) => setLiquifyStrength(Number(event.target.value))}
+                  onChange={(event) =>
+                    setLiquifyStrength(Number(event.target.value))
+                  }
                 />
                 <span className="control__value">{liquifyStrength}</span>
               </label>
@@ -17298,13 +20413,22 @@ export default function App() {
                 className="warp-mesh"
                 viewBox={`${-document.width / 4} ${-document.height / 4} ${document.width * 1.5} ${document.height * 1.5}`}
               >
-                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                <rect
+                  className="warp-mesh__canvas"
+                  x={-0.5}
+                  y={-0.5}
+                  width={document.width}
+                  height={document.height}
+                />
                 {Array.from({ length: liquifyMesh.rows }, (_, row) => (
                   <polyline
                     className="warp-mesh__curve"
                     key={`row-${row}`}
                     points={liquifyMesh.deformed
-                      .slice(row * liquifyMesh.cols, row * liquifyMesh.cols + liquifyMesh.cols)
+                      .slice(
+                        row * liquifyMesh.cols,
+                        row * liquifyMesh.cols + liquifyMesh.cols,
+                      )
                       .map(([x, y]) => `${x},${y}`)
                       .join(" ")}
                   />
@@ -17315,7 +20439,8 @@ export default function App() {
                     key={`col-${col}`}
                     points={Array.from(
                       { length: liquifyMesh.rows },
-                      (_, row) => liquifyMesh.deformed[row * liquifyMesh.cols + col],
+                      (_, row) =>
+                        liquifyMesh.deformed[row * liquifyMesh.cols + col],
                     )
                       .map(([x, y]) => `${x},${y}`)
                       .join(" ")}
@@ -17324,10 +20449,19 @@ export default function App() {
               </svg>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowLiquifyDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLiquifyDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
-              <button className="button" onClick={applyLiquify} disabled={busy || selectedId === null} title="Apply once at this centre">
+              <button
+                className="button"
+                onClick={applyLiquify}
+                disabled={busy || selectedId === null}
+                title="Apply once at this centre"
+              >
                 Apply
               </button>
             </div>
@@ -17336,28 +20470,37 @@ export default function App() {
       )}
 
       {showFaceLiquifyDialog && (
-        <div className="modal-overlay" onClick={() => setShowFaceLiquifyDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFaceLiquifyDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Face-Aware Liquify"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Liquify &gt; Face-Aware Liquify</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Liquify &gt; Face-Aware Liquify
+            </h2>
             <p className="modal__hint">
-              Estimates eight landmark points from the selected layer&apos;s own largest
-              skin-toned region (the same region Select People finds) at fixed
-              anthropometric proportions of its bounding box — a classical,
-              pre-deep-learning substitute for neural landmark detection, not landmark
-              detection itself. Every slider below is Liquify&apos;s own Bloat/Pucker or
-              Forward Warp, aimed automatically at one of those points and scaled by the
-              estimated face radius, run instead of by hand. Works best on a single,
-              mostly frontal, well-lit face; anything else — profile views, multiple
-              faces, unusual lighting — the landmark estimate degrades gracefully but is
-              not corrected for.
+              Estimates eight landmark points from the selected layer&apos;s own
+              largest skin-toned region (the same region Select People finds) at
+              fixed anthropometric proportions of its bounding box — a
+              classical, pre-deep-learning substitute for neural landmark
+              detection, not landmark detection itself. Every slider below is
+              Liquify&apos;s own Bloat/Pucker or Forward Warp, aimed
+              automatically at one of those points and scaled by the estimated
+              face radius, run instead of by hand. Works best on a single,
+              mostly frontal, well-lit face; anything else — profile views,
+              multiple faces, unusual lighting — the landmark estimate degrades
+              gracefully but is not corrected for.
             </p>
             {!faceLandmarks && (
-              <p className="modal__hint">No face-shaped (skin-toned) region was found on this layer.</p>
+              <p className="modal__hint">
+                No face-shaped (skin-toned) region was found on this layer.
+              </p>
             )}
             {faceLandmarks &&
               (
@@ -17387,7 +20530,11 @@ export default function App() {
                 </label>
               ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFaceLiquifyDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFaceLiquifyDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
               <button
@@ -17417,56 +20564,62 @@ export default function App() {
           >
             <h2 className="modal__heading">Filter &gt; Vanishing Point</h2>
             <p className="modal__hint">
-              Clones a circular patch from Source to Target through the Plane's own
-              homography — the same projective map Perspective Warp's own planes already
-              use — so cloned content scales correctly as it moves across a receding
-              surface, instead of copying pixel-for-pixel like an ordinary Clone Stamp. A
-              single application rather than Photoshop&apos;s own continuous painted
-              stroke.
+              Clones a circular patch from Source to Target through the Plane's
+              own homography — the same projective map Perspective Warp's own
+              planes already use — so cloned content scales correctly as it
+              moves across a receding surface, instead of copying
+              pixel-for-pixel like an ordinary Clone Stamp. A single application
+              rather than Photoshop&apos;s own continuous painted stroke.
             </p>
-            {(["Top Left", "Top Right", "Bottom Right", "Bottom Left"] as const).map(
-              (label, i) => (
-                <label className="control control--row" key={label}>
-                  <span className="control__label">Plane {label}</span>
-                  <input
-                    type="number"
-                    value={vanishingPointPlane[i][0]}
-                    onChange={(event) =>
-                      setVanishingPointPlane((corners) => {
-                        const next = [...corners] as typeof corners;
-                        next[i] = [Number(event.target.value), corners[i][1]];
-                        return next;
-                      })
-                    }
-                  />
-                  <input
-                    type="number"
-                    value={vanishingPointPlane[i][1]}
-                    onChange={(event) =>
-                      setVanishingPointPlane((corners) => {
-                        const next = [...corners] as typeof corners;
-                        next[i] = [corners[i][0], Number(event.target.value)];
-                        return next;
-                      })
-                    }
-                  />
-                </label>
-              ),
-            )}
+            {(
+              ["Top Left", "Top Right", "Bottom Right", "Bottom Left"] as const
+            ).map((label, i) => (
+              <label className="control control--row" key={label}>
+                <span className="control__label">Plane {label}</span>
+                <input
+                  type="number"
+                  value={vanishingPointPlane[i][0]}
+                  onChange={(event) =>
+                    setVanishingPointPlane((corners) => {
+                      const next = [...corners] as typeof corners;
+                      next[i] = [Number(event.target.value), corners[i][1]];
+                      return next;
+                    })
+                  }
+                />
+                <input
+                  type="number"
+                  value={vanishingPointPlane[i][1]}
+                  onChange={(event) =>
+                    setVanishingPointPlane((corners) => {
+                      const next = [...corners] as typeof corners;
+                      next[i] = [corners[i][0], Number(event.target.value)];
+                      return next;
+                    })
+                  }
+                />
+              </label>
+            ))}
             <label className="control control--row">
               <span className="control__label">Source X, Y</span>
               <input
                 type="number"
                 value={vanishingPointSource[0]}
                 onChange={(event) =>
-                  setVanishingPointSource(([, y]) => [Number(event.target.value), y])
+                  setVanishingPointSource(([, y]) => [
+                    Number(event.target.value),
+                    y,
+                  ])
                 }
               />
               <input
                 type="number"
                 value={vanishingPointSource[1]}
                 onChange={(event) =>
-                  setVanishingPointSource(([x]) => [x, Number(event.target.value)])
+                  setVanishingPointSource(([x]) => [
+                    x,
+                    Number(event.target.value),
+                  ])
                 }
               />
             </label>
@@ -17476,14 +20629,20 @@ export default function App() {
                 type="number"
                 value={vanishingPointTarget[0]}
                 onChange={(event) =>
-                  setVanishingPointTarget(([, y]) => [Number(event.target.value), y])
+                  setVanishingPointTarget(([, y]) => [
+                    Number(event.target.value),
+                    y,
+                  ])
                 }
               />
               <input
                 type="number"
                 value={vanishingPointTarget[1]}
                 onChange={(event) =>
-                  setVanishingPointTarget(([x]) => [x, Number(event.target.value)])
+                  setVanishingPointTarget(([x]) => [
+                    x,
+                    Number(event.target.value),
+                  ])
                 }
               />
             </label>
@@ -17494,7 +20653,9 @@ export default function App() {
                 min={1}
                 max={200}
                 value={vanishingPointRadius}
-                onChange={(event) => setVanishingPointRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setVanishingPointRadius(Number(event.target.value))
+                }
               />
               <span className="control__value">{vanishingPointRadius}</span>
             </label>
@@ -17520,14 +20681,24 @@ export default function App() {
       )}
 
       {showLensCorrectionDialog && (
-        <div className="modal-overlay" onClick={() => setShowLensCorrectionDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Lens Correction" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLensCorrectionDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Lens Correction"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Filter &gt; Lens Correction</h2>
             <p className="modal__hint">
-              Distortion and Vignette are the same radial correction Camera Raw&apos;s Optics
-              panel applies; Chromatic Aberration resamples Red and Blue independently to
-              pull a colour fringe back into register, leaving Green as the anchor. Lens
-              profiles are a documented scope cut.
+              Distortion and Vignette are the same radial correction Camera
+              Raw&apos;s Optics panel applies; Chromatic Aberration resamples
+              Red and Blue independently to pull a colour fringe back into
+              register, leaving Green as the anchor. Lens profiles are a
+              documented scope cut.
             </p>
             <label className="control control--row">
               <span className="control__label">Remove Distortion</span>
@@ -17536,7 +20707,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={lensDistortion}
-                onChange={(event) => setLensDistortion(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensDistortion(Number(event.target.value))
+                }
               />
               <span className="control__value">{lensDistortion}</span>
             </label>
@@ -17547,7 +20720,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={lensVignette}
-                onChange={(event) => setLensVignette(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensVignette(Number(event.target.value))
+                }
               />
               <span className="control__value">{lensVignette}</span>
             </label>
@@ -17569,15 +20744,26 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={lensBlueYellow}
-                onChange={(event) => setLensBlueYellow(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensBlueYellow(Number(event.target.value))
+                }
               />
               <span className="control__value">{lensBlueYellow}</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowLensCorrectionDialog(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLensCorrectionDialog(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyLensCorrection} disabled={busy || selectedId === null} title="Apply Lens Correction">
+              <button
+                className="button"
+                onClick={applyLensCorrection}
+                disabled={busy || selectedId === null}
+                title="Apply Lens Correction"
+              >
                 OK
               </button>
             </div>
@@ -17586,7 +20772,11 @@ export default function App() {
       )}
 
       {showAdaptiveWideAngleDialog && (
-        <div className="modal-overlay" onClick={() => setShowAdaptiveWideAngleDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAdaptiveWideAngleDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -17595,16 +20785,17 @@ export default function App() {
           >
             <h2 className="modal__heading">Filter &gt; Adaptive Wide Angle</h2>
             <p className="modal__hint">
-              Mark three image-pixel points, in order, along one line that should be
-              straight. Distortion is fit automatically: every candidate value of Lens
-              Correction&apos;s own Distortion (the same radial model Camera Raw&apos;s
-              Optics panel and Lens Correction already apply) is tried in turn, and the
-              one that best straightens the marked points — the smallest total
-              least-squares deviation from a single line — is applied through Lens
-              Correction itself. One marked line and a fixed three points is a documented
-              scope cut of Photoshop&apos;s own click-to-mark, any-number-of-constraints
-              tool, matching the numeric point entry Vanishing Point&apos;s own plane
-              corners already use.
+              Mark three image-pixel points, in order, along one line that
+              should be straight. Distortion is fit automatically: every
+              candidate value of Lens Correction&apos;s own Distortion (the same
+              radial model Camera Raw&apos;s Optics panel and Lens Correction
+              already apply) is tried in turn, and the one that best straightens
+              the marked points — the smallest total least-squares deviation
+              from a single line — is applied through Lens Correction itself.
+              One marked line and a fixed three points is a documented scope cut
+              of Photoshop&apos;s own click-to-mark, any-number-of-constraints
+              tool, matching the numeric point entry Vanishing Point&apos;s own
+              plane corners already use.
             </p>
             {adaptiveWideAngleLine.map((point, index) => (
               <label className="control control--row" key={index}>
@@ -17615,7 +20806,10 @@ export default function App() {
                   onChange={(event) =>
                     setAdaptiveWideAngleLine((line) => {
                       const next = [...line] as typeof line;
-                      next[index] = [Number(event.target.value), next[index][1]];
+                      next[index] = [
+                        Number(event.target.value),
+                        next[index][1],
+                      ];
                       return next;
                     })
                   }
@@ -17626,7 +20820,10 @@ export default function App() {
                   onChange={(event) =>
                     setAdaptiveWideAngleLine((line) => {
                       const next = [...line] as typeof line;
-                      next[index] = [next[index][0], Number(event.target.value)];
+                      next[index] = [
+                        next[index][0],
+                        Number(event.target.value),
+                      ];
                       return next;
                     })
                   }
@@ -17655,7 +20852,11 @@ export default function App() {
       )}
 
       {showGenerateImageDialog && (
-        <div className="modal-overlay" onClick={() => setShowGenerateImageDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGenerateImageDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -17666,7 +20867,7 @@ export default function App() {
             <p className="modal__hint">
               {generativeModel === "device"
                 ? "This project's own text-conditioned diffusion model, trained here from scratch on 787 licensed landscape photographs, draws the prompt at 64×64 and Super Zoom takes it to 192×192, placed as a new layer at the top-left. It knows seven kinds of scene and the words of those photographs' titles; it is a real generator, and it is not Firefly."
-                : "The prompt goes to the Generative AI Endpoint configured in External Services as { prompt, width, height, seed }, expecting { image: \"<base64 PNG>\" } back, placed as a new layer."}
+                : 'The prompt goes to the Generative AI Endpoint configured in External Services as { prompt, width, height, seed }, expecting { image: "<base64 PNG>" } back, placed as a new layer.'}
             </p>
             <label className="control control--row">
               <span className="control__label">Prompt</span>
@@ -17683,8 +20884,14 @@ export default function App() {
             {generativeModel === "device" && understood && (
               <p className="modal__hint">
                 The model will hear:{" "}
-                {understood.category ? <strong>{understood.category}</strong> : <em>no scene kind</em>}
-                {understood.words.length > 0 ? ` — ${understood.words.join(", ")}` : " — none of these words are in its vocabulary"}
+                {understood.category ? (
+                  <strong>{understood.category}</strong>
+                ) : (
+                  <em>no scene kind</em>
+                )}
+                {understood.words.length > 0
+                  ? ` — ${understood.words.join(", ")}`
+                  : " — none of these words are in its vocabulary"}
                 . Scene kinds it knows: {understood.categories.join(", ")}.
               </p>
             )}
@@ -17694,11 +20901,17 @@ export default function App() {
                 type="number"
                 min={0}
                 value={generateSeed}
-                onChange={(event) => setGenerateSeed(Math.max(0, Math.round(Number(event.target.value))))}
+                onChange={(event) =>
+                  setGenerateSeed(
+                    Math.max(0, Math.round(Number(event.target.value))),
+                  )
+                }
               />
               <button
                 className="button button--quiet"
-                onClick={() => setGenerateSeed(Math.floor(Math.random() * 1_000_000))}
+                onClick={() =>
+                  setGenerateSeed(Math.floor(Math.random() * 1_000_000))
+                }
                 title="Pick a random seed"
               >
                 Random
@@ -17707,7 +20920,11 @@ export default function App() {
                 <span className="control__label">Model</span>
                 <select
                   value={generativeModel}
-                  onChange={(event) => setGenerativeModel(event.target.value as "device" | "endpoint")}
+                  onChange={(event) =>
+                    setGenerativeModel(
+                      event.target.value as "device" | "endpoint",
+                    )
+                  }
                 >
                   <option value="device">On-device diffusion</option>
                   <option value="endpoint">Generative AI Endpoint</option>
@@ -17719,7 +20936,13 @@ export default function App() {
                 <span className="control__label">Reference</span>
                 <select
                   value={generateReference ?? ""}
-                  onChange={(event) => setGenerateReference(event.target.value === "" ? null : Number(event.target.value))}
+                  onChange={(event) =>
+                    setGenerateReference(
+                      event.target.value === ""
+                        ? null
+                        : Number(event.target.value),
+                    )
+                  }
                   style={{ flex: 1 }}
                   title="Reference Images: start from a layer's own picture rather than from noise"
                 >
@@ -17733,7 +20956,10 @@ export default function App() {
                 {generateReference !== null && (
                   <>
                     <span className="control__label">
-                      Strength <span className="control__value">{generateStrength.toFixed(2)}</span>
+                      Strength{" "}
+                      <span className="control__value">
+                        {generateStrength.toFixed(2)}
+                      </span>
                     </span>
                     <input
                       type="range"
@@ -17741,7 +20967,9 @@ export default function App() {
                       max={1}
                       step={0.05}
                       value={generateStrength}
-                      onChange={(event) => setGenerateStrength(Number(event.target.value))}
+                      onChange={(event) =>
+                        setGenerateStrength(Number(event.target.value))
+                      }
                       title="How far the reference is noised before denoising under the prompt: low keeps it, high departs from it"
                     />
                   </>
@@ -17758,10 +20986,15 @@ export default function App() {
                   min={2}
                   max={100}
                   value={generateSteps}
-                  onChange={(event) => setGenerateSteps(Number(event.target.value))}
+                  onChange={(event) =>
+                    setGenerateSteps(Number(event.target.value))
+                  }
                 />
                 <span className="control__label">
-                  Guidance <span className="control__value">{generateGuidance.toFixed(1)}</span>
+                  Guidance{" "}
+                  <span className="control__value">
+                    {generateGuidance.toFixed(1)}
+                  </span>
                 </span>
                 <input
                   type="range"
@@ -17769,22 +21002,40 @@ export default function App() {
                   max={5}
                   step={0.5}
                   value={generateGuidance}
-                  onChange={(event) => setGenerateGuidance(Number(event.target.value))}
+                  onChange={(event) =>
+                    setGenerateGuidance(Number(event.target.value))
+                  }
                 />
               </label>
             )}
             {generativeModel === "endpoint" && !generativeAiEndpoint && (
-              <p className="modal__hint">No provider endpoint is configured — set one in External Services first.</p>
+              <p className="modal__hint">
+                No provider endpoint is configured — set one in External
+                Services first.
+              </p>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowGenerateImageDialog(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGenerateImageDialog(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
               <button
                 className="button"
                 onClick={() => void generateImage()}
-                disabled={busy || generateBusy || !generatePrompt.trim() || (generativeModel === "endpoint" && !generativeAiEndpoint)}
-                title={generativeModel === "device" ? "Generate on this device (about a step per second)" : "Generate through the endpoint"}
+                disabled={
+                  busy ||
+                  generateBusy ||
+                  !generatePrompt.trim() ||
+                  (generativeModel === "endpoint" && !generativeAiEndpoint)
+                }
+                title={
+                  generativeModel === "device"
+                    ? "Generate on this device (about a step per second)"
+                    : "Generate through the endpoint"
+                }
               >
                 Generate
               </button>
@@ -17794,15 +21045,25 @@ export default function App() {
       )}
 
       {showPromptToEditDialog && (
-        <div className="modal-overlay" onClick={() => setShowPromptToEditDialog(false)} role="presentation">
-          <div className="modal modal--wide" role="dialog" aria-label="Prompt to Edit" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPromptToEditDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Prompt to Edit"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Prompt to Edit</h2>
             <p className="modal__hint">
-              Redraws the selection under the prompt with this project&apos;s own on-device
-              diffusion model: the area around the selection is noised to the strength and
-              denoised under the prompt, then blended back inside the selection with a
-              feathered edge. Nothing outside the selection changes. Seed, steps and
-              guidance are the Generate Image dialog&apos;s.
+              Redraws the selection under the prompt with this project&apos;s
+              own on-device diffusion model: the area around the selection is
+              noised to the strength and denoised under the prompt, then blended
+              back inside the selection with a feathered edge. Nothing outside
+              the selection changes. Seed, steps and guidance are the Generate
+              Image dialog&apos;s.
             </p>
             <label className="control control--row">
               <span className="control__label">Prompt</span>
@@ -17816,7 +21077,10 @@ export default function App() {
             </label>
             <label className="control">
               <span className="control__label">
-                Strength <span className="control__value">{editStrength.toFixed(2)}</span>
+                Strength{" "}
+                <span className="control__value">
+                  {editStrength.toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
@@ -17824,14 +21088,23 @@ export default function App() {
                 max={1}
                 step={0.05}
                 value={editStrength}
-                onChange={(event) => setEditStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setEditStrength(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPromptToEditDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPromptToEditDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={() => void promptToEdit()} disabled={busy || selectedId === null}>
+              <button
+                className="button"
+                onClick={() => void promptToEdit()}
+                disabled={busy || selectedId === null}
+              >
                 Edit
               </button>
             </div>
@@ -17840,15 +21113,25 @@ export default function App() {
       )}
 
       {showGenerativeUpscaleDialog && (
-        <div className="modal-overlay" onClick={() => setShowGenerativeUpscaleDialog(false)} role="presentation">
-          <div className="modal modal--wide" role="dialog" aria-label="Generative Upscale" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGenerativeUpscaleDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Generative Upscale"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Generative Upscale</h2>
             <p className="modal__hint">
-              Super Zoom&apos;s ×3 upscale, then this project&apos;s own diffusion model adds
-              plausible fine detail over every 64×64 tile of it (overlaps blended), rather
-              than only interpolating — a low strength keeps the picture, a higher one
-              invents more. Replaces the document with one layer, as Super Zoom does. One
-              model run per step per tile: a large image takes a while.
+              Super Zoom&apos;s ×3 upscale, then this project&apos;s own
+              diffusion model adds plausible fine detail over every 64×64 tile
+              of it (overlaps blended), rather than only interpolating — a low
+              strength keeps the picture, a higher one invents more. Replaces
+              the document with one layer, as Super Zoom does. One model run per
+              step per tile: a large image takes a while.
             </p>
             <label className="control control--row">
               <span className="control__label">Prompt</span>
@@ -17862,7 +21145,10 @@ export default function App() {
             </label>
             <label className="control">
               <span className="control__label">
-                Strength <span className="control__value">{upscaleStrength.toFixed(2)}</span>
+                Strength{" "}
+                <span className="control__value">
+                  {upscaleStrength.toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
@@ -17870,20 +21156,37 @@ export default function App() {
                 max={0.6}
                 step={0.05}
                 value={upscaleStrength}
-                onChange={(event) => setUpscaleStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setUpscaleStrength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Steps <span className="control__value">{upscaleSteps}</span>
               </span>
-              <input type="range" min={2} max={30} value={upscaleSteps} onChange={(event) => setUpscaleSteps(Number(event.target.value))} />
+              <input
+                type="range"
+                min={2}
+                max={30}
+                value={upscaleSteps}
+                onChange={(event) =>
+                  setUpscaleSteps(Number(event.target.value))
+                }
+              />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowGenerativeUpscaleDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGenerativeUpscaleDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={() => void generativeUpscale()} disabled={busy || !hasDocument}>
+              <button
+                className="button"
+                onClick={() => void generativeUpscale()}
+                disabled={busy || !hasDocument}
+              >
                 Upscale
               </button>
             </div>
@@ -17892,7 +21195,11 @@ export default function App() {
       )}
 
       {showGenerativeFillDialog && (
-        <div className="modal-overlay" onClick={() => setShowGenerativeFillDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGenerativeFillDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -17901,32 +21208,37 @@ export default function App() {
           >
             <h2 className="modal__heading">Filter &gt; Generative Fill</h2>
             <p className="modal__hint">
-              Sends Prompt, the document&apos;s Width, and its Height as JSON to the
-              provider endpoint configured in External Services, expecting back `{"{"}
-              image: "&lt;base64 PNG&gt;"{"}"}`. This is this app&apos;s own defined
-              contract, not a universal standard — a thin adapter in front of a real
-              image-generation provider, or a provider that already speaks this shape
-              directly, is the only thing needed to make this live. The returned image
-              lands as a new top layer.
+              Sends Prompt, the document&apos;s Width, and its Height as JSON to
+              the provider endpoint configured in External Services, expecting
+              back `{"{"}
+              image: "&lt;base64 PNG&gt;"{"}"}`. This is this app&apos;s own
+              defined contract, not a universal standard — a thin adapter in
+              front of a real image-generation provider, or a provider that
+              already speaks this shape directly, is the only thing needed to
+              make this live. The returned image lands as a new top layer.
             </p>
             <p className="modal__hint">
               No provider configured? The "Generative Fill (AI)" button next to
-              Content-Aware Fill runs this project&apos;s own on-device model against
-              the active selection instead — no prompt, no endpoint, entirely local; see
-              its own tooltip and the README for what it can and can&apos;t do.
+              Content-Aware Fill runs this project&apos;s own on-device model
+              against the active selection instead — no prompt, no endpoint,
+              entirely local; see its own tooltip and the README for what it can
+              and can&apos;t do.
             </p>
             <label className="control control--row">
               <span className="control__label">Prompt</span>
               <input
                 type="text"
                 value={generativeFillPrompt}
-                onChange={(event) => setGenerativeFillPrompt(event.target.value)}
+                onChange={(event) =>
+                  setGenerativeFillPrompt(event.target.value)
+                }
                 style={{ flex: 1 }}
               />
             </label>
             {!generativeAiEndpoint && (
               <p className="modal__hint">
-                No provider endpoint is configured — set one in External Services first.
+                No provider endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <div className="modal__actions">
@@ -17940,7 +21252,12 @@ export default function App() {
               <button
                 className="button"
                 onClick={() => void applyGenerativeFill()}
-                disabled={busy || generativeFillBusy || selectedId === null || !generativeAiEndpoint}
+                disabled={
+                  busy ||
+                  generativeFillBusy ||
+                  selectedId === null ||
+                  !generativeAiEndpoint
+                }
                 title="Call the configured provider and insert its response as a new layer"
               >
                 Generate
@@ -17951,25 +21268,34 @@ export default function App() {
       )}
 
       {showInterfaceDialog && (
-        <div className="modal-overlay" onClick={() => setShowInterfaceDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowInterfaceDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Interface preferences"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Edit &gt; Preferences &gt; Interface</h2>
+            <h2 className="modal__heading">
+              Edit &gt; Preferences &gt; Interface
+            </h2>
             <p className="modal__hint">
-              Photoshop's own Interface preferences: a colour theme at one of four
-              brightnesses, the highlight colour, and the UI font size. Applied at once and
-              kept in this browser; the next launch starts in this look without a flash.
+              Photoshop's own Interface preferences: a colour theme at one of
+              four brightnesses, the highlight colour, and the UI font size.
+              Applied at once and kept in this browser; the next launch starts
+              in this look without a flash.
             </p>
             <label className="control control--row">
               <span className="control__label">Color Theme</span>
               <select
                 value={interfacePreferences.theme}
                 onChange={(event) =>
-                  updateInterface({ theme: event.target.value as InterfacePreferences["theme"] })
+                  updateInterface({
+                    theme: event.target.value as InterfacePreferences["theme"],
+                  })
                 }
               >
                 {THEMES.map((theme) => (
@@ -17985,7 +21311,8 @@ export default function App() {
                 value={interfacePreferences.highlight}
                 onChange={(event) =>
                   updateInterface({
-                    highlight: event.target.value as InterfacePreferences["highlight"],
+                    highlight: event.target
+                      .value as InterfacePreferences["highlight"],
                   })
                 }
               >
@@ -18001,7 +21328,10 @@ export default function App() {
               <select
                 value={interfacePreferences.uiSize}
                 onChange={(event) =>
-                  updateInterface({ uiSize: event.target.value as InterfacePreferences["uiSize"] })
+                  updateInterface({
+                    uiSize: event.target
+                      .value as InterfacePreferences["uiSize"],
+                  })
                 }
               >
                 {UI_SIZES.map((size) => (
@@ -18018,7 +21348,10 @@ export default function App() {
               >
                 Reset to Defaults
               </button>
-              <button className="button" onClick={() => setShowInterfaceDialog(false)}>
+              <button
+                className="button"
+                onClick={() => setShowInterfaceDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -18027,7 +21360,11 @@ export default function App() {
       )}
 
       {showExternalServicesDialog && (
-        <div className="modal-overlay" onClick={() => setShowExternalServicesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowExternalServicesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -18036,19 +21373,22 @@ export default function App() {
           >
             <h2 className="modal__heading">External Services</h2>
             <p className="modal__hint">
-              Cloud Documents, Search Cloud Files, Invite to Edit and Share for Review
-              talk to image-editor-server — this project&apos;s own backend, in the
-              repository&apos;s <code>server/</code> directory. Run it, then paste its URL
-              and the user token it printed here. Generative Fill&apos;s provider endpoint
-              is a separate service of your choosing. Every value is kept only in this
-              browser&apos;s own storage and sent only to the endpoint you enter.
+              Cloud Documents, Search Cloud Files, Invite to Edit and Share for
+              Review talk to image-editor-server — this project&apos;s own
+              backend, in the repository&apos;s <code>server/</code> directory.
+              Run it, then paste its URL and the user token it printed here.
+              Generative Fill&apos;s provider endpoint is a separate service of
+              your choosing. Every value is kept only in this browser&apos;s own
+              storage and sent only to the endpoint you enter.
             </p>
             <label className="control control--row">
               <span className="control__label">Generative AI Endpoint</span>
               <input
                 type="text"
                 value={generativeAiEndpoint}
-                onChange={(event) => setGenerativeAiEndpoint(event.target.value)}
+                onChange={(event) =>
+                  setGenerativeAiEndpoint(event.target.value)
+                }
                 placeholder="https://your-provider.example/generate"
                 style={{ flex: 1 }}
               />
@@ -18066,10 +21406,16 @@ export default function App() {
               <span className="control__label">AI Model</span>
               <select
                 value={generativeModel}
-                onChange={(event) => setGenerativeModel(event.target.value as "device" | "endpoint")}
+                onChange={(event) =>
+                  setGenerativeModel(
+                    event.target.value as "device" | "endpoint",
+                  )
+                }
                 style={{ flex: 1 }}
               >
-                <option value="device">On-device diffusion (this project&apos;s own model)</option>
+                <option value="device">
+                  On-device diffusion (this project&apos;s own model)
+                </option>
                 <option value="endpoint">Generative AI Endpoint (above)</option>
               </select>
             </label>
@@ -18119,7 +21465,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={saveExternalServicesSettings} title="Save these settings">
+              <button
+                className="button"
+                onClick={saveExternalServicesSettings}
+                title="Save these settings"
+              >
                 Save
               </button>
             </div>
@@ -18128,7 +21478,11 @@ export default function App() {
       )}
 
       {showCloudSearchDialog && (
-        <div className="modal-overlay" onClick={() => setShowCloudSearchDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCloudSearchDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -18137,12 +21491,12 @@ export default function App() {
           >
             <h2 className="modal__heading">Search Your Cloud Files</h2>
             <p className="modal__hint">
-              Fetches every document name at the configured Cloud Documents endpoint — a
-              GET to `{"{"}endpoint{"}"}/documents`, expecting back{" "}
+              Fetches every document name at the configured Cloud Documents
+              endpoint — a GET to `{"{"}endpoint{"}"}/documents`, expecting back{" "}
               `{"{"}
-              documents: string[]{"}"}`
-              — and filters the result by whatever you type below. Refresh re-fetches;
-              Load runs the same fetch Load from Cloud already does, for the chosen name.
+              documents: string[]{"}"}` — and filters the result by whatever you
+              type below. Refresh re-fetches; Load runs the same fetch Load from
+              Cloud already does, for the chosen name.
             </p>
             <label className="control control--row">
               <span className="control__label">Filter</span>
@@ -18163,13 +21517,15 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list">
               {cloudDocumentList
-                .filter((name) => name.toLowerCase().includes(cloudSearchQuery.toLowerCase()))
+                .filter((name) =>
+                  name.toLowerCase().includes(cloudSearchQuery.toLowerCase()),
+                )
                 .map((name) => (
                   <li key={name} className="cloud-search__row">
                     <span>{name}</span>
@@ -18198,7 +21554,11 @@ export default function App() {
       )}
 
       {showLibrariesDialog && (
-        <div className="modal-overlay" onClick={() => setShowLibrariesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowLibrariesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -18207,10 +21567,11 @@ export default function App() {
           >
             <h2 className="modal__heading">Libraries</h2>
             <p className="modal__hint">
-              Asset libraries on image-editor-server, shared between users the way
-              Creative Cloud Libraries are: colours, gradient presets, adjustment presets
-              and graphics. Use puts an asset into this document (a colour becomes the
-              brush colour, a graphic a new layer); Add sends one from it.
+              Asset libraries on image-editor-server, shared between users the
+              way Creative Cloud Libraries are: colours, gradient presets,
+              adjustment presets and graphics. Use puts an asset into this
+              document (a colour becomes the brush colour, a graphic a new
+              layer); Add sends one from it.
             </p>
             <label className="control control--row">
               <span className="control__label">New library</span>
@@ -18224,7 +21585,9 @@ export default function App() {
               <button
                 className="button"
                 onClick={() => void createCloudLibrary()}
-                disabled={libraryBusy || !cloudEndpoint || !newLibraryName.trim()}
+                disabled={
+                  libraryBusy || !cloudEndpoint || !newLibraryName.trim()
+                }
                 title="Create a library"
               >
                 Create
@@ -18232,8 +21595,8 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list">
@@ -18246,15 +21609,21 @@ export default function App() {
                 <li key={library.id} className="cloud-search__row">
                   <span>
                     {library.name}
-                    {library.access !== "owner" ? ` (${library.owner}, can ${library.access})` : ""} —{" "}
-                    {library.assets} {library.assets === 1 ? "asset" : "assets"}
+                    {library.access !== "owner"
+                      ? ` (${library.owner}, can ${library.access})`
+                      : ""}{" "}
+                    — {library.assets}{" "}
+                    {library.assets === 1 ? "asset" : "assets"}
                   </span>
                   <button
                     className="button button--quiet"
                     onClick={() => {
                       setActiveLibraryId(library.id);
-                      void refreshCloudAssets(library.id).catch((err: unknown) =>
-                        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`),
+                      void refreshCloudAssets(library.id).catch(
+                        (err: unknown) =>
+                          setError(
+                            `Libraries failed: ${err instanceof Error ? err.message : String(err)}`,
+                          ),
                       );
                     }}
                     disabled={library.id === activeLibraryId}
@@ -18266,7 +21635,9 @@ export default function App() {
               ))}
             </ul>
             {(() => {
-              const library = cloudLibraries.find((l) => l.id === activeLibraryId);
+              const library = cloudLibraries.find(
+                (l) => l.id === activeLibraryId,
+              );
               if (!library) return null;
               const canEdit = library.access !== "view";
               return (
@@ -18289,7 +21660,9 @@ export default function App() {
                                 height: 12,
                                 marginRight: 6,
                                 verticalAlign: "middle",
-                                background: (asset.data as { hex?: string })?.hex ?? "transparent",
+                                background:
+                                  (asset.data as { hex?: string })?.hex ??
+                                  "transparent",
                                 border: "1px solid var(--border)",
                               }}
                             />
@@ -18300,7 +21673,11 @@ export default function App() {
                           <button
                             className="button button--quiet"
                             onClick={() => void useCloudAsset(asset)}
-                            disabled={libraryBusy || busy || (asset.kind !== "color" && !hasDocument)}
+                            disabled={
+                              libraryBusy ||
+                              busy ||
+                              (asset.kind !== "color" && !hasDocument)
+                            }
                             title={
                               asset.kind === "color"
                                 ? "Make this the brush colour"
@@ -18332,13 +21709,21 @@ export default function App() {
                         <input
                           type="text"
                           value={libraryAssetName}
-                          onChange={(event) => setLibraryAssetName(event.target.value)}
+                          onChange={(event) =>
+                            setLibraryAssetName(event.target.value)
+                          }
                           placeholder="asset name"
                           style={{ flex: 1 }}
                         />
                         <button
                           className="button button--quiet"
-                          onClick={() => void addJsonAsset(libraryAssetName || brushColor, "color", { hex: brushColor })}
+                          onClick={() =>
+                            void addJsonAsset(
+                              libraryAssetName || brushColor,
+                              "color",
+                              { hex: brushColor },
+                            )
+                          }
                           disabled={libraryBusy}
                           title={`Add the brush colour ${brushColor} to the library`}
                         >
@@ -18355,10 +21740,14 @@ export default function App() {
                       </label>
                       {document && document.gradientPresets.length > 0 && (
                         <label className="control control--row">
-                          <span className="control__label">Gradient preset</span>
+                          <span className="control__label">
+                            Gradient preset
+                          </span>
                           <select
                             value={libraryGradientName}
-                            onChange={(event) => setLibraryGradientName(event.target.value)}
+                            onChange={(event) =>
+                              setLibraryGradientName(event.target.value)
+                            }
                             style={{ flex: 1 }}
                           >
                             <option value="">choose…</option>
@@ -18371,7 +21760,9 @@ export default function App() {
                           <button
                             className="button button--quiet"
                             onClick={() => {
-                              const preset = document.gradientPresets.find((p) => p.name === libraryGradientName);
+                              const preset = document.gradientPresets.find(
+                                (p) => p.name === libraryGradientName,
+                              );
                               if (preset) {
                                 void addJsonAsset(preset.name, "gradient", {
                                   startColor: preset.startColor,
@@ -18388,10 +21779,14 @@ export default function App() {
                       )}
                       {document && document.adjustmentPresets.length > 0 && (
                         <label className="control control--row">
-                          <span className="control__label">Adjustment preset</span>
+                          <span className="control__label">
+                            Adjustment preset
+                          </span>
                           <select
                             value={libraryAdjustmentName}
-                            onChange={(event) => setLibraryAdjustmentName(event.target.value)}
+                            onChange={(event) =>
+                              setLibraryAdjustmentName(event.target.value)
+                            }
                             style={{ flex: 1 }}
                           >
                             <option value="">choose…</option>
@@ -18404,9 +21799,13 @@ export default function App() {
                           <button
                             className="button button--quiet"
                             onClick={() => {
-                              const preset = document.adjustmentPresets.find((p) => p.name === libraryAdjustmentName);
+                              const preset = document.adjustmentPresets.find(
+                                (p) => p.name === libraryAdjustmentName,
+                              );
                               if (preset) {
-                                void addJsonAsset(preset.name, "adjustment", { adjustment: preset.adjustment });
+                                void addJsonAsset(preset.name, "adjustment", {
+                                  adjustment: preset.adjustment,
+                                });
                               }
                             }}
                             disabled={libraryBusy || !libraryAdjustmentName}
@@ -18424,13 +21823,19 @@ export default function App() {
                       <input
                         type="text"
                         value={libraryShareUser}
-                        onChange={(event) => setLibraryShareUser(event.target.value)}
+                        onChange={(event) =>
+                          setLibraryShareUser(event.target.value)
+                        }
                         placeholder="user name"
                         style={{ flex: 1 }}
                       />
                       <select
                         value={libraryShareRole}
-                        onChange={(event) => setLibraryShareRole(event.target.value as "edit" | "view")}
+                        onChange={(event) =>
+                          setLibraryShareRole(
+                            event.target.value as "edit" | "view",
+                          )
+                        }
                       >
                         <option value="edit">Can edit</option>
                         <option value="view">Can view</option>
@@ -18465,7 +21870,11 @@ export default function App() {
               >
                 Refresh
               </button>
-              <button className="button button--quiet" onClick={() => setShowLibrariesDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowLibrariesDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -18474,7 +21883,11 @@ export default function App() {
       )}
 
       {showBoardsDialog && (
-        <div className="modal-overlay" onClick={() => setShowBoardsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBoardsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -18483,9 +21896,10 @@ export default function App() {
           >
             <h2 className="modal__heading">Boards</h2>
             <p className="modal__hint">
-              Shared boards on image-editor-server — Firefly Boards&apos; open equivalent:
-              pin the open document, the selected layer, a note or a prompt; drag items to
-              arrange them; place an image back into the document as a layer.
+              Shared boards on image-editor-server — Firefly Boards&apos; open
+              equivalent: pin the open document, the selected layer, a note or a
+              prompt; drag items to arrange them; place an image back into the
+              document as a layer.
             </p>
             <label className="control control--row">
               <span className="control__label">New board</span>
@@ -18507,8 +21921,8 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list">
@@ -18521,15 +21935,19 @@ export default function App() {
                 <li key={board.id} className="cloud-search__row">
                   <span>
                     {board.name}
-                    {board.access !== "owner" ? ` (${board.owner}, can ${board.access})` : ""} — {board.items}{" "}
-                    {board.items === 1 ? "item" : "items"}
+                    {board.access !== "owner"
+                      ? ` (${board.owner}, can ${board.access})`
+                      : ""}{" "}
+                    — {board.items} {board.items === 1 ? "item" : "items"}
                   </span>
                   <button
                     className="button button--quiet"
                     onClick={() => {
                       setActiveBoardId(board.id);
                       void refreshBoardItems(board.id).catch((err: unknown) =>
-                        setError(`Boards failed: ${err instanceof Error ? err.message : String(err)}`),
+                        setError(
+                          `Boards failed: ${err instanceof Error ? err.message : String(err)}`,
+                        ),
                       );
                     }}
                     disabled={board.id === activeBoardId}
@@ -18544,14 +21962,23 @@ export default function App() {
               const board = cloudBoards.find((b) => b.id === activeBoardId);
               if (!board) return null;
               const canEdit = board.access !== "view";
-              const extentX = Math.max(1600, ...boardItems.map((i) => i.x + i.w));
-              const extentY = Math.max(960, ...boardItems.map((i) => i.y + i.h));
+              const extentX = Math.max(
+                1600,
+                ...boardItems.map((i) => i.x + i.w),
+              );
+              const extentY = Math.max(
+                960,
+                ...boardItems.map((i) => i.y + i.h),
+              );
               const scale = Math.min(520 / extentX, 320 / extentY);
               return (
                 <>
                   <div
                     className="board-canvas"
-                    style={{ width: Math.round(extentX * scale), height: Math.round(extentY * scale) }}
+                    style={{
+                      width: Math.round(extentX * scale),
+                      height: Math.round(extentY * scale),
+                    }}
                     role="group"
                     aria-label={`${board.name} board`}
                   >
@@ -18566,10 +21993,16 @@ export default function App() {
                           height: Math.max(8, item.h * scale),
                           cursor: canEdit ? "grab" : "default",
                         }}
-                        title={item.kind === "image" ? item.name : `${item.kind}: ${item.text}`}
+                        title={
+                          item.kind === "image"
+                            ? item.name
+                            : `${item.kind}: ${item.text}`
+                        }
                         onPointerDown={(event) => {
                           if (!canEdit) return;
-                          event.currentTarget.setPointerCapture(event.pointerId);
+                          event.currentTarget.setPointerCapture(
+                            event.pointerId,
+                          );
                           boardDrag.current = {
                             id: item.id,
                             startX: event.clientX,
@@ -18582,25 +22015,58 @@ export default function App() {
                         onPointerMove={(event) => {
                           const drag = boardDrag.current;
                           if (!drag || drag.id !== item.id) return;
-                          const x = Math.max(0, drag.originX + (event.clientX - drag.startX) / drag.scale);
-                          const y = Math.max(0, drag.originY + (event.clientY - drag.startY) / drag.scale);
-                          setBoardItems((items) => items.map((i) => (i.id === item.id ? { ...i, x, y } : i)));
+                          const x = Math.max(
+                            0,
+                            drag.originX +
+                              (event.clientX - drag.startX) / drag.scale,
+                          );
+                          const y = Math.max(
+                            0,
+                            drag.originY +
+                              (event.clientY - drag.startY) / drag.scale,
+                          );
+                          setBoardItems((items) =>
+                            items.map((i) =>
+                              i.id === item.id ? { ...i, x, y } : i,
+                            ),
+                          );
                         }}
                         onPointerUp={(event) => {
                           const drag = boardDrag.current;
                           if (!drag || drag.id !== item.id) return;
                           boardDrag.current = null;
-                          const x = Math.round(Math.max(0, drag.originX + (event.clientX - drag.startX) / drag.scale));
-                          const y = Math.round(Math.max(0, drag.originY + (event.clientY - drag.startY) / drag.scale));
-                          if (x !== Math.round(drag.originX) || y !== Math.round(drag.originY)) {
+                          const x = Math.round(
+                            Math.max(
+                              0,
+                              drag.originX +
+                                (event.clientX - drag.startX) / drag.scale,
+                            ),
+                          );
+                          const y = Math.round(
+                            Math.max(
+                              0,
+                              drag.originY +
+                                (event.clientY - drag.startY) / drag.scale,
+                            ),
+                          );
+                          if (
+                            x !== Math.round(drag.originX) ||
+                            y !== Math.round(drag.originY)
+                          ) {
                             void moveBoardItem(item, x, y);
                           }
                         }}
                       >
                         {item.kind === "image" && boardThumbnails[item.id] ? (
-                          <img src={boardThumbnails[item.id]} alt={item.name} draggable={false} />
+                          <img
+                            src={boardThumbnails[item.id]}
+                            alt={item.name}
+                            draggable={false}
+                          />
                         ) : (
-                          <span>{item.kind === "image" ? item.name : item.text}</span>
+                          <span>
+                            {item.kind === "image" ? item.name : item.text}
+                          </span>
                         )}
                       </div>
                     ))}
@@ -18614,7 +22080,8 @@ export default function App() {
                     {boardItems.map((item) => (
                       <li key={item.id} className="cloud-search__row">
                         <span>
-                          <em>{item.kind}</em> {item.kind === "image" ? item.name : item.text}{" "}
+                          <em>{item.kind}</em>{" "}
+                          {item.kind === "image" ? item.name : item.text}{" "}
                           <small>
                             ({Math.round(item.x)}, {Math.round(item.y)})
                           </small>
@@ -18704,11 +22171,20 @@ export default function App() {
                       <input
                         type="text"
                         value={boardShareUser}
-                        onChange={(event) => setBoardShareUser(event.target.value)}
+                        onChange={(event) =>
+                          setBoardShareUser(event.target.value)
+                        }
                         placeholder="user name"
                         style={{ flex: 1 }}
                       />
-                      <select value={boardShareRole} onChange={(event) => setBoardShareRole(event.target.value as "edit" | "view")}>
+                      <select
+                        value={boardShareRole}
+                        onChange={(event) =>
+                          setBoardShareRole(
+                            event.target.value as "edit" | "view",
+                          )
+                        }
+                      >
                         <option value="edit">Can edit</option>
                         <option value="view">Can view</option>
                       </select>
@@ -18742,7 +22218,11 @@ export default function App() {
               >
                 Refresh
               </button>
-              <button className="button button--quiet" onClick={() => setShowBoardsDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBoardsDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -18751,7 +22231,11 @@ export default function App() {
       )}
 
       {showAssistantDialog && (
-        <div className="modal-overlay" onClick={() => setShowAssistantDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAssistantDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -18760,29 +22244,39 @@ export default function App() {
           >
             <h2 className="modal__heading">AI Assisted Editor</h2>
             <p className="modal__hint">
-              Say what to do to the open document. image-editor-server asks Claude with your
-              own Anthropic API key (External Services), offering this app&apos;s own commands
-              as tools; every edit it makes runs through the same undoable commands as a
-              click, on the selected layer. Without a key, plain requests — brighter,
-              blur, select the subject, generate a lake — still work through a rule-based
-              reader.
+              Say what to do to the open document. image-editor-server asks
+              Claude with your own Anthropic API key (External Services),
+              offering this app&apos;s own commands as tools; every edit it
+              makes runs through the same undoable commands as a click, on the
+              selected layer. Without a key, plain requests — brighter, blur,
+              select the subject, generate a lake — still work through a
+              rule-based reader.
             </p>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list assistant__transcript">
               {assistantLines.length === 0 && (
                 <li className="cloud-search__row">
-                  <span>Try: &ldquo;make it a little brighter and warmer&rdquo;.</span>
+                  <span>
+                    Try: &ldquo;make it a little brighter and warmer&rdquo;.
+                  </span>
                 </li>
               )}
               {assistantLines.map((line, i) => (
-                <li key={i} className={`cloud-search__row assistant__line assistant__line--${line.role}`}>
+                <li
+                  key={i}
+                  className={`cloud-search__row assistant__line assistant__line--${line.role}`}
+                >
                   <span>
-                    {line.role === "you" ? <strong>You: </strong> : line.role === "assistant" ? <strong>Assistant: </strong> : null}
+                    {line.role === "you" ? (
+                      <strong>You: </strong>
+                    ) : line.role === "assistant" ? (
+                      <strong>Assistant: </strong>
+                    ) : null}
                     {line.text}
                   </span>
                 </li>
@@ -18803,7 +22297,12 @@ export default function App() {
               <button
                 className="button"
                 onClick={() => void sendToAssistant()}
-                disabled={assistantBusy || busy || !cloudEndpoint || !assistantInput.trim()}
+                disabled={
+                  assistantBusy ||
+                  busy ||
+                  !cloudEndpoint ||
+                  !assistantInput.trim()
+                }
                 title="Send"
               >
                 Send
@@ -18821,7 +22320,11 @@ export default function App() {
               >
                 New conversation
               </button>
-              <button className="button button--quiet" onClick={() => setShowAssistantDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAssistantDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -18830,14 +22333,24 @@ export default function App() {
       )}
 
       {showBrushSettings && (
-        <div className="modal-overlay" onClick={() => setShowBrushSettings(false)} role="presentation">
-          <div className="modal modal--wide" role="dialog" aria-label="Brush Settings" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBrushSettings(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Brush Settings"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Brush Settings</h2>
             <p className="modal__hint">
-              With Brush Settings on, the Brush, Eraser and a defined tip paint dab by dab:
-              a dab every Spacing percent of the diameter, each dab&apos;s size, angle,
-              roundness, position and opacity drawn by the jitters below. Every jitter at
-              zero, Count 1 and Hardness 100 is the plain stroke laid as dabs.
+              With Brush Settings on, the Brush, Eraser and a defined tip paint
+              dab by dab: a dab every Spacing percent of the diameter, each
+              dab&apos;s size, angle, roundness, position and opacity drawn by
+              the jitters below. Every jitter at zero, Count 1 and Hardness 100
+              is the plain stroke laid as dabs.
             </p>
             {(
               [
@@ -18856,14 +22369,22 @@ export default function App() {
             ).map(([key, label, min, max]) => (
               <label key={key} className="control">
                 <span className="control__label">
-                  {label} <span className="control__value">{String(brushDynamics[key])}</span>
+                  {label}{" "}
+                  <span className="control__value">
+                    {String(brushDynamics[key])}
+                  </span>
                 </span>
                 <input
                   type="range"
                   min={min}
                   max={max}
                   value={Number(brushDynamics[key])}
-                  onChange={(event) => setBrushDynamics((d) => ({ ...d, [key]: Number(event.target.value) }))}
+                  onChange={(event) =>
+                    setBrushDynamics((d) => ({
+                      ...d,
+                      [key]: Number(event.target.value),
+                    }))
+                  }
                 />
               </label>
             ))}
@@ -18871,7 +22392,12 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={brushDynamics.bothAxes}
-                onChange={(event) => setBrushDynamics((d) => ({ ...d, bothAxes: event.target.checked }))}
+                onChange={(event) =>
+                  setBrushDynamics((d) => ({
+                    ...d,
+                    bothAxes: event.target.checked,
+                  }))
+                }
               />
               <span className="control__label">Scatter on both axes</span>
               <input
@@ -18906,7 +22432,11 @@ export default function App() {
               >
                 Reset
               </button>
-              <button className="button" onClick={() => setShowBrushSettings(false)} title="Close">
+              <button
+                className="button"
+                onClick={() => setShowBrushSettings(false)}
+                title="Close"
+              >
                 Done
               </button>
             </div>
@@ -18915,7 +22445,11 @@ export default function App() {
       )}
 
       {showFontsDialog && (
-        <div className="modal-overlay" onClick={() => setShowFontsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFontsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -18924,10 +22458,11 @@ export default function App() {
           >
             <h2 className="modal__heading">Fonts</h2>
             <p className="modal__hint">
-              Open-licensed families from image-editor-server&apos;s catalogue (each with its
-              licence named), fetched through the server and activated for the Type tools —
-              Adobe Fonts&apos; open equivalent. Activated faces are kept on this machine.
-              Any font file of your own works too.
+              Open-licensed families from image-editor-server&apos;s catalogue
+              (each with its licence named), fetched through the server and
+              activated for the Type tools — Adobe Fonts&apos; open equivalent.
+              Activated faces are kept on this machine. Any font file of your
+              own works too.
             </p>
             <label className="control control--row">
               <span className="control__label">Search</span>
@@ -18938,12 +22473,21 @@ export default function App() {
                 placeholder="family or category"
                 style={{ flex: 1 }}
               />
-              <select value={fontWeight} onChange={(event) => setFontWeight(event.target.value as "400" | "700")}>
+              <select
+                value={fontWeight}
+                onChange={(event) =>
+                  setFontWeight(event.target.value as "400" | "700")
+                }
+              >
                 <option value="400">Regular</option>
                 <option value="700">Bold</option>
               </select>
               <label className="control control--row">
-                <input type="checkbox" checked={fontItalic} onChange={(event) => setFontItalic(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={fontItalic}
+                  onChange={(event) => setFontItalic(event.target.checked)}
+                />
                 <span className="control__label">Italic</span>
               </label>
               <button
@@ -18957,8 +22501,8 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first. A font file of your own still works.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first. A font file of your own still works.
               </p>
             )}
             <ul className="cloud-search__list">
@@ -18970,7 +22514,11 @@ export default function App() {
               {fontCatalogue
                 .filter((entry) => {
                   const q = fontSearch.trim().toLowerCase();
-                  return !q || entry.family.toLowerCase().includes(q) || entry.category.toLowerCase().includes(q);
+                  return (
+                    !q ||
+                    entry.family.toLowerCase().includes(q) ||
+                    entry.category.toLowerCase().includes(q)
+                  );
                 })
                 .map((entry) => {
                   const name =
@@ -18979,15 +22527,25 @@ export default function App() {
                       : `${entry.family}${fontWeight === "700" ? " Bold" : ""}${fontItalic ? " Italic" : ""}`;
                   const active = activatedFonts.includes(name);
                   return (
-                    <li key={`${entry.source}:${entry.family}`} className="cloud-search__row">
+                    <li
+                      key={`${entry.source}:${entry.family}`}
+                      className="cloud-search__row"
+                    >
                       <span>
-                        {entry.family} <em>({entry.category}, {entry.license})</em>
+                        {entry.family}{" "}
+                        <em>
+                          ({entry.category}, {entry.license})
+                        </em>
                       </span>
                       <button
                         className="button button--quiet"
                         onClick={() => void activateFont(entry)}
                         disabled={fontsBusy || active}
-                        title={active ? `${name} is activated` : `Activate ${name} for the Type tools`}
+                        title={
+                          active
+                            ? `${name} is activated`
+                            : `Activate ${name} for the Type tools`
+                        }
                       >
                         {active ? "Activated" : "Activate"}
                       </button>
@@ -18999,7 +22557,11 @@ export default function App() {
               Activated: {activatedFonts.join(", ")}
             </p>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFontsDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFontsDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -19008,7 +22570,11 @@ export default function App() {
       )}
 
       {showInviteDialog && (
-        <div className="modal-overlay" onClick={() => setShowInviteDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowInviteDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -19017,11 +22583,12 @@ export default function App() {
           >
             <h2 className="modal__heading">Invite to Edit</h2>
             <p className="modal__hint">
-              Shares the cloud document &ldquo;{cloudDocumentName}&rdquo; with another user of
-              the same image-editor-server. &ldquo;Can edit&rdquo; lets them save new versions
-              and share it for review; &ldquo;Can view&rdquo; lets them open it. It appears in
-              their Search Cloud Files as &ldquo;your-name/{cloudDocumentName}&rdquo;, and the
-              server enforces the role on every request.
+              Shares the cloud document &ldquo;{cloudDocumentName}&rdquo; with
+              another user of the same image-editor-server. &ldquo;Can
+              edit&rdquo; lets them save new versions and share it for review;
+              &ldquo;Can view&rdquo; lets them open it. It appears in their
+              Search Cloud Files as &ldquo;your-name/{cloudDocumentName}&rdquo;,
+              and the server enforces the role on every request.
             </p>
             <label className="control control--row">
               <span className="control__label">User</span>
@@ -19032,7 +22599,12 @@ export default function App() {
                 placeholder="their user name"
                 style={{ flex: 1 }}
               />
-              <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as "edit" | "view")}>
+              <select
+                value={inviteRole}
+                onChange={(event) =>
+                  setInviteRole(event.target.value as "edit" | "view")
+                }
+              >
                 <option value="edit">Can edit</option>
                 <option value="view">Can view</option>
               </select>
@@ -19047,8 +22619,8 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list">
@@ -19060,7 +22632,8 @@ export default function App() {
               {cloudShares.map((share) => (
                 <li key={share.user} className="cloud-search__row">
                   <span>
-                    {share.user} — {share.role === "edit" ? "can edit" : "can view"}
+                    {share.user} —{" "}
+                    {share.role === "edit" ? "can edit" : "can view"}
                   </span>
                   <button
                     className="button button--quiet"
@@ -19074,7 +22647,11 @@ export default function App() {
               ))}
             </ul>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowInviteDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowInviteDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -19083,7 +22660,11 @@ export default function App() {
       )}
 
       {showReviewDialog && (
-        <div className="modal-overlay" onClick={() => setShowReviewDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowReviewDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--panel"
             role="dialog"
@@ -19092,10 +22673,11 @@ export default function App() {
           >
             <h2 className="modal__heading">Share for Review</h2>
             <p className="modal__hint">
-              Creates a link to the saved version of &ldquo;{cloudDocumentName}&rdquo; at the
-              Cloud Documents endpoint. Anyone with the link can fetch that exact version
-              and leave comments — no account needed — and later saves never change what
-              the link shows. Comments come back here, threaded, with Resolve.
+              Creates a link to the saved version of &ldquo;{cloudDocumentName}
+              &rdquo; at the Cloud Documents endpoint. Anyone with the link can
+              fetch that exact version and leave comments — no account needed —
+              and later saves never change what the link shows. Comments come
+              back here, threaded, with Resolve.
             </p>
             <label className="control control--row">
               <span className="control__label">Title</span>
@@ -19117,8 +22699,8 @@ export default function App() {
             </label>
             {!cloudEndpoint && (
               <p className="modal__hint">
-                No Cloud Documents endpoint is configured — set one in External Services
-                first.
+                No Cloud Documents endpoint is configured — set one in External
+                Services first.
               </p>
             )}
             <ul className="cloud-search__list">
@@ -19130,7 +22712,8 @@ export default function App() {
               {cloudReviews.map((review) => (
                 <li key={review.id} className="cloud-search__row">
                   <span>
-                    {review.title} — version {review.version}, {review.comments.length}{" "}
+                    {review.title} — version {review.version},{" "}
+                    {review.comments.length}{" "}
                     {review.comments.length === 1 ? "comment" : "comments"}
                   </span>
                   <button
@@ -19152,8 +22735,15 @@ export default function App() {
               return (
                 <>
                   <p className="modal__hint">
-                    Link: <code style={{ overflowWrap: "anywhere" }}>{`${base}/reviews/${review.id}/document`}</code>{" "}
-                    (comments at <code style={{ overflowWrap: "anywhere" }}>{`${base}/reviews/${review.id}`}</code>)
+                    Link:{" "}
+                    <code
+                      style={{ overflowWrap: "anywhere" }}
+                    >{`${base}/reviews/${review.id}/document`}</code>{" "}
+                    (comments at{" "}
+                    <code
+                      style={{ overflowWrap: "anywhere" }}
+                    >{`${base}/reviews/${review.id}`}</code>
+                    )
                   </p>
                   <ul className="cloud-search__list">
                     {threads.length === 0 && (
@@ -19183,9 +22773,18 @@ export default function App() {
                             </button>
                             <button
                               className="button button--quiet"
-                              onClick={() => void setReviewCommentResolved(comment.id, !comment.resolved)}
+                              onClick={() =>
+                                void setReviewCommentResolved(
+                                  comment.id,
+                                  !comment.resolved,
+                                )
+                              }
                               disabled={reviewBusy}
-                              title={comment.resolved ? "Reopen this thread" : "Mark this thread resolved"}
+                              title={
+                                comment.resolved
+                                  ? "Reopen this thread"
+                                  : "Mark this thread resolved"
+                              }
                             >
                               {comment.resolved ? "Reopen" : "Resolve"}
                             </button>
@@ -19194,7 +22793,11 @@ export default function App() {
                         {review.comments
                           .filter((reply) => reply.parent === comment.id)
                           .map((reply) => (
-                            <li key={reply.id} className="cloud-search__row" style={{ paddingLeft: 28 }}>
+                            <li
+                              key={reply.id}
+                              className="cloud-search__row"
+                              style={{ paddingLeft: 28 }}
+                            >
                               <span>
                                 <strong>{reply.author}</strong>: {reply.text}
                               </span>
@@ -19208,16 +22811,24 @@ export default function App() {
                     <input
                       type="text"
                       value={reviewCommentAuthor}
-                      onChange={(event) => setReviewCommentAuthor(event.target.value)}
+                      onChange={(event) =>
+                        setReviewCommentAuthor(event.target.value)
+                      }
                       style={{ flex: 1 }}
                     />
                   </label>
                   <label className="control control--row">
-                    <span className="control__label">{reviewReplyTo === null ? "Comment" : `Reply to #${reviewReplyTo}`}</span>
+                    <span className="control__label">
+                      {reviewReplyTo === null
+                        ? "Comment"
+                        : `Reply to #${reviewReplyTo}`}
+                    </span>
                     <input
                       type="text"
                       value={reviewCommentText}
-                      onChange={(event) => setReviewCommentText(event.target.value)}
+                      onChange={(event) =>
+                        setReviewCommentText(event.target.value)
+                      }
                       style={{ flex: 1 }}
                     />
                     {reviewReplyTo !== null && (
@@ -19232,7 +22843,11 @@ export default function App() {
                     <button
                       className="button"
                       onClick={() => void postReviewComment()}
-                      disabled={reviewBusy || !reviewCommentAuthor.trim() || !reviewCommentText.trim()}
+                      disabled={
+                        reviewBusy ||
+                        !reviewCommentAuthor.trim() ||
+                        !reviewCommentText.trim()
+                      }
                       title="Post this comment on the review"
                     >
                       Post
@@ -19250,7 +22865,11 @@ export default function App() {
               >
                 Refresh
               </button>
-              <button className="button button--quiet" onClick={() => setShowReviewDialog(false)} title="Close">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowReviewDialog(false)}
+                title="Close"
+              >
                 Close
               </button>
             </div>
@@ -19272,29 +22891,45 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Content-Aware Fill</h2>
             <p className="modal__hint">
-              The selection is rebuilt from patches of the pixels around it — PatchMatch
-              synthesis, coarse to fine — so texture continues into it. Sampling Area limits
-              the sources to a margin around the selection (0 samples the whole layer);
-              Mirror and Rotation Adaptation let patches flip and turn by quarter turns;
-              Color Adaptation blends the fill into its border.
+              The selection is rebuilt from patches of the pixels around it —
+              PatchMatch synthesis, coarse to fine — so texture continues into
+              it. Sampling Area limits the sources to a margin around the
+              selection (0 samples the whole layer); Mirror and Rotation
+              Adaptation let patches flip and turn by quarter turns; Color
+              Adaptation blends the fill into its border.
             </p>
             <label className="control">
-              <span className="control__label">Sampling Area margin (px, 0 = whole layer)</span>
+              <span className="control__label">
+                Sampling Area margin (px, 0 = whole layer)
+              </span>
               <input
                 type="number"
                 min={0}
                 max={4096}
                 value={cafSamplingMargin}
-                onChange={(event) => setCafSamplingMargin(Math.max(0, Number(event.target.value) || 0))}
+                onChange={(event) =>
+                  setCafSamplingMargin(
+                    Math.max(0, Number(event.target.value) || 0),
+                  )
+                }
               />
             </label>
             <label className="control control--row">
-              <input type="checkbox" checked={cafMirror} onChange={(event) => setCafMirror(event.target.checked)} />
+              <input
+                type="checkbox"
+                checked={cafMirror}
+                onChange={(event) => setCafMirror(event.target.checked)}
+              />
               <span className="control__label">Mirror</span>
             </label>
             <label className="control control--row">
               <span className="control__label">Rotation Adaptation</span>
-              <select value={cafRotation} onChange={(event) => setCafRotation(event.target.value as typeof cafRotation)}>
+              <select
+                value={cafRotation}
+                onChange={(event) =>
+                  setCafRotation(event.target.value as typeof cafRotation)
+                }
+              >
                 <option value="none">None</option>
                 <option value="low">Low (half turns)</option>
                 <option value="medium">Medium (half turns)</option>
@@ -19306,7 +22941,11 @@ export default function App() {
               <span className="control__label">Color Adaptation</span>
               <select
                 value={cafColorAdaptation}
-                onChange={(event) => setCafColorAdaptation(event.target.value as typeof cafColorAdaptation)}
+                onChange={(event) =>
+                  setCafColorAdaptation(
+                    event.target.value as typeof cafColorAdaptation,
+                  )
+                }
               >
                 <option value="none">None</option>
                 <option value="default">Default</option>
@@ -19320,11 +22959,18 @@ export default function App() {
                 type="number"
                 min={0}
                 value={cafSeed}
-                onChange={(event) => setCafSeed(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
+                onChange={(event) =>
+                  setCafSeed(
+                    Math.max(0, Math.floor(Number(event.target.value) || 0)),
+                  )
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowContentAwareFillDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowContentAwareFillDialog(false)}
+              >
                 Cancel
               </button>
               <button
@@ -19333,11 +22979,16 @@ export default function App() {
                   setShowContentAwareFillDialog(false);
                   if (selectedId === null) return;
                   const rotation =
-                    cafRotation === "none" ? "none" : cafRotation === "high" || cafRotation === "full" ? "quarter" : "half";
+                    cafRotation === "none"
+                      ? "none"
+                      : cafRotation === "high" || cafRotation === "full"
+                        ? "quarter"
+                        : "half";
                   void runCommand("content_aware_fill", {
                     id: selectedId,
                     options: {
-                      samplingMargin: cafSamplingMargin > 0 ? cafSamplingMargin : null,
+                      samplingMargin:
+                        cafSamplingMargin > 0 ? cafSamplingMargin : null,
                       mirror: cafMirror,
                       rotation,
                       colorAdaptation: cafColorAdaptation !== "none",
@@ -19355,7 +23006,11 @@ export default function App() {
       )}
 
       {showActionsDialog && (
-        <div className="modal-overlay" onClick={() => setShowActionsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowActionsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal modal--wide"
             role="dialog"
@@ -19364,10 +23019,11 @@ export default function App() {
           >
             <h2 className="modal__heading">Window &gt; Actions</h2>
             <p className="modal__hint">
-              Name an action and press Record: every command you run is added to it and
-              written to disk as it runs, so a recording is never lost. Play runs it on the
-              layer selected then; Insert Stop pauses playback with a message; Batch plays
-              it over every PNG in a folder and saves the results into another.
+              Name an action and press Record: every command you run is added to
+              it and written to disk as it runs, so a recording is never lost.
+              Play runs it on the layer selected then; Insert Stop pauses
+              playback with a message; Batch plays it over every PNG in a folder
+              and saves the results into another.
             </p>
             {actionsError && (
               <p className="modal__hint modal__hint--error" role="alert">
@@ -19378,7 +23034,8 @@ export default function App() {
               {recording ? (
                 <>
                   <span className="statusbar__recording">
-                    ● Recording "{recording.name}" — {recording.steps.length} step
+                    ● Recording "{recording.name}" — {recording.steps.length}{" "}
+                    step
                     {recording.steps.length === 1 ? "" : "s"}
                   </span>
                   <button className="button" onClick={stopRecording}>
@@ -19423,7 +23080,9 @@ export default function App() {
               )}
             </div>
             <div className="toolbar-customize__list actions__list">
-              {actions.length === 0 && <p className="modal__hint">No actions yet.</p>}
+              {actions.length === 0 && (
+                <p className="modal__hint">No actions yet.</p>
+              )}
               {actions.map((action) => (
                 <div
                   className={`actions__row${selectedActionName === action.name ? " actions__row--selected" : ""}`}
@@ -19435,7 +23094,8 @@ export default function App() {
                   >
                     {action.name}{" "}
                     <span className="actions__count">
-                      ({action.steps.length} step{action.steps.length === 1 ? "" : "s"})
+                      ({action.steps.length} step
+                      {action.steps.length === 1 ? "" : "s"})
                     </span>
                   </button>
                   <button
@@ -19444,7 +23104,12 @@ export default function App() {
                       setShowActionsDialog(false);
                       void playAction(action);
                     }}
-                    disabled={busy || !hasDocument || recording !== null || action.steps.length === 0}
+                    disabled={
+                      busy ||
+                      !hasDocument ||
+                      recording !== null ||
+                      action.steps.length === 0
+                    }
                     title="Play this action on the selected layer of the open document"
                   >
                     Play
@@ -19455,7 +23120,9 @@ export default function App() {
                       setShowActionsDialog(false);
                       void batchAction(action);
                     }}
-                    disabled={busy || recording !== null || action.steps.length === 0}
+                    disabled={
+                      busy || recording !== null || action.steps.length === 0
+                    }
                     title="File > Automate > Batch: play this action over every PNG in a folder"
                   >
                     Batch…
@@ -19472,11 +23139,19 @@ export default function App() {
             </div>
             {selectedActionName !== null &&
               (() => {
-                const shown = recording?.name === selectedActionName ? recording : actions.find((a) => a.name === selectedActionName);
+                const shown =
+                  recording?.name === selectedActionName
+                    ? recording
+                    : actions.find((a) => a.name === selectedActionName);
                 if (!shown) return null;
                 return (
-                  <ol className="actions__steps" aria-label={`Steps of ${shown.name}`}>
-                    {shown.steps.length === 0 && <li className="actions__step">No steps yet.</li>}
+                  <ol
+                    className="actions__steps"
+                    aria-label={`Steps of ${shown.name}`}
+                  >
+                    {shown.steps.length === 0 && (
+                      <li className="actions__step">No steps yet.</li>
+                    )}
                     {shown.steps.map((step, index) => (
                       <li className="actions__step" key={index}>
                         {describeStep(step)}
@@ -19486,7 +23161,10 @@ export default function App() {
                 );
               })()}
             <div className="modal__actions">
-              <button className="button" onClick={() => setShowActionsDialog(false)}>
+              <button
+                className="button"
+                onClick={() => setShowActionsDialog(false)}
+              >
                 Close
               </button>
             </div>
@@ -19500,10 +23178,17 @@ export default function App() {
             <h2 className="modal__heading">Stop</h2>
             <p className="modal__hint">{stopPrompt.message}</p>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => stopPrompt.resolve(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => stopPrompt.resolve(false)}
+              >
                 Stop
               </button>
-              <button className="button" onClick={() => stopPrompt.resolve(true)} autoFocus>
+              <button
+                className="button"
+                onClick={() => stopPrompt.resolve(true)}
+                autoFocus
+              >
                 Continue
               </button>
             </div>
@@ -19513,18 +23198,32 @@ export default function App() {
 
       {showRecoveryDialog && recoveryStatus && (
         <div className="modal-overlay" role="presentation">
-          <div className="modal" role="dialog" aria-label="Recover unsaved work">
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Recover unsaved work"
+          >
             <h2 className="modal__heading">Recover unsaved work?</h2>
             <p className="modal__hint">
-              A recovery file from {new Date(recoveryStatus.modifiedAt * 1000).toLocaleString()} (
-              {Math.max(1, Math.round(recoveryStatus.bytes / 1024))} KB) was left by a previous run that
-              did not close cleanly. Recover opens it as the document; Discard deletes it.
+              A recovery file from{" "}
+              {new Date(recoveryStatus.modifiedAt * 1000).toLocaleString()} (
+              {Math.max(1, Math.round(recoveryStatus.bytes / 1024))} KB) was
+              left by a previous run that did not close cleanly. Recover opens
+              it as the document; Discard deletes it.
             </p>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => void discardAutosave()} title="Delete the recovery file">
+              <button
+                className="button button--quiet"
+                onClick={() => void discardAutosave()}
+                title="Delete the recovery file"
+              >
                 Discard
               </button>
-              <button className="button" onClick={() => void recoverAutosave()} title="Open the recovered document">
+              <button
+                className="button"
+                onClick={() => void recoverAutosave()}
+                title="Open the recovered document"
+              >
                 Recover
               </button>
             </div>
@@ -19533,7 +23232,11 @@ export default function App() {
       )}
 
       {showMissingProfileDialog && (
-        <div className="modal-overlay" onClick={() => setShowMissingProfileDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMissingProfileDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -19542,15 +23245,18 @@ export default function App() {
           >
             <h2 className="modal__heading">Missing Profile</h2>
             <p className="modal__hint">
-              This project file has no embedded colour profile of its own — it was saved
-              before Embed Color Profile existed. Choose which working space to treat it
-              as; nothing has been converted yet, only labelled sRGB for now.
+              This project file has no embedded colour profile of its own — it
+              was saved before Embed Color Profile existed. Choose which working
+              space to treat it as; nothing has been converted yet, only
+              labelled sRGB for now.
             </p>
             <label className="control control--row">
               <span className="control__label">Assign</span>
               <select
                 value={missingProfileChoice}
-                onChange={(event) => setMissingProfileChoice(event.target.value as ColorProfile)}
+                onChange={(event) =>
+                  setMissingProfileChoice(event.target.value as ColorProfile)
+                }
               >
                 <option value="srgb">sRGB</option>
                 <option value="adobeRgb1998">Adobe RGB (1998)</option>
@@ -19568,7 +23274,9 @@ export default function App() {
               <button
                 className="button"
                 onClick={() => {
-                  void runCommand("assign_profile", { profile: missingProfileChoice });
+                  void runCommand("assign_profile", {
+                    profile: missingProfileChoice,
+                  });
                   setShowMissingProfileDialog(false);
                 }}
                 title="Assign the chosen profile"
@@ -19594,10 +23302,12 @@ export default function App() {
           >
             <h2 className="modal__heading">Paste Profile Mismatch</h2>
             <p className="modal__hint">
-              The clipboard was copied from a {PROFILE_LABELS[pasteMismatchFromProfile]} document,
-              which differs from this document's own working space. Convert remaps the pasted
-              pixels to look the same in this document's working space; Don't Convert keeps the
-              pasted pixels' own raw numbers unchanged, which can shift their appearance.
+              The clipboard was copied from a{" "}
+              {PROFILE_LABELS[pasteMismatchFromProfile]} document, which differs
+              from this document's own working space. Convert remaps the pasted
+              pixels to look the same in this document's working space; Don't
+              Convert keeps the pasted pixels' own raw numbers unchanged, which
+              can shift their appearance.
             </p>
             <div className="modal__actions">
               <button
@@ -19626,18 +23336,31 @@ export default function App() {
       )}
 
       {showPuppetDialog && (
-        <div className="modal-overlay" onClick={() => setShowPuppetDialog(false)} role="presentation">
-          <div className="modal modal--wide" role="dialog" aria-label="Puppet Warp" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPuppetDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Puppet Warp"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Edit &gt; Puppet Warp</h2>
             <p className="modal__hint">
-              Click the picture to place pins, then drag them. A pin set forward draws its
-              part of the mesh over the rest where the mesh folds.
+              Click the picture to place pins, then drag them. A pin set forward
+              draws its part of the mesh over the rest where the mesh folds.
             </p>
             <label className="control control--row">
               <span className="control__label">Mode</span>
               <select
                 value={puppetOptions.mode}
-                onChange={(event) => updatePuppet({ mode: event.target.value as PuppetWarpOptions["mode"] })}
+                onChange={(event) =>
+                  updatePuppet({
+                    mode: event.target.value as PuppetWarpOptions["mode"],
+                  })
+                }
               >
                 <option value="rigid">Rigid</option>
                 <option value="normal">Normal</option>
@@ -19646,7 +23369,11 @@ export default function App() {
               <span className="control__label">Density</span>
               <select
                 value={puppetOptions.density}
-                onChange={(event) => updatePuppet({ density: event.target.value as PuppetWarpOptions["density"] })}
+                onChange={(event) =>
+                  updatePuppet({
+                    density: event.target.value as PuppetWarpOptions["density"],
+                  })
+                }
               >
                 <option value="fewer">Fewer Points</option>
                 <option value="normal">Normal</option>
@@ -19658,10 +23385,21 @@ export default function App() {
                 min={0}
                 max={100}
                 value={puppetOptions.expansion}
-                onChange={(event) => updatePuppet({ expansion: Math.max(0, Math.round(Number(event.target.value))) })}
+                onChange={(event) =>
+                  updatePuppet({
+                    expansion: Math.max(
+                      0,
+                      Math.round(Number(event.target.value)),
+                    ),
+                  })
+                }
               />
               <label className="control control--row">
-                <input type="checkbox" checked={puppetShowMesh} onChange={(event) => setPuppetShowMesh(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={puppetShowMesh}
+                  onChange={(event) => setPuppetShowMesh(event.target.checked)}
+                />
                 <span className="control__label">Show Mesh</span>
               </label>
             </label>
@@ -19674,24 +23412,42 @@ export default function App() {
                   if (puppetDrag !== null) return;
                   const point = puppetSvgPoint(event);
                   if (!point) return;
-                  const pins = [...puppetOptions.pins, { source: point, target: point, depth: 0 }];
+                  const pins = [
+                    ...puppetOptions.pins,
+                    { source: point, target: point, depth: 0 },
+                  ];
                   updatePuppet({ pins });
                   setPuppetSelected(pins.length - 1);
                 }}
                 onPointerMove={(event) => {
                   if (puppetDrag === null) return;
                   const point = puppetSvgPoint(event);
-                  if (point) setPuppetPin(puppetDrag, { ...puppetOptions.pins[puppetDrag], target: point });
+                  if (point)
+                    setPuppetPin(puppetDrag, {
+                      ...puppetOptions.pins[puppetDrag],
+                      target: point,
+                    });
                 }}
                 onPointerUp={() => setPuppetDrag(null)}
                 onPointerLeave={() => setPuppetDrag(null)}
               >
-                <rect className="warp-mesh__canvas" x={-0.5} y={-0.5} width={document.width} height={document.height} />
+                <rect
+                  className="warp-mesh__canvas"
+                  x={-0.5}
+                  y={-0.5}
+                  width={document.width}
+                  height={document.height}
+                />
                 {puppetShowMesh &&
                   puppetMesh.triangles.map(([a, b, c], i) => (
                     <polygon
                       className="warp-mesh__curve"
-                      points={[a, b, c].map((k) => `${puppetMesh.deformed[k][0]},${puppetMesh.deformed[k][1]}`).join(" ")}
+                      points={[a, b, c]
+                        .map(
+                          (k) =>
+                            `${puppetMesh.deformed[k][0]},${puppetMesh.deformed[k][1]}`,
+                        )
+                        .join(" ")}
                       key={i}
                     />
                   ))}
@@ -19724,7 +23480,10 @@ export default function App() {
                 onClick={() => {
                   if (puppetSelected === null) return;
                   const pin = puppetOptions.pins[puppetSelected];
-                  setPuppetPin(puppetSelected, { ...pin, depth: pin.depth + 1 });
+                  setPuppetPin(puppetSelected, {
+                    ...pin,
+                    depth: pin.depth + 1,
+                  });
                 }}
                 title="Set Pin Forward"
               >
@@ -19736,7 +23495,10 @@ export default function App() {
                 onClick={() => {
                   if (puppetSelected === null) return;
                   const pin = puppetOptions.pins[puppetSelected];
-                  setPuppetPin(puppetSelected, { ...pin, depth: pin.depth - 1 });
+                  setPuppetPin(puppetSelected, {
+                    ...pin,
+                    depth: pin.depth - 1,
+                  });
                 }}
                 title="Set Pin Backward"
               >
@@ -19747,7 +23509,11 @@ export default function App() {
                 disabled={puppetSelected === null}
                 onClick={() => {
                   if (puppetSelected === null) return;
-                  updatePuppet({ pins: puppetOptions.pins.filter((_, i) => i !== puppetSelected) });
+                  updatePuppet({
+                    pins: puppetOptions.pins.filter(
+                      (_, i) => i !== puppetSelected,
+                    ),
+                  });
                   setPuppetSelected(null);
                 }}
                 title="Remove the selected pin"
@@ -19767,7 +23533,11 @@ export default function App() {
               </button>
             </div>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPuppetDialog(false)} title="Cancel">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPuppetDialog(false)}
+                title="Cancel"
+              >
                 Cancel
               </button>
               <button
@@ -19800,27 +23570,34 @@ export default function App() {
               Where each corner of the layer should land, in pixels. Everything
               between is warped projectively, so straight lines stay straight.
             </p>
-            {(["Top-left", "Top-right", "Bottom-right", "Bottom-left"] as const).map(
-              (name, corner) => (
-                <label className="control control--row" key={name}>
-                  <span className="control__label">{name}</span>
-                  <input
-                    type="number"
-                    step={0.5}
-                    value={distortCorners[corner][0]}
-                    onChange={(event) => setDistortCorner(corner, 0, Number(event.target.value))}
-                  />
-                  <input
-                    type="number"
-                    step={0.5}
-                    value={distortCorners[corner][1]}
-                    onChange={(event) => setDistortCorner(corner, 1, Number(event.target.value))}
-                  />
-                </label>
-              ),
-            )}
+            {(
+              ["Top-left", "Top-right", "Bottom-right", "Bottom-left"] as const
+            ).map((name, corner) => (
+              <label className="control control--row" key={name}>
+                <span className="control__label">{name}</span>
+                <input
+                  type="number"
+                  step={0.5}
+                  value={distortCorners[corner][0]}
+                  onChange={(event) =>
+                    setDistortCorner(corner, 0, Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.5}
+                  value={distortCorners[corner][1]}
+                  onChange={(event) =>
+                    setDistortCorner(corner, 1, Number(event.target.value))
+                  }
+                />
+              </label>
+            ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={openDistortDialog}>
+              <button
+                className="button button--quiet"
+                onClick={openDistortDialog}
+              >
                 Reset
               </button>
               <button
@@ -19849,7 +23626,9 @@ export default function App() {
             aria-label="Perspective"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Edit &gt; Transform &gt; Perspective</h2>
+            <h2 className="modal__heading">
+              Edit &gt; Transform &gt; Perspective
+            </h2>
             <p className="modal__hint">
               Insets in pixels, applied to both ends of an edge. Positive
               horizontal narrows the top edge, negative the bottom; positive
@@ -19861,7 +23640,9 @@ export default function App() {
                 type="number"
                 step={0.5}
                 value={perspectiveHorizontal}
-                onChange={(event) => setPerspectiveHorizontal(Number(event.target.value))}
+                onChange={(event) =>
+                  setPerspectiveHorizontal(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -19870,7 +23651,9 @@ export default function App() {
                 type="number"
                 step={0.5}
                 value={perspectiveVertical}
-                onChange={(event) => setPerspectiveVertical(Number(event.target.value))}
+                onChange={(event) =>
+                  setPerspectiveVertical(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -19889,7 +23672,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPerspective} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPerspective}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -19922,7 +23709,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={defringeAmount}
-                onChange={(event) => setDefringeAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setDefringeAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -19932,7 +23721,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDefringe} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDefringe}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -19956,40 +23749,52 @@ export default function App() {
             <label className="control">
               <span className="control__label">
                 Exposure
-                <span className="control__value">{(exposureStops / 100).toFixed(2)}</span>
+                <span className="control__value">
+                  {(exposureStops / 100).toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
                 min={-200}
                 max={200}
                 value={exposureStops}
-                onChange={(event) => setExposureStops(Number(event.target.value))}
+                onChange={(event) =>
+                  setExposureStops(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Offset
-                <span className="control__value">{(exposureOffset / 100).toFixed(2)}</span>
+                <span className="control__value">
+                  {(exposureOffset / 100).toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
                 min={-50}
                 max={50}
                 value={exposureOffset}
-                onChange={(event) => setExposureOffset(Number(event.target.value))}
+                onChange={(event) =>
+                  setExposureOffset(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Gamma
-                <span className="control__value">{(exposureGamma / 100).toFixed(2)}</span>
+                <span className="control__value">
+                  {(exposureGamma / 100).toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
                 min={10}
                 max={300}
                 value={exposureGamma}
-                onChange={(event) => setExposureGamma(Number(event.target.value))}
+                onChange={(event) =>
+                  setExposureGamma(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -19999,7 +23804,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyExposure} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyExposure}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20035,7 +23844,9 @@ export default function App() {
                 type="color"
                 className="tools__color"
                 value={gradientMapHighlight}
-                onChange={(event) => setGradientMapHighlight(event.target.value)}
+                onChange={(event) =>
+                  setGradientMapHighlight(event.target.value)
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20045,7 +23856,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGradientMap} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGradientMap}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20089,7 +23904,11 @@ export default function App() {
                           max={200}
                           value={value}
                           onChange={(event) =>
-                            setChannelMixerCell(row, col, Number(event.target.value))
+                            setChannelMixerCell(
+                              row,
+                              col,
+                              Number(event.target.value),
+                            )
                           }
                         />
                       </td>
@@ -20111,7 +23930,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyChannelMixer} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyChannelMixer}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20142,7 +23965,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={selectiveColorCyan}
-                onChange={(event) => setSelectiveColorCyan(Number(event.target.value))}
+                onChange={(event) =>
+                  setSelectiveColorCyan(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20155,7 +23980,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={selectiveColorMagenta}
-                onChange={(event) => setSelectiveColorMagenta(Number(event.target.value))}
+                onChange={(event) =>
+                  setSelectiveColorMagenta(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20168,7 +23995,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={selectiveColorYellow}
-                onChange={(event) => setSelectiveColorYellow(Number(event.target.value))}
+                onChange={(event) =>
+                  setSelectiveColorYellow(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20181,7 +24010,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={selectiveColorBlack}
-                onChange={(event) => setSelectiveColorBlack(Number(event.target.value))}
+                onChange={(event) =>
+                  setSelectiveColorBlack(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20191,7 +24022,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySelectiveColor} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySelectiveColor}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20211,7 +24046,9 @@ export default function App() {
             aria-label="Stroke"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Stroke</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Stroke
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -20222,7 +24059,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={strokeOutlineSize}
-                onChange={(event) => setStrokeOutlineSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setStrokeOutlineSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -20230,7 +24069,9 @@ export default function App() {
               <select
                 value={strokeOutlinePosition}
                 onChange={(event) =>
-                  setStrokeOutlinePosition(event.target.value as typeof strokeOutlinePosition)
+                  setStrokeOutlinePosition(
+                    event.target.value as typeof strokeOutlinePosition,
+                  )
                 }
               >
                 <option value="outside">Outside</option>
@@ -20256,7 +24097,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={strokeOutlineOpacity}
-                onChange={(event) => setStrokeOutlineOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setStrokeOutlineOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20266,7 +24109,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyStrokeOutline} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyStrokeOutline}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20286,7 +24133,9 @@ export default function App() {
             aria-label="Color Overlay"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Color Overlay</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Color Overlay
+            </h2>
             <label className="control control--row">
               <span className="control__label">Color</span>
               <input
@@ -20305,7 +24154,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={colorOverlayOpacity}
-                onChange={(event) => setColorOverlayOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorOverlayOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20315,7 +24166,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorOverlay} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorOverlay}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20335,13 +24190,17 @@ export default function App() {
             aria-label="Gradient Overlay"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Gradient Overlay</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Gradient Overlay
+            </h2>
             <label className="control control--row">
               <span className="control__label">Color 1</span>
               <input
                 type="color"
                 value={gradientOverlayColor1}
-                onChange={(event) => setGradientOverlayColor1(event.target.value)}
+                onChange={(event) =>
+                  setGradientOverlayColor1(event.target.value)
+                }
               />
             </label>
             <label className="control control--row">
@@ -20349,7 +24208,9 @@ export default function App() {
               <input
                 type="color"
                 value={gradientOverlayColor2}
-                onChange={(event) => setGradientOverlayColor2(event.target.value)}
+                onChange={(event) =>
+                  setGradientOverlayColor2(event.target.value)
+                }
               />
             </label>
             <label className="control control--row">
@@ -20357,7 +24218,9 @@ export default function App() {
               <select
                 value={gradientOverlayStyle}
                 onChange={(event) =>
-                  setGradientOverlayStyle(event.target.value as typeof gradientOverlayStyle)
+                  setGradientOverlayStyle(
+                    event.target.value as typeof gradientOverlayStyle,
+                  )
                 }
               >
                 <option value="linear">Linear</option>
@@ -20377,7 +24240,9 @@ export default function App() {
                 min={-180}
                 max={180}
                 value={gradientOverlayAngle}
-                onChange={(event) => setGradientOverlayAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setGradientOverlayAngle(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20390,14 +24255,18 @@ export default function App() {
                 min={10}
                 max={150}
                 value={gradientOverlayScale}
-                onChange={(event) => setGradientOverlayScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setGradientOverlayScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <input
                 type="checkbox"
                 checked={gradientOverlayReverse}
-                onChange={(event) => setGradientOverlayReverse(event.target.checked)}
+                onChange={(event) =>
+                  setGradientOverlayReverse(event.target.checked)
+                }
               />
               <span className="control__label">Reverse</span>
             </label>
@@ -20405,21 +24274,27 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={gradientOverlayAlign}
-                onChange={(event) => setGradientOverlayAlign(event.target.checked)}
+                onChange={(event) =>
+                  setGradientOverlayAlign(event.target.checked)
+                }
               />
               <span className="control__label">Align with Layer</span>
             </label>
             <label className="control">
               <span className="control__label">
                 Opacity
-                <span className="control__value">{gradientOverlayOpacity}%</span>
+                <span className="control__value">
+                  {gradientOverlayOpacity}%
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={gradientOverlayOpacity}
-                onChange={(event) => setGradientOverlayOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setGradientOverlayOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20429,7 +24304,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGradientOverlay} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGradientOverlay}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20449,7 +24328,9 @@ export default function App() {
             aria-label="Outer Glow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Outer Glow</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Outer Glow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -20460,7 +24341,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={outerGlowSize}
-                onChange={(event) => setOuterGlowSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setOuterGlowSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -20481,7 +24364,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={outerGlowOpacity}
-                onChange={(event) => setOuterGlowOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setOuterGlowOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20491,7 +24376,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyOuterGlow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyOuterGlow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20511,7 +24400,9 @@ export default function App() {
             aria-label="Inner Glow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Inner Glow</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Inner Glow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -20522,7 +24413,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={innerGlowSize}
-                onChange={(event) => setInnerGlowSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerGlowSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -20543,7 +24436,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={innerGlowOpacity}
-                onChange={(event) => setInnerGlowOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerGlowOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20553,7 +24448,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyInnerGlow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyInnerGlow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20573,7 +24472,9 @@ export default function App() {
             aria-label="Drop Shadow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Drop Shadow</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Drop Shadow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Distance
@@ -20584,7 +24485,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={dropShadowDistance}
-                onChange={(event) => setDropShadowDistance(Number(event.target.value))}
+                onChange={(event) =>
+                  setDropShadowDistance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20597,7 +24500,9 @@ export default function App() {
                 min={0}
                 max={360}
                 value={dropShadowAngle}
-                onChange={(event) => setDropShadowAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setDropShadowAngle(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20610,7 +24515,9 @@ export default function App() {
                 min={0}
                 max={250}
                 value={dropShadowSize}
-                onChange={(event) => setDropShadowSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setDropShadowSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -20631,7 +24538,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={dropShadowOpacity}
-                onChange={(event) => setDropShadowOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setDropShadowOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -20641,7 +24550,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDropShadow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDropShadow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -20650,7 +24563,11 @@ export default function App() {
       )}
 
       {showCasDialog && (
-        <div className="modal-overlay" onClick={() => setShowCasDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCasDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -20659,9 +24576,10 @@ export default function App() {
           >
             <h2 className="modal__heading">Edit &gt; Content-Aware Scale</h2>
             <p className="modal__hint">
-              Resizes the layer&apos;s opaque content by removing or duplicating its
-              lowest-energy seams; Amount is how much of the change is seam carving rather
-              than plain scaling. OK commits the transform, Cancel discards it.
+              Resizes the layer&apos;s opaque content by removing or duplicating
+              its lowest-energy seams; Amount is how much of the change is seam
+              carving rather than plain scaling. OK commits the transform,
+              Cancel discards it.
             </p>
             <label className="control control--row">
               <span className="control__label">W (%)</span>
@@ -20698,7 +24616,10 @@ export default function App() {
             </label>
             <label className="control control--row">
               <span className="control__label">Protect</span>
-              <select value={casProtect} onChange={(event) => setCasProtect(event.target.value)}>
+              <select
+                value={casProtect}
+                onChange={(event) => setCasProtect(event.target.value)}
+              >
                 <option value="">None</option>
                 {(document?.channels ?? []).map((name) => (
                   <option key={name} value={name}>
@@ -20719,7 +24640,9 @@ export default function App() {
               <span className="control__label">Reference Point</span>
               <select
                 value={casReference}
-                onChange={(event) => setCasReference(event.target.value as ReferencePoint)}
+                onChange={(event) =>
+                  setCasReference(event.target.value as ReferencePoint)
+                }
               >
                 <option value="topLeft">Top left</option>
                 <option value="top">Top</option>
@@ -20738,21 +24661,40 @@ export default function App() {
                 checked={casUsePosition}
                 onChange={(event) => setCasUsePosition(event.target.checked)}
               />
-              <span className="control__label">Set reference point position</span>
+              <span className="control__label">
+                Set reference point position
+              </span>
               {casUsePosition && (
                 <>
                   <span className="control__label">X</span>
-                  <input type="number" value={casX} onChange={(event) => setCasX(Number(event.target.value))} />
+                  <input
+                    type="number"
+                    value={casX}
+                    onChange={(event) => setCasX(Number(event.target.value))}
+                  />
                   <span className="control__label">Y</span>
-                  <input type="number" value={casY} onChange={(event) => setCasY(Number(event.target.value))} />
+                  <input
+                    type="number"
+                    value={casY}
+                    onChange={(event) => setCasY(Number(event.target.value))}
+                  />
                 </>
               )}
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowCasDialog(false)} title="Cancel Transform">
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCasDialog(false)}
+                title="Cancel Transform"
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyContentAwareScale} disabled={busy} title="Commit Transform">
+              <button
+                className="button"
+                onClick={applyContentAwareScale}
+                disabled={busy}
+                title="Commit Transform"
+              >
                 OK
               </button>
             </div>
@@ -20774,11 +24716,12 @@ export default function App() {
           >
             <h2 className="modal__heading">Image &gt; Canvas Size</h2>
             <p className="modal__hint">
-              Sets the canvas to the new size with the existing content pinned to the
-              anchor: growing adds transparent pixels on the far sides, shrinking crops
-              them. Generative Expand fills the new area of the selected layer with the
-              on-device model — softer than Adobe&apos;s, best on textured content, weak
-              on large uniform areas like open sky.
+              Sets the canvas to the new size with the existing content pinned
+              to the anchor: growing adds transparent pixels on the far sides,
+              shrinking crops them. Generative Expand fills the new area of the
+              selected layer with the on-device model — softer than
+              Adobe&apos;s, best on textured content, weak on large uniform
+              areas like open sky.
             </p>
             <label className="control control--row">
               <span className="control__label">Width</span>
@@ -20787,7 +24730,9 @@ export default function App() {
                 min={1}
                 step={1}
                 value={canvasSizeWidth}
-                onChange={(event) => setCanvasSizeWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setCanvasSizeWidth(Number(event.target.value))
+                }
               />
               <span className="control__label">Height</span>
               <input
@@ -20795,14 +24740,18 @@ export default function App() {
                 min={1}
                 step={1}
                 value={canvasSizeHeight}
-                onChange={(event) => setCanvasSizeHeight(Number(event.target.value))}
+                onChange={(event) =>
+                  setCanvasSizeHeight(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Anchor</span>
               <select
                 value={canvasSizeAnchor}
-                onChange={(event) => setCanvasSizeAnchor(event.target.value as ReferencePoint)}
+                onChange={(event) =>
+                  setCanvasSizeAnchor(event.target.value as ReferencePoint)
+                }
               >
                 <option value="topLeft">Top left</option>
                 <option value="top">Top</option>
@@ -20820,7 +24769,9 @@ export default function App() {
                 type="checkbox"
                 checked={canvasSizeGenerative}
                 disabled={selectedId === null}
-                onChange={(event) => setCanvasSizeGenerative(event.target.checked)}
+                onChange={(event) =>
+                  setCanvasSizeGenerative(event.target.checked)
+                }
               />
               <span className="control__label">
                 Generative Expand (AI): fill the new area on the selected layer
@@ -20834,7 +24785,12 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCanvasSize} disabled={busy} title="OK">
+              <button
+                className="button"
+                onClick={applyCanvasSize}
+                disabled={busy}
+                title="OK"
+              >
                 OK
               </button>
             </div>
@@ -20854,10 +24810,13 @@ export default function App() {
             aria-label="Satin"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Satin</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Satin
+            </h2>
             <p className="modal__hint">
-              Shades the layer where its silhouette, shifted both ways along the angle,
-              disagrees with itself; Invert shades where it agrees instead.
+              Shades the layer where its silhouette, shifted both ways along the
+              angle, disagrees with itself; Invert shades where it agrees
+              instead.
             </p>
             <label className="control">
               <span className="control__label">
@@ -20869,7 +24828,9 @@ export default function App() {
                 min={0}
                 max={250}
                 value={satinDistance}
-                onChange={(event) => setSatinDistance(Number(event.target.value))}
+                onChange={(event) =>
+                  setSatinDistance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20916,7 +24877,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={satinOpacity}
-                onChange={(event) => setSatinOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setSatinOpacity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -20928,7 +24891,10 @@ export default function App() {
               <span className="control__label">Invert</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSatinDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSatinDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applySatin} disabled={busy}>
@@ -20951,7 +24917,9 @@ export default function App() {
             aria-label="Inner Shadow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Inner Shadow</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Inner Shadow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Distance
@@ -20962,7 +24930,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={innerShadowDistance}
-                onChange={(event) => setInnerShadowDistance(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerShadowDistance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20975,7 +24945,9 @@ export default function App() {
                 min={0}
                 max={360}
                 value={innerShadowAngle}
-                onChange={(event) => setInnerShadowAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerShadowAngle(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -20988,7 +24960,9 @@ export default function App() {
                 min={0}
                 max={250}
                 value={innerShadowSize}
-                onChange={(event) => setInnerShadowSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerShadowSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -21009,7 +24983,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={innerShadowOpacity}
-                onChange={(event) => setInnerShadowOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setInnerShadowOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -21019,7 +24995,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyInnerShadow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyInnerShadow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -21039,7 +25019,9 @@ export default function App() {
             aria-label="Pattern Overlay"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Pattern Overlay</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Pattern Overlay
+            </h2>
             <label className="control">
               <span className="control__label">
                 Scale
@@ -21050,7 +25032,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={patternOverlayScale}
-                onChange={(event) => setPatternOverlayScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setPatternOverlayScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -21058,7 +25042,9 @@ export default function App() {
               <input
                 type="color"
                 value={patternOverlayColor1}
-                onChange={(event) => setPatternOverlayColor1(event.target.value)}
+                onChange={(event) =>
+                  setPatternOverlayColor1(event.target.value)
+                }
               />
             </label>
             <label className="control control--row">
@@ -21066,7 +25052,9 @@ export default function App() {
               <input
                 type="color"
                 value={patternOverlayColor2}
-                onChange={(event) => setPatternOverlayColor2(event.target.value)}
+                onChange={(event) =>
+                  setPatternOverlayColor2(event.target.value)
+                }
               />
             </label>
             <label className="control">
@@ -21079,7 +25067,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={patternOverlayOpacity}
-                onChange={(event) => setPatternOverlayOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setPatternOverlayOpacity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -21089,7 +25079,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPatternOverlay} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPatternOverlay}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -21109,7 +25103,9 @@ export default function App() {
             aria-label="Bevel & Emboss"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Bevel &amp; Emboss</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Bevel &amp; Emboss
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -21120,14 +25116,18 @@ export default function App() {
                 min={1}
                 max={250}
                 value={bevelEmbossSize}
-                onChange={(event) => setBevelEmbossSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setBevelEmbossSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Style</span>
               <select
                 value={bevelStyle}
-                onChange={(event) => setBevelStyle(event.target.value as typeof bevelStyle)}
+                onChange={(event) =>
+                  setBevelStyle(event.target.value as typeof bevelStyle)
+                }
               >
                 <option value="innerBevel">Inner Bevel</option>
                 <option value="outerBevel">Outer Bevel</option>
@@ -21139,7 +25139,9 @@ export default function App() {
               <span className="control__label">Technique</span>
               <select
                 value={bevelTechnique}
-                onChange={(event) => setBevelTechnique(event.target.value as typeof bevelTechnique)}
+                onChange={(event) =>
+                  setBevelTechnique(event.target.value as typeof bevelTechnique)
+                }
               >
                 <option value="smooth">Smooth</option>
                 <option value="chiselHard">Chisel Hard</option>
@@ -21161,7 +25163,10 @@ export default function App() {
             </label>
             <label className="control control--row">
               <span className="control__label">Direction</span>
-              <select value={bevelUp ? "up" : "down"} onChange={(event) => setBevelUp(event.target.value === "up")}>
+              <select
+                value={bevelUp ? "up" : "down"}
+                onChange={(event) => setBevelUp(event.target.value === "up")}
+              >
                 <option value="up">Up</option>
                 <option value="down">Down</option>
               </select>
@@ -21202,31 +25207,45 @@ export default function App() {
                 min={0}
                 max={90}
                 value={bevelAltitude}
-                onChange={(event) => setBevelAltitude(Number(event.target.value))}
+                onChange={(event) =>
+                  setBevelAltitude(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Highlight</span>
-              <input type="color" value={bevelHighlight} onChange={(event) => setBevelHighlight(event.target.value)} />
+              <input
+                type="color"
+                value={bevelHighlight}
+                onChange={(event) => setBevelHighlight(event.target.value)}
+              />
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={bevelHighlightOpacity}
-                onChange={(event) => setBevelHighlightOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setBevelHighlightOpacity(Number(event.target.value))
+                }
                 title="Highlight opacity"
               />
               <span className="control__value">{bevelHighlightOpacity}%</span>
             </label>
             <label className="control control--row">
               <span className="control__label">Shadow</span>
-              <input type="color" value={bevelShadow} onChange={(event) => setBevelShadow(event.target.value)} />
+              <input
+                type="color"
+                value={bevelShadow}
+                onChange={(event) => setBevelShadow(event.target.value)}
+              />
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={bevelShadowOpacity}
-                onChange={(event) => setBevelShadowOpacity(Number(event.target.value))}
+                onChange={(event) =>
+                  setBevelShadowOpacity(Number(event.target.value))
+                }
                 title="Shadow opacity"
               />
               <span className="control__value">{bevelShadowOpacity}%</span>
@@ -21238,7 +25257,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyBevelEmboss} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyBevelEmboss}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -21258,7 +25281,9 @@ export default function App() {
             aria-label="Contour"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Contour</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Contour
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -21276,7 +25301,9 @@ export default function App() {
               <span className="control__label">Light Direction</span>
               <select
                 value={contourLightDirection}
-                onChange={(event) => setContourLightDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setContourLightDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Top</option>
                 <option value={1}>Top Right</option>
@@ -21298,7 +25325,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={contourStrength}
-                onChange={(event) => setContourStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setContourStrength(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -21328,7 +25357,9 @@ export default function App() {
             aria-label="Texture"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Layer &gt; Layer Style &gt; Texture</h2>
+            <h2 className="modal__heading">
+              Layer &gt; Layer Style &gt; Texture
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -21346,7 +25377,9 @@ export default function App() {
               <span className="control__label">Light Direction</span>
               <select
                 value={textureLightDirection}
-                onChange={(event) => setTextureLightDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setTextureLightDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Top</option>
                 <option value={1}>Top Right</option>
@@ -21368,7 +25401,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={textureStrength}
-                onChange={(event) => setTextureStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setTextureStrength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -21381,7 +25416,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={textureScale}
-                onChange={(event) => setTextureScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setTextureScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -21394,7 +25431,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={textureDepth}
-                onChange={(event) => setTextureDepth(Number(event.target.value))}
+                onChange={(event) =>
+                  setTextureDepth(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -21424,7 +25463,21 @@ export default function App() {
             aria-label="Texturizer"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Texturizer</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Texturizer
+            </h2>
+            <label className="control control--row">
+              <span className="control__label">Texture</span>
+              <select
+                value={texturizerTexture}
+                onChange={(event) => setTexturizerTexture(event.target.value)}
+              >
+                <option value="canvas">Canvas</option>
+                <option value="brick">Brick</option>
+                <option value="burlap">Burlap</option>
+                <option value="sandstone">Sandstone</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Scale
@@ -21435,7 +25488,9 @@ export default function App() {
                 min={1}
                 max={250}
                 value={texturizerScale}
-                onChange={(event) => setTexturizerScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setTexturizerScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -21448,14 +25503,18 @@ export default function App() {
                 min={0}
                 max={50}
                 value={texturizerRelief}
-                onChange={(event) => setTexturizerRelief(Number(event.target.value))}
+                onChange={(event) =>
+                  setTexturizerRelief(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Light Direction</span>
               <select
                 value={texturizerLightDirection}
-                onChange={(event) => setTexturizerLightDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setTexturizerLightDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Top</option>
                 <option value={1}>Top Right</option>
@@ -21482,7 +25541,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyTexturizer} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTexturizer}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -21507,7 +25570,9 @@ export default function App() {
               <span className="control__label">Adjustment</span>
               <select
                 value={adjustmentKind}
-                onChange={(event) => setAdjustmentKind(event.target.value as Adjustment["kind"])}
+                onChange={(event) =>
+                  setAdjustmentKind(event.target.value as Adjustment["kind"])
+                }
               >
                 <option value="invert">Invert</option>
                 <option value="brightnessContrast">Brightness/Contrast</option>
@@ -21520,14 +25585,18 @@ export default function App() {
                 <label className="control">
                   <span className="control__label">
                     Brightness
-                    <span className="control__value">{adjustmentBrightness}</span>
+                    <span className="control__value">
+                      {adjustmentBrightness}
+                    </span>
                   </span>
                   <input
                     type="range"
                     min={-150}
                     max={150}
                     value={adjustmentBrightness}
-                    onChange={(event) => setAdjustmentBrightness(Number(event.target.value))}
+                    onChange={(event) =>
+                      setAdjustmentBrightness(Number(event.target.value))
+                    }
                   />
                 </label>
                 <label className="control">
@@ -21540,7 +25609,9 @@ export default function App() {
                     min={-100}
                     max={100}
                     value={adjustmentContrast}
-                    onChange={(event) => setAdjustmentContrast(Number(event.target.value))}
+                    onChange={(event) =>
+                      setAdjustmentContrast(Number(event.target.value))
+                    }
                   />
                 </label>
               </>
@@ -21556,7 +25627,9 @@ export default function App() {
                   min={1}
                   max={255}
                   value={adjustmentLevel}
-                  onChange={(event) => setAdjustmentLevel(Number(event.target.value))}
+                  onChange={(event) =>
+                    setAdjustmentLevel(Number(event.target.value))
+                  }
                 />
               </label>
             )}
@@ -21571,17 +25644,22 @@ export default function App() {
                   min={2}
                   max={32}
                   value={adjustmentLevels}
-                  onChange={(event) => setAdjustmentLevels(Number(event.target.value))}
+                  onChange={(event) =>
+                    setAdjustmentLevels(Number(event.target.value))
+                  }
                 />
               </label>
             )}
             {document?.layers.find((l) => l.id === selectedId)?.smart && (
               <div className="control">
                 <span className="control__label">
-                  Smart Filters — applied to the selected smart object, non-destructively
+                  Smart Filters — applied to the selected smart object,
+                  non-destructively
                 </span>
                 {smartFilterList.length === 0 ? (
-                  <p className="modal__hint">None yet — Add Smart Filter appends the recipe above.</p>
+                  <p className="modal__hint">
+                    None yet — Add Smart Filter appends the recipe above.
+                  </p>
                 ) : (
                   <ul className="smart-filter-list">
                     {smartFilterList.map((filter, index) => (
@@ -21611,7 +25689,9 @@ export default function App() {
               <button
                 className="button button--quiet"
                 onClick={retuneAdjustmentLayer}
-                disabled={busy || !layers.find((l) => l.id === selectedId)?.adjustment}
+                disabled={
+                  busy || !layers.find((l) => l.id === selectedId)?.adjustment
+                }
                 title="Re-tune the selected adjustment layer to these settings"
               >
                 Update Selected
@@ -21626,7 +25706,11 @@ export default function App() {
                   Add Smart Filter
                 </button>
               )}
-              <button className="button" onClick={addAdjustmentLayer} disabled={busy}>
+              <button
+                className="button"
+                onClick={addAdjustmentLayer}
+                disabled={busy}
+              >
                 Add Layer
               </button>
             </div>
@@ -21634,12 +25718,22 @@ export default function App() {
         </div>
       )}
       {showFrameDialog && (
-        <div className="modal-overlay" onClick={() => setShowFrameDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Frame" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFrameDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Frame"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Frame tool</h2>
             <p className="modal__hint">
-              A frame is an empty layer masked to a box or ellipse; placing the selected layer
-              into it moves the layer&apos;s pixels in and clips them to the frame.
+              A frame is an empty layer masked to a box or ellipse; placing the
+              selected layer into it moves the layer&apos;s pixels in and clips
+              them to the frame.
             </p>
             <label className="control control--row">
               <span className="control__label">Box (x0, y0, x1, y1)</span>
@@ -21649,17 +25743,37 @@ export default function App() {
                   step={0.5}
                   value={v}
                   key={i}
-                  onChange={(event) => setFrameBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                  onChange={(event) =>
+                    setFrameBox(
+                      (box) =>
+                        box.map((old, j) =>
+                          j === i ? Number(event.target.value) : old,
+                        ) as typeof box,
+                    )
+                  }
                 />
               ))}
               <label className="control control--row">
-                <input type="checkbox" checked={frameElliptical} onChange={(event) => setFrameElliptical(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={frameElliptical}
+                  onChange={(event) => setFrameElliptical(event.target.checked)}
+                />
                 <span className="control__label">Elliptical</span>
               </label>
             </label>
             <label className="control control--row">
               <span className="control__label">Place selected layer into</span>
-              <select value={frameTarget ?? ""} onChange={(event) => setFrameTarget(event.target.value === "" ? null : Number(event.target.value))}>
+              <select
+                value={frameTarget ?? ""}
+                onChange={(event) =>
+                  setFrameTarget(
+                    event.target.value === ""
+                      ? null
+                      : Number(event.target.value),
+                  )
+                }
+              >
                 <option value="">(choose a frame)</option>
                 {(document?.layers ?? [])
                   .filter((layer) => layer.hasMask && layer.id !== selectedId)
@@ -21671,13 +25785,24 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFrameDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFrameDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button button--quiet" onClick={placeIntoFrame} disabled={busy || selectedId === null || frameTarget === null}>
+              <button
+                className="button button--quiet"
+                onClick={placeIntoFrame}
+                disabled={busy || selectedId === null || frameTarget === null}
+              >
                 Place into frame
               </button>
-              <button className="button" onClick={addFrameLayer} disabled={busy}>
+              <button
+                className="button"
+                onClick={addFrameLayer}
+                disabled={busy}
+              >
                 Add frame
               </button>
             </div>
@@ -21686,33 +25811,61 @@ export default function App() {
       )}
 
       {showFocusDialog && (
-        <div className="modal-overlay" onClick={() => setShowFocusDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Focus Area" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFocusDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Focus Area"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Select &gt; Focus Area</h2>
             <p className="modal__hint">
-              Selects where the picture is sharp: a pixel is in focus when the strongest edge
-              within Spread pixels of it clears the In-Focus Range. Combines with the current
-              selection by the selection mode.
+              Selects where the picture is sharp: a pixel is in focus when the
+              strongest edge within Spread pixels of it clears the In-Focus
+              Range. Combines with the current selection by the selection mode.
             </p>
             <label className="control">
               <span className="control__label">
                 In-Focus Range
                 <span className="control__value">{focusRange}</span>
               </span>
-              <input type="range" min={0} max={100} value={focusRange} onChange={(event) => setFocusRange(Number(event.target.value))} />
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={focusRange}
+                onChange={(event) => setFocusRange(Number(event.target.value))}
+              />
             </label>
             <label className="control">
               <span className="control__label">
                 Spread (px)
                 <span className="control__value">{focusSpread}</span>
               </span>
-              <input type="range" min={0} max={10} value={focusSpread} onChange={(event) => setFocusSpread(Number(event.target.value))} />
+              <input
+                type="range"
+                min={0}
+                max={10}
+                value={focusSpread}
+                onChange={(event) => setFocusSpread(Number(event.target.value))}
+              />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFocusDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFocusDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyFocusArea} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyFocusArea}
+                disabled={busy}
+              >
                 OK
               </button>
             </div>
@@ -21721,14 +25874,24 @@ export default function App() {
       )}
 
       {showSmartDialog && (
-        <div className="modal-overlay" onClick={() => setShowSmartDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Smart Objects" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSmartDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Smart Objects"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Layer &gt; Smart Objects</h2>
             <p className="modal__hint">
-              A smart object keeps the pixels it was made from and shows them through a
-              transform, so scaling down and back up loses nothing. Tick the layers to wrap
-              together, or convert the selected layer alone; Smart Transform uses the Free
-              Transform dialog&apos;s values.
+              A smart object keeps the pixels it was made from and shows them
+              through a transform, so scaling down and back up loses nothing.
+              Tick the layers to wrap together, or convert the selected layer
+              alone; Smart Transform uses the Free Transform dialog&apos;s
+              values.
             </p>
             <div className="control">
               <span className="control__label">Layers to wrap</span>
@@ -21739,7 +25902,9 @@ export default function App() {
                     checked={smartMembers.includes(layer.id)}
                     onChange={(event) =>
                       setSmartMembers((members) =>
-                        event.target.checked ? [...members, layer.id] : members.filter((m) => m !== layer.id),
+                        event.target.checked
+                          ? [...members, layer.id]
+                          : members.filter((m) => m !== layer.id),
                       )
                     }
                   />
@@ -21751,24 +25916,39 @@ export default function App() {
               ))}
             </div>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSmartDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSmartDialog(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button button--quiet"
                 onClick={convertToSmartObject}
-                disabled={busy || selectedId === null || !!document?.layers.find((l) => l.id === selectedId)?.smart}
+                disabled={
+                  busy ||
+                  selectedId === null ||
+                  !!document?.layers.find((l) => l.id === selectedId)?.smart
+                }
                 title="Convert to Smart Object"
               >
                 Convert selected
               </button>
-              <button className="button button--quiet" onClick={smartObjectFromLayers} disabled={busy || smartMembers.length === 0} title="Create Smart Object from Layers">
+              <button
+                className="button button--quiet"
+                onClick={smartObjectFromLayers}
+                disabled={busy || smartMembers.length === 0}
+                title="Create Smart Object from Layers"
+              >
                 Create from ticked
               </button>
               <button
                 className="button button--quiet"
                 onClick={applySmartTransform}
-                disabled={busy || !document?.layers.find((l) => l.id === selectedId)?.smart}
+                disabled={
+                  busy ||
+                  !document?.layers.find((l) => l.id === selectedId)?.smart
+                }
                 title="Show the selected smart object through the Free Transform values, from its source"
               >
                 Smart Transform
@@ -21776,7 +25956,10 @@ export default function App() {
               <button
                 className="button"
                 onClick={rasterizeSmartObject}
-                disabled={busy || !document?.layers.find((l) => l.id === selectedId)?.smart}
+                disabled={
+                  busy ||
+                  !document?.layers.find((l) => l.id === selectedId)?.smart
+                }
                 title="Rasterize the selected smart object"
               >
                 Rasterize
@@ -21787,17 +25970,32 @@ export default function App() {
       )}
 
       {showShapeLayerDialog && (
-        <div className="modal-overlay" onClick={() => setShowShapeLayerDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Shape Layer" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowShapeLayerDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Shape Layer"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Shape Layer</h2>
             <p className="modal__hint">
-              A live shape drawn by the shape tools&apos; own painters with their Fill, Stroke,
-              Radius, Sides, Star Ratio, and Weight options. Custom takes one x,y per line and
-              can also be painted straight onto the selected layer.
+              A live shape drawn by the shape tools&apos; own painters with
+              their Fill, Stroke, Radius, Sides, Star Ratio, and Weight options.
+              Custom takes one x,y per line and can also be painted straight
+              onto the selected layer.
             </p>
             <label className="control control--row">
               <span className="control__label">Shape</span>
-              <select value={shapeKind} onChange={(event) => setShapeKind(event.target.value as ShapeSpec["kind"])}>
+              <select
+                value={shapeKind}
+                onChange={(event) =>
+                  setShapeKind(event.target.value as ShapeSpec["kind"])
+                }
+              >
                 <option value="rectangle">Rectangle</option>
                 <option value="ellipse">Ellipse</option>
                 <option value="triangle">Triangle</option>
@@ -21810,40 +26008,71 @@ export default function App() {
             {shapeKind === "custom" ? (
               <label className="control">
                 <span className="control__label">Points (x,y per line)</span>
-                <textarea rows={4} value={customPoints} onChange={(event) => setCustomPoints(event.target.value)} />
+                <textarea
+                  rows={4}
+                  value={customPoints}
+                  onChange={(event) => setCustomPoints(event.target.value)}
+                />
               </label>
             ) : (
               <label className="control control--row">
-                <span className="control__label">{shapeKind === "polygon" || shapeKind === "star" ? "Centre, first vertex" : "Box (x0, y0, x1, y1)"}</span>
+                <span className="control__label">
+                  {shapeKind === "polygon" || shapeKind === "star"
+                    ? "Centre, first vertex"
+                    : "Box (x0, y0, x1, y1)"}
+                </span>
                 {shapeBox.map((v, i) => (
                   <input
                     type="number"
                     step={0.5}
                     value={v}
                     key={i}
-                    onChange={(event) => setShapeBox((box) => box.map((old, j) => (j === i ? Number(event.target.value) : old)) as typeof box)}
+                    onChange={(event) =>
+                      setShapeBox(
+                        (box) =>
+                          box.map((old, j) =>
+                            j === i ? Number(event.target.value) : old,
+                          ) as typeof box,
+                      )
+                    }
                   />
                 ))}
               </label>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowShapeLayerDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowShapeLayerDialog(false)}
+              >
                 Cancel
               </button>
               {shapeKind === "custom" && (
-                <button className="button button--quiet" onClick={paintCustomShape} disabled={busy || !canPaint} title="Custom Shape tool, Pixels mode: paint onto the selected layer">
+                <button
+                  className="button button--quiet"
+                  onClick={paintCustomShape}
+                  disabled={busy || !canPaint}
+                  title="Custom Shape tool, Pixels mode: paint onto the selected layer"
+                >
                   Paint on layer
                 </button>
               )}
               <button
                 className="button button--quiet"
                 onClick={retuneShapeLayer}
-                disabled={busy || !(document?.layers.find((layer) => layer.id === selectedId)?.shape)}
+                disabled={
+                  busy ||
+                  !document?.layers.find((layer) => layer.id === selectedId)
+                    ?.shape
+                }
                 title="Redraw the selected shape layer"
               >
                 Edit selected
               </button>
-              <button className="button" onClick={addShapeLayer} disabled={busy}>
+              <button
+                className="button"
+                onClick={addShapeLayer}
+                disabled={busy}
+              >
                 Add shape layer
               </button>
             </div>
@@ -21852,20 +26081,31 @@ export default function App() {
       )}
 
       {showTypeDialog && (
-        <div className="modal-overlay" onClick={() => setShowTypeDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Type" onClick={(event) => event.stopPropagation()}>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTypeDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Type"
+            onClick={(event) => event.stopPropagation()}
+          >
             <h2 className="modal__heading">Type</h2>
             <p className="modal__hint">
-              A text layer in an activated font (Fonts… adds more) or the built-in 5×7 face,
-              in the brush colour. Lines drop below (or, vertically, columns step right).
-              Edit the selected text layer or add a new one.
+              A text layer in an activated font (Fonts… adds more) or the
+              built-in 5×7 face, in the brush colour. Lines drop below (or,
+              vertically, columns step right). Edit the selected text layer or
+              add a new one.
             </p>
             <label className="control control--row">
               <span className="control__label">Face</span>
               <select
                 value={typeFont ?? ""}
                 onChange={(event) => {
-                  const next = event.target.value === "" ? null : event.target.value;
+                  const next =
+                    event.target.value === "" ? null : event.target.value;
                   setTypeFont(next);
                   if (next === null) setTypeSize((size) => Math.min(size, 64));
                 }}
@@ -21881,38 +26121,73 @@ export default function App() {
             </label>
             <label className="control">
               <span className="control__label">Text</span>
-              <textarea rows={3} value={typeText} onChange={(event) => setTypeText(event.target.value)} />
+              <textarea
+                rows={3}
+                value={typeText}
+                onChange={(event) => setTypeText(event.target.value)}
+              />
             </label>
             <label className="control control--row">
               <span className="control__label">X / Y</span>
-              <input type="number" value={typeX} onChange={(event) => setTypeX(Math.round(Number(event.target.value)))} />
-              <input type="number" value={typeY} onChange={(event) => setTypeY(Math.round(Number(event.target.value)))} />
+              <input
+                type="number"
+                value={typeX}
+                onChange={(event) =>
+                  setTypeX(Math.round(Number(event.target.value)))
+                }
+              />
+              <input
+                type="number"
+                value={typeY}
+                onChange={(event) =>
+                  setTypeY(Math.round(Number(event.target.value)))
+                }
+              />
               <span className="control__label">Size</span>
               <input
                 type="number"
                 min={1}
                 max={typeFont === null ? 64 : 1024}
                 value={typeSize}
-                onChange={(event) => setTypeSize(Math.max(1, Math.round(Number(event.target.value))))}
+                onChange={(event) =>
+                  setTypeSize(
+                    Math.max(1, Math.round(Number(event.target.value))),
+                  )
+                }
               />
               <label className="control control--row">
-                <input type="checkbox" checked={typeVertical} onChange={(event) => setTypeVertical(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={typeVertical}
+                  onChange={(event) => setTypeVertical(event.target.checked)}
+                />
                 <span className="control__label">Vertical</span>
               </label>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowTypeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTypeDialog(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button button--quiet"
                 onClick={retuneTextLayer}
-                disabled={busy || !(document?.layers.find((layer) => layer.id === selectedId)?.text)}
+                disabled={
+                  busy ||
+                  !document?.layers.find((layer) => layer.id === selectedId)
+                    ?.text
+                }
                 title="Set the selected text layer's type again"
               >
                 Edit selected
               </button>
-              <button className="button" onClick={addTextLayer} disabled={busy || typeText.trim() === ""}>
+              <button
+                className="button"
+                onClick={addTextLayer}
+                disabled={busy || typeText.trim() === ""}
+              >
                 Add text layer
               </button>
             </div>
@@ -21937,16 +26212,22 @@ export default function App() {
               <span className="control__label">Fill</span>
               <select
                 value={fillLayerKind}
-                onChange={(event) => setFillLayerKind(event.target.value as Fill["kind"])}
+                onChange={(event) =>
+                  setFillLayerKind(event.target.value as Fill["kind"])
+                }
               >
                 <option value="solidColor">Solid Color (brush colour)</option>
-                <option value="gradient">Gradient (brush → gradient end colour)</option>
+                <option value="gradient">
+                  Gradient (brush → gradient end colour)
+                </option>
                 <option value="pattern">Pattern (the defined pattern)</option>
               </select>
             </label>
             {fillLayerKind !== "pattern" && (
               <label className="control">
-                <span className="control__label">{fillLayerKind === "gradient" ? "Start" : "Color"}</span>
+                <span className="control__label">
+                  {fillLayerKind === "gradient" ? "Start" : "Color"}
+                </span>
                 <input
                   type="color"
                   value={brushColor}
@@ -21965,16 +26246,23 @@ export default function App() {
               </label>
             )}
             {fillLayerKind === "pattern" && !document?.hasPattern && (
-              <p className="modal__hint">No pattern is defined yet (Edit &gt; Define Pattern).</p>
+              <p className="modal__hint">
+                No pattern is defined yet (Edit &gt; Define Pattern).
+              </p>
             )}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFillLayerDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFillLayerDialog(false)}
+              >
                 Cancel
               </button>
               <button
                 className="button button--quiet"
                 onClick={retuneFillLayer}
-                disabled={busy || !layers.find((l) => l.id === selectedId)?.fill}
+                disabled={
+                  busy || !layers.find((l) => l.id === selectedId)?.fill
+                }
                 title="Re-render the selected fill layer from these settings"
               >
                 Update Selected
@@ -21982,7 +26270,9 @@ export default function App() {
               <button
                 className="button"
                 onClick={addFillLayer}
-                disabled={busy || (fillLayerKind === "pattern" && !document?.hasPattern)}
+                disabled={
+                  busy || (fillLayerKind === "pattern" && !document?.hasPattern)
+                }
               >
                 Add Layer
               </button>
@@ -22008,7 +26298,9 @@ export default function App() {
               <span className="control__label">Orientation</span>
               <select
                 value={guideOrientation}
-                onChange={(event) => setGuideOrientation(event.target.value as GuideOrientation)}
+                onChange={(event) =>
+                  setGuideOrientation(event.target.value as GuideOrientation)
+                }
               >
                 <option value="horizontal">Horizontal</option>
                 <option value="vertical">Vertical</option>
@@ -22019,15 +26311,26 @@ export default function App() {
               <input
                 type="number"
                 min={0}
-                max={guideOrientation === "vertical" ? document.width : document.height}
+                max={
+                  guideOrientation === "vertical"
+                    ? document.width
+                    : document.height
+                }
                 value={guidePosition}
-                onChange={(event) => setGuidePosition(Math.max(0, Math.round(Number(event.target.value))))}
+                onChange={(event) =>
+                  setGuidePosition(
+                    Math.max(0, Math.round(Number(event.target.value))),
+                  )
+                }
               />
             </label>
             <button
               className="button button--quiet"
               onClick={() =>
-                void runCommand("add_guide", { orientation: guideOrientation, position: guidePosition })
+                void runCommand("add_guide", {
+                  orientation: guideOrientation,
+                  position: guidePosition,
+                })
               }
               disabled={busy}
             >
@@ -22042,7 +26345,11 @@ export default function App() {
                   min={0}
                   max={100}
                   value={guideColumns}
-                  onChange={(event) => setGuideColumns(Math.max(0, Math.round(Number(event.target.value))))}
+                  onChange={(event) =>
+                    setGuideColumns(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
                 />
               </label>
               <label className="control">
@@ -22052,13 +26359,22 @@ export default function App() {
                   min={0}
                   max={100}
                   value={guideRows}
-                  onChange={(event) => setGuideRows(Math.max(0, Math.round(Number(event.target.value))))}
+                  onChange={(event) =>
+                    setGuideRows(
+                      Math.max(0, Math.round(Number(event.target.value))),
+                    )
+                  }
                 />
               </label>
             </div>
             <button
               className="button button--quiet"
-              onClick={() => void runCommand("guide_layout", { columns: guideColumns, rows: guideRows })}
+              onClick={() =>
+                void runCommand("guide_layout", {
+                  columns: guideColumns,
+                  rows: guideRows,
+                })
+              }
               disabled={busy}
             >
               Add Layout
@@ -22071,7 +26387,10 @@ export default function App() {
               >
                 Clear Guides
               </button>
-              <button className="button" onClick={() => setShowGuidesDialog(false)}>
+              <button
+                className="button"
+                onClick={() => setShowGuidesDialog(false)}
+              >
                 Done
               </button>
             </div>
@@ -22095,7 +26414,9 @@ export default function App() {
               <span className="control__label">Channel</span>
               <select
                 value={levelsChannel}
-                onChange={(event) => setLevelsChannel(event.target.value as LevelsChannel)}
+                onChange={(event) =>
+                  setLevelsChannel(event.target.value as LevelsChannel)
+                }
               >
                 <option value="rgb">RGB</option>
                 <option value="red">Red</option>
@@ -22113,7 +26434,9 @@ export default function App() {
                 min={0}
                 max={255}
                 value={levelsInputBlack}
-                onChange={(event) => setLevelsInputBlack(Number(event.target.value))}
+                onChange={(event) =>
+                  setLevelsInputBlack(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -22126,13 +26449,17 @@ export default function App() {
                 min={0}
                 max={255}
                 value={levelsInputWhite}
-                onChange={(event) => setLevelsInputWhite(Number(event.target.value))}
+                onChange={(event) =>
+                  setLevelsInputWhite(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Gamma
-                <span className="control__value">{(levelsGamma / 100).toFixed(2)}</span>
+                <span className="control__value">
+                  {(levelsGamma / 100).toFixed(2)}
+                </span>
               </span>
               <input
                 type="range"
@@ -22152,7 +26479,9 @@ export default function App() {
                 min={0}
                 max={255}
                 value={levelsOutputBlack}
-                onChange={(event) => setLevelsOutputBlack(Number(event.target.value))}
+                onChange={(event) =>
+                  setLevelsOutputBlack(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -22165,7 +26494,9 @@ export default function App() {
                 min={0}
                 max={255}
                 value={levelsOutputWhite}
-                onChange={(event) => setLevelsOutputWhite(Number(event.target.value))}
+                onChange={(event) =>
+                  setLevelsOutputWhite(Number(event.target.value))
+                }
               />
             </label>
             <div className="control control--row">
@@ -22179,7 +26510,13 @@ export default function App() {
                   value={(levelsClipShadows / 100).toFixed(2)}
                   onChange={(event) =>
                     setLevelsClipShadows(
-                      Math.max(0, Math.min(999, Math.round(Number(event.target.value) * 100))),
+                      Math.max(
+                        0,
+                        Math.min(
+                          999,
+                          Math.round(Number(event.target.value) * 100),
+                        ),
+                      ),
                     )
                   }
                 />
@@ -22194,7 +26531,13 @@ export default function App() {
                   value={(levelsClipHighlights / 100).toFixed(2)}
                   onChange={(event) =>
                     setLevelsClipHighlights(
-                      Math.max(0, Math.min(999, Math.round(Number(event.target.value) * 100))),
+                      Math.max(
+                        0,
+                        Math.min(
+                          999,
+                          Math.round(Number(event.target.value) * 100),
+                        ),
+                      ),
                     )
                   }
                 />
@@ -22273,7 +26616,9 @@ export default function App() {
               <span className="control__label">Channel</span>
               <select
                 value={curveChannel}
-                onChange={(event) => selectCurveChannel(event.target.value as LevelsChannel)}
+                onChange={(event) =>
+                  selectCurveChannel(event.target.value as LevelsChannel)
+                }
               >
                 <option value="rgb">RGB</option>
                 <option value="red">Red</option>
@@ -22287,7 +26632,10 @@ export default function App() {
                   ? null
                   : curvesPointMode
                     ? (curveNodes[curveFocus] ?? null)
-                    : [IDENTITY_CURVE[curveFocus] ?? 0, curvePoints[curveFocus] ?? 0];
+                    : [
+                        IDENTITY_CURVE[curveFocus] ?? 0,
+                        curvePoints[curveFocus] ?? 0,
+                      ];
               const peak = Math.max(1, ...(curveHistogram ?? [0]));
               return (
                 <svg
@@ -22296,7 +26644,11 @@ export default function App() {
                   preserveAspectRatio="none"
                   role="img"
                   aria-label="Curves graph: histogram, baseline, and the curve"
-                  style={curvesPencilMode ? { cursor: "crosshair", touchAction: "none" } : undefined}
+                  style={
+                    curvesPencilMode
+                      ? { cursor: "crosshair", touchAction: "none" }
+                      : undefined
+                  }
                   onPointerDown={(event) => {
                     if (!curvesPencilMode) return;
                     event.currentTarget.setPointerCapture(event.pointerId);
@@ -22304,7 +26656,10 @@ export default function App() {
                     pencilDraw(event);
                   }}
                   onPointerMove={(event) => {
-                    if (!curvesPencilMode || !event.currentTarget.hasPointerCapture(event.pointerId))
+                    if (
+                      !curvesPencilMode ||
+                      !event.currentTarget.hasPointerCapture(event.pointerId)
+                    )
                       return;
                     pencilDraw(event);
                   }}
@@ -22319,7 +26674,10 @@ export default function App() {
                       d={
                         `M0,256 ` +
                         curveHistogram
-                          .map((count, value) => `L${value},${256 - (count / peak) * 256}`)
+                          .map(
+                            (count, value) =>
+                              `L${value},${256 - (count / peak) * 256}`,
+                          )
                           .join(" ") +
                         " L255,256 Z"
                       }
@@ -22358,7 +26716,12 @@ export default function App() {
                     .filter((channel) => channel !== curveChannel)
                     .map((channel) => {
                       const lut = curveLuts[channel];
-                      const colors = { rgb: "#e6e8ea", red: "#e5484d", green: "#46a758", blue: "#3e63dd" };
+                      const colors = {
+                        rgb: "#e6e8ea",
+                        red: "#e5484d",
+                        green: "#46a758",
+                        blue: "#3e63dd",
+                      };
                       return lut ? (
                         <polyline
                           key={channel}
@@ -22366,7 +26729,9 @@ export default function App() {
                           stroke={colors[channel]}
                           strokeOpacity={0.6}
                           strokeWidth={1}
-                          points={lut.map((out, input) => `${input},${255 - out}`).join(" ")}
+                          points={lut
+                            .map((out, input) => `${input},${255 - out}`)
+                            .join(" ")}
                         />
                       ) : null;
                     })}
@@ -22375,16 +26740,21 @@ export default function App() {
                       fill="none"
                       stroke="#f5c400"
                       strokeWidth={2}
-                      points={curveTable.map((out, input) => `${input},${255 - out}`).join(" ")}
+                      points={curveTable
+                        .map((out, input) => `${input},${255 - out}`)
+                        .join(" ")}
                     />
                   )}
                   {!curvesPencilMode && curveLuts[curveChannel] && (
                     <polyline
                       fill="none"
                       stroke={
-                        { rgb: "#e6e8ea", red: "#e5484d", green: "#46a758", blue: "#3e63dd" }[
-                          curveChannel
-                        ]
+                        {
+                          rgb: "#e6e8ea",
+                          red: "#e5484d",
+                          green: "#46a758",
+                          blue: "#3e63dd",
+                        }[curveChannel]
                       }
                       strokeWidth={2}
                       points={(curveLuts[curveChannel] ?? [])
@@ -22455,7 +26825,9 @@ export default function App() {
                       max={255}
                       value={input}
                       onFocus={() => setCurveFocus(index)}
-                      onChange={(event) => setCurveNode(index, 0, Number(event.target.value))}
+                      onChange={(event) =>
+                        setCurveNode(index, 0, Number(event.target.value))
+                      }
                     />
                   </label>
                   <label className="control">
@@ -22466,13 +26838,19 @@ export default function App() {
                       max={255}
                       value={output}
                       onFocus={() => setCurveFocus(index)}
-                      onChange={(event) => setCurveNode(index, 1, Number(event.target.value))}
+                      onChange={(event) =>
+                        setCurveNode(index, 1, Number(event.target.value))
+                      }
                     />
                   </label>
                   <button
                     className="button button--quiet"
                     disabled={curveNodes.length <= 2}
-                    onClick={() => setCurveNodes((nodes) => nodes.filter((_, i) => i !== index))}
+                    onClick={() =>
+                      setCurveNodes((nodes) =>
+                        nodes.filter((_, i) => i !== index),
+                      )
+                    }
                     title="Remove this point"
                   >
                     ×
@@ -22489,20 +26867,22 @@ export default function App() {
             )}
             {!curvesPointMode &&
               curvePoints.map((value, index) => (
-              <label className="control" key={index}>
-                <span className="control__label">
-                  Input {IDENTITY_CURVE[index]}
-                  <span className="control__value">{value}</span>
-                </span>
-                <input
-                  type="range"
-                  min={0}
-                  max={255}
-                  value={value}
-                  onFocus={() => setCurveFocus(index)}
-                  onChange={(event) => setCurvePoint(index, Number(event.target.value))}
-                />
-              </label>
+                <label className="control" key={index}>
+                  <span className="control__label">
+                    Input {IDENTITY_CURVE[index]}
+                    <span className="control__value">{value}</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={255}
+                    value={value}
+                    onFocus={() => setCurveFocus(index)}
+                    onChange={(event) =>
+                      setCurvePoint(index, Number(event.target.value))
+                    }
+                  />
+                </label>
               ))}
             <div className="modal__actions">
               <button
@@ -22515,10 +26895,34 @@ export default function App() {
                   ]);
                   setCurveTable(Array.from({ length: 256 }, (_, i) => i));
                   setCurveStore({
-                    rgb: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-                    red: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-                    green: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
-                    blue: { points: IDENTITY_CURVE, nodes: [[0, 0], [255, 255]] },
+                    rgb: {
+                      points: IDENTITY_CURVE,
+                      nodes: [
+                        [0, 0],
+                        [255, 255],
+                      ],
+                    },
+                    red: {
+                      points: IDENTITY_CURVE,
+                      nodes: [
+                        [0, 0],
+                        [255, 255],
+                      ],
+                    },
+                    green: {
+                      points: IDENTITY_CURVE,
+                      nodes: [
+                        [0, 0],
+                        [255, 255],
+                      ],
+                    },
+                    blue: {
+                      points: IDENTITY_CURVE,
+                      nodes: [
+                        [0, 0],
+                        [255, 255],
+                      ],
+                    },
                   });
                 }}
               >
@@ -22615,7 +27019,11 @@ export default function App() {
                   [
                     ["Shadows", colorBalanceShadows, setColorBalanceShadows],
                     ["Midtones", colorBalanceMidtones, setColorBalanceMidtones],
-                    ["Highlights", colorBalanceHighlights, setColorBalanceHighlights],
+                    [
+                      "Highlights",
+                      colorBalanceHighlights,
+                      setColorBalanceHighlights,
+                    ],
                   ] as const
                 ).map(([label, values, setter]) => (
                   <tr key={label}>
@@ -22628,7 +27036,11 @@ export default function App() {
                           max={100}
                           value={value}
                           onChange={(event) =>
-                            setColorBalanceValue(setter, index, Number(event.target.value))
+                            setColorBalanceValue(
+                              setter,
+                              index,
+                              Number(event.target.value),
+                            )
                           }
                         />
                       </td>
@@ -22654,7 +27066,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorBalance} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorBalance}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -22691,7 +27107,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySolidColorFill} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySolidColorFill}
+                disabled={busy}
+              >
                 Add Layer
               </button>
             </div>
@@ -22737,7 +27157,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGradientFill} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGradientFill}
+                disabled={busy}
+              >
                 Add Layer
               </button>
             </div>
@@ -22746,7 +27170,11 @@ export default function App() {
       )}
 
       {showFillDialog && (
-        <div className="modal-overlay" onClick={() => setShowFillDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFillDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -22764,7 +27192,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFillDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFillDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyFill} disabled={busy}>
@@ -22798,7 +27229,9 @@ export default function App() {
                 min={1}
                 max={40}
                 value={boxBlurRadius}
-                onChange={(event) => setBoxBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setBoxBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -22833,7 +27266,9 @@ export default function App() {
               <span className="control__label">Shape</span>
               <select
                 value={shapeBlurKernel}
-                onChange={(event) => setShapeBlurKernel(event.target.value as ShapeBlurKernel)}
+                onChange={(event) =>
+                  setShapeBlurKernel(event.target.value as ShapeBlurKernel)
+                }
               >
                 <option value="circle">Circle</option>
                 <option value="diamond">Diamond</option>
@@ -22850,7 +27285,9 @@ export default function App() {
                 min={1}
                 max={40}
                 value={shapeBlurRadius}
-                onChange={(event) => setShapeBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setShapeBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -22860,7 +27297,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyShapeBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyShapeBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -22879,7 +27320,9 @@ export default function App() {
             aria-label="Unsharp Mask"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Sharpen &gt; Unsharp Mask</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Sharpen &gt; Unsharp Mask
+            </h2>
             <label className="control">
               <span className="control__label">
                 Amount
@@ -22890,7 +27333,9 @@ export default function App() {
                 min={1}
                 max={500}
                 value={unsharpMaskAmount}
-                onChange={(event) => setUnsharpMaskAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setUnsharpMaskAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -22903,7 +27348,9 @@ export default function App() {
                 min={1}
                 max={40}
                 value={unsharpMaskRadius}
-                onChange={(event) => setUnsharpMaskRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setUnsharpMaskRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -22916,7 +27363,9 @@ export default function App() {
                 min={0}
                 max={255}
                 value={unsharpMaskThreshold}
-                onChange={(event) => setUnsharpMaskThreshold(Number(event.target.value))}
+                onChange={(event) =>
+                  setUnsharpMaskThreshold(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -22926,7 +27375,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyUnsharpMask} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyUnsharpMask}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -22946,7 +27399,9 @@ export default function App() {
             aria-label="Smart Sharpen"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Sharpen &gt; Smart Sharpen</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Sharpen &gt; Smart Sharpen
+            </h2>
             <label className="control">
               <span className="control__label">
                 Amount
@@ -22957,7 +27412,9 @@ export default function App() {
                 min={1}
                 max={500}
                 value={smartSharpenAmount}
-                onChange={(event) => setSmartSharpenAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmartSharpenAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -22970,20 +27427,26 @@ export default function App() {
                 min={1}
                 max={40}
                 value={smartSharpenRadius}
-                onChange={(event) => setSmartSharpenRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmartSharpenRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Reduce Noise
-                <span className="control__value">{smartSharpenReduceNoise}</span>
+                <span className="control__value">
+                  {smartSharpenReduceNoise}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={smartSharpenReduceNoise}
-                onChange={(event) => setSmartSharpenReduceNoise(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmartSharpenReduceNoise(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -22993,7 +27456,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySmartSharpen} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySmartSharpen}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23013,7 +27480,9 @@ export default function App() {
             aria-label="Reduce Noise"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Noise &gt; Reduce Noise</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Noise &gt; Reduce Noise
+            </h2>
             <label className="control">
               <span className="control__label">
                 Strength
@@ -23024,20 +27493,26 @@ export default function App() {
                 min={0}
                 max={10}
                 value={reduceNoiseStrength}
-                onChange={(event) => setReduceNoiseStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setReduceNoiseStrength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Preserve Details
-                <span className="control__value">{reduceNoisePreserveDetails}%</span>
+                <span className="control__value">
+                  {reduceNoisePreserveDetails}%
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={reduceNoisePreserveDetails}
-                onChange={(event) => setReduceNoisePreserveDetails(Number(event.target.value))}
+                onChange={(event) =>
+                  setReduceNoisePreserveDetails(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23047,7 +27522,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyReduceNoise} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyReduceNoise}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23067,7 +27546,9 @@ export default function App() {
             aria-label="Motion Blur"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Blur &gt; Motion Blur</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Blur &gt; Motion Blur
+            </h2>
             <label className="control">
               <span className="control__label">
                 Angle
@@ -23078,7 +27559,9 @@ export default function App() {
                 min={-180}
                 max={180}
                 value={motionBlurAngle}
-                onChange={(event) => setMotionBlurAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setMotionBlurAngle(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -23091,7 +27574,9 @@ export default function App() {
                 min={1}
                 max={60}
                 value={motionBlurDistance}
-                onChange={(event) => setMotionBlurDistance(Number(event.target.value))}
+                onChange={(event) =>
+                  setMotionBlurDistance(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23101,7 +27586,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyMotionBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyMotionBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23132,11 +27621,16 @@ export default function App() {
                 min={1}
                 max={16}
                 value={medianRadius}
-                onChange={(event) => setMedianRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setMedianRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowMedianDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMedianDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyMedian} disabled={busy}>
@@ -23159,7 +27653,9 @@ export default function App() {
             aria-label="Dust & Scratches"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Noise &gt; Dust &amp; Scratches</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Noise &gt; Dust &amp; Scratches
+            </h2>
             <label className="control">
               <span className="control__label">
                 Radius
@@ -23183,7 +27679,9 @@ export default function App() {
                 min={0}
                 max={255}
                 value={dustThreshold}
-                onChange={(event) => setDustThreshold(Number(event.target.value))}
+                onChange={(event) =>
+                  setDustThreshold(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23193,7 +27691,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDustAndScratches} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDustAndScratches}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23231,7 +27733,9 @@ export default function App() {
               <span className="control__label">Distribution</span>
               <select
                 value={noiseGaussian ? "gaussian" : "uniform"}
-                onChange={(event) => setNoiseGaussian(event.target.value === "gaussian")}
+                onChange={(event) =>
+                  setNoiseGaussian(event.target.value === "gaussian")
+                }
               >
                 <option value="uniform">Uniform</option>
                 <option value="gaussian">Gaussian</option>
@@ -23242,7 +27746,9 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={noiseMonochromatic}
-                onChange={(event) => setNoiseMonochromatic(event.target.checked)}
+                onChange={(event) =>
+                  setNoiseMonochromatic(event.target.checked)
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23252,7 +27758,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyAddNoise} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyAddNoise}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23261,7 +27771,11 @@ export default function App() {
       )}
 
       {showMaximumDialog && (
-        <div className="modal-overlay" onClick={() => setShowMaximumDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMaximumDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23279,11 +27793,16 @@ export default function App() {
                 min={1}
                 max={16}
                 value={maximumRadius}
-                onChange={(event) => setMaximumRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setMaximumRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowMaximumDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMaximumDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyMaximum} disabled={busy}>
@@ -23295,7 +27814,11 @@ export default function App() {
       )}
 
       {showMinimumDialog && (
-        <div className="modal-overlay" onClick={() => setShowMinimumDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMinimumDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23313,11 +27836,16 @@ export default function App() {
                 min={1}
                 max={16}
                 value={minimumRadius}
-                onChange={(event) => setMinimumRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setMinimumRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowMinimumDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMinimumDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyMinimum} disabled={busy}>
@@ -23329,7 +27857,11 @@ export default function App() {
       )}
 
       {showHighPassDialog && (
-        <div className="modal-overlay" onClick={() => setShowHighPassDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowHighPassDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23347,14 +27879,23 @@ export default function App() {
                 min={1}
                 max={40}
                 value={highPassRadius}
-                onChange={(event) => setHighPassRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setHighPassRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowHighPassDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowHighPassDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyHighPass} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyHighPass}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23363,7 +27904,11 @@ export default function App() {
       )}
 
       {showOffsetDialog && (
-        <div className="modal-overlay" onClick={() => setShowOffsetDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowOffsetDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23398,7 +27943,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowOffsetDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowOffsetDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyOffset} disabled={busy}>
@@ -23410,7 +27958,11 @@ export default function App() {
       )}
 
       {showCustomDialog && (
-        <div className="modal-overlay" onClick={() => setShowCustomDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCustomDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23430,7 +27982,9 @@ export default function App() {
                   aria-label={`Kernel row ${Math.floor(index / 5) + 1} column ${(index % 5) + 1}`}
                   onChange={(event) => {
                     const next = event.target.value;
-                    setCustomKernel((kernel) => kernel.map((v, i) => (i === index ? next : v)));
+                    setCustomKernel((kernel) =>
+                      kernel.map((v, i) => (i === index ? next : v)),
+                    );
                   }}
                 />
               ))}
@@ -23466,7 +28020,10 @@ export default function App() {
               >
                 Reset
               </button>
-              <button className="button button--quiet" onClick={() => setShowCustomDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCustomDialog(false)}
+              >
                 Cancel
               </button>
               <button
@@ -23482,7 +28039,11 @@ export default function App() {
       )}
 
       {showEmbossDialog && (
-        <div className="modal-overlay" onClick={() => setShowEmbossDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowEmbossDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23513,7 +28074,9 @@ export default function App() {
                 min={1}
                 max={100}
                 value={embossHeight}
-                onChange={(event) => setEmbossHeight(Number(event.target.value))}
+                onChange={(event) =>
+                  setEmbossHeight(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -23526,11 +28089,16 @@ export default function App() {
                 min={1}
                 max={500}
                 value={embossAmount}
-                onChange={(event) => setEmbossAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setEmbossAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowEmbossDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowEmbossDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyEmboss} disabled={busy}>
@@ -23553,7 +28121,9 @@ export default function App() {
             aria-label="Trace Contour"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Stylize &gt; Trace Contour</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Stylize &gt; Trace Contour
+            </h2>
             <label className="control">
               <span className="control__label">
                 Level
@@ -23582,7 +28152,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyTraceContour} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTraceContour}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23602,7 +28176,9 @@ export default function App() {
             aria-label="Gaussian Blur"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Blur &gt; Gaussian Blur</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Blur &gt; Gaussian Blur
+            </h2>
             <label className="control">
               <span className="control__label">
                 Radius
@@ -23613,7 +28189,9 @@ export default function App() {
                 min={1}
                 max={25}
                 value={gaussianBlurRadius}
-                onChange={(event) => setGaussianBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setGaussianBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23623,7 +28201,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGaussianBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGaussianBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23632,7 +28214,11 @@ export default function App() {
       )}
 
       {showDiffuseDialog && (
-        <div className="modal-overlay" onClick={() => setShowDiffuseDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowDiffuseDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23653,7 +28239,10 @@ export default function App() {
               </label>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowDiffuseDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowDiffuseDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyDiffuse} disabled={busy}>
@@ -23676,7 +28265,9 @@ export default function App() {
             aria-label="Surface Blur"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Blur &gt; Surface Blur</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Blur &gt; Surface Blur
+            </h2>
             <label className="control">
               <span className="control__label">
                 Radius
@@ -23687,20 +28278,26 @@ export default function App() {
                 min={1}
                 max={16}
                 value={surfaceBlurRadius}
-                onChange={(event) => setSurfaceBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setSurfaceBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Threshold
-                <span className="control__value">{surfaceBlurThreshold} levels</span>
+                <span className="control__value">
+                  {surfaceBlurThreshold} levels
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={255}
                 value={surfaceBlurThreshold}
-                onChange={(event) => setSurfaceBlurThreshold(Number(event.target.value))}
+                onChange={(event) =>
+                  setSurfaceBlurThreshold(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23710,7 +28307,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySurfaceBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySurfaceBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23730,12 +28331,14 @@ export default function App() {
             aria-label="Skin Smoothing"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Neural Filters &gt; Skin Smoothing</h2>
+            <h2 className="modal__heading">
+              Neural Filters &gt; Skin Smoothing
+            </h2>
             <p className="modal__hint">
-              Surface Blur, confined to skin-toned pixels (the same rule Select People
-              and Color Range's Skin Tones already use) and blended in by Amount — this
-              project's own non-AI stand-in for Photoshop's neural skin detection.
-              Non-skin-toned pixels are never touched.
+              Surface Blur, confined to skin-toned pixels (the same rule Select
+              People and Color Range's Skin Tones already use) and blended in by
+              Amount — this project's own non-AI stand-in for Photoshop's neural
+              skin detection. Non-skin-toned pixels are never touched.
             </p>
             <label className="control">
               <span className="control__label">
@@ -23747,20 +28350,26 @@ export default function App() {
                 min={1}
                 max={16}
                 value={skinSmoothingRadius}
-                onChange={(event) => setSkinSmoothingRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setSkinSmoothingRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Threshold
-                <span className="control__value">{skinSmoothingThreshold} levels</span>
+                <span className="control__value">
+                  {skinSmoothingThreshold} levels
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={255}
                 value={skinSmoothingThreshold}
-                onChange={(event) => setSkinSmoothingThreshold(Number(event.target.value))}
+                onChange={(event) =>
+                  setSkinSmoothingThreshold(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -23773,10 +28382,15 @@ export default function App() {
                 min={0}
                 max={100}
                 value={skinSmoothingAmount}
-                onChange={(event) => setSkinSmoothingAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setSkinSmoothingAmount(Number(event.target.value))
+                }
               />
             </label>
-            <NeuralFilterOutput value={neuralFilterOutput} onChange={setNeuralFilterOutput} />
+            <NeuralFilterOutput
+              value={neuralFilterOutput}
+              onChange={setNeuralFilterOutput}
+            />
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -23784,7 +28398,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySkinSmoothing} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySkinSmoothing}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23804,7 +28422,9 @@ export default function App() {
             aria-label="Glowing Edges"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Stylize &gt; Glowing Edges</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Stylize &gt; Glowing Edges
+            </h2>
             <label className="control">
               <span className="control__label">
                 Edge Width
@@ -23815,7 +28435,9 @@ export default function App() {
                 min={1}
                 max={14}
                 value={glowEdgeWidth}
-                onChange={(event) => setGlowEdgeWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setGlowEdgeWidth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -23828,7 +28450,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={glowEdgeBrightness}
-                onChange={(event) => setGlowEdgeBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setGlowEdgeBrightness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -23841,7 +28465,9 @@ export default function App() {
                 min={1}
                 max={15}
                 value={glowSmoothness}
-                onChange={(event) => setGlowSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setGlowSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -23851,7 +28477,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyGlowingEdges} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGlowingEdges}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -23860,7 +28490,11 @@ export default function App() {
       )}
 
       {showExtrudeDialog && (
-        <div className="modal-overlay" onClick={() => setShowExtrudeDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowExtrudeDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23891,7 +28525,9 @@ export default function App() {
                 min={1}
                 max={255}
                 value={extrudeDepth}
-                onChange={(event) => setExtrudeDepth(Number(event.target.value))}
+                onChange={(event) =>
+                  setExtrudeDepth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -23913,7 +28549,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowExtrudeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowExtrudeDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyExtrude} disabled={busy}>
@@ -23925,7 +28564,11 @@ export default function App() {
       )}
 
       {showWindDialog && (
-        <div className="modal-overlay" onClick={() => setShowWindDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowWindDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -23979,7 +28622,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowWindDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowWindDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyWind} disabled={busy}>
@@ -23991,7 +28637,11 @@ export default function App() {
       )}
 
       {showTilesDialog && (
-        <div className="modal-overlay" onClick={() => setShowTilesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTilesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -24009,7 +28659,9 @@ export default function App() {
                 min={1}
                 max={15}
                 value={tilesTileSize}
-                onChange={(event) => setTilesTileSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setTilesTileSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24022,11 +28674,16 @@ export default function App() {
                 min={0}
                 max={99}
                 value={tilesMaxOffset}
-                onChange={(event) => setTilesMaxOffset(Number(event.target.value))}
+                onChange={(event) =>
+                  setTilesMaxOffset(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowTilesDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTilesDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyTiles} disabled={busy}>
@@ -24038,14 +28695,38 @@ export default function App() {
       )}
 
       {showGrainDialog && (
-        <div className="modal-overlay" onClick={() => setShowGrainDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGrainDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Grain"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Grain</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Grain
+            </h2>
+            <label className="control control--row">
+              <span className="control__label">Grain Type</span>
+              <select
+                value={grainType}
+                onChange={(event) => setGrainType(event.target.value)}
+              >
+                <option value="regular">Regular</option>
+                <option value="soft">Soft</option>
+                <option value="sprinkles">Sprinkles</option>
+                <option value="clumped">Clumped</option>
+                <option value="contrasty">Contrasty</option>
+                <option value="enlarged">Enlarged</option>
+                <option value="stippled">Stippled</option>
+                <option value="horizontal">Horizontal</option>
+                <option value="vertical">Vertical</option>
+                <option value="speckle">Speckle</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Intensity
@@ -24056,7 +28737,9 @@ export default function App() {
                 min={0}
                 max={40}
                 value={grainIntensity}
-                onChange={(event) => setGrainIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setGrainIntensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24069,11 +28752,16 @@ export default function App() {
                 min={0}
                 max={40}
                 value={grainContrast}
-                onChange={(event) => setGrainContrast(Number(event.target.value))}
+                onChange={(event) =>
+                  setGrainContrast(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowGrainDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGrainDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyGrain} disabled={busy}>
@@ -24096,7 +28784,9 @@ export default function App() {
             aria-label="Mosaic Tiles"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Mosaic Tiles</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Mosaic Tiles
+            </h2>
             <label className="control">
               <span className="control__label">
                 Tile Size
@@ -24107,33 +28797,43 @@ export default function App() {
                 min={2}
                 max={100}
                 value={mosaicTilesTileSize}
-                onChange={(event) => setMosaicTilesTileSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setMosaicTilesTileSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Grout Width
-                <span className="control__value">{mosaicTilesGroutWidth}px</span>
+                <span className="control__value">
+                  {mosaicTilesGroutWidth}px
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={15}
                 value={mosaicTilesGroutWidth}
-                onChange={(event) => setMosaicTilesGroutWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setMosaicTilesGroutWidth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Lighten Grout
-                <span className="control__value">{mosaicTilesLightenGrout}</span>
+                <span className="control__value">
+                  {mosaicTilesLightenGrout}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={mosaicTilesLightenGrout}
-                onChange={(event) => setMosaicTilesLightenGrout(Number(event.target.value))}
+                onChange={(event) =>
+                  setMosaicTilesLightenGrout(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24143,7 +28843,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyMosaicTiles} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyMosaicTiles}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24163,7 +28867,9 @@ export default function App() {
             aria-label="Patchwork"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Patchwork</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Patchwork
+            </h2>
             <label className="control">
               <span className="control__label">
                 Square Size
@@ -24174,7 +28880,9 @@ export default function App() {
                 min={2}
                 max={100}
                 value={patchworkSquareSize}
-                onChange={(event) => setPatchworkSquareSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setPatchworkSquareSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24187,7 +28895,9 @@ export default function App() {
                 min={0}
                 max={25}
                 value={patchworkRelief}
-                onChange={(event) => setPatchworkRelief(Number(event.target.value))}
+                onChange={(event) =>
+                  setPatchworkRelief(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24197,7 +28907,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPatchwork} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPatchwork}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24217,7 +28931,9 @@ export default function App() {
             aria-label="Stained Glass"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Stained Glass</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Stained Glass
+            </h2>
             <label className="control">
               <span className="control__label">
                 Cell Size
@@ -24228,33 +28944,43 @@ export default function App() {
                 min={2}
                 max={50}
                 value={stainedGlassCellSize}
-                onChange={(event) => setStainedGlassCellSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setStainedGlassCellSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Border Thickness
-                <span className="control__value">{stainedGlassBorderThickness}px</span>
+                <span className="control__value">
+                  {stainedGlassBorderThickness}px
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={20}
                 value={stainedGlassBorderThickness}
-                onChange={(event) => setStainedGlassBorderThickness(Number(event.target.value))}
+                onChange={(event) =>
+                  setStainedGlassBorderThickness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Light Intensity
-                <span className="control__value">{stainedGlassLightIntensity}</span>
+                <span className="control__value">
+                  {stainedGlassLightIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={stainedGlassLightIntensity}
-                onChange={(event) => setStainedGlassLightIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setStainedGlassLightIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24264,7 +28990,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyStainedGlass} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyStainedGlass}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24284,18 +29014,24 @@ export default function App() {
             aria-label="Craquelure"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Texture &gt; Craquelure</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Texture &gt; Craquelure
+            </h2>
             <label className="control">
               <span className="control__label">
                 Crack Spacing
-                <span className="control__value">{craquelureCrackSpacing}px</span>
+                <span className="control__value">
+                  {craquelureCrackSpacing}px
+                </span>
               </span>
               <input
                 type="range"
                 min={2}
                 max={100}
                 value={craquelureCrackSpacing}
-                onChange={(event) => setCraquelureCrackSpacing(Number(event.target.value))}
+                onChange={(event) =>
+                  setCraquelureCrackSpacing(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24308,20 +29044,26 @@ export default function App() {
                 min={0}
                 max={10}
                 value={craquelureCrackDepth}
-                onChange={(event) => setCraquelureCrackDepth(Number(event.target.value))}
+                onChange={(event) =>
+                  setCraquelureCrackDepth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Crack Brightness
-                <span className="control__value">{craquelureCrackBrightness}</span>
+                <span className="control__value">
+                  {craquelureCrackBrightness}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={craquelureCrackBrightness}
-                onChange={(event) => setCraquelureCrackBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setCraquelureCrackBrightness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24331,7 +29073,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCraquelure} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCraquelure}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24351,7 +29097,9 @@ export default function App() {
             aria-label="Colored Pencil"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Colored Pencil</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Colored Pencil
+            </h2>
             <label className="control">
               <span className="control__label">
                 Pencil Width
@@ -24362,7 +29110,9 @@ export default function App() {
                 min={1}
                 max={24}
                 value={coloredPencilWidth}
-                onChange={(event) => setColoredPencilWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setColoredPencilWidth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24375,7 +29125,9 @@ export default function App() {
                 min={0}
                 max={15}
                 value={coloredPencilPressure}
-                onChange={(event) => setColoredPencilPressure(Number(event.target.value))}
+                onChange={(event) =>
+                  setColoredPencilPressure(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24388,7 +29140,9 @@ export default function App() {
                 min={0}
                 max={50}
                 value={coloredPencilPaper}
-                onChange={(event) => setColoredPencilPaper(Number(event.target.value))}
+                onChange={(event) =>
+                  setColoredPencilPaper(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24398,7 +29152,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColoredPencil} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColoredPencil}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24407,14 +29165,20 @@ export default function App() {
       )}
 
       {showCutoutDialog && (
-        <div className="modal-overlay" onClick={() => setShowCutoutDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCutoutDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Cutout"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Cutout</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Cutout
+            </h2>
             <label className="control">
               <span className="control__label">
                 Number of Levels
@@ -24425,7 +29189,9 @@ export default function App() {
                 min={2}
                 max={8}
                 value={cutoutLevels}
-                onChange={(event) => setCutoutLevels(Number(event.target.value))}
+                onChange={(event) =>
+                  setCutoutLevels(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24438,11 +29204,16 @@ export default function App() {
                 min={0}
                 max={10}
                 value={cutoutSimplicity}
-                onChange={(event) => setCutoutSimplicity(Number(event.target.value))}
+                onChange={(event) =>
+                  setCutoutSimplicity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowCutoutDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCutoutDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyCutout} disabled={busy}>
@@ -24465,7 +29236,9 @@ export default function App() {
             aria-label="Dry Brush"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Dry Brush</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Dry Brush
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Size
@@ -24476,7 +29249,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={dryBrushSize}
-                onChange={(event) => setDryBrushSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setDryBrushSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24489,7 +29264,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={dryBrushDetail}
-                onChange={(event) => setDryBrushDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setDryBrushDetail(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24499,7 +29276,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDryBrush} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDryBrush}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24519,7 +29300,9 @@ export default function App() {
             aria-label="Film Grain"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Film Grain</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Film Grain
+            </h2>
             <label className="control">
               <span className="control__label">
                 Grain
@@ -24530,7 +29313,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={filmGrainAmount}
-                onChange={(event) => setFilmGrainAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setFilmGrainAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24543,7 +29328,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={filmGrainHighlightArea}
-                onChange={(event) => setFilmGrainHighlightArea(Number(event.target.value))}
+                onChange={(event) =>
+                  setFilmGrainHighlightArea(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24556,7 +29343,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={filmGrainIntensity}
-                onChange={(event) => setFilmGrainIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setFilmGrainIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24566,7 +29355,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyFilmGrain} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyFilmGrain}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24586,7 +29379,9 @@ export default function App() {
             aria-label="Neon Glow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Neon Glow</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Neon Glow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Glow Size
@@ -24597,7 +29392,9 @@ export default function App() {
                 min={0}
                 max={24}
                 value={neonGlowSize}
-                onChange={(event) => setNeonGlowSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setNeonGlowSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24610,7 +29407,9 @@ export default function App() {
                 min={0}
                 max={50}
                 value={neonGlowBrightness}
-                onChange={(event) => setNeonGlowBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setNeonGlowBrightness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -24629,7 +29428,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyNeonGlow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyNeonGlow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24649,7 +29452,9 @@ export default function App() {
             aria-label="Poster Edges"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Poster Edges</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Poster Edges
+            </h2>
             <label className="control">
               <span className="control__label">
                 Edge Thickness
@@ -24660,7 +29465,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={posterEdgesThickness}
-                onChange={(event) => setPosterEdgesThickness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPosterEdgesThickness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24673,7 +29480,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={posterEdgesIntensity}
-                onChange={(event) => setPosterEdgesIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setPosterEdgesIntensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24686,7 +29495,9 @@ export default function App() {
                 min={2}
                 max={6}
                 value={posterEdgesLevels}
-                onChange={(event) => setPosterEdgesLevels(Number(event.target.value))}
+                onChange={(event) =>
+                  setPosterEdgesLevels(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24696,7 +29507,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPosterEdges} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPosterEdges}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24705,14 +29520,20 @@ export default function App() {
       )}
 
       {showSpongeDialog && (
-        <div className="modal-overlay" onClick={() => setShowSpongeDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSpongeDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Sponge"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Sponge</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Sponge
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Size
@@ -24723,7 +29544,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={spongeBrushSize}
-                onChange={(event) => setSpongeBrushSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpongeBrushSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24736,11 +29559,16 @@ export default function App() {
                 min={0}
                 max={25}
                 value={spongeDefinition}
-                onChange={(event) => setSpongeDefinition(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpongeDefinition(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSpongeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSpongeDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applySponge} disabled={busy}>
@@ -24763,7 +29591,9 @@ export default function App() {
             aria-label="Watercolor"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Watercolor</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Watercolor
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Detail
@@ -24774,20 +29604,26 @@ export default function App() {
                 min={1}
                 max={14}
                 value={watercolorBrushDetail}
-                onChange={(event) => setWatercolorBrushDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setWatercolorBrushDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Shadow Intensity
-                <span className="control__value">{watercolorShadowIntensity}</span>
+                <span className="control__value">
+                  {watercolorShadowIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={watercolorShadowIntensity}
-                onChange={(event) => setWatercolorShadowIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setWatercolorShadowIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -24797,7 +29633,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyWatercolor} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyWatercolor}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24806,38 +29646,52 @@ export default function App() {
       )}
 
       {showSmudgeStickDialog && (
-        <div className="modal-overlay" onClick={() => setShowSmudgeStickDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSmudgeStickDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Smudge Stick"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Smudge Stick</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Smudge Stick
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
-                <span className="control__value">{smudgeStickStrokeLength}</span>
+                <span className="control__value">
+                  {smudgeStickStrokeLength}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={smudgeStickStrokeLength}
-                onChange={(event) => setSmudgeStickStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmudgeStickStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Highlight Area
-                <span className="control__value">{smudgeStickHighlightArea}</span>
+                <span className="control__value">
+                  {smudgeStickHighlightArea}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={20}
                 value={smudgeStickHighlightArea}
-                onChange={(event) => setSmudgeStickHighlightArea(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmudgeStickHighlightArea(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24850,14 +29704,23 @@ export default function App() {
                 min={0}
                 max={10}
                 value={smudgeStickIntensity}
-                onChange={(event) => setSmudgeStickIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setSmudgeStickIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSmudgeStickDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSmudgeStickDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applySmudgeStick} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySmudgeStick}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24866,14 +29729,20 @@ export default function App() {
       )}
 
       {showPaintDaubsDialog && (
-        <div className="modal-overlay" onClick={() => setShowPaintDaubsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPaintDaubsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Paint Daubs"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Paint Daubs</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Paint Daubs
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Size
@@ -24884,7 +29753,9 @@ export default function App() {
                 min={1}
                 max={50}
                 value={paintDaubsBrushSize}
-                onChange={(event) => setPaintDaubsBrushSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setPaintDaubsBrushSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24897,14 +29768,23 @@ export default function App() {
                 min={0}
                 max={40}
                 value={paintDaubsSharpness}
-                onChange={(event) => setPaintDaubsSharpness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPaintDaubsSharpness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPaintDaubsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPaintDaubsDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPaintDaubs} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPaintDaubs}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24913,14 +29793,20 @@ export default function App() {
       )}
 
       {showPaletteKnifeDialog && (
-        <div className="modal-overlay" onClick={() => setShowPaletteKnifeDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPaletteKnifeDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Palette Knife"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Palette Knife</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Palette Knife
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Size
@@ -24931,20 +29817,26 @@ export default function App() {
                 min={1}
                 max={50}
                 value={paletteKnifeStrokeSize}
-                onChange={(event) => setPaletteKnifeStrokeSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setPaletteKnifeStrokeSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Stroke Detail
-                <span className="control__value">{paletteKnifeStrokeDetail}</span>
+                <span className="control__value">
+                  {paletteKnifeStrokeDetail}
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={3}
                 value={paletteKnifeStrokeDetail}
-                onChange={(event) => setPaletteKnifeStrokeDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setPaletteKnifeStrokeDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -24957,14 +29849,23 @@ export default function App() {
                 min={0}
                 max={10}
                 value={paletteKnifeSoftness}
-                onChange={(event) => setPaletteKnifeSoftness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPaletteKnifeSoftness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPaletteKnifeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPaletteKnifeDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPaletteKnife} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPaletteKnife}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -24973,25 +29874,35 @@ export default function App() {
       )}
 
       {showPlasticWrapDialog && (
-        <div className="modal-overlay" onClick={() => setShowPlasticWrapDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPlasticWrapDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Plastic Wrap"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Plastic Wrap</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Plastic Wrap
+            </h2>
             <label className="control">
               <span className="control__label">
                 Highlight Strength
-                <span className="control__value">{plasticWrapHighlightStrength}</span>
+                <span className="control__value">
+                  {plasticWrapHighlightStrength}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={20}
                 value={plasticWrapHighlightStrength}
-                onChange={(event) => setPlasticWrapHighlightStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasticWrapHighlightStrength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25004,7 +29915,9 @@ export default function App() {
                 min={0}
                 max={15}
                 value={plasticWrapDetail}
-                onChange={(event) => setPlasticWrapDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasticWrapDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25017,14 +29930,23 @@ export default function App() {
                 min={1}
                 max={15}
                 value={plasticWrapSmoothness}
-                onChange={(event) => setPlasticWrapSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasticWrapSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPlasticWrapDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPlasticWrapDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPlasticWrap} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPlasticWrap}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25033,14 +29955,20 @@ export default function App() {
       )}
 
       {showFrescoDialog && (
-        <div className="modal-overlay" onClick={() => setShowFrescoDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFrescoDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Fresco"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Fresco</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Fresco
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Size
@@ -25051,7 +29979,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={frescoBrushSize}
-                onChange={(event) => setFrescoBrushSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setFrescoBrushSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25064,7 +29994,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={frescoBrushDetail}
-                onChange={(event) => setFrescoBrushDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setFrescoBrushDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25077,11 +30009,16 @@ export default function App() {
                 min={1}
                 max={3}
                 value={frescoTexture}
-                onChange={(event) => setFrescoTexture(Number(event.target.value))}
+                onChange={(event) =>
+                  setFrescoTexture(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFrescoDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFrescoDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyFresco} disabled={busy}>
@@ -25093,38 +30030,52 @@ export default function App() {
       )}
 
       {showRoughPastelsDialog && (
-        <div className="modal-overlay" onClick={() => setShowRoughPastelsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowRoughPastelsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Rough Pastels"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Rough Pastels</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Rough Pastels
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
-                <span className="control__value">{roughPastelsStrokeLength}</span>
+                <span className="control__value">
+                  {roughPastelsStrokeLength}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={40}
                 value={roughPastelsStrokeLength}
-                onChange={(event) => setRoughPastelsStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setRoughPastelsStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Stroke Detail
-                <span className="control__value">{roughPastelsStrokeDetail}</span>
+                <span className="control__value">
+                  {roughPastelsStrokeDetail}
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={20}
                 value={roughPastelsStrokeDetail}
-                onChange={(event) => setRoughPastelsStrokeDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setRoughPastelsStrokeDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25137,14 +30088,23 @@ export default function App() {
                 min={0}
                 max={40}
                 value={roughPastelsRelief}
-                onChange={(event) => setRoughPastelsRelief(Number(event.target.value))}
+                onChange={(event) =>
+                  setRoughPastelsRelief(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowRoughPastelsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowRoughPastelsDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyRoughPastels} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyRoughPastels}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25153,14 +30113,20 @@ export default function App() {
       )}
 
       {showUnderpaintingDialog && (
-        <div className="modal-overlay" onClick={() => setShowUnderpaintingDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowUnderpaintingDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Underpainting"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Artistic &gt; Underpainting</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Artistic &gt; Underpainting
+            </h2>
             <label className="control">
               <span className="control__label">
                 Brush Size
@@ -25171,27 +30137,40 @@ export default function App() {
                 min={0}
                 max={40}
                 value={underpaintingBrushSize}
-                onChange={(event) => setUnderpaintingBrushSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setUnderpaintingBrushSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Texture Coverage
-                <span className="control__value">{underpaintingTextureCoverage}</span>
+                <span className="control__value">
+                  {underpaintingTextureCoverage}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={40}
                 value={underpaintingTextureCoverage}
-                onChange={(event) => setUnderpaintingTextureCoverage(Number(event.target.value))}
+                onChange={(event) =>
+                  setUnderpaintingTextureCoverage(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowUnderpaintingDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowUnderpaintingDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyUnderpainting} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyUnderpainting}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25200,14 +30179,20 @@ export default function App() {
       )}
 
       {showStampDialog && (
-        <div className="modal-overlay" onClick={() => setShowStampDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowStampDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Stamp"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Stamp</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Stamp
+            </h2>
             <label className="control">
               <span className="control__label">
                 Light/Dark Balance
@@ -25218,7 +30203,9 @@ export default function App() {
                 min={0}
                 max={25}
                 value={stampLightDarkBalance}
-                onChange={(event) => setStampLightDarkBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setStampLightDarkBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25231,11 +30218,16 @@ export default function App() {
                 min={1}
                 max={25}
                 value={stampSmoothness}
-                onChange={(event) => setStampSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setStampSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowStampDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowStampDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyStamp} disabled={busy}>
@@ -25247,14 +30239,20 @@ export default function App() {
       )}
 
       {showPhotocopyDialog && (
-        <div className="modal-overlay" onClick={() => setShowPhotocopyDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPhotocopyDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Photocopy"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Photocopy</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Photocopy
+            </h2>
             <label className="control">
               <span className="control__label">
                 Detail
@@ -25265,7 +30263,9 @@ export default function App() {
                 min={0}
                 max={24}
                 value={photocopyDetail}
-                onChange={(event) => setPhotocopyDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setPhotocopyDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25278,14 +30278,23 @@ export default function App() {
                 min={0}
                 max={50}
                 value={photocopyDarkness}
-                onChange={(event) => setPhotocopyDarkness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPhotocopyDarkness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPhotocopyDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPhotocopyDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPhotocopy} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPhotocopy}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25294,14 +30303,20 @@ export default function App() {
       )}
 
       {showReticulationDialog && (
-        <div className="modal-overlay" onClick={() => setShowReticulationDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowReticulationDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Reticulation"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Reticulation</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Reticulation
+            </h2>
             <label className="control">
               <span className="control__label">
                 Density
@@ -25312,40 +30327,57 @@ export default function App() {
                 min={0}
                 max={50}
                 value={reticulationDensity}
-                onChange={(event) => setReticulationDensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setReticulationDensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Foreground Level
-                <span className="control__value">{reticulationForegroundLevel}</span>
+                <span className="control__value">
+                  {reticulationForegroundLevel}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={reticulationForegroundLevel}
-                onChange={(event) => setReticulationForegroundLevel(Number(event.target.value))}
+                onChange={(event) =>
+                  setReticulationForegroundLevel(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Background Level
-                <span className="control__value">{reticulationBackgroundLevel}</span>
+                <span className="control__value">
+                  {reticulationBackgroundLevel}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={reticulationBackgroundLevel}
-                onChange={(event) => setReticulationBackgroundLevel(Number(event.target.value))}
+                onChange={(event) =>
+                  setReticulationBackgroundLevel(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowReticulationDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowReticulationDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyReticulation} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyReticulation}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25354,14 +30386,20 @@ export default function App() {
       )}
 
       {showNotePaperDialog && (
-        <div className="modal-overlay" onClick={() => setShowNotePaperDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowNotePaperDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Note Paper"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Note Paper</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Note Paper
+            </h2>
             <label className="control">
               <span className="control__label">
                 Image Balance
@@ -25372,7 +30410,9 @@ export default function App() {
                 min={0}
                 max={50}
                 value={notePaperImageBalance}
-                onChange={(event) => setNotePaperImageBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setNotePaperImageBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25385,14 +30425,23 @@ export default function App() {
                 min={0}
                 max={10}
                 value={notePaperGraininess}
-                onChange={(event) => setNotePaperGraininess(Number(event.target.value))}
+                onChange={(event) =>
+                  setNotePaperGraininess(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowNotePaperDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowNotePaperDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyNotePaper} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyNotePaper}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25401,14 +30450,20 @@ export default function App() {
       )}
 
       {showGraphicPenDialog && (
-        <div className="modal-overlay" onClick={() => setShowGraphicPenDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGraphicPenDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Graphic Pen"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Graphic Pen</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Graphic Pen
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
@@ -25419,27 +30474,35 @@ export default function App() {
                 min={0}
                 max={15}
                 value={graphicPenStrokeLength}
-                onChange={(event) => setGraphicPenStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setGraphicPenStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Light/Dark Balance
-                <span className="control__value">{graphicPenLightDarkBalance}</span>
+                <span className="control__value">
+                  {graphicPenLightDarkBalance}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={graphicPenLightDarkBalance}
-                onChange={(event) => setGraphicPenLightDarkBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setGraphicPenLightDarkBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Stroke Direction</span>
               <select
                 value={graphicPenDirection}
-                onChange={(event) => setGraphicPenDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setGraphicPenDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Right Diagonal</option>
                 <option value={1}>Horizontal</option>
@@ -25448,10 +30511,17 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowGraphicPenDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGraphicPenDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyGraphicPen} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyGraphicPen}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25460,13 +30530,36 @@ export default function App() {
       )}
 
       {showConteDialog && (
-        <div className="modal-overlay" onClick={() => setShowConteDialog(false)} role="presentation">
-          <div className="modal" role="dialog" aria-label="Conté Crayon" onClick={(event) => event.stopPropagation()}>
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Conté Crayon</h2>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowConteDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Conté Crayon"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Conté Crayon
+            </h2>
             {(
               [
-                ["Foreground Level", conteForeground, setConteForeground, 1, 15],
-                ["Background Level", conteBackground, setConteBackground, 1, 15],
+                [
+                  "Foreground Level",
+                  conteForeground,
+                  setConteForeground,
+                  1,
+                  15,
+                ],
+                [
+                  "Background Level",
+                  conteBackground,
+                  setConteBackground,
+                  1,
+                  15,
+                ],
                 ["Scaling %", conteScale, setConteScale, 1, 250],
                 ["Relief", conteRelief, setConteRelief, 0, 50],
               ] as const
@@ -25476,28 +30569,57 @@ export default function App() {
                   {label}
                   <span className="control__value">{value}</span>
                 </span>
-                <input type="range" min={min} max={max} value={value} onChange={(event) => set(Number(event.target.value))} />
+                <input
+                  type="range"
+                  min={min}
+                  max={max}
+                  value={value}
+                  onChange={(event) => set(Number(event.target.value))}
+                />
               </label>
             ))}
             <label className="control control--row">
               <span className="control__label">Light</span>
-              <select value={conteLight} onChange={(event) => setConteLight(Number(event.target.value))}>
-                {["Top", "Top Right", "Right", "Bottom Right", "Bottom", "Bottom Left", "Left", "Top Left"].map((name, i) => (
+              <select
+                value={conteLight}
+                onChange={(event) => setConteLight(Number(event.target.value))}
+              >
+                {[
+                  "Top",
+                  "Top Right",
+                  "Right",
+                  "Bottom Right",
+                  "Bottom",
+                  "Bottom Left",
+                  "Left",
+                  "Top Left",
+                ].map((name, i) => (
                   <option value={i} key={name}>
                     {name}
                   </option>
                 ))}
               </select>
               <label className="control control--row">
-                <input type="checkbox" checked={conteInvert} onChange={(event) => setConteInvert(event.target.checked)} />
+                <input
+                  type="checkbox"
+                  checked={conteInvert}
+                  onChange={(event) => setConteInvert(event.target.checked)}
+                />
                 <span className="control__label">Invert</span>
               </label>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowConteDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowConteDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyConteCrayon} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyConteCrayon}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25506,58 +30628,83 @@ export default function App() {
       )}
 
       {showChalkAndCharcoalDialog && (
-        <div className="modal-overlay" onClick={() => setShowChalkAndCharcoalDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowChalkAndCharcoalDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Chalk & Charcoal"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Chalk &amp; Charcoal</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Chalk &amp; Charcoal
+            </h2>
             <label className="control">
               <span className="control__label">
                 Charcoal Area
-                <span className="control__value">{chalkAndCharcoalCharcoalArea}</span>
+                <span className="control__value">
+                  {chalkAndCharcoalCharcoalArea}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={chalkAndCharcoalCharcoalArea}
-                onChange={(event) => setChalkAndCharcoalCharcoalArea(Number(event.target.value))}
+                onChange={(event) =>
+                  setChalkAndCharcoalCharcoalArea(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Chalk Area
-                <span className="control__value">{chalkAndCharcoalChalkArea}</span>
+                <span className="control__value">
+                  {chalkAndCharcoalChalkArea}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={20}
                 value={chalkAndCharcoalChalkArea}
-                onChange={(event) => setChalkAndCharcoalChalkArea(Number(event.target.value))}
+                onChange={(event) =>
+                  setChalkAndCharcoalChalkArea(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Stroke Pressure
-                <span className="control__value">{chalkAndCharcoalStrokePressure}</span>
+                <span className="control__value">
+                  {chalkAndCharcoalStrokePressure}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={5}
                 value={chalkAndCharcoalStrokePressure}
-                onChange={(event) => setChalkAndCharcoalStrokePressure(Number(event.target.value))}
+                onChange={(event) =>
+                  setChalkAndCharcoalStrokePressure(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowChalkAndCharcoalDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowChalkAndCharcoalDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyChalkAndCharcoal} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyChalkAndCharcoal}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25566,14 +30713,20 @@ export default function App() {
       )}
 
       {showPlasterDialog && (
-        <div className="modal-overlay" onClick={() => setShowPlasterDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPlasterDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Plaster"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Plaster</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Plaster
+            </h2>
             <label className="control">
               <span className="control__label">
                 Image Balance
@@ -25584,7 +30737,9 @@ export default function App() {
                 min={0}
                 max={40}
                 value={plasterImageBalance}
-                onChange={(event) => setPlasterImageBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasterImageBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25597,14 +30752,18 @@ export default function App() {
                 min={1}
                 max={15}
                 value={plasterSmoothness}
-                onChange={(event) => setPlasterSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasterSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Light Direction</span>
               <select
                 value={plasterLightDirection}
-                onChange={(event) => setPlasterLightDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setPlasterLightDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Top</option>
                 <option value={1}>Top Right</option>
@@ -25617,7 +30776,10 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPlasterDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPlasterDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyPlaster} disabled={busy}>
@@ -25629,14 +30791,20 @@ export default function App() {
       )}
 
       {showWaterPaperDialog && (
-        <div className="modal-overlay" onClick={() => setShowWaterPaperDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowWaterPaperDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Water Paper"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Water Paper</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Water Paper
+            </h2>
             <label className="control">
               <span className="control__label">
                 Fiber Length
@@ -25647,7 +30815,9 @@ export default function App() {
                 min={3}
                 max={50}
                 value={waterPaperFiberLength}
-                onChange={(event) => setWaterPaperFiberLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaterPaperFiberLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25660,7 +30830,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={waterPaperBrightness}
-                onChange={(event) => setWaterPaperBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaterPaperBrightness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25673,14 +30845,23 @@ export default function App() {
                 min={0}
                 max={100}
                 value={waterPaperContrast}
-                onChange={(event) => setWaterPaperContrast(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaterPaperContrast(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowWaterPaperDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowWaterPaperDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyWaterPaper} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyWaterPaper}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25689,14 +30870,20 @@ export default function App() {
       )}
 
       {showTornEdgesDialog && (
-        <div className="modal-overlay" onClick={() => setShowTornEdgesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTornEdgesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Torn Edges"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Torn Edges</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Torn Edges
+            </h2>
             <label className="control">
               <span className="control__label">
                 Image Balance
@@ -25707,7 +30894,9 @@ export default function App() {
                 min={0}
                 max={25}
                 value={tornEdgesImageBalance}
-                onChange={(event) => setTornEdgesImageBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setTornEdgesImageBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25720,7 +30909,9 @@ export default function App() {
                 min={1}
                 max={15}
                 value={tornEdgesSmoothness}
-                onChange={(event) => setTornEdgesSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setTornEdgesSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25733,14 +30924,23 @@ export default function App() {
                 min={1}
                 max={25}
                 value={tornEdgesContrast}
-                onChange={(event) => setTornEdgesContrast(Number(event.target.value))}
+                onChange={(event) =>
+                  setTornEdgesContrast(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowTornEdgesDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTornEdgesDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyTornEdges} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTornEdges}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25749,14 +30949,20 @@ export default function App() {
       )}
 
       {showBasReliefDialog && (
-        <div className="modal-overlay" onClick={() => setShowBasReliefDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowBasReliefDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Bas Relief"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Bas Relief</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Bas Relief
+            </h2>
             <label className="control">
               <span className="control__label">
                 Detail
@@ -25767,7 +30973,9 @@ export default function App() {
                 min={0}
                 max={15}
                 value={basReliefDetail}
-                onChange={(event) => setBasReliefDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setBasReliefDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25780,14 +30988,18 @@ export default function App() {
                 min={1}
                 max={15}
                 value={basReliefSmoothness}
-                onChange={(event) => setBasReliefSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setBasReliefSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Light Direction</span>
               <select
                 value={basReliefLightDirection}
-                onChange={(event) => setBasReliefLightDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setBasReliefLightDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Top</option>
                 <option value={1}>Top Right</option>
@@ -25800,10 +31012,17 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowBasReliefDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowBasReliefDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyBasRelief} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyBasRelief}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25823,7 +31042,9 @@ export default function App() {
             aria-label="Halftone Pattern"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Halftone Pattern</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Halftone Pattern
+            </h2>
             <label className="control">
               <span className="control__label">
                 Size
@@ -25834,27 +31055,35 @@ export default function App() {
                 min={1}
                 max={12}
                 value={halftonePatternSize}
-                onChange={(event) => setHalftonePatternSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setHalftonePatternSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Contrast
-                <span className="control__value">{halftonePatternContrast}</span>
+                <span className="control__value">
+                  {halftonePatternContrast}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={halftonePatternContrast}
-                onChange={(event) => setHalftonePatternContrast(Number(event.target.value))}
+                onChange={(event) =>
+                  setHalftonePatternContrast(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Pattern Type</span>
               <select
                 value={halftonePatternType}
-                onChange={(event) => setHalftonePatternType(Number(event.target.value))}
+                onChange={(event) =>
+                  setHalftonePatternType(Number(event.target.value))
+                }
               >
                 <option value={0}>Line</option>
                 <option value={1}>Dot</option>
@@ -25867,7 +31096,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyHalftonePattern} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyHalftonePattern}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -25876,14 +31109,20 @@ export default function App() {
       )}
 
       {showChromeDialog && (
-        <div className="modal-overlay" onClick={() => setShowChromeDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowChromeDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Chrome"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Sketch &gt; Chrome</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Sketch &gt; Chrome
+            </h2>
             <label className="control">
               <span className="control__label">
                 Detail
@@ -25894,7 +31133,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={chromeDetail}
-                onChange={(event) => setChromeDetail(Number(event.target.value))}
+                onChange={(event) =>
+                  setChromeDetail(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -25907,11 +31148,16 @@ export default function App() {
                 min={0}
                 max={10}
                 value={chromeSmoothness}
-                onChange={(event) => setChromeSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setChromeSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowChromeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowChromeDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyChrome} disabled={busy}>
@@ -25934,7 +31180,9 @@ export default function App() {
             aria-label="Dark Strokes"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Dark Strokes</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Dark Strokes
+            </h2>
             <label className="control">
               <span className="control__label">
                 Balance
@@ -25945,33 +31193,43 @@ export default function App() {
                 min={0}
                 max={10}
                 value={darkStrokesBalance}
-                onChange={(event) => setDarkStrokesBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setDarkStrokesBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Black Intensity
-                <span className="control__value">{darkStrokesBlackIntensity}</span>
+                <span className="control__value">
+                  {darkStrokesBlackIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={darkStrokesBlackIntensity}
-                onChange={(event) => setDarkStrokesBlackIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setDarkStrokesBlackIntensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 White Intensity
-                <span className="control__value">{darkStrokesWhiteIntensity}</span>
+                <span className="control__value">
+                  {darkStrokesWhiteIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={10}
                 value={darkStrokesWhiteIntensity}
-                onChange={(event) => setDarkStrokesWhiteIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setDarkStrokesWhiteIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -25981,7 +31239,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDarkStrokes} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDarkStrokes}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26001,44 +31263,58 @@ export default function App() {
             aria-label="Ink Outlines"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Ink Outlines</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Ink Outlines
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
-                <span className="control__value">{inkOutlinesStrokeLength}</span>
+                <span className="control__value">
+                  {inkOutlinesStrokeLength}
+                </span>
               </span>
               <input
                 type="range"
                 min={1}
                 max={50}
                 value={inkOutlinesStrokeLength}
-                onChange={(event) => setInkOutlinesStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setInkOutlinesStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Dark Intensity
-                <span className="control__value">{inkOutlinesDarkIntensity}</span>
+                <span className="control__value">
+                  {inkOutlinesDarkIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={inkOutlinesDarkIntensity}
-                onChange={(event) => setInkOutlinesDarkIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setInkOutlinesDarkIntensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Light Intensity
-                <span className="control__value">{inkOutlinesLightIntensity}</span>
+                <span className="control__value">
+                  {inkOutlinesLightIntensity}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={inkOutlinesLightIntensity}
-                onChange={(event) => setInkOutlinesLightIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setInkOutlinesLightIntensity(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -26048,7 +31324,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyInkOutlines} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyInkOutlines}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26057,14 +31337,20 @@ export default function App() {
       )}
 
       {showSpatterDialog && (
-        <div className="modal-overlay" onClick={() => setShowSpatterDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSpatterDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Spatter"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Spatter</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Spatter
+            </h2>
             <label className="control">
               <span className="control__label">
                 Spray Radius
@@ -26075,7 +31361,9 @@ export default function App() {
                 min={0}
                 max={25}
                 value={spatterSprayRadius}
-                onChange={(event) => setSpatterSprayRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpatterSprayRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26088,11 +31376,16 @@ export default function App() {
                 min={1}
                 max={15}
                 value={spatterSmoothness}
-                onChange={(event) => setSpatterSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpatterSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSpatterDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSpatterDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applySpatter} disabled={busy}>
@@ -26104,14 +31397,20 @@ export default function App() {
       )}
 
       {showCrosshatchDialog && (
-        <div className="modal-overlay" onClick={() => setShowCrosshatchDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCrosshatchDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Crosshatch"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Crosshatch</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Crosshatch
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
@@ -26122,7 +31421,9 @@ export default function App() {
                 min={3}
                 max={50}
                 value={crosshatchStrokeLength}
-                onChange={(event) => setCrosshatchStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setCrosshatchStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26135,7 +31436,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={crosshatchSharpness}
-                onChange={(event) => setCrosshatchSharpness(Number(event.target.value))}
+                onChange={(event) =>
+                  setCrosshatchSharpness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26148,14 +31451,23 @@ export default function App() {
                 min={1}
                 max={3}
                 value={crosshatchStrength}
-                onChange={(event) => setCrosshatchStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setCrosshatchStrength(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowCrosshatchDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCrosshatchDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyCrosshatch} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCrosshatch}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26164,14 +31476,20 @@ export default function App() {
       )}
 
       {showAccentedEdgesDialog && (
-        <div className="modal-overlay" onClick={() => setShowAccentedEdgesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAccentedEdgesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Accented Edges"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Accented Edges</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Accented Edges
+            </h2>
             <label className="control">
               <span className="control__label">
                 Edge Width
@@ -26182,40 +31500,57 @@ export default function App() {
                 min={1}
                 max={14}
                 value={accentedEdgesWidth}
-                onChange={(event) => setAccentedEdgesWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setAccentedEdgesWidth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Edge Brightness
-                <span className="control__value">{accentedEdgesBrightness}</span>
+                <span className="control__value">
+                  {accentedEdgesBrightness}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={50}
                 value={accentedEdgesBrightness}
-                onChange={(event) => setAccentedEdgesBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setAccentedEdgesBrightness(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Smoothness
-                <span className="control__value">{accentedEdgesSmoothness}</span>
+                <span className="control__value">
+                  {accentedEdgesSmoothness}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={15}
                 value={accentedEdgesSmoothness}
-                onChange={(event) => setAccentedEdgesSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setAccentedEdgesSmoothness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowAccentedEdgesDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAccentedEdgesDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyAccentedEdges} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyAccentedEdges}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26224,38 +31559,52 @@ export default function App() {
       )}
 
       {showAngledStrokesDialog && (
-        <div className="modal-overlay" onClick={() => setShowAngledStrokesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowAngledStrokesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Angled Strokes"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Angled Strokes</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Angled Strokes
+            </h2>
             <label className="control">
               <span className="control__label">
                 Direction Balance
-                <span className="control__value">{angledStrokesDirectionBalance}</span>
+                <span className="control__value">
+                  {angledStrokesDirectionBalance}
+                </span>
               </span>
               <input
                 type="range"
                 min={0}
                 max={100}
                 value={angledStrokesDirectionBalance}
-                onChange={(event) => setAngledStrokesDirectionBalance(Number(event.target.value))}
+                onChange={(event) =>
+                  setAngledStrokesDirectionBalance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Stroke Length
-                <span className="control__value">{angledStrokesStrokeLength}</span>
+                <span className="control__value">
+                  {angledStrokesStrokeLength}
+                </span>
               </span>
               <input
                 type="range"
                 min={3}
                 max={50}
                 value={angledStrokesStrokeLength}
-                onChange={(event) => setAngledStrokesStrokeLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setAngledStrokesStrokeLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26268,14 +31617,23 @@ export default function App() {
                 min={0}
                 max={10}
                 value={angledStrokesSharpness}
-                onChange={(event) => setAngledStrokesSharpness(Number(event.target.value))}
+                onChange={(event) =>
+                  setAngledStrokesSharpness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowAngledStrokesDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowAngledStrokesDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyAngledStrokes} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyAngledStrokes}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26284,14 +31642,20 @@ export default function App() {
       )}
 
       {showSprayedStrokesDialog && (
-        <div className="modal-overlay" onClick={() => setShowSprayedStrokesDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSprayedStrokesDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Sprayed Strokes"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Sprayed Strokes</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Sprayed Strokes
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Length
@@ -26302,7 +31666,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={sprayedStrokesLength}
-                onChange={(event) => setSprayedStrokesLength(Number(event.target.value))}
+                onChange={(event) =>
+                  setSprayedStrokesLength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26315,14 +31681,18 @@ export default function App() {
                 min={0}
                 max={25}
                 value={sprayedStrokesRadius}
-                onChange={(event) => setSprayedStrokesRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setSprayedStrokesRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
               <span className="control__label">Stroke Direction</span>
               <select
                 value={sprayedStrokesDirection}
-                onChange={(event) => setSprayedStrokesDirection(Number(event.target.value))}
+                onChange={(event) =>
+                  setSprayedStrokesDirection(Number(event.target.value))
+                }
               >
                 <option value={0}>Right Diagonal</option>
                 <option value={1}>Horizontal</option>
@@ -26331,10 +31701,17 @@ export default function App() {
               </select>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSprayedStrokesDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSprayedStrokesDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applySprayedStrokes} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySprayedStrokes}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26343,14 +31720,20 @@ export default function App() {
       )}
 
       {showSumiEDialog && (
-        <div className="modal-overlay" onClick={() => setShowSumiEDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSumiEDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Sumi-e"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Brush Strokes &gt; Sumi-e</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Brush Strokes &gt; Sumi-e
+            </h2>
             <label className="control">
               <span className="control__label">
                 Stroke Width
@@ -26361,7 +31744,9 @@ export default function App() {
                 min={3}
                 max={15}
                 value={sumiEStrokeWidth}
-                onChange={(event) => setSumiEStrokeWidth(Number(event.target.value))}
+                onChange={(event) =>
+                  setSumiEStrokeWidth(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26374,7 +31759,9 @@ export default function App() {
                 min={0}
                 max={15}
                 value={sumiEStrokePressure}
-                onChange={(event) => setSumiEStrokePressure(Number(event.target.value))}
+                onChange={(event) =>
+                  setSumiEStrokePressure(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26387,11 +31774,16 @@ export default function App() {
                 min={0}
                 max={40}
                 value={sumiEContrast}
-                onChange={(event) => setSumiEContrast(Number(event.target.value))}
+                onChange={(event) =>
+                  setSumiEContrast(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSumiEDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSumiEDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applySumiE} disabled={busy}>
@@ -26403,7 +31795,11 @@ export default function App() {
       )}
 
       {showMosaicDialog && (
-        <div className="modal-overlay" onClick={() => setShowMosaicDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowMosaicDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26421,11 +31817,16 @@ export default function App() {
                 min={2}
                 max={64}
                 value={mosaicCellSize}
-                onChange={(event) => setMosaicCellSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setMosaicCellSize(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowMosaicDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowMosaicDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyMosaic} disabled={busy}>
@@ -26437,7 +31838,11 @@ export default function App() {
       )}
 
       {showRippleDialog && (
-        <div className="modal-overlay" onClick={() => setShowRippleDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowRippleDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26455,7 +31860,9 @@ export default function App() {
                 min={-999}
                 max={999}
                 value={rippleAmount}
-                onChange={(event) => setRippleAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setRippleAmount(Number(event.target.value))
+                }
               />
             </label>
             {RIPPLE_SIZES.map(([value, label]) => (
@@ -26471,7 +31878,10 @@ export default function App() {
               </label>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowRippleDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowRippleDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyRipple} disabled={busy}>
@@ -26483,7 +31893,11 @@ export default function App() {
       )}
 
       {showTwirlDialog && (
-        <div className="modal-overlay" onClick={() => setShowTwirlDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowTwirlDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26505,7 +31919,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowTwirlDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowTwirlDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyTwirl} disabled={busy}>
@@ -26517,7 +31934,11 @@ export default function App() {
       )}
 
       {showPinchDialog && (
-        <div className="modal-overlay" onClick={() => setShowPinchDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPinchDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26539,7 +31960,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPinchDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPinchDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyPinch} disabled={busy}>
@@ -26551,14 +31975,20 @@ export default function App() {
       )}
 
       {showSpherizeDialog && (
-        <div className="modal-overlay" onClick={() => setShowSpherizeDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowSpherizeDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Spherize"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Distort &gt; Spherize</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Distort &gt; Spherize
+            </h2>
             <label className="control">
               <span className="control__label">
                 Amount
@@ -26569,14 +31999,23 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={spherizeAmount}
-                onChange={(event) => setSpherizeAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpherizeAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowSpherizeDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowSpherizeDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applySpherize} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySpherize}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26585,7 +32024,11 @@ export default function App() {
       )}
 
       {showZigZagDialog && (
-        <div className="modal-overlay" onClick={() => setShowZigZagDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowZigZagDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26603,7 +32046,9 @@ export default function App() {
                 min={-100}
                 max={100}
                 value={zigZagAmount}
-                onChange={(event) => setZigZagAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setZigZagAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26616,7 +32061,9 @@ export default function App() {
                 min={1}
                 max={20}
                 value={zigZagRidges}
-                onChange={(event) => setZigZagRidges(Number(event.target.value))}
+                onChange={(event) =>
+                  setZigZagRidges(Number(event.target.value))
+                }
               />
             </label>
             {ZIGZAG_STYLES.map(([value, label]) => (
@@ -26632,7 +32079,10 @@ export default function App() {
               </label>
             ))}
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowZigZagDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowZigZagDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyZigZag} disabled={busy}>
@@ -26644,14 +32094,20 @@ export default function App() {
       )}
 
       {showPolarDialog && (
-        <div className="modal-overlay" onClick={() => setShowPolarDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPolarDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Polar Coordinates"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Distort &gt; Polar Coordinates</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Distort &gt; Polar Coordinates
+            </h2>
             <label className="control control--row">
               <span className="control__label">Rectangular to Polar</span>
               <input
@@ -26671,10 +32127,17 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPolarDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPolarDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPolarCoordinates} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPolarCoordinates}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -26683,7 +32146,11 @@ export default function App() {
       )}
 
       {showWaveDialog && (
-        <div className="modal-overlay" onClick={() => setShowWaveDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowWaveDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26701,7 +32168,9 @@ export default function App() {
                 min={1}
                 max={20}
                 value={waveGenerators}
-                onChange={(event) => setWaveGenerators(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaveGenerators(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26782,7 +32251,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={waveHorizontalScale}
-                onChange={(event) => setWaveHorizontalScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaveHorizontalScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -26795,11 +32266,16 @@ export default function App() {
                 min={0}
                 max={100}
                 value={waveVerticalScale}
-                onChange={(event) => setWaveVerticalScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setWaveVerticalScale(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowWaveDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowWaveDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyWave} disabled={busy}>
@@ -26811,7 +32287,11 @@ export default function App() {
       )}
 
       {showShearDialog && (
-        <div className="modal-overlay" onClick={() => setShowShearDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowShearDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -26862,7 +32342,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowShearDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowShearDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyShear} disabled={busy}>
@@ -26885,12 +32368,16 @@ export default function App() {
             aria-label="Displace"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Distort &gt; Displace</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Distort &gt; Displace
+            </h2>
             <label className="control control--row">
               <span className="control__label">Displacement Map</span>
               <select
                 value={displaceMapLayerId ?? ""}
-                onChange={(event) => setDisplaceMapLayerId(Number(event.target.value))}
+                onChange={(event) =>
+                  setDisplaceMapLayerId(Number(event.target.value))
+                }
               >
                 {(document?.layers ?? [])
                   .filter((layer) => layer.id !== selectedId)
@@ -26904,27 +32391,35 @@ export default function App() {
             <label className="control">
               <span className="control__label">
                 Horizontal Scale
-                <span className="control__value">{displaceHorizontalScale}px</span>
+                <span className="control__value">
+                  {displaceHorizontalScale}px
+                </span>
               </span>
               <input
                 type="range"
                 min={-100}
                 max={100}
                 value={displaceHorizontalScale}
-                onChange={(event) => setDisplaceHorizontalScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setDisplaceHorizontalScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
               <span className="control__label">
                 Vertical Scale
-                <span className="control__value">{displaceVerticalScale}px</span>
+                <span className="control__value">
+                  {displaceVerticalScale}px
+                </span>
               </span>
               <input
                 type="range"
                 min={-100}
                 max={100}
                 value={displaceVerticalScale}
-                onChange={(event) => setDisplaceVerticalScale(Number(event.target.value))}
+                onChange={(event) =>
+                  setDisplaceVerticalScale(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -26976,7 +32471,9 @@ export default function App() {
             aria-label="Diffuse Glow"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Diffuse Glow</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Distort &gt; Diffuse Glow
+            </h2>
             <label className="control">
               <span className="control__label">
                 Graininess
@@ -26987,7 +32484,9 @@ export default function App() {
                 min={0}
                 max={10}
                 value={diffuseGlowGraininess}
-                onChange={(event) => setDiffuseGlowGraininess(Number(event.target.value))}
+                onChange={(event) =>
+                  setDiffuseGlowGraininess(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27000,7 +32499,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={diffuseGlowGlowAmount}
-                onChange={(event) => setDiffuseGlowGlowAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setDiffuseGlowGlowAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27013,7 +32514,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={diffuseGlowClearAmount}
-                onChange={(event) => setDiffuseGlowClearAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setDiffuseGlowClearAmount(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27023,7 +32526,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDiffuseGlow} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDiffuseGlow}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27032,14 +32539,20 @@ export default function App() {
       )}
 
       {showGlassDialog && (
-        <div className="modal-overlay" onClick={() => setShowGlassDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowGlassDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
             aria-label="Glass"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Glass</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Distort &gt; Glass
+            </h2>
             <label className="control">
               <span className="control__label">
                 Distortion
@@ -27050,7 +32563,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={glassDistortion}
-                onChange={(event) => setGlassDistortion(Number(event.target.value))}
+                onChange={(event) =>
+                  setGlassDistortion(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27063,11 +32578,51 @@ export default function App() {
                 min={1}
                 max={15}
                 value={glassSmoothness}
-                onChange={(event) => setGlassSmoothness(Number(event.target.value))}
+                onChange={(event) =>
+                  setGlassSmoothness(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Texture</span>
+              <select
+                value={glassTexture}
+                onChange={(event) => setGlassTexture(event.target.value)}
+              >
+                <option value="blocks">Blocks</option>
+                <option value="canvas">Canvas</option>
+                <option value="frosted">Frosted</option>
+                <option value="tinyLens">Tiny Lens</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Scaling
+                <span className="control__value">{glassScaling}%</span>
+              </span>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                value={glassScaling}
+                onChange={(event) =>
+                  setGlassScaling(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Invert</span>
+              <input
+                type="checkbox"
+                checked={glassInvert}
+                onChange={(event) => setGlassInvert(event.target.checked)}
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowGlassDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowGlassDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyGlass} disabled={busy}>
@@ -27090,7 +32645,9 @@ export default function App() {
             aria-label="Ocean Ripple"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter Gallery &gt; Distort &gt; Ocean Ripple</h2>
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Distort &gt; Ocean Ripple
+            </h2>
             <label className="control">
               <span className="control__label">
                 Ripple Size
@@ -27101,7 +32658,9 @@ export default function App() {
                 min={1}
                 max={15}
                 value={oceanRippleSize}
-                onChange={(event) => setOceanRippleSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setOceanRippleSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27114,7 +32673,9 @@ export default function App() {
                 min={0}
                 max={20}
                 value={oceanRippleMagnitude}
-                onChange={(event) => setOceanRippleMagnitude(Number(event.target.value))}
+                onChange={(event) =>
+                  setOceanRippleMagnitude(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27124,7 +32685,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyOceanRipple} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyOceanRipple}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27144,7 +32709,9 @@ export default function App() {
             aria-label="Color Halftone"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Color Halftone</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Pixelate &gt; Color Halftone
+            </h2>
             <label className="control">
               <span className="control__label">
                 Max Radius
@@ -27155,7 +32722,9 @@ export default function App() {
                 min={1}
                 max={64}
                 value={colorHalftoneRadius}
-                onChange={(event) => setColorHalftoneRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setColorHalftoneRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27165,7 +32734,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyColorHalftone} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyColorHalftone}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27185,7 +32758,9 @@ export default function App() {
             aria-label="Mezzotint"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Mezzotint</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Pixelate &gt; Mezzotint
+            </h2>
             <label className="control">
               <span className="control__label">
                 Cell Size
@@ -27196,7 +32771,9 @@ export default function App() {
                 min={1}
                 max={64}
                 value={mezzotintCellSize}
-                onChange={(event) => setMezzotintCellSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setMezzotintCellSize(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27206,7 +32783,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyMezzotint} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyMezzotint}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27226,7 +32807,9 @@ export default function App() {
             aria-label="Crystallize"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Crystallize</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Pixelate &gt; Crystallize
+            </h2>
             <label className="control">
               <span className="control__label">
                 Cell Size
@@ -27237,7 +32820,9 @@ export default function App() {
                 min={3}
                 max={64}
                 value={crystallizeCellSize}
-                onChange={(event) => setCrystallizeCellSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setCrystallizeCellSize(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27247,7 +32832,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyCrystallize} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyCrystallize}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27267,7 +32856,9 @@ export default function App() {
             aria-label="Pointillize"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Pixelate &gt; Pointillize</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Pixelate &gt; Pointillize
+            </h2>
             <label className="control">
               <span className="control__label">
                 Cell Size
@@ -27278,7 +32869,9 @@ export default function App() {
                 min={3}
                 max={64}
                 value={pointillizeCellSize}
-                onChange={(event) => setPointillizeCellSize(Number(event.target.value))}
+                onChange={(event) =>
+                  setPointillizeCellSize(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -27286,7 +32879,9 @@ export default function App() {
               <input
                 type="color"
                 value={pointillizeBackground}
-                onChange={(event) => setPointillizeBackground(event.target.value)}
+                onChange={(event) =>
+                  setPointillizeBackground(event.target.value)
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27296,7 +32891,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyPointillize} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyPointillize}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27305,7 +32904,11 @@ export default function App() {
       )}
 
       {showCloudsDialog && (
-        <div className="modal-overlay" onClick={() => setShowCloudsDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowCloudsDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -27330,7 +32933,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowCloudsDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowCloudsDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyClouds} disabled={busy}>
@@ -27353,13 +32959,17 @@ export default function App() {
             aria-label="Difference Clouds"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Render &gt; Difference Clouds</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Render &gt; Difference Clouds
+            </h2>
             <label className="control control--row">
               <span className="control__label">Foreground</span>
               <input
                 type="color"
                 value={differenceCloudsForeground}
-                onChange={(event) => setDifferenceCloudsForeground(event.target.value)}
+                onChange={(event) =>
+                  setDifferenceCloudsForeground(event.target.value)
+                }
               />
             </label>
             <label className="control control--row">
@@ -27367,7 +32977,9 @@ export default function App() {
               <input
                 type="color"
                 value={differenceCloudsBackground}
-                onChange={(event) => setDifferenceCloudsBackground(event.target.value)}
+                onChange={(event) =>
+                  setDifferenceCloudsBackground(event.target.value)
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27377,7 +32989,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyDifferenceClouds} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyDifferenceClouds}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27386,7 +33002,11 @@ export default function App() {
       )}
 
       {showFibersDialog && (
-        <div className="modal-overlay" onClick={() => setShowFibersDialog(false)} role="presentation">
+        <div
+          className="modal-overlay"
+          onClick={() => setShowFibersDialog(false)}
+          role="presentation"
+        >
           <div
             className="modal"
             role="dialog"
@@ -27404,7 +33024,9 @@ export default function App() {
                 min={1}
                 max={100}
                 value={fibersVariance}
-                onChange={(event) => setFibersVariance(Number(event.target.value))}
+                onChange={(event) =>
+                  setFibersVariance(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27417,7 +33039,9 @@ export default function App() {
                 min={1}
                 max={64}
                 value={fibersStrength}
-                onChange={(event) => setFibersStrength(Number(event.target.value))}
+                onChange={(event) =>
+                  setFibersStrength(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -27437,7 +33061,10 @@ export default function App() {
               />
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowFibersDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowFibersDialog(false)}
+              >
                 Cancel
               </button>
               <button className="button" onClick={applyFibers} disabled={busy}>
@@ -27460,7 +33087,9 @@ export default function App() {
             aria-label="Lens Flare"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Render &gt; Lens Flare</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Render &gt; Lens Flare
+            </h2>
             <label className="control">
               <span className="control__label">
                 Center X
@@ -27471,7 +33100,9 @@ export default function App() {
                 min={0}
                 max={document?.width ?? 1}
                 value={lensFlareCenterX}
-                onChange={(event) => setLensFlareCenterX(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensFlareCenterX(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27484,7 +33115,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={lensFlareCenterY}
-                onChange={(event) => setLensFlareCenterY(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensFlareCenterY(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27497,7 +33130,9 @@ export default function App() {
                 min={10}
                 max={300}
                 value={lensFlareBrightness}
-                onChange={(event) => setLensFlareBrightness(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensFlareBrightness(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27507,7 +33142,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyLensFlare} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyLensFlare}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27527,7 +33166,9 @@ export default function App() {
             aria-label="Radial Blur"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Blur &gt; Radial Blur</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Blur &gt; Radial Blur
+            </h2>
             <label className="control">
               <span className="control__label">
                 Amount
@@ -27538,7 +33179,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={radialBlurAmount}
-                onChange={(event) => setRadialBlurAmount(Number(event.target.value))}
+                onChange={(event) =>
+                  setRadialBlurAmount(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27551,7 +33194,9 @@ export default function App() {
                 min={0}
                 max={document?.width ?? 1}
                 value={radialBlurCenterX}
-                onChange={(event) => setRadialBlurCenterX(Number(event.target.value))}
+                onChange={(event) =>
+                  setRadialBlurCenterX(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27564,7 +33209,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={radialBlurCenterY}
-                onChange={(event) => setRadialBlurCenterY(Number(event.target.value))}
+                onChange={(event) =>
+                  setRadialBlurCenterY(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27574,7 +33221,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyRadialBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyRadialBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27607,7 +33258,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={tiltShiftFocusRow}
-                onChange={(event) => setTiltShiftFocusRow(Number(event.target.value))}
+                onChange={(event) =>
+                  setTiltShiftFocusRow(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27620,7 +33273,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={tiltShiftHalfHeight}
-                onChange={(event) => setTiltShiftHalfHeight(Number(event.target.value))}
+                onChange={(event) =>
+                  setTiltShiftHalfHeight(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27633,7 +33288,9 @@ export default function App() {
                 min={1}
                 max={100}
                 value={tiltShiftBlurRadius}
-                onChange={(event) => setTiltShiftBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setTiltShiftBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27643,7 +33300,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyTiltShift} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyTiltShift}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27676,7 +33337,9 @@ export default function App() {
                 min={0}
                 max={document?.width ?? 1}
                 value={irisBlurCenterX}
-                onChange={(event) => setIrisBlurCenterX(Number(event.target.value))}
+                onChange={(event) =>
+                  setIrisBlurCenterX(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27689,7 +33352,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={irisBlurCenterY}
-                onChange={(event) => setIrisBlurCenterY(Number(event.target.value))}
+                onChange={(event) =>
+                  setIrisBlurCenterY(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27702,7 +33367,9 @@ export default function App() {
                 min={0}
                 max={Math.max(document?.width ?? 1, document?.height ?? 1)}
                 value={irisBlurRadius}
-                onChange={(event) => setIrisBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setIrisBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27715,7 +33382,9 @@ export default function App() {
                 min={1}
                 max={100}
                 value={irisBlurBlurRadius}
-                onChange={(event) => setIrisBlurBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setIrisBlurBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27725,7 +33394,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyIrisBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyIrisBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27775,7 +33448,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={fieldBlurRadius1}
-                onChange={(event) => setFieldBlurRadius1(Number(event.target.value))}
+                onChange={(event) =>
+                  setFieldBlurRadius1(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -27805,7 +33480,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={fieldBlurRadius2}
-                onChange={(event) => setFieldBlurRadius2(Number(event.target.value))}
+                onChange={(event) =>
+                  setFieldBlurRadius2(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27815,7 +33492,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyFieldBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyFieldBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27824,23 +33505,54 @@ export default function App() {
       )}
 
       {showPathBlurDialog && (
-        <div className="modal-overlay" onClick={() => setShowPathBlurDialog(false)} role="presentation">
-          <div className="modal modal--wide" role="dialog" aria-label="Path Blur" onClick={(event) => event.stopPropagation()}>
-            <h2 className="modal__heading">Filter Gallery &gt; Blur Gallery &gt; Path Blur</h2>
+        <div
+          className="modal-overlay"
+          onClick={() => setShowPathBlurDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Path Blur"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">
+              Filter Gallery &gt; Blur Gallery &gt; Path Blur
+            </h2>
             <p className="modal__hint">
-              Every pixel streaks along the nearest leg of the path. Speed is the streak&apos;s
-              half-length in pixels; Taper shortens it toward the path&apos;s ends; Centered
-              Blur straddles each pixel instead of running forward from it.
+              Every pixel streaks along the nearest leg of the path. Speed is
+              the streak&apos;s half-length in pixels; Taper shortens it toward
+              the path&apos;s ends; Centered Blur straddles each pixel instead
+              of running forward from it.
             </p>
             {pathBlur.points.map((point, i) => (
               <span className="control control--row" key={i}>
                 <span className="control__label">Point {i + 1}</span>
-                <input type="number" step={0.5} value={point[0]} onChange={(event) => setPathBlurPoint(i, 0, Number(event.target.value))} />
-                <input type="number" step={0.5} value={point[1]} onChange={(event) => setPathBlurPoint(i, 1, Number(event.target.value))} />
+                <input
+                  type="number"
+                  step={0.5}
+                  value={point[0]}
+                  onChange={(event) =>
+                    setPathBlurPoint(i, 0, Number(event.target.value))
+                  }
+                />
+                <input
+                  type="number"
+                  step={0.5}
+                  value={point[1]}
+                  onChange={(event) =>
+                    setPathBlurPoint(i, 1, Number(event.target.value))
+                  }
+                />
                 <button
                   className="button button--quiet"
                   disabled={pathBlur.points.length <= 2}
-                  onClick={() => setPathBlur((o) => ({ ...o, points: o.points.filter((_, j) => j !== i) }))}
+                  onClick={() =>
+                    setPathBlur((o) => ({
+                      ...o,
+                      points: o.points.filter((_, j) => j !== i),
+                    }))
+                  }
                   title="Remove this point"
                 >
                   ×
@@ -27852,7 +33564,10 @@ export default function App() {
               onClick={() =>
                 setPathBlur((o) => {
                   const last = o.points[o.points.length - 1] ?? [0.5, 0.5];
-                  return { ...o, points: [...o.points, [last[0], last[1] + 10]] };
+                  return {
+                    ...o,
+                    points: [...o.points, [last[0], last[1] + 10]],
+                  };
                 })
               }
               title="Add a point after the last"
@@ -27866,7 +33581,12 @@ export default function App() {
                 min={1}
                 max={100}
                 value={pathBlur.speed}
-                onChange={(event) => setPathBlur((o) => ({ ...o, speed: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setPathBlur((o) => ({
+                    ...o,
+                    speed: Number(event.target.value),
+                  }))
+                }
               />
               <span className="control__value">{pathBlur.speed}</span>
             </label>
@@ -27877,7 +33597,12 @@ export default function App() {
                 min={0}
                 max={100}
                 value={pathBlur.taper}
-                onChange={(event) => setPathBlur((o) => ({ ...o, taper: Number(event.target.value) }))}
+                onChange={(event) =>
+                  setPathBlur((o) => ({
+                    ...o,
+                    taper: Number(event.target.value),
+                  }))
+                }
               />
               <span className="control__value">{pathBlur.taper}</span>
             </label>
@@ -27885,15 +33610,24 @@ export default function App() {
               <input
                 type="checkbox"
                 checked={pathBlur.centered}
-                onChange={(event) => setPathBlur((o) => ({ ...o, centered: event.target.checked }))}
+                onChange={(event) =>
+                  setPathBlur((o) => ({ ...o, centered: event.target.checked }))
+                }
               />
               <span className="control__label">Centered Blur</span>
             </label>
             <div className="modal__actions">
-              <button className="button button--quiet" onClick={() => setShowPathBlurDialog(false)}>
+              <button
+                className="button button--quiet"
+                onClick={() => setShowPathBlurDialog(false)}
+              >
                 Cancel
               </button>
-              <button className="button" onClick={applyPathBlur} disabled={busy || pathBlur.points.length < 2}>
+              <button
+                className="button"
+                onClick={applyPathBlur}
+                disabled={busy || pathBlur.points.length < 2}
+              >
                 Apply
               </button>
             </div>
@@ -27923,14 +33657,18 @@ export default function App() {
                 min={0}
                 max={document?.width ?? 1}
                 value={spinBlurCenterX}
-                onChange={(event) => setSpinBlurCenterX(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpinBlurCenterX(Number(event.target.value))
+                }
               />
               <input
                 type="number"
                 min={0}
                 max={document?.height ?? 1}
                 value={spinBlurCenterY}
-                onChange={(event) => setSpinBlurCenterY(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpinBlurCenterY(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -27943,7 +33681,9 @@ export default function App() {
                 min={0}
                 max={360}
                 value={spinBlurAngle}
-                onChange={(event) => setSpinBlurAngle(Number(event.target.value))}
+                onChange={(event) =>
+                  setSpinBlurAngle(Number(event.target.value))
+                }
               />
             </label>
             <div className="modal__actions">
@@ -27953,7 +33693,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applySpinBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applySpinBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -27975,8 +33719,8 @@ export default function App() {
           >
             <h2 className="modal__heading">Filter &gt; Blur &gt; Lens Blur</h2>
             <p className="modal__hint">
-              The layer's own alpha channel is the depth map: opaque pixels
-              blur at the full radius, transparent pixels stay sharp.
+              The layer's own alpha channel is the depth map: opaque pixels blur
+              at the full radius, transparent pixels stay sharp.
             </p>
             <label className="control">
               <span className="control__label">
@@ -27988,7 +33732,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={lensBlurRadius}
-                onChange={(event) => setLensBlurRadius(Number(event.target.value))}
+                onChange={(event) =>
+                  setLensBlurRadius(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -28006,7 +33752,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyLensBlur} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyLensBlur}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -28026,7 +33776,9 @@ export default function App() {
             aria-label="Lighting Effects"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Filter &gt; Render &gt; Lighting Effects</h2>
+            <h2 className="modal__heading">
+              Filter &gt; Render &gt; Lighting Effects
+            </h2>
             <label className="control">
               <span className="control__label">
                 Light X
@@ -28037,7 +33789,9 @@ export default function App() {
                 min={0}
                 max={document?.width ?? 1}
                 value={lightingLightX}
-                onChange={(event) => setLightingLightX(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingLightX(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -28050,7 +33804,9 @@ export default function App() {
                 min={0}
                 max={document?.height ?? 1}
                 value={lightingLightY}
-                onChange={(event) => setLightingLightY(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingLightY(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -28063,7 +33819,9 @@ export default function App() {
                 min={1}
                 max={200}
                 value={lightingLightHeight}
-                onChange={(event) => setLightingLightHeight(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingLightHeight(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -28076,7 +33834,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={lightingIntensity}
-                onChange={(event) => setLightingIntensity(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingIntensity(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -28089,7 +33849,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={lightingAmbience}
-                onChange={(event) => setLightingAmbience(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingAmbience(Number(event.target.value))
+                }
               />
             </label>
             <label className="control">
@@ -28102,7 +33864,9 @@ export default function App() {
                 min={0}
                 max={100}
                 value={lightingBumpHeight}
-                onChange={(event) => setLightingBumpHeight(Number(event.target.value))}
+                onChange={(event) =>
+                  setLightingBumpHeight(Number(event.target.value))
+                }
               />
             </label>
             <label className="control control--row">
@@ -28121,7 +33885,11 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button className="button" onClick={applyLightingEffects} disabled={busy}>
+              <button
+                className="button"
+                onClick={applyLightingEffects}
+                disabled={busy}
+              >
                 Apply
               </button>
             </div>
@@ -28130,7 +33898,12 @@ export default function App() {
       )}
 
       <div className="workspace">
-        <aside className="toolbox" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+        <aside
+          className="toolbox"
+          role="toolbar"
+          aria-label="Tools"
+          aria-orientation="vertical"
+        >
           <button
             className={`button button--quiet${tool === "selectRect" ? " button--active" : ""}`}
             disabled={!hasDocument}
@@ -28783,7 +34556,9 @@ export default function App() {
             Gradient
           </button>
         </aside>
-        {leftDockedPanels.length > 0 && <div className="dock-zone dock-zone--left">{leftDockedPanels}</div>}
+        {leftDockedPanels.length > 0 && (
+          <div className="dock-zone dock-zone--left">{leftDockedPanels}</div>
+        )}
         <main className="stage">
           {error && (
             <div className="notice notice--error" role="alert">
@@ -28794,8 +34569,8 @@ export default function App() {
             <div className="notice">
               <p className="notice__lead">No image open</p>
               <p>
-                Click <strong>Open PNG…</strong> or drop a .png file onto this window. Drop another
-                to stack it as a layer.
+                Click <strong>Open PNG…</strong> or drop a .png file onto this
+                window. Drop another to stack it as a layer.
               </p>
             </div>
           )}
@@ -28818,7 +34593,8 @@ export default function App() {
                   // cursor leaves the element, but a mouse that was never
                   // pressed on the canvas has no capture to keep the stroke
                   // alive — treat leaving as the end of the stroke either way.
-                  if (!event.currentTarget.hasPointerCapture(event.pointerId)) endStroke(event);
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                    endStroke(event);
                 }}
               />
               {marqueePreview && (tool === "polygon" || tool === "star") && (
@@ -28862,15 +34638,22 @@ export default function App() {
                   />
                 </svg>
               )}
-              {marqueePreview && tool !== "line" && tool !== "polygon" && tool !== "star" && (
-                <div
-                  className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
-                  style={overlayStyle(
-                    marqueeBounds(marqueePreview.start, marqueePreview.current, document),
-                    document,
-                  )}
-                />
-              )}
+              {marqueePreview &&
+                tool !== "line" &&
+                tool !== "polygon" &&
+                tool !== "star" && (
+                  <div
+                    className={`selection-outline${tool === "selectEllipse" || tool === "ellipse" ? " selection-outline--ellipse" : ""}`}
+                    style={overlayStyle(
+                      marqueeBounds(
+                        marqueePreview.start,
+                        marqueePreview.current,
+                        document,
+                      ),
+                      document,
+                    )}
+                  />
+                )}
               {hoverBounds && tool === "move" && (
                 <div
                   className="hover-bounds"
@@ -28883,7 +34666,10 @@ export default function App() {
                   className="transform-box"
                   style={{
                     ...overlayStyle(controlPreview ?? controlBounds, document),
-                    transform: controlRotation !== null ? `rotate(${controlRotation}deg)` : undefined,
+                    transform:
+                      controlRotation !== null
+                        ? `rotate(${controlRotation}deg)`
+                        : undefined,
                   }}
                 >
                   {["nw", "ne", "se", "sw"].map((corner) => (
@@ -28901,34 +34687,44 @@ export default function App() {
                       onPointerCancel={endRotateDrag}
                     />
                   ))}
-                  {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map((handle) => (
-                    <div
-                      key={handle}
-                      className={`transform-handle transform-handle--${handle}`}
-                      role="slider"
-                      aria-label={`Transform handle ${handle}`}
-                      aria-valuenow={0}
-                      tabIndex={-1}
-                      onPointerDown={(event) => startHandleDrag(event, handle)}
-                      onPointerMove={moveHandleDrag}
-                      onPointerUp={endHandleDrag}
-                      onPointerCancel={endHandleDrag}
-                    />
-                  ))}
+                  {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map(
+                    (handle) => (
+                      <div
+                        key={handle}
+                        className={`transform-handle transform-handle--${handle}`}
+                        role="slider"
+                        aria-label={`Transform handle ${handle}`}
+                        aria-valuenow={0}
+                        tabIndex={-1}
+                        onPointerDown={(event) =>
+                          startHandleDrag(event, handle)
+                        }
+                        onPointerMove={moveHandleDrag}
+                        onPointerUp={endHandleDrag}
+                        onPointerCancel={endHandleDrag}
+                      />
+                    ),
+                  )}
                 </div>
               )}
-              {(showFieldBlurDialog || showIrisBlurDialog || showTiltShiftDialog) &&
+              {(showFieldBlurDialog ||
+                showIrisBlurDialog ||
+                showTiltShiftDialog) &&
                 (() => {
                   const doc = document;
                   const pointAt = (event: React.PointerEvent) => {
                     const box = canvasWrapRef.current?.getBoundingClientRect();
-                    return box ? documentPoint(box, event.clientX, event.clientY, doc) : null;
+                    return box
+                      ? documentPoint(box, event.clientX, event.clientY, doc)
+                      : null;
                   };
-                  const start = (which: NonNullable<typeof blurDrag>) => (event: React.PointerEvent) => {
-                    event.stopPropagation();
-                    event.currentTarget.setPointerCapture(event.pointerId);
-                    setBlurDrag(which);
-                  };
+                  const start =
+                    (which: NonNullable<typeof blurDrag>) =>
+                    (event: React.PointerEvent) => {
+                      event.stopPropagation();
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      setBlurDrag(which);
+                    };
                   const move = (event: React.PointerEvent) => {
                     if (blurDrag === null) return;
                     const at = pointAt(event);
@@ -28939,28 +34735,54 @@ export default function App() {
                         setFieldBlurY1(at.y);
                         break;
                       case "field1ring":
-                        setFieldBlurRadius1(Math.min(250, pixelDistance(at, { x: fieldBlurX1, y: fieldBlurY1 })));
+                        setFieldBlurRadius1(
+                          Math.min(
+                            250,
+                            pixelDistance(at, {
+                              x: fieldBlurX1,
+                              y: fieldBlurY1,
+                            }),
+                          ),
+                        );
                         break;
                       case "field2":
                         setFieldBlurX2(at.x);
                         setFieldBlurY2(at.y);
                         break;
                       case "field2ring":
-                        setFieldBlurRadius2(Math.min(250, pixelDistance(at, { x: fieldBlurX2, y: fieldBlurY2 })));
+                        setFieldBlurRadius2(
+                          Math.min(
+                            250,
+                            pixelDistance(at, {
+                              x: fieldBlurX2,
+                              y: fieldBlurY2,
+                            }),
+                          ),
+                        );
                         break;
                       case "iris":
                         setIrisBlurCenterX(at.x);
                         setIrisBlurCenterY(at.y);
                         break;
                       case "irisring":
-                        setIrisBlurRadius(Math.max(1, pixelDistance(at, { x: irisBlurCenterX, y: irisBlurCenterY })));
+                        setIrisBlurRadius(
+                          Math.max(
+                            1,
+                            pixelDistance(at, {
+                              x: irisBlurCenterX,
+                              y: irisBlurCenterY,
+                            }),
+                          ),
+                        );
                         break;
                       case "tiltFocus":
                         setTiltShiftFocusRow(Math.min(doc.height - 1, at.y));
                         break;
                       case "tiltBandTop":
                       case "tiltBandBottom":
-                        setTiltShiftHalfHeight(Math.max(1, Math.abs(at.y - tiltShiftFocusRow)));
+                        setTiltShiftHalfHeight(
+                          Math.max(1, Math.abs(at.y - tiltShiftFocusRow)),
+                        );
                         break;
                     }
                   };
@@ -28975,7 +34797,12 @@ export default function App() {
                     onPointerUp: end,
                     onPointerCancel: end,
                   });
-                  const pin = (which: NonNullable<typeof blurDrag>, x: number, y: number, label: string) => (
+                  const pin = (
+                    which: NonNullable<typeof blurDrag>,
+                    x: number,
+                    y: number,
+                    label: string,
+                  ) => (
                     <div
                       key={which}
                       className="blur-pin"
@@ -28984,12 +34811,21 @@ export default function App() {
                       aria-valuenow={0}
                       tabIndex={-1}
                       data-blur-control={which}
-                      style={{ left: percentOf(x, doc.width), top: percentOf(y, doc.height) }}
+                      style={{
+                        left: percentOf(x, doc.width),
+                        top: percentOf(y, doc.height),
+                      }}
                       title={`${label}: drag to move`}
                       {...handlers(which)}
                     />
                   );
-                  const ring = (which: NonNullable<typeof blurDrag>, x: number, y: number, radius: number, label: string) => (
+                  const ring = (
+                    which: NonNullable<typeof blurDrag>,
+                    x: number,
+                    y: number,
+                    radius: number,
+                    label: string,
+                  ) => (
                     <div
                       key={which}
                       className="blur-ring"
@@ -29003,7 +34839,12 @@ export default function App() {
                       {...handlers(which)}
                     />
                   );
-                  const line = (which: NonNullable<typeof blurDrag>, row: number, label: string, dashed: boolean) => (
+                  const line = (
+                    which: NonNullable<typeof blurDrag>,
+                    row: number,
+                    label: string,
+                    dashed: boolean,
+                  ) => (
                     <div
                       key={which}
                       className={`blur-line${dashed ? " blur-line--band" : ""}`}
@@ -29020,19 +34861,67 @@ export default function App() {
                   return (
                     <>
                       {showFieldBlurDialog && [
-                        ring("field1ring", fieldBlurX1, fieldBlurY1, fieldBlurRadius1, "Field Blur pin 1 blur"),
-                        pin("field1", fieldBlurX1, fieldBlurY1, "Field Blur pin 1"),
-                        ring("field2ring", fieldBlurX2, fieldBlurY2, fieldBlurRadius2, "Field Blur pin 2 blur"),
-                        pin("field2", fieldBlurX2, fieldBlurY2, "Field Blur pin 2"),
+                        ring(
+                          "field1ring",
+                          fieldBlurX1,
+                          fieldBlurY1,
+                          fieldBlurRadius1,
+                          "Field Blur pin 1 blur",
+                        ),
+                        pin(
+                          "field1",
+                          fieldBlurX1,
+                          fieldBlurY1,
+                          "Field Blur pin 1",
+                        ),
+                        ring(
+                          "field2ring",
+                          fieldBlurX2,
+                          fieldBlurY2,
+                          fieldBlurRadius2,
+                          "Field Blur pin 2 blur",
+                        ),
+                        pin(
+                          "field2",
+                          fieldBlurX2,
+                          fieldBlurY2,
+                          "Field Blur pin 2",
+                        ),
                       ]}
                       {showIrisBlurDialog && [
-                        ring("irisring", irisBlurCenterX, irisBlurCenterY, irisBlurRadius, "Iris Blur radius"),
-                        pin("iris", irisBlurCenterX, irisBlurCenterY, "Iris Blur centre"),
+                        ring(
+                          "irisring",
+                          irisBlurCenterX,
+                          irisBlurCenterY,
+                          irisBlurRadius,
+                          "Iris Blur radius",
+                        ),
+                        pin(
+                          "iris",
+                          irisBlurCenterX,
+                          irisBlurCenterY,
+                          "Iris Blur centre",
+                        ),
                       ]}
                       {showTiltShiftDialog && [
-                        line("tiltBandTop", tiltShiftFocusRow - tiltShiftHalfHeight, "Tilt-Shift upper band", true),
-                        line("tiltFocus", tiltShiftFocusRow, "Tilt-Shift focus", false),
-                        line("tiltBandBottom", tiltShiftFocusRow + tiltShiftHalfHeight, "Tilt-Shift lower band", true),
+                        line(
+                          "tiltBandTop",
+                          tiltShiftFocusRow - tiltShiftHalfHeight,
+                          "Tilt-Shift upper band",
+                          true,
+                        ),
+                        line(
+                          "tiltFocus",
+                          tiltShiftFocusRow,
+                          "Tilt-Shift focus",
+                          false,
+                        ),
+                        line(
+                          "tiltBandBottom",
+                          tiltShiftFocusRow + tiltShiftHalfHeight,
+                          "Tilt-Shift lower band",
+                          true,
+                        ),
                       ]}
                     </>
                   );
@@ -29081,8 +34970,10 @@ export default function App() {
                       r={Math.max(
                         0.5,
                         Math.hypot(
-                          lassoPoints[lassoPoints.length - 1][0] - lassoPoints[0][0],
-                          lassoPoints[lassoPoints.length - 1][1] - lassoPoints[0][1],
+                          lassoPoints[lassoPoints.length - 1][0] -
+                            lassoPoints[0][0],
+                          lassoPoints[lassoPoints.length - 1][1] -
+                            lassoPoints[0][1],
                         ),
                       )}
                       fill="#4c8dff"
@@ -29091,9 +34982,12 @@ export default function App() {
                       strokeWidth={0.5}
                     />
                   )}
-                  {(tool === "quickSelection" || (tool === "selectionBrush" && !brushCircleMode)) && (
+                  {(tool === "quickSelection" ||
+                    (tool === "selectionBrush" && !brushCircleMode)) && (
                     <polyline
-                      points={lassoPoints.map(([x, y]) => `${x},${y}`).join(" ")}
+                      points={lassoPoints
+                        .map(([x, y]) => `${x},${y}`)
+                        .join(" ")}
                       fill="none"
                       stroke="#4c8dff"
                       strokeOpacity={selectionOverlayOpacity / 100}
@@ -29119,58 +35013,59 @@ export default function App() {
                   />
                 </svg>
               )}
-              {document.currentPath && document.currentPath.anchors.length > 0 && (
-                <svg
-                  className="lasso-preview"
-                  viewBox={`0 0 ${document.width} ${document.height}`}
-                  preserveAspectRatio="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d={pathOutlineD(document.currentPath)}
-                    fill="none"
-                    stroke="#4c8dff"
-                    strokeWidth={1}
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  {document.currentPath.anchors.map((anchor, i) => (
-                    <g key={i}>
-                      {anchor.inHandle && (
-                        <line
-                          x1={anchor.point[0]}
-                          y1={anchor.point[1]}
-                          x2={anchor.inHandle[0]}
-                          y2={anchor.inHandle[1]}
+              {document.currentPath &&
+                document.currentPath.anchors.length > 0 && (
+                  <svg
+                    className="lasso-preview"
+                    viewBox={`0 0 ${document.width} ${document.height}`}
+                    preserveAspectRatio="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d={pathOutlineD(document.currentPath)}
+                      fill="none"
+                      stroke="#4c8dff"
+                      strokeWidth={1}
+                      vectorEffect="non-scaling-stroke"
+                    />
+                    {document.currentPath.anchors.map((anchor, i) => (
+                      <g key={i}>
+                        {anchor.inHandle && (
+                          <line
+                            x1={anchor.point[0]}
+                            y1={anchor.point[1]}
+                            x2={anchor.inHandle[0]}
+                            y2={anchor.inHandle[1]}
+                            stroke="#4c8dff"
+                            strokeWidth={0.5}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        )}
+                        {anchor.outHandle && (
+                          <line
+                            x1={anchor.point[0]}
+                            y1={anchor.point[1]}
+                            x2={anchor.outHandle[0]}
+                            y2={anchor.outHandle[1]}
+                            stroke="#4c8dff"
+                            strokeWidth={0.5}
+                            vectorEffect="non-scaling-stroke"
+                          />
+                        )}
+                        <rect
+                          x={anchor.point[0] - 1.5}
+                          y={anchor.point[1] - 1.5}
+                          width={3}
+                          height={3}
+                          fill={i === 0 ? "#ffd34d" : "#ffffff"}
                           stroke="#4c8dff"
                           strokeWidth={0.5}
                           vectorEffect="non-scaling-stroke"
                         />
-                      )}
-                      {anchor.outHandle && (
-                        <line
-                          x1={anchor.point[0]}
-                          y1={anchor.point[1]}
-                          x2={anchor.outHandle[0]}
-                          y2={anchor.outHandle[1]}
-                          stroke="#4c8dff"
-                          strokeWidth={0.5}
-                          vectorEffect="non-scaling-stroke"
-                        />
-                      )}
-                      <rect
-                        x={anchor.point[0] - 1.5}
-                        y={anchor.point[1] - 1.5}
-                        width={3}
-                        height={3}
-                        fill={i === 0 ? "#ffd34d" : "#ffffff"}
-                        stroke="#4c8dff"
-                        strokeWidth={0.5}
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    </g>
-                  ))}
-                </svg>
-              )}
+                      </g>
+                    ))}
+                  </svg>
+                )}
               {document.notes.map((note, index) => (
                 <button
                   key={index}
@@ -29184,7 +35079,12 @@ export default function App() {
                   }}
                   onClick={(event) => {
                     event.stopPropagation();
-                    setNoteDialog({ x: note.x, y: note.y, index, text: note.text });
+                    setNoteDialog({
+                      x: note.x,
+                      y: note.y,
+                      index,
+                      text: note.text,
+                    });
                   }}
                 >
                   ✎
@@ -29194,11 +35094,16 @@ export default function App() {
                 <>
                   <div
                     className={`selection-outline${
-                      document.selection.shape === "ellipse" ? " selection-outline--ellipse" : ""
+                      document.selection.shape === "ellipse"
+                        ? " selection-outline--ellipse"
+                        : ""
                     }${document.selection.shape === "mask" ? " selection-outline--mask" : ""}`}
                     style={{
                       ...overlayStyle(document.selection.bounds, document),
-                      ...selectionRadiusStyle(document.selection.shape, document.selection.bounds),
+                      ...selectionRadiusStyle(
+                        document.selection.shape,
+                        document.selection.bounds,
+                      ),
                     }}
                   />
                   {document.selection.inverted && (
@@ -29207,7 +35112,12 @@ export default function App() {
                     <div
                       className="selection-outline"
                       style={overlayStyle(
-                        { x0: 0, y0: 0, x1: document.width, y1: document.height },
+                        {
+                          x0: 0,
+                          y0: 0,
+                          x1: document.width,
+                          y1: document.height,
+                        },
                         document,
                       )}
                     />
@@ -29230,7 +35140,10 @@ export default function App() {
                           }${document.selection.shape === "mask" ? " selection-outline--mask" : ""}`}
                           style={{
                             ...overlayStyle(inner, document),
-                            ...selectionRadiusStyle(document.selection.shape, inner),
+                            ...selectionRadiusStyle(
+                              document.selection.shape,
+                              inner,
+                            ),
                           }}
                         />
                       );
@@ -29240,7 +35153,11 @@ export default function App() {
             </div>
           )}
           {document && (hasSelection || selectedId !== null) && (
-            <div className="contextual-task-bar" role="toolbar" aria-label="Contextual Task Bar">
+            <div
+              className="contextual-task-bar"
+              role="toolbar"
+              aria-label="Contextual Task Bar"
+            >
               {hasSelection ? (
                 <>
                   <button
@@ -29301,7 +35218,10 @@ export default function App() {
                     <button
                       className="button button--quiet"
                       onClick={() =>
-                        void runCommand("remove_background", { id: selectedId, tolerance: magicWandTolerance })
+                        void runCommand("remove_background", {
+                          id: selectedId,
+                          tolerance: magicWandTolerance,
+                        })
                       }
                       disabled={busy}
                       data-tooltip-name="Remove Background"
@@ -29316,7 +35236,9 @@ export default function App() {
           )}
         </main>
 
-        {rightDockedPanels.length > 0 && <div className="dock-zone dock-zone--right">{rightDockedPanels}</div>}
+        {rightDockedPanels.length > 0 && (
+          <div className="dock-zone dock-zone--right">{rightDockedPanels}</div>
+        )}
       </div>
       {floatingPanels}
 
@@ -29365,7 +35287,8 @@ export default function App() {
                 className="statusbar__levels"
                 title="Camera Raw Filter > RGB Levels: the selected layer's own pixel under the pointer"
               >
-                R {rgbLevels[0]} G {rgbLevels[1]} B {rgbLevels[2]} A {rgbLevels[3]}
+                R {rgbLevels[0]} G {rgbLevels[1]} B {rgbLevels[2]} A{" "}
+                {rgbLevels[3]}
               </span>
             )}
             {rulerReadout && (
@@ -29373,17 +35296,25 @@ export default function App() {
                 className="statusbar__levels"
                 title="Ruler: the last measured drag (angle counter-clockwise from horizontal)"
               >
-                W {rulerReadout.width.toFixed(1)} H {rulerReadout.height.toFixed(1)} D{" "}
-                {rulerReadout.distance.toFixed(1)} A {rulerReadout.angle.toFixed(1)}°
+                W {rulerReadout.width.toFixed(1)} H{" "}
+                {rulerReadout.height.toFixed(1)} D{" "}
+                {rulerReadout.distance.toFixed(1)} A{" "}
+                {rulerReadout.angle.toFixed(1)}°
               </span>
             )}
             {document.countMarks.length > 0 && (
-              <span className="statusbar__levels" title="Count tool: marks placed">
+              <span
+                className="statusbar__levels"
+                title="Count tool: marks placed"
+              >
                 Count {document.countMarks.length}
               </span>
             )}
             {document.notes.length > 0 && (
-              <span className="statusbar__levels" title="Note tool: notes pinned">
+              <span
+                className="statusbar__levels"
+                title="Note tool: notes pinned"
+              >
                 Notes {document.notes.length}
               </span>
             )}

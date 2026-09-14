@@ -30,6 +30,42 @@ pub struct ContentAwareFillOptions {
     pub seed: u64,
 }
 
+/// Filter Gallery > Texture > Grain's Grain Type — Photoshop's ten.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GrainType {
+    Regular,
+    Soft,
+    Sprinkles,
+    Clumped,
+    Contrasty,
+    Enlarged,
+    Stippled,
+    Horizontal,
+    Vertical,
+    Speckle,
+}
+
+/// Filter Gallery > Distort > Glass's Texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GlassTexture {
+    Blocks,
+    Canvas,
+    Frosted,
+    TinyLens,
+}
+
+/// Filter Gallery > Texture > Texturizer's Texture.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TexturizerTexture {
+    Canvas,
+    Brick,
+    Burlap,
+    Sandstone,
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -20106,6 +20142,94 @@ impl Document {
         })
     }
 
+    /// [`Self::glass`] with Photoshop's Texture, Scaling, and Invert
+    /// (README Phase 363). The cell is `smoothness · scaling / 100`
+    /// pixels. Blocks displaces every pixel of a cell by the cell's own
+    /// seeded offset, as `glass` does; Canvas by a woven pair of sines,
+    /// `distortion · sin(2π x / cell)` across and `distortion · sin(2π y
+    /// / cell)` down; Frosted by per-pixel seeded offsets box-blurred over
+    /// the cell's radius, a fine irregular texture; Tiny Lens by each
+    /// cell's own lens, every pixel pulled toward its cell's centre by
+    /// `distortion / cell` of its offset, so each cell magnifies its
+    /// middle. Invert reverses every displacement. Resampled with
+    /// [`sample_nearest`] like the other Distort filters.
+    #[allow(clippy::too_many_arguments)]
+    pub fn glass_with(
+        &mut self,
+        id: LayerId,
+        distortion: u32,
+        smoothness: u32,
+        seed: u32,
+        texture: GlassTexture,
+        scaling: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if distortion > 20 {
+            return Err("Glass distortion must be between 0 and 20.".to_string());
+        }
+        if !(1..=15).contains(&smoothness) {
+            return Err("Glass smoothness must be between 1 and 15.".to_string());
+        }
+        if !(50..=200).contains(&scaling) {
+            return Err("Glass scaling must be between 50 and 200 percent.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let (w, h) = (self.width as usize, self.height as usize);
+        let cell = ((smoothness * scaling) as f32 / 100.0).round().max(1.0) as usize;
+        let distortion = distortion as f32;
+        let sign = if invert { -1.0 } else { 1.0 };
+        let mut rng = XorShift32::new(seed);
+        let field: Vec<(f32, f32)> = match texture {
+            GlassTexture::Blocks => {
+                let cells_x = w.div_ceil(cell);
+                let cells_y = h.div_ceil(cell);
+                let offsets: Vec<(f32, f32)> = (0..cells_x * cells_y)
+                    .map(|_| {
+                        let dx = distortion * rng.next_unit();
+                        (dx, distortion * rng.next_unit())
+                    })
+                    .collect();
+                (0..w * h)
+                    .map(|i| offsets[(i / w / cell) * cells_x + (i % w) / cell])
+                    .collect()
+            }
+            GlassTexture::Canvas => (0..w * h)
+                .map(|i| {
+                    let (x, y) = ((i % w) as f32, (i / w) as f32);
+                    let k = std::f32::consts::TAU / cell as f32;
+                    (distortion * (k * x).sin(), distortion * (k * y).sin())
+                })
+                .collect(),
+            GlassTexture::Frosted => {
+                let xs: Vec<f32> = (0..w * h).map(|_| distortion * rng.next_unit()).collect();
+                let ys: Vec<f32> = (0..w * h).map(|_| distortion * rng.next_unit()).collect();
+                let radius = cell / 2;
+                let xs = box_blur_field(&xs, w, h, radius);
+                let ys = box_blur_field(&ys, w, h, radius);
+                xs.into_iter().zip(ys).collect()
+            }
+            GlassTexture::TinyLens => (0..w * h)
+                .map(|i| {
+                    let (x, y) = (i % w, i / w);
+                    let centre =
+                        |v: usize| (v / cell) as f32 * cell as f32 + (cell as f32 - 1.0) / 2.0;
+                    let (ox, oy) = (x as f32 - centre(x), y as f32 - centre(y));
+                    let pull = distortion / cell as f32;
+                    (-ox * pull, -oy * pull)
+                })
+                .collect(),
+        };
+        self.filter_pixels(id, move |src, row, col| {
+            let (dx, dy) = field[row as usize * w + col as usize];
+            sample_nearest(
+                src,
+                w,
+                (width, height),
+                (col as f32 + sign * dx, row as f32 + sign * dy),
+            )
+        })
+    }
+
     /// Filter Gallery > Distort > Ocean Ripple: layers a seeded per-pixel
     /// jitter on top of [`Self::ripple`]'s own two-axis sine-wave
     /// displacement (`sx = x + amplitude · sin(k·y)`, `sy = y + amplitude
@@ -20264,6 +20388,92 @@ impl Document {
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let draw = rng.next_unit();
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let grained = (src[base + c] as f32 + draw * grain_scale).clamp(0.0, 255.0);
+                out[c] = (factor * (grained - 128.0) + 128.0)
+                    .round()
+                    .clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
+    /// [`Self::grain`] with Photoshop's Grain Type (README Phase 363). A
+    /// seeded noise plane in `-1..=1` is laid over the whole layer first
+    /// — one draw per pixel in row-major order, so the result no longer
+    /// depends on which pixels are selected — and shaped by the type:
+    /// Regular uses it as drawn; Soft box-blurs it 3×3; Sprinkles keeps
+    /// only draws beyond ±0.7, at full strength, the rest zero; Clumped
+    /// and Enlarged draw one value per 2×2 and 4×4 block; Contrasty
+    /// scales the draw by 1.5 and adds 10 to the contrast; Stippled
+    /// takes each draw's sign at full strength; Horizontal and Vertical
+    /// draw one value per row or per column, so the grain streaks;
+    /// Speckle keeps only the darkening half of Sprinkles. The shaped
+    /// value times `intensity / 40 · 128` is added to every channel and
+    /// the contrast curve applied, as `grain` does.
+    pub fn grain_with(
+        &mut self,
+        id: LayerId,
+        intensity: u32,
+        contrast: u32,
+        seed: u32,
+        kind: GrainType,
+    ) -> Result<Option<Rect>, String> {
+        if intensity > 40 {
+            return Err("Grain intensity must be between 0 and 40.".to_string());
+        }
+        if contrast > 40 {
+            return Err("Grain contrast must be between 0 and 40.".to_string());
+        }
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut rng = XorShift32::new(seed);
+        let noise: Vec<f32> = match kind {
+            GrainType::Horizontal => {
+                let rows: Vec<f32> = (0..h).map(|_| rng.next_unit()).collect();
+                (0..w * h).map(|i| rows[i / w]).collect()
+            }
+            GrainType::Vertical => {
+                let cols: Vec<f32> = (0..w).map(|_| rng.next_unit()).collect();
+                (0..w * h).map(|i| cols[i % w]).collect()
+            }
+            GrainType::Clumped | GrainType::Enlarged => {
+                let block = if kind == GrainType::Clumped { 2 } else { 4 };
+                let (bw, bh) = (w.div_ceil(block), h.div_ceil(block));
+                let blocks: Vec<f32> = (0..bw * bh).map(|_| rng.next_unit()).collect();
+                (0..w * h)
+                    .map(|i| blocks[(i / w / block) * bw + (i % w) / block])
+                    .collect()
+            }
+            _ => (0..w * h).map(|_| rng.next_unit()).collect(),
+        };
+        let noise: Vec<f32> = match kind {
+            GrainType::Soft => box_blur_field(&noise, w, h, 1),
+            GrainType::Sprinkles => noise
+                .iter()
+                .map(|&v| if v.abs() > 0.7 { v.signum() } else { 0.0 })
+                .collect(),
+            GrainType::Speckle => noise
+                .iter()
+                .map(|&v| if v < -0.7 { -1.0 } else { 0.0 })
+                .collect(),
+            GrainType::Stippled => noise.iter().map(|&v| v.signum()).collect(),
+            GrainType::Contrasty => noise.iter().map(|&v| v * 1.5).collect(),
+            _ => noise,
+        };
+        let contrast = if kind == GrainType::Contrasty {
+            (contrast + 10).min(40)
+        } else {
+            contrast
+        };
+        let grain_scale = intensity as f32 / 40.0 * 128.0;
+        let contrast_mapped = contrast as f32 / 40.0 * 255.0;
+        let factor = 259.0 * (contrast_mapped + 255.0) / (255.0 * (259.0 - contrast_mapped));
+        self.filter_pixels(id, move |src, row, col| {
+            let idx = row as usize * w + col as usize;
+            let base = idx * CHANNELS;
+            let draw = noise[idx];
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
                 let grained = (src[base + c] as f32 + draw * grain_scale).clamp(0.0, 255.0);
@@ -21968,6 +22178,108 @@ impl Document {
             let up = (r / scale + c / scale) % 2 == 0;
             let up = if invert { !up } else { up };
             i64::from(up)
+        };
+        self.filter_pixels(id, move |src, row, col| {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let (row, col) = (row as i64, col as i64);
+            let toward = height_at(row + dy, col + dx);
+            let away = height_at(row - dy, col - dx);
+            let shade = (away - toward) as f32 * relief;
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                out[c] = (src[base + c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+            }
+            out[3] = src[base + 3];
+            out
+        })
+    }
+
+    /// [`Self::texturizer`] with Photoshop's built-in Textures (README
+    /// Phase 363), each a height field over the canvas at `scale` pixels
+    /// a cell: Canvas the two-level checkerboard `texturizer` uses; Brick
+    /// a running bond — height 1 inside a brick, 0 on the mortar, one
+    /// row of mortar every `scale` rows and a joint every `2 · scale`
+    /// columns, alternate courses shifted by a brick's half; Burlap a
+    /// weave of two thread directions, height 0, 1, or 2 as the pixel
+    /// sits on neither, one, or both of the raised halves of its cell
+    /// across and down; Sandstone a seeded 0/1 speckle at a quarter of
+    /// the scale, the same for the same layer size. Invert flips every
+    /// height; the light and relief shade as `texturizer` does. Loading a
+    /// custom texture file remains a documented scope cut.
+    pub fn texturizer_with(
+        &mut self,
+        id: LayerId,
+        texture: TexturizerTexture,
+        scale: u32,
+        relief: u32,
+        light_direction: u32,
+        invert: bool,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=250).contains(&scale) {
+            return Err("Texturizer scale must be between 1 and 250.".to_string());
+        }
+        if relief > 50 {
+            return Err("Texturizer relief must be between 0 and 50.".to_string());
+        }
+        if light_direction > 7 {
+            return Err("Texturizer light direction must be between 0 and 7.".to_string());
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let scale = scale as i64;
+        let angle: f32 = match light_direction {
+            0 => 90.0,
+            1 => 45.0,
+            2 => 0.0,
+            3 => 315.0,
+            4 => 270.0,
+            5 => 225.0,
+            6 => 180.0,
+            _ => 135.0,
+        };
+        let (sin, cos) = angle.to_radians().sin_cos();
+        let dx = cos.round() as i64;
+        let dy = -(sin.round() as i64);
+        let relief = relief as f32;
+        let grain = (scale / 4).max(1);
+        let speckle: Vec<i64> = if texture == TexturizerTexture::Sandstone {
+            let (gw, gh) = (
+                ((width + grain - 1) / grain) as usize,
+                ((height + grain - 1) / grain) as usize,
+            );
+            let mut rng = XorShift32::new(0x5A5D_5701);
+            (0..gw * gh)
+                .map(|_| i64::from(rng.next_u32() & 1))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let speckle_w = ((width + grain - 1) / grain) as usize;
+        let height_at = move |r: i64, c: i64| -> i64 {
+            let r = r.clamp(0, height - 1);
+            let c = c.clamp(0, width - 1);
+            let h = match texture {
+                TexturizerTexture::Canvas => i64::from((r / scale + c / scale) % 2 == 0),
+                TexturizerTexture::Brick => {
+                    let course = r / scale;
+                    let mortar_row = r % scale == 0;
+                    let shift = if course % 2 == 0 { 0 } else { scale };
+                    let joint = (c + shift) % (2 * scale) == 0;
+                    i64::from(!(mortar_row || joint))
+                }
+                TexturizerTexture::Burlap => {
+                    let half = (scale / 2).max(1);
+                    i64::from(c % scale < half) + i64::from(r % scale < half)
+                }
+                TexturizerTexture::Sandstone => {
+                    speckle[(r / grain) as usize * speckle_w + (c / grain) as usize]
+                }
+            };
+            if invert {
+                -h
+            } else {
+                h
+            }
         };
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
@@ -43698,6 +44010,215 @@ mod tests {
             shadow: [0, 0, 0],
             shadow_opacity: 75,
         }
+    }
+
+    fn flat_grey(w: u32, h: u32) -> (Document, LayerId) {
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc
+            .add_layer("g", &solid(w, h, [128, 128, 128, 255]), w, h)
+            .unwrap();
+        (doc, id)
+    }
+
+    fn red_plane(doc: &Document) -> Vec<u8> {
+        doc.layers()[0]
+            .pixels
+            .chunks_exact(4)
+            .map(|p| p[0])
+            .collect()
+    }
+
+    fn std_dev(values: &[u8]) -> f64 {
+        let n = values.len() as f64;
+        let mean = values.iter().map(|&v| v as f64).sum::<f64>() / n;
+        (values
+            .iter()
+            .map(|&v| (v as f64 - mean).powi(2))
+            .sum::<f64>()
+            / n)
+            .sqrt()
+    }
+
+    #[test]
+    fn grain_types_shape_the_noise_plane() {
+        let (w, h) = (16u32, 12u32);
+        let run = |kind: GrainType| {
+            let (mut doc, id) = flat_grey(w, h);
+            doc.grain_with(id, 20, 0, 7, kind).unwrap();
+            red_plane(&doc)
+        };
+        let regular = run(GrainType::Regular);
+        // Horizontal: every pixel of a row alike, rows differ; Vertical the
+        // same by column.
+        let horizontal = run(GrainType::Horizontal);
+        for y in 0..h as usize {
+            let row = &horizontal[y * w as usize..(y + 1) * w as usize];
+            assert!(row.iter().all(|&v| v == row[0]), "row {y}");
+        }
+        assert!(
+            horizontal[0] != horizontal[w as usize] || horizontal[0] != horizontal[2 * w as usize]
+        );
+        let vertical = run(GrainType::Vertical);
+        for x in 0..w as usize {
+            assert!(
+                (0..h as usize).all(|y| vertical[y * w as usize + x] == vertical[x]),
+                "column {x}"
+            );
+        }
+        // Clumped and Enlarged: 2×2 and 4×4 blocks alike.
+        for (kind, block) in [(GrainType::Clumped, 2usize), (GrainType::Enlarged, 4usize)] {
+            let grain = run(kind);
+            for y in 0..h as usize {
+                for x in 0..w as usize {
+                    let anchor = grain[(y / block * block) * w as usize + x / block * block];
+                    assert_eq!(grain[y * w as usize + x], anchor, "{kind:?} at ({x}, {y})");
+                }
+            }
+            assert!(std_dev(&grain) > 5.0);
+        }
+        // Stippled: exactly two values, 128 ± 64 (intensity 20 → scale 64).
+        let stippled = run(GrainType::Stippled);
+        assert!(
+            stippled.iter().all(|&v| v == 64 || v == 192),
+            "{stippled:?}"
+        );
+        assert!(stippled.contains(&64) && stippled.contains(&192));
+        // Sprinkles: most pixels untouched, the rest at full strength;
+        // Speckle only darkens.
+        let sprinkles = run(GrainType::Sprinkles);
+        let untouched = sprinkles.iter().filter(|&&v| v == 128).count();
+        assert!(untouched > (w * h) as usize / 2, "{untouched}");
+        assert!(sprinkles.iter().all(|&v| v == 128 || v == 64 || v == 192));
+        let speckle = run(GrainType::Speckle);
+        assert!(speckle.iter().all(|&v| v == 128 || v == 64));
+        assert!(speckle.contains(&64));
+        // Soft is calmer than Regular, Contrasty wilder.
+        let soft = run(GrainType::Soft);
+        let contrasty = run(GrainType::Contrasty);
+        assert!(std_dev(&soft) < std_dev(&regular));
+        assert!(std_dev(&contrasty) > std_dev(&regular));
+        // Deterministic for a seed, and errors as grain does.
+        assert_eq!(run(GrainType::Regular), regular);
+        let (mut doc, id) = flat_grey(4, 4);
+        assert!(doc.grain_with(id, 41, 0, 1, GrainType::Regular).is_err());
+    }
+
+    #[test]
+    fn glass_textures_displace_by_their_own_fields() {
+        // A horizontal ramp, 32 wide: pixel x reads 8x, so a displacement
+        // of d pixels reads 8(x + d).
+        let (w, h) = (32u32, 8u32);
+        let mut ramp = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                ramp.extend_from_slice(&[(x * 8) as u8, 0, 0, 255]);
+            }
+        }
+        let run = |texture: GlassTexture,
+                   distortion: u32,
+                   smoothness: u32,
+                   scaling: u32,
+                   invert: bool| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.glass_with(id, distortion, smoothness, 3, texture, scaling, invert)
+                .unwrap();
+            red_plane(&doc)
+        };
+        // Canvas: cell 8; at x = 2 (a quarter wave) the sine is 1, so the
+        // pixel reads x + 4 = 6 → 48; at x = 8 the sine is 0 → 64; at x = 6
+        // (three quarters) the sine is −1 → x − 4 = 2 → 16. Invert flips
+        // the field: x = 2 reads x − 4 → 0 (clamped by the sampler: −2 →
+        // 0) and x = 6 reads x + 4 = 10 → 80.
+        let canvas = run(GlassTexture::Canvas, 4, 8, 100, false);
+        assert_eq!(canvas[2], 48);
+        assert_eq!(canvas[8], 64);
+        assert_eq!(canvas[6], 16);
+        assert_eq!(canvas[4 * 32 + 8], 64);
+        let inverted = run(GlassTexture::Canvas, 4, 8, 100, true);
+        assert_eq!(inverted[2 + 32], 0);
+        assert_eq!(inverted[6], 80);
+        // Tiny Lens, cell 4 (smoothness 2 at 200 %): the cell's centre sits
+        // at 1.5; pixel 3 (offset 1.5) is pulled toward it by 4/4 · 1.5 =
+        // 1.5 → reads 1.5 → rounds to 2 → 16; the centre-ward pixel 2
+        // (offset 0.5) reads 1.5 → 2 → 16 as well; pixel 0 reads 1.5 → 16.
+        let lens = run(GlassTexture::TinyLens, 4, 2, 200, false);
+        assert_eq!(lens[3], 16);
+        assert_eq!(lens[2], 16);
+        assert_eq!(lens[0], 16);
+        assert_eq!(lens[7], 48);
+        // Blocks at 200 % scaling: cells twice as wide, so the first two
+        // smoothness-cells share one offset; deterministic per seed.
+        // One shared offset per cell keeps the ramp monotone inside the
+        // first 8-pixel cell (a clamped edge can only flatten it).
+        let blocks = run(GlassTexture::Blocks, 6, 4, 200, false);
+        assert!(blocks[0..8].windows(2).all(|p| p[0] <= p[1]));
+        let again = run(GlassTexture::Blocks, 6, 4, 200, false);
+        assert_eq!(blocks, again);
+        let plain = run(GlassTexture::Blocks, 6, 4, 100, false);
+        assert_ne!(blocks, plain);
+        // Frosted: some displacement, none where distortion is 0.
+        let frosted = run(GlassTexture::Frosted, 6, 4, 100, false);
+        assert_ne!(
+            frosted,
+            ramp.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>()
+        );
+        let still = run(GlassTexture::Frosted, 0, 4, 100, false);
+        assert_eq!(
+            still,
+            ramp.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>()
+        );
+        let mut doc = Document::new(4, 4).unwrap();
+        let id = doc
+            .add_layer("r", &solid(4, 4, [1, 2, 3, 255]), 4, 4)
+            .unwrap();
+        assert!(doc
+            .glass_with(id, 4, 4, 1, GlassTexture::Canvas, 49, false)
+            .is_err());
+    }
+
+    #[test]
+    fn texturizer_textures_are_their_own_height_fields() {
+        // Light from the left (direction 6): shade = (height at the right
+        // − height at the left) · relief, relief 10.
+        let (w, h) = (12u32, 8u32);
+        let run = |texture: TexturizerTexture, scale: u32, invert: bool| {
+            let (mut doc, id) = flat_grey(w, h);
+            doc.texturizer_with(id, texture, scale, 10, 6, invert)
+                .unwrap();
+            red_plane(&doc)
+        };
+        // Brick, scale 4: row 0 is mortar (height 0 everywhere) so no
+        // shade; row 1 has a joint at column 0 and 8 (0 % 8): at column 1
+        // the left is the joint (0) and the right a brick (1): shade +10
+        // → 138; at column 7 the right is the joint: −10 → 118; column 4
+        // sits between bricks' heights 1 both sides → 128. Course 1 (row
+        // 4..7) shifts the joint by 4: row 5 column 5 reads 138.
+        let brick = run(TexturizerTexture::Brick, 4, false);
+        assert!(brick[0..12].iter().all(|&v| v == 128));
+        assert_eq!(brick[12 + 1], 138);
+        assert_eq!(brick[12 + 7], 118);
+        assert_eq!(brick[12 + 4], 128);
+        assert_eq!(brick[5 * 12 + 5], 138);
+        let inverted = run(TexturizerTexture::Brick, 4, true);
+        assert_eq!(inverted[12 + 1], 118);
+        // Burlap, scale 4: columns 0–1 raised across, columns 2–3 not; rows
+        // likewise. At row 0 (raised down) column 2: left height 1 + 1 =
+        // 2, right (column 3) 0 + 1 = 1: shade −10 → 118; column 0: left is
+        // column −1 clamped to 0 (2), right column 1 (2): 128.
+        let burlap = run(TexturizerTexture::Burlap, 4, false);
+        assert_eq!(burlap[2], 118);
+        assert_eq!(burlap[0], 128);
+        assert_eq!(burlap[4], 138);
+        // Canvas matches texturizer; Sandstone is deterministic and differs.
+        let canvas = run(TexturizerTexture::Canvas, 4, false);
+        let (mut doc, id) = flat_grey(w, h);
+        doc.texturizer(id, 4, 10, 6, false).unwrap();
+        assert_eq!(canvas, red_plane(&doc));
+        let sand = run(TexturizerTexture::Sandstone, 4, false);
+        assert_eq!(sand, run(TexturizerTexture::Sandstone, 4, false));
+        assert_ne!(sand, canvas);
+        assert!(sand.iter().all(|&v| v == 118 || v == 128 || v == 138));
     }
 
     #[test]

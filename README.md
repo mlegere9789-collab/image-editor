@@ -21612,6 +21612,85 @@ real app; the "gap stands" note ends.
 
 Tests unchanged: 1844 Rust, 22 frontend.
 
+## Phase 363 — Filter Gallery texture options: Grain types, Glass textures, Texturizer textures
+
+Three more scope cuts of `docs/PLAN_TO_100.md` section D reopened. Each
+of these Filter Gallery filters shipped with one texture and a note
+that Photoshop's others were cut; each now has all of them, as a new
+`*_with` command beside the old one (the old commands stay for saved
+Actions).
+
+**Grain's ten types** (`grain_with`, a Grain Type select in the dialog).
+Regular is the old filter. The others shape the same seeded noise plane
+before it is added: Soft box-blurs it one pixel; Sprinkles keeps only
+the strongest 30 % of draws and pushes them to full strength; Speckle
+keeps only the darkest 15 % as dark specks; Stippled turns every draw
+into a full-strength dot; Contrasty scales the plane by 1.5 and adds 10
+to Contrast; Clumped and Enlarged share one draw across 2×2 and 4×4
+blocks; Horizontal and Vertical share one draw along each row or
+column. Contrast is applied afterwards exactly as before.
+
+**Glass's textures, Scaling and Invert** (`glass_with`). Blocks is the
+old per-cell offset. Canvas displaces by a sine grid, `distortion ·
+sin(2πx / cell)` horizontally and the same in y; Frosted draws a
+per-pixel offset and box-blurs the field over half a cell, a fine
+irregular texture; Tiny Lens pulls each pixel toward its cell's centre
+by `distortion / cell` of its offset, so each cell magnifies its
+middle. The cell is `smoothness · scaling / 100`, Scaling ranging
+50–200 % as in Photoshop; Invert reverses every displacement.
+Resampling stays `sample_nearest`, like every Distort filter here.
+
+**Texturizer's textures** (`texturizer_with`). Canvas is the old
+checkerboard. Brick is a running bond: courses `scale` high with a
+one-pixel mortar line between them and between bricks, odd courses
+offset by half a brick; Burlap is a three-level weave (0, 1, 2) from
+the sum of each axis's phase; Sandstone is a seeded speckle at a
+quarter of the scale (seed fixed, so the texture is a texture and not
+noise that changes per apply). Relief, Light Direction and Invert work
+on all four unchanged. Loading a custom texture file is still cut.
+
+**Verified.** Three Rust tests. `grain_types_shape_the_noise_plane`,
+on flat grey at intensity 20: Horizontal makes every row constant and
+Vertical every column; Clumped and Enlarged share one value across
+each 2×2 and 4×4 block; Stippled leaves exactly two values, 64 and 192
+about the grey 128; Sprinkles leaves more than half of the pixels
+untouched and the rest at those two; Speckle only darkens; Soft's
+spread is below Regular's and Contrasty's above; a seed is
+deterministic and intensity 41 errors as before.
+`glass_textures_displace_by_their_own_fields` on a horizontal ramp
+(pixel x reads 8x): Canvas at distortion 4, cell 8 reads 48 at x = 2 (a
+quarter wave, sine 1), 64 at x = 8 (sine 0), 16 at x = 6 (sine −1);
+inverted it reads 0 at x = 2 (clamped) and 80 at x = 6; Tiny Lens at
+cell 4 pulls pixels 0, 2 and 3 to 16 and pixel 7 to 48; Blocks keeps
+the ramp monotone within one cell, is deterministic, and differs
+between 100 % and 200 % scaling; Frosted displaces at distortion 6 and
+not at 0; scaling 49 errors.
+`texturizer_textures_are_their_own_height_fields`, lit from the left at
+relief 10: Brick at scale 4 leaves the mortar row unshaded (128),
+reads 138 beside a joint and 118 before the next, 128 between, shifts
+the joints half a brick on the second course, and inverts to 118;
+Burlap reads 118, 128 and 138 where its weave steps down, is flat, and
+steps up; Canvas equals the old `texturizer` pixel for pixel;
+Sandstone is deterministic, differs from Canvas, and takes only those
+three values. In Chromium against the built
+frontend: Filter > Filter Gallery > Texture > Grain… shows Grain Type,
+Intensity and Contrast, and Apply with Sprinkles chosen sends
+`grain_with` with `kind: "sprinkles"`; Distort > Glass… shows
+Distortion, Smoothness, Texture (Frosted by default), Scaling 100 %
+and Invert, and after choosing Tiny Lens, 150 % and Invert sends
+`glass_with` with `texture: "tinyLens", scaling: 150, invert: true`;
+Texture > Texturizer… shows Texture (Canvas), Scale, Relief, Light
+Direction and Invert, and Brick sends `texturizer_with` with `texture:
+"brick"`; every dialog closes on Apply. On the real app under Xvfb
+(`scripts/xvfb-live.sh`): the recovery prompt reopened Phase 362's
+800×600 document with its white brush stroke; Filter > Filter Gallery >
+Texture > Grain… with Sprinkles chosen, applied through the real IPC,
+speckled the stroke; Texturizer… with Brick at scale 32 and relief 29
+drew the mortar lines of a running bond across it. Seven screenshots
+were checked by eye.
+
+Tests: 1847 Rust (1844 → 1847), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

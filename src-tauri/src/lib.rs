@@ -5845,6 +5845,58 @@ fn stroke_outline(
     })
 }
 
+/// Filter Gallery > Texture > Grain with its Grain Type -- see
+/// `Document::grain_with`.
+#[tauri::command]
+fn grain_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    intensity: u32,
+    contrast: u32,
+    seed: u32,
+    kind: document::GrainType,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.grain_with(id, intensity, contrast, seed, kind)
+    })
+}
+
+/// Filter Gallery > Distort > Glass with its Texture, Scaling, and Invert
+/// -- see `Document::glass_with`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+fn glass_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    distortion: u32,
+    smoothness: u32,
+    seed: u32,
+    texture: document::GlassTexture,
+    scaling: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.glass_with(id, distortion, smoothness, seed, texture, scaling, invert)
+    })
+}
+
+/// Filter Gallery > Texture > Texturizer with its Texture -- see
+/// `Document::texturizer_with`.
+#[tauri::command]
+fn texturizer_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    texture: document::TexturizerTexture,
+    scale: u32,
+    relief: u32,
+    light_direction: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.texturizer_with(id, texture, scale, relief, light_direction, invert)
+    })
+}
+
 /// Layer > Layer Style > Stroke with its Position -- see
 /// `Document::stroke_outline_with`.
 #[tauri::command]
@@ -7687,6 +7739,9 @@ pub fn run() {
             autosave_project,
             cancel_operation,
             stroke_outline_with,
+            grain_with,
+            glass_with,
+            texturizer_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,
