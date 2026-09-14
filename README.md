@@ -22733,6 +22733,42 @@ three pins in play; four screenshots checked by eye.
 
 Tests: 1892 Rust (1889 → 1892), 22 frontend.
 
+## Phase 384 — Replace Color's plus-eyedropper sampling
+
+One dialog row of section D. `Document::replace_color_with` takes
+`targets: &[[u8; 3]]`, one colour or more — Photoshop's plus-
+eyedropper, which adds another sampled colour to the mask on each
+click rather than replacing the one target. A pixel's own strength is
+the *largest* of every target's own Chebyshev-distance strength (the
+same formula `replace_color` already used per target), so the mask is
+the union of every sampled colour's own fuzzy range: a pixel close to
+any one target is shifted, at whichever target's own strength is
+higher when it is close to more than one. `replace_color` keeps its
+old single-colour shape, calling `replace_color_with` with a one-
+element slice. The dialog's Target Color picker gains an Add Swatch
+button that appends its current colour to a list of removable
+swatches shown beneath it (click a swatch to drop it); Apply sends the
+picker's own colour plus every swatch as `targets`.
+
+**Verified.** Two Rust tests.
+`replace_color_with_matches_the_union_of_every_target`: two targets
+(100, 100, 100) and (200, 200, 200), fuzziness 50, lightness −100
+(always shifts to pure black) on a 5-pixel row — the two exact matches
+turn black; a pixel sitting exactly at the fuzziness edge from both
+(distance 50 to each) is untouched, strength 0; a pixel 20 from the
+first target and 80 from the second takes the larger strength, 1 −
+20/50 = 0.6, blending 60% toward black (120 → 48); a pixel far from
+both stays untouched. An empty `targets` list errors. In Chromium
+against the built frontend: Add Swatch appends the picker's current
+colour to the swatch row, and Apply sends `targets` as the picker's
+colour followed by every swatch, in order. On the real app under
+Xvfb: Add Swatch added two swatches to the dialog through real clicks,
+clicking a swatch removed it (its tooltip read "#ff0000: click to
+remove"), and Apply completed a real `replace_color` round trip
+without error; three screenshots checked by eye.
+
+Tests: 1894 Rust (1892 → 1894), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

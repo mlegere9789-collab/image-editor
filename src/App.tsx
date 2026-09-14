@@ -879,6 +879,9 @@ export default function App() {
   const [replaceColorHue, setReplaceColorHue] = useState(0);
   const [replaceColorSaturation, setReplaceColorSaturation] = useState(0);
   const [replaceColorLightness, setReplaceColorLightness] = useState(0);
+  const [replaceColorSwatches, setReplaceColorSwatches] = useState<string[]>(
+    [],
+  );
 
   const [showVibranceDialog, setShowVibranceDialog] = useState(false);
   const [vibrance, setVibrance] = useState(0);
@@ -3508,10 +3511,12 @@ export default function App() {
 
   const applyReplaceColor = useCallback(async () => {
     if (selectedId === null) return;
-    const [r, g, b] = hexToRgb(replaceColorTarget);
+    const targets = [replaceColorTarget, ...replaceColorSwatches].map((hex) =>
+      hexToRgb(hex),
+    );
     await runCommand("replace_color", {
       id: selectedId,
-      target: [r, g, b],
+      targets,
       fuzziness: replaceColorFuzziness,
       hue: replaceColorHue,
       saturation: replaceColorSaturation,
@@ -3522,6 +3527,7 @@ export default function App() {
     runCommand,
     selectedId,
     replaceColorTarget,
+    replaceColorSwatches,
     replaceColorFuzziness,
     replaceColorHue,
     replaceColorSaturation,
@@ -16068,7 +16074,39 @@ export default function App() {
                 value={replaceColorTarget}
                 onChange={(event) => setReplaceColorTarget(event.target.value)}
               />
+              <button
+                className="button button--quiet"
+                onClick={() =>
+                  setReplaceColorSwatches((swatches) => [
+                    ...swatches,
+                    replaceColorTarget,
+                  ])
+                }
+                title="Add this colour as another sampled target — Photoshop's plus-eyedropper"
+              >
+                Add Swatch
+              </button>
             </label>
+            {replaceColorSwatches.length > 0 && (
+              <div
+                className="control control--row"
+                aria-label="Replace Color swatches"
+              >
+                {replaceColorSwatches.map((hex, index) => (
+                  <button
+                    key={`${index}-${hex}`}
+                    className="button button--quiet"
+                    style={{ background: hex }}
+                    onClick={() =>
+                      setReplaceColorSwatches((swatches) =>
+                        swatches.filter((_, i) => i !== index),
+                      )
+                    }
+                    title={`${hex}: click to remove`}
+                  />
+                ))}
+              </div>
+            )}
             <label className="control">
               <span className="control__label">
                 Fuzziness

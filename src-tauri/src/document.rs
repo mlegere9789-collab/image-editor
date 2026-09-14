@@ -24322,10 +24322,9 @@ impl Document {
     /// `0..=200` dialog range; `hue`/`saturation`/`lightness` share
     /// [`Self::hue_saturation`]'s own ranges and clamping convention
     /// (saturating rather than erroring on an out-of-range value).
-    /// Alpha untouched. Photoshop's own on-canvas eyedropper sampling
-    /// (plus/minus swatches) and live mask preview are a documented scope
-    /// cut — `target` here is a single colour chosen once, not built up
-    /// interactively.
+    /// Alpha untouched. Photoshop's own live mask preview is a documented
+    /// scope cut; its plus-eyedropper sampling — building `target` up
+    /// from more than one click — is [`Self::replace_color_with`].
     pub fn replace_color(
         &mut self,
         id: LayerId,
@@ -24335,6 +24334,30 @@ impl Document {
         saturation: i32,
         lightness: i32,
     ) -> Result<Option<Rect>, String> {
+        self.replace_color_with(id, &[target], fuzziness, hue, saturation, lightness)
+    }
+
+    /// [`Self::replace_color`] with Photoshop's plus-eyedropper: `targets`
+    /// is one colour or more, each sampled by its own click, and a pixel
+    /// matches whichever target it is nearest to — its own `strength` is
+    /// the *largest* of every target's own Chebyshev-distance strength,
+    /// so the mask is the union of every sampled colour's own fuzzy
+    /// range, exactly as adding another eyedropper sample widens
+    /// Photoshop's own selection. Errors on an empty `targets` list, or
+    /// as [`Self::replace_color`] does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn replace_color_with(
+        &mut self,
+        id: LayerId,
+        targets: &[[u8; 3]],
+        fuzziness: u32,
+        hue: i32,
+        saturation: i32,
+        lightness: i32,
+    ) -> Result<Option<Rect>, String> {
+        if targets.is_empty() {
+            return Err("Replace Color needs at least one sampled colour.".to_string());
+        }
         if fuzziness > 200 {
             return Err("Replace Color fuzziness must be between 0 and 200.".to_string());
         }
@@ -24342,20 +24365,26 @@ impl Document {
         let hue_shift = hue.clamp(-180, 180) as f32;
         let sat_factor = saturation.clamp(-100, 100) as f32 / 100.0;
         let light_offset = lightness.clamp(-100, 100) as f32 / 100.0;
+        let targets: Vec<[u8; 3]> = targets.to_vec();
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let dr = (r as i32 - target[0] as i32).abs();
-            let dg = (g as i32 - target[1] as i32).abs();
-            let db = (b as i32 - target[2] as i32).abs();
-            let distance = dr.max(dg).max(db) as f32;
-            let strength = if fuzz <= 0.0 {
-                if distance == 0.0 {
-                    1.0
-                } else {
-                    0.0
-                }
-            } else {
-                (1.0 - distance / fuzz).clamp(0.0, 1.0)
-            };
+            let strength = targets
+                .iter()
+                .map(|target| {
+                    let dr = (r as i32 - target[0] as i32).abs();
+                    let dg = (g as i32 - target[1] as i32).abs();
+                    let db = (b as i32 - target[2] as i32).abs();
+                    let distance = dr.max(dg).max(db) as f32;
+                    if fuzz <= 0.0 {
+                        if distance == 0.0 {
+                            1.0
+                        } else {
+                            0.0
+                        }
+                    } else {
+                        (1.0 - distance / fuzz).clamp(0.0, 1.0)
+                    }
+                })
+                .fold(0.0f32, f32::max);
             if strength == 0.0 {
                 return [r, g, b, a];
             }
@@ -49982,6 +50011,50 @@ mod tests {
         assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
         assert_eq!(pixel(&doc, id, 1, 0), [130, 100, 100, 255]);
         assert_eq!(pixel(&doc, id, 2, 0), [200, 100, 100, 255]);
+    }
+
+    #[test]
+    fn replace_color_with_matches_the_union_of_every_target() {
+        // Two targets (100, 100, 100) and (200, 200, 200), fuzziness 50,
+        // lightness -100 (always shifts to pure black). A 5-pixel row:
+        // (100, 100, 100) matches target 1 exactly (strength 1.0), black;
+        // (200, 200, 200) matches target 2 exactly, black; (150, 150,
+        // 150) sits distance 50 from both -- right at the fuzziness edge,
+        // strength 0, untouched; (120, 120, 120) sits 20 from target 1
+        // (strength 1 - 20/50 = 0.6) and 80 from target 2 (clamped to 0),
+        // so the union's own strength is the larger, 0.6, blending 60%
+        // toward black: 120 * 0.4 = 48; (10, 10, 10) sits 90 and 190 from
+        // the two targets, both past fuzziness, untouched.
+        let mut doc = Document::new(5, 1).unwrap();
+        let id = doc
+            .add_layer(
+                "row",
+                &[
+                    100, 100, 100, 255, 200, 200, 200, 255, 150, 150, 150, 255, 120, 120, 120, 255,
+                    10, 10, 10, 255,
+                ],
+                5,
+                1,
+            )
+            .unwrap();
+        doc.replace_color_with(id, &[[100, 100, 100], [200, 200, 200]], 50, 0, 0, -100)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[0..3], &[0, 0, 0]);
+        assert_eq!(&p[4..7], &[0, 0, 0]);
+        assert_eq!(&p[8..11], &[150, 150, 150]);
+        assert_eq!(&p[12..15], &[48, 48, 48]);
+        assert_eq!(&p[16..19], &[10, 10, 10]);
+    }
+
+    #[test]
+    fn replace_color_with_needs_at_least_one_target() {
+        let mut doc = Document::new(1, 1).unwrap();
+        let id = doc.add_layer("p", &[10, 10, 10, 255], 1, 1).unwrap();
+        assert!(doc
+            .replace_color_with(id, &[], 50, 0, 0, -100)
+            .unwrap_err()
+            .contains("one sampled colour"));
     }
 
     #[test]

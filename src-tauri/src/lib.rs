@@ -6799,19 +6799,21 @@ fn hue_saturation(
     })
 }
 
-/// Image > Adjustments > Replace Color on layer `id`.
+/// Image > Adjustments > Replace Color on layer `id`: `targets`, one
+/// colour or more (Photoshop's plus-eyedropper sampling).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn replace_color(
     state: State<'_, AppState>,
     id: LayerId,
-    target: [u8; 3],
+    targets: Vec<[u8; 3]>,
     fuzziness: u32,
     hue: i32,
     saturation: i32,
     lightness: i32,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.replace_color(id, target, fuzziness, hue, saturation, lightness)
+        document.replace_color_with(id, &targets, fuzziness, hue, saturation, lightness)
     })
 }
 
