@@ -20947,6 +20947,85 @@ Xvfb live-verification gap from the previous phases stands.
 
 **1823 Rust tests total** (1820 → 1823: 1816 lib + 7 pipeline). Frontend tests: 9.
 
+## Phase 350 — The Actions panel: record, play, stop, batch — and never lose a recording
+
+The third pain point in `docs/PLAN_TO_100.md` section B.3: "the Actions
+panel regressing and actions silently clearing". Photoshop keeps its
+recorded actions in the application's preferences, and a crash, a reset,
+or an update has emptied that panel for many users. This app had no
+Actions panel at all; this phase builds one that cannot lose a
+recording.
+
+**Mechanism.** `src-tauri/src/actions.rs` is the store: each action is
+its own JSON file under `actions/` in the app's data directory — `name`
+and `steps`, a step being a `command` with the arguments it ran with, or
+a `stop` with a message — written through a temporary file and a rename
+so a crash mid-write leaves the previous file intact, listed by name
+with any file that no longer parses skipped rather than fatal, and
+deleted quietly whether or not it was there. Names are checked to be
+safe file names on every platform (letters, digits, spaces, `-`, `_`,
+`.`; 1–64 characters; no path). `list_pngs` lists the PNGs directly
+inside a folder for Batch. Four commands expose it: `save_action`,
+`list_actions`, `delete_action`, `list_pngs`.
+
+`src/actions.ts` is the recorder's model. A recording keeps every
+command the app runs — through `runCommand`, the one path every command
+takes — as it ran, except that the selected layer's id becomes the
+token `"$selected"`, the way Photoshop's actions target "the current
+layer" rather than the layer that happened to be selected while
+recording, and the progress channel a long command carries is dropped.
+Commands that change which document is open (New, Open, Open Project,
+Recover) and history itself (undo, redo, checkpoint, cancel) are never
+recorded. Playback resolves the token to the layer selected at that
+moment and refuses a step that needs one when nothing is selected.
+
+**The panel** (Window > Actions): name an action and press Record; the
+status bar shows "● Recording *name* — n steps", and every command run
+from then on is appended and written to disk *before* anything else
+happens — `save_action` is called from inside `runCommand` the instant
+the command's result lands — so a recording is never only in memory.
+Insert Stop adds a pause with a message; Stop Recording ends it. Play
+runs the action's steps through `runCommand` in turn, aimed at the
+selected layer, showing "Playing *name* i/n" in the progress strip
+(Phase 349) with Cancel; a Stop step opens a dialog with its message and
+Continue / Stop; the first failing step, a Stop answered Stop, or Cancel
+ends playback. Batch (File > Automate > Batch) asks for a folder of PNGs
+and a folder for results, then opens each file, plays the action, and
+exports the flattened result under the source's name — "Batch *name*
+i/n" in the strip, cancellable between files. Delete removes an action;
+deleting the one being recorded stops the recording. The selected
+action's steps are listed underneath, each described by its command and
+arguments without the layer id.
+
+**Verified two ways.** `cargo test` (`actions::`): actions round-trip
+through their own files and list in case-insensitive name order, saving
+again replaces without leaving a temporary, and the file is plain JSON
+with `"kind": "command"`, `"kind": "stop"`, and `"$selected"` spelled
+out; a broken file is skipped and a non-JSON file ignored while the good
+action still lists, and removing a missing action is quiet; names are
+validated (empty, all spaces, `..`, `/`, `\`, non-ASCII, 65 characters
+all refused, `../escape` refused by `save`); `list_pngs` finds `A.PNG`
+and `b.png` in order, not the `.jpg`, the `.txt`, or the nested PNG.
+`npm test` (`src/actions.test.ts`, 4 tests): recording swaps the
+selected layer's id for the token, keeps another layer's id, and drops
+the progress channel; playback aims the token at the layer selected now
+and throws without one; the non-recordable set; step descriptions and
+Batch's output names on both path styles. Then the built app in
+Chromium (`vite preview` + Playwright, the Tauri bridge stubbed with an
+in-memory action store and the real `DocumentView`): File > New…; Window
+> Actions; Record "Soften" → the status bar reads `● Recording "Soften"
+— 0 steps`; Image > Adjustments > Invert Colors from the menu bar → `1
+step`, the stub's store holding `invert_colors` with `id: "$selected"`;
+Insert Stop "Look at it" → the steps list reads `invert_colors | Stop:
+Look at it` and the store has both; Stop Recording clears the
+indicator; Play runs `invert_colors(id=1)`, shows "Playing Soften 1/2 |
+Cancel" while the Stop dialog reads "Look at it" with Stop / Continue,
+and Continue finishes with the strip gone and no error; Play again with
+Stop at the prompt runs only the first step; Delete empties the list.
+The Xvfb live-verification gap from the previous phases stands.
+
+**1827 Rust tests total** (1823 → 1827: 1820 lib + 7 pipeline). **Frontend tests: 13** (9 → 13).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

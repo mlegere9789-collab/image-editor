@@ -1,6 +1,7 @@
 // Suppress the extra console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod actions;
 pub mod autosave;
 pub mod blend;
 pub mod colorize;
@@ -146,6 +147,42 @@ where
         cancel: &state.cancel,
     };
     edit_checkpointed(state, |document| edit_fn(document, &mut progress))
+}
+
+/// The app's data directory, where actions live.
+fn data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map_err(|e| format!("No data directory: {e}"))
+}
+
+/// Window > Actions: writes `action` to its own file under the data
+/// directory, replacing the previous version -- called after every
+/// recorded step, so a recording is never only in memory.
+#[tauri::command]
+fn save_action(app: tauri::AppHandle, action: actions::Action) -> Result<(), String> {
+    actions::save(&data_dir(&app)?, &action)
+}
+
+/// Window > Actions: every saved action, by name.
+#[tauri::command]
+fn list_actions(app: tauri::AppHandle) -> Result<Vec<actions::Action>, String> {
+    actions::list(&data_dir(&app)?)
+}
+
+/// Window > Actions: deletes the action called `name`.
+#[tauri::command]
+fn delete_action(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    actions::remove(&data_dir(&app)?, &name)
+}
+
+/// File > Automate > Batch: the PNG files directly inside `dir`, sorted.
+#[tauri::command]
+fn list_pngs(dir: String) -> Result<Vec<String>, String> {
+    Ok(actions::list_pngs(Path::new(&dir))?
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect())
 }
 
 /// Cancel: asks the long command in flight, if any, to stop at its next
@@ -7587,6 +7624,10 @@ pub fn run() {
             export_layer_bytes,
             autosave_project,
             cancel_operation,
+            save_action,
+            list_actions,
+            delete_action,
+            list_pngs,
             autosave_status,
             recover_autosave,
             discard_autosave,

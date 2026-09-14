@@ -10,6 +10,15 @@ import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
+import {
+  batchOutputName,
+  describeStep,
+  isRecordable,
+  playArgs,
+  recordArgs,
+  type ActionStep,
+  type RecordedAction,
+} from "./actions";
 import type {
   Adjustment,
   ProgressEvent,
@@ -706,12 +715,33 @@ export default function App() {
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
   const [recoveryStatus, setRecoveryStatus] = useState<{ modifiedAt: number; bytes: number } | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // The selection as the recorder and playback see it, without a stale
+  // closure: runCommand's own closure is fixed for the app's life.
+  const selectedIdRef = useRef<number | null>(null);
+  selectedIdRef.current = selectedId;
   const [blendModes, setBlendModes] = useState<BlendModeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
   // The long command in flight, as its last progress report: the
   // progress strip in the status bar, with its Cancel button.
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  // Window > Actions: the recordings on disk (actions.rs), the one being
+  // recorded -- also held in a ref, since runCommand's closure is fixed
+  // -- and playback's own state: a Stop step's prompt and its Cancel.
+  const [actions, setActions] = useState<RecordedAction[]>([]);
+  const [recording, setRecording] = useState<RecordedAction | null>(null);
+  const recordingRef = useRef<RecordedAction | null>(null);
+  const [showActionsDialog, setShowActionsDialog] = useState(false);
+  const [selectedActionName, setSelectedActionName] = useState<string | null>(null);
+  const [newActionName, setNewActionName] = useState("");
+  const [stopMessage, setStopMessage] = useState("");
+  const [actionsError, setActionsError] = useState<string | null>(null);
+  const [stopPrompt, setStopPrompt] = useState<{
+    message: string;
+    resolve: (go: boolean) => void;
+  } | null>(null);
+  const playbackCancelRef = useRef(false);
   const cancelOperation = useCallback(() => {
+    playbackCancelRef.current = true;
     setProgress((current) => (current ? { ...current, stage: "Cancelling" } : current));
     void invoke("cancel_operation").catch(() => {
       // Nothing to cancel any more.
@@ -2615,9 +2645,23 @@ export default function App() {
       }
       try {
         const snapshot = await invoke<Snapshot>(command, args);
-        if (ticket !== requestId.current) return;
+        if (ticket !== requestId.current) return false;
 
         editHistoryRef.current.push({ command, at: new Date().toISOString() });
+        // Window > Actions: a recording keeps every command that ran, as
+        // it ran, and reaches disk before anything else happens.
+        const tape = recordingRef.current;
+        if (tape && isRecordable(command)) {
+          const step: ActionStep = {
+            kind: "command",
+            command,
+            args: recordArgs(args, selectedIdRef.current),
+          };
+          const next = { ...tape, steps: [...tape.steps, step] };
+          recordingRef.current = next;
+          setRecording(next);
+          void invoke("save_action", { action: next }).catch((err) => setActionsError(String(err)));
+        }
         setError(null);
         // Color Settings > Missing Profile Warning / Ask When Opening: only
         // meaningful right after loading a project, since `profileWasMissing`
@@ -2698,15 +2742,19 @@ export default function App() {
             );
           }
         }
+        return true;
       } catch (err) {
-        if (ticket !== requestId.current) return;
+        if (ticket !== requestId.current) return false;
         // A cancel is the user's own doing, not a failure: the document is
         // back as it was, and the strip simply goes away.
         setError(String(err) === CANCELLED ? null : String(err));
+        return false;
       } finally {
         if (ticket === requestId.current) {
           setBusy(false);
-          setProgress(null);
+          // Only a command that drove the strip clears it: an action or a
+          // batch playing quick commands keeps its own report up.
+          if (PROGRESS_COMMANDS.has(command)) setProgress(null);
         }
       }
     },
@@ -7134,6 +7182,144 @@ export default function App() {
     });
   }, []);
 
+  // Window > Actions -- see README Phase 350.
+  const refreshActions = useCallback(() => {
+    invoke<RecordedAction[]>("list_actions")
+      .then(setActions)
+      .catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    refreshActions();
+  }, [refreshActions]);
+  const startRecording = useCallback(async () => {
+    const name = newActionName.trim();
+    if (!name) return;
+    const tape: RecordedAction = { name, steps: [] };
+    try {
+      await invoke("save_action", { action: tape });
+    } catch (err) {
+      setActionsError(String(err));
+      return;
+    }
+    setActionsError(null);
+    recordingRef.current = tape;
+    setRecording(tape);
+    setSelectedActionName(name);
+    setNewActionName("");
+    refreshActions();
+  }, [newActionName, refreshActions]);
+  const stopRecording = useCallback(() => {
+    recordingRef.current = null;
+    setRecording(null);
+    refreshActions();
+  }, [refreshActions]);
+  const insertStop = useCallback(async () => {
+    const tape = recordingRef.current;
+    const message = stopMessage.trim();
+    if (!tape || !message) return;
+    const step: ActionStep = { kind: "stop", message };
+    const next = { ...tape, steps: [...tape.steps, step] };
+    recordingRef.current = next;
+    setRecording(next);
+    setStopMessage("");
+    await invoke("save_action", { action: next }).catch((err) => setActionsError(String(err)));
+    refreshActions();
+  }, [stopMessage, refreshActions]);
+  const deleteAction = useCallback(
+    async (name: string) => {
+      if (recordingRef.current?.name === name) stopRecording();
+      await invoke("delete_action", { name }).catch((err) => setActionsError(String(err)));
+      if (selectedActionName === name) setSelectedActionName(null);
+      refreshActions();
+    },
+    [refreshActions, selectedActionName, stopRecording],
+  );
+  // Playback: every step through runCommand in turn, aimed at the layer
+  // selected now; a Stop step waits on its prompt; the first failure, a
+  // Stop answered Stop, or Cancel ends it. Returns whether it ran through.
+  const playAction = useCallback(
+    async (action: RecordedAction): Promise<boolean> => {
+      playbackCancelRef.current = false;
+      const total = action.steps.length;
+      setProgress({ stage: `Playing ${action.name}`, done: 0, total });
+      let finished = true;
+      for (let index = 0; index < total; index++) {
+        if (playbackCancelRef.current) {
+          finished = false;
+          break;
+        }
+        const step = action.steps[index];
+        if (step.kind === "stop") {
+          const go = await new Promise<boolean>((resolve) =>
+            setStopPrompt({ message: step.message, resolve }),
+          );
+          setStopPrompt(null);
+          if (!go) {
+            finished = false;
+            break;
+          }
+        } else {
+          let args: Record<string, unknown>;
+          try {
+            args = playArgs(step.args, selectedIdRef.current);
+          } catch (err) {
+            setError(`Step ${index + 1} of "${action.name}": ${err instanceof Error ? err.message : String(err)}`);
+            finished = false;
+            break;
+          }
+          if (!(await runCommand(step.command, args))) {
+            finished = false;
+            break;
+          }
+        }
+        setProgress({ stage: `Playing ${action.name}`, done: index + 1, total });
+      }
+      setProgress(null);
+      return finished;
+    },
+    [runCommand],
+  );
+  // File > Automate > Batch: the action over every PNG in a folder, each
+  // opened, played, and exported under its own name into another folder.
+  const batchAction = useCallback(
+    async (action: RecordedAction) => {
+      const source = await open({ directory: true, multiple: false, title: "Batch: the folder of PNGs to process" });
+      if (typeof source !== "string") return;
+      const destination = await open({ directory: true, multiple: false, title: "Batch: the folder to save the results in" });
+      if (typeof destination !== "string") return;
+      let files: string[];
+      try {
+        files = await invoke<string[]>("list_pngs", { dir: source });
+      } catch (err) {
+        setError(String(err));
+        return;
+      }
+      if (files.length === 0) {
+        setError("That folder has no PNG files.");
+        return;
+      }
+      const separator = destination.includes("\\") && !destination.includes("/") ? "\\" : "/";
+      playbackCancelRef.current = false;
+      for (let index = 0; index < files.length; index++) {
+        if (playbackCancelRef.current) break;
+        setProgress({ stage: `Batch ${action.name}`, done: index, total: files.length });
+        if (!(await runCommand("open_document", { path: files[index] }, "top"))) break;
+        if (!(await playAction(action))) break;
+        try {
+          await invoke("export_png", {
+            path: `${destination}${separator}${batchOutputName(files[index])}`,
+            contentCredentials: null,
+          });
+        } catch (err) {
+          setError(String(err));
+          break;
+        }
+      }
+      setProgress(null);
+    },
+    [playAction, runCommand],
+  );
+
   const openDocument = useCallback(async () => {
     const selected = await open({ multiple: false, directory: false, filters: PNG_FILTER });
     if (typeof selected === "string") await runCommand("open_document", { path: selected }, "top");
@@ -9165,6 +9351,13 @@ export default function App() {
           title="Window > Brush Settings…: spacing, Shape Dynamics, Scattering, Transfer and hardness"
         >
           Brush Settings…
+        </button>
+        <button
+          className={`button button--quiet${recording ? " button--active" : ""}`}
+          onClick={() => setShowActionsDialog(true)}
+          title="Window > Actions: record the commands you run as a named action kept on disk, play it back on the selected layer, pause at Insert Stop, or batch it over a folder of PNGs"
+        >
+          Actions…
         </button>
         <button
           className="button button--quiet"
@@ -19444,6 +19637,163 @@ export default function App() {
         </div>
       )}
 
+      {showActionsDialog && (
+        <div className="modal-overlay" onClick={() => setShowActionsDialog(false)} role="presentation">
+          <div
+            className="modal modal--wide"
+            role="dialog"
+            aria-label="Actions"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Window &gt; Actions</h2>
+            <p className="modal__hint">
+              Name an action and press Record: every command you run is added to it and
+              written to disk as it runs, so a recording is never lost. Play runs it on the
+              layer selected then; Insert Stop pauses playback with a message; Batch plays
+              it over every PNG in a folder and saves the results into another.
+            </p>
+            {actionsError && (
+              <p className="modal__hint modal__hint--error" role="alert">
+                {actionsError}
+              </p>
+            )}
+            <div className="actions__record">
+              {recording ? (
+                <>
+                  <span className="statusbar__recording">
+                    ● Recording "{recording.name}" — {recording.steps.length} step
+                    {recording.steps.length === 1 ? "" : "s"}
+                  </span>
+                  <button className="button" onClick={stopRecording}>
+                    Stop Recording
+                  </button>
+                  <label className="control control--row">
+                    <span className="control__label">Stop message</span>
+                    <input
+                      type="text"
+                      value={stopMessage}
+                      onChange={(event) => setStopMessage(event.target.value)}
+                      placeholder="Check the crop, then continue"
+                    />
+                  </label>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void insertStop()}
+                    disabled={stopMessage.trim() === ""}
+                  >
+                    Insert Stop
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className="control control--row">
+                    <span className="control__label">New action</span>
+                    <input
+                      type="text"
+                      value={newActionName}
+                      onChange={(event) => setNewActionName(event.target.value)}
+                      placeholder="Name"
+                    />
+                  </label>
+                  <button
+                    className="button"
+                    onClick={() => void startRecording()}
+                    disabled={newActionName.trim() === ""}
+                  >
+                    Record
+                  </button>
+                </>
+              )}
+            </div>
+            <div className="toolbar-customize__list actions__list">
+              {actions.length === 0 && <p className="modal__hint">No actions yet.</p>}
+              {actions.map((action) => (
+                <div
+                  className={`actions__row${selectedActionName === action.name ? " actions__row--selected" : ""}`}
+                  key={action.name}
+                >
+                  <button
+                    className="button button--quiet actions__name"
+                    onClick={() => setSelectedActionName(action.name)}
+                  >
+                    {action.name}{" "}
+                    <span className="actions__count">
+                      ({action.steps.length} step{action.steps.length === 1 ? "" : "s"})
+                    </span>
+                  </button>
+                  <button
+                    className="button"
+                    onClick={() => {
+                      setShowActionsDialog(false);
+                      void playAction(action);
+                    }}
+                    disabled={busy || !hasDocument || recording !== null || action.steps.length === 0}
+                    title="Play this action on the selected layer of the open document"
+                  >
+                    Play
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setShowActionsDialog(false);
+                      void batchAction(action);
+                    }}
+                    disabled={busy || recording !== null || action.steps.length === 0}
+                    title="File > Automate > Batch: play this action over every PNG in a folder"
+                  >
+                    Batch…
+                  </button>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => void deleteAction(action.name)}
+                    disabled={busy}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+            {selectedActionName !== null &&
+              (() => {
+                const shown = recording?.name === selectedActionName ? recording : actions.find((a) => a.name === selectedActionName);
+                if (!shown) return null;
+                return (
+                  <ol className="actions__steps" aria-label={`Steps of ${shown.name}`}>
+                    {shown.steps.length === 0 && <li className="actions__step">No steps yet.</li>}
+                    {shown.steps.map((step, index) => (
+                      <li className="actions__step" key={index}>
+                        {describeStep(step)}
+                      </li>
+                    ))}
+                  </ol>
+                );
+              })()}
+            <div className="modal__actions">
+              <button className="button" onClick={() => setShowActionsDialog(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {stopPrompt && (
+        <div className="modal-overlay" role="presentation">
+          <div className="modal" role="dialog" aria-label="Action stopped">
+            <h2 className="modal__heading">Stop</h2>
+            <p className="modal__hint">{stopPrompt.message}</p>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => stopPrompt.resolve(false)}>
+                Stop
+              </button>
+              <button className="button" onClick={() => stopPrompt.resolve(true)} autoFocus>
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showRecoveryDialog && recoveryStatus && (
         <div className="modal-overlay" role="presentation">
           <div className="modal" role="dialog" aria-label="Recover unsaved work">
@@ -28362,6 +28712,15 @@ export default function App() {
               Cancel
             </button>
           </div>
+        )}
+        {recording && (
+          <span
+            className="statusbar__recording"
+            title="Window > Actions: every command you run is being recorded and saved as it runs"
+          >
+            ● Recording "{recording.name}" — {recording.steps.length} step
+            {recording.steps.length === 1 ? "" : "s"}
+          </span>
         )}
         {document ? (
           <>

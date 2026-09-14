@@ -1491,3 +1491,62 @@ body {
 .progress-strip__cancel {
   padding: 2px 10px;
 }
+
+/* Window > Actions -- see README Phase 350. */
+.statusbar__recording {
+  color: var(--danger);
+  white-space: nowrap;
+}
+
+.actions__record {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.actions__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.actions__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.actions__row--selected {
+  background: var(--bg);
+}
+
+.actions__name {
+  flex: 1;
+  text-align: left;
+}
+
+.actions__count {
+  color: var(--muted);
+}
+
+.actions__steps {
+  max-height: 200px;
+  overflow-y: auto;
+  margin: 12px 0 0;
+  padding-left: 28px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.actions__step {
+  padding: 2px 0;
+}
+
+.modal__hint--error {
+  color: var(--danger);
+}
