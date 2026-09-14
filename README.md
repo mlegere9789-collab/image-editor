@@ -22691,6 +22691,48 @@ to end; three screenshots checked by eye.
 
 Tests: 1889 Rust (1888 → 1889), 22 frontend.
 
+## Phase 383 — Field Blur's arbitrary number of pins
+
+One tool row of section D, the last of the two-pin scope cuts.
+`Document::field_blur_with` takes `pins: &[(f32, f32, u32)]`, any
+number of them: a pixel exactly at a pin's position uses that pin's
+radius outright, and every other pixel's blur radius is the same
+inverse-distance-weighted average as before, generalised from two
+terms to a sum over every pin — `Σ(weightᵢ · radiusᵢ) / Σ weightᵢ`,
+`weightᵢ = 1 / distanceᵢ`. With one pin the sum has a single term
+whose weight cancels, giving a uniform box blur; with none it errors.
+`field_blur` keeps its old two-argument shape, calling
+`field_blur_with` with exactly those two pins. The Tauri command now
+takes the pins list directly instead of six fixed fields. The dialog
+and its on-canvas markers (Phase 361) grew with it: `fieldBlurPins`
+replaces the six `fieldBlurX1`/`Y1`/`Radius1`/`X2`/`Y2`/`Radius2`
+fields with a list, the dialog renders one X/Y/Radius/Remove block per
+pin plus an Add Pin button, and the canvas markers are generated the
+same way — `blurDrag`'s type grew a `{ kind: "field", index, ring }`
+case alongside the other tools' fixed string ones, so dragging any
+pin's marker or blur ring edits that one pin in the list.
+
+**Verified.** Three Rust tests. `field_blur_with_takes_any_number_of_pins`:
+three pins on the ramped 3×3 canvas — (0, 0) radius 0, (2, 0) radius 2,
+(1, 2) radius 6 — give pixel (1, 1) an interpolated radius of 3
+(weights 0.70710677, 0.70710677 and 1.0, cross-checked in Python's f32
+arithmetic) whose box blur is 50, while (0, 0) and (2, 0), sitting
+exactly on the first two pins, use their radii outright (10 untouched,
+and 42 for pin two's own radius-2 blur).
+`field_blur_with_one_pin_is_a_uniform_box_blur` confirms the one-pin
+case degenerates to a plain box blur at every non-pin pixel; an empty
+list errors. In Chromium against the built frontend: opening Field
+Blur shows two pins and their on-canvas markers, Add Pin adds a third
+(a new marker appears), dragging the third pin's own marker updates
+its own X/Y fields to the drop point, Remove Pin 2 drops back to two,
+and Apply sends `field_blur` with a `pins` array matching the dialog.
+On the real app under Xvfb: Add Pin added a third marker on the live
+canvas, dragging it to a new spot updated Pin 3's X/Y fields through
+the real IPC, and Apply visibly softened the stroke's edges with all
+three pins in play; four screenshots checked by eye.
+
+Tests: 1892 Rust (1889 → 1892), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

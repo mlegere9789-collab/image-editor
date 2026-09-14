@@ -2301,10 +2301,7 @@ export default function App() {
   // drag holds, and the canvas box it is measured against.
   const canvasWrapRef = useRef<HTMLDivElement>(null);
   const [blurDrag, setBlurDrag] = useState<
-    | "field1"
-    | "field1ring"
-    | "field2"
-    | "field2ring"
+    | { kind: "field"; index: number; ring: boolean }
     | "iris"
     | "irisring"
     | "tiltFocus"
@@ -2326,12 +2323,12 @@ export default function App() {
   const [irisBlurAspect, setIrisBlurAspect] = useState(100);
   const [irisBlurRotation, setIrisBlurRotation] = useState(0);
   const [showFieldBlurDialog, setShowFieldBlurDialog] = useState(false);
-  const [fieldBlurX1, setFieldBlurX1] = useState(0);
-  const [fieldBlurY1, setFieldBlurY1] = useState(0);
-  const [fieldBlurRadius1, setFieldBlurRadius1] = useState(0);
-  const [fieldBlurX2, setFieldBlurX2] = useState(0);
-  const [fieldBlurY2, setFieldBlurY2] = useState(0);
-  const [fieldBlurRadius2, setFieldBlurRadius2] = useState(15);
+  const [fieldBlurPins, setFieldBlurPins] = useState<
+    { x: number; y: number; radius: number }[]
+  >([
+    { x: 0, y: 0, radius: 0 },
+    { x: 0, y: 0, radius: 15 },
+  ]);
   const [showSpinBlurDialog, setShowSpinBlurDialog] = useState(false);
   // Blur Gallery > Path Blur: the path's points and the options bar.
   const [showPathBlurDialog, setShowPathBlurDialog] = useState(false);
@@ -8577,35 +8574,56 @@ export default function App() {
   ]);
 
   const openFieldBlurDialog = useCallback(() => {
-    setFieldBlurX1(Math.round((document?.width ?? 2) / 4));
-    setFieldBlurY1(Math.round((document?.height ?? 2) / 4));
-    setFieldBlurX2(Math.round(((document?.width ?? 2) * 3) / 4));
-    setFieldBlurY2(Math.round(((document?.height ?? 2) * 3) / 4));
+    setFieldBlurPins([
+      {
+        x: Math.round((document?.width ?? 2) / 4),
+        y: Math.round((document?.height ?? 2) / 4),
+        radius: 0,
+      },
+      {
+        x: Math.round(((document?.width ?? 2) * 3) / 4),
+        y: Math.round(((document?.height ?? 2) * 3) / 4),
+        radius: 15,
+      },
+    ]);
     setShowFieldBlurDialog(true);
   }, [document]);
+
+  const addFieldBlurPin = useCallback(() => {
+    setFieldBlurPins((pins) => [
+      ...pins,
+      {
+        x: Math.round((document?.width ?? 2) / 2),
+        y: Math.round((document?.height ?? 2) / 2),
+        radius: 15,
+      },
+    ]);
+  }, [document]);
+
+  const removeFieldBlurPin = useCallback((index: number) => {
+    setFieldBlurPins((pins) => pins.filter((_, i) => i !== index));
+  }, []);
+
+  const setFieldBlurPin = useCallback(
+    (
+      index: number,
+      patch: Partial<{ x: number; y: number; radius: number }>,
+    ) => {
+      setFieldBlurPins((pins) =>
+        pins.map((p, i) => (i === index ? { ...p, ...patch } : p)),
+      );
+    },
+    [],
+  );
 
   const applyFieldBlur = useCallback(async () => {
     if (selectedId === null) return;
     await runCommand("field_blur", {
       id: selectedId,
-      x1: fieldBlurX1,
-      y1: fieldBlurY1,
-      radius1: fieldBlurRadius1,
-      x2: fieldBlurX2,
-      y2: fieldBlurY2,
-      radius2: fieldBlurRadius2,
+      pins: fieldBlurPins.map((p) => [p.x, p.y, p.radius]),
     });
     setShowFieldBlurDialog(false);
-  }, [
-    runCommand,
-    selectedId,
-    fieldBlurX1,
-    fieldBlurY1,
-    fieldBlurRadius1,
-    fieldBlurX2,
-    fieldBlurY2,
-    fieldBlurRadius2,
-  ]);
+  }, [runCommand, selectedId, fieldBlurPins]);
 
   const openSpinBlurDialog = useCallback(() => {
     setSpinBlurCenterX(Math.round((document?.width ?? 2) / 2));
@@ -34683,70 +34701,63 @@ export default function App() {
             <h2 className="modal__heading">
               Filter Gallery &gt; Blur Gallery &gt; Field Blur
             </h2>
-            <label className="control control--row">
-              <span className="control__label">Pin 1 X / Y</span>
-              <input
-                type="number"
-                min={0}
-                max={document?.width ?? 1}
-                value={fieldBlurX1}
-                onChange={(event) => setFieldBlurX1(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={0}
-                max={document?.height ?? 1}
-                value={fieldBlurY1}
-                onChange={(event) => setFieldBlurY1(Number(event.target.value))}
-              />
-            </label>
-            <label className="control">
-              <span className="control__label">
-                Pin 1 Blur Radius
-                <span className="control__value">{fieldBlurRadius1}px</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={fieldBlurRadius1}
-                onChange={(event) =>
-                  setFieldBlurRadius1(Number(event.target.value))
-                }
-              />
-            </label>
-            <label className="control control--row">
-              <span className="control__label">Pin 2 X / Y</span>
-              <input
-                type="number"
-                min={0}
-                max={document?.width ?? 1}
-                value={fieldBlurX2}
-                onChange={(event) => setFieldBlurX2(Number(event.target.value))}
-              />
-              <input
-                type="number"
-                min={0}
-                max={document?.height ?? 1}
-                value={fieldBlurY2}
-                onChange={(event) => setFieldBlurY2(Number(event.target.value))}
-              />
-            </label>
-            <label className="control">
-              <span className="control__label">
-                Pin 2 Blur Radius
-                <span className="control__value">{fieldBlurRadius2}px</span>
-              </span>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                value={fieldBlurRadius2}
-                onChange={(event) =>
-                  setFieldBlurRadius2(Number(event.target.value))
-                }
-              />
-            </label>
+            {fieldBlurPins.map((pin, index) => (
+              <div key={index} className="field-blur-pin">
+                <label className="control control--row">
+                  <span className="control__label">Pin {index + 1} X / Y</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={document?.width ?? 1}
+                    value={pin.x}
+                    onChange={(event) =>
+                      setFieldBlurPin(index, { x: Number(event.target.value) })
+                    }
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    max={document?.height ?? 1}
+                    value={pin.y}
+                    onChange={(event) =>
+                      setFieldBlurPin(index, { y: Number(event.target.value) })
+                    }
+                  />
+                </label>
+                <label className="control">
+                  <span className="control__label">
+                    Pin {index + 1} Blur Radius
+                    <span className="control__value">{pin.radius}px</span>
+                  </span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={pin.radius}
+                    onChange={(event) =>
+                      setFieldBlurPin(index, {
+                        radius: Number(event.target.value),
+                      })
+                    }
+                  />
+                </label>
+                <button
+                  className="button button--quiet"
+                  onClick={() => removeFieldBlurPin(index)}
+                  disabled={fieldBlurPins.length <= 1}
+                  title="Remove this pin"
+                >
+                  Remove Pin {index + 1}
+                </button>
+              </div>
+            ))}
+            <button
+              className="button button--quiet"
+              onClick={addFieldBlurPin}
+              title="Add another Field Blur pin"
+            >
+              Add Pin
+            </button>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -34757,7 +34768,7 @@ export default function App() {
               <button
                 className="button"
                 onClick={applyFieldBlur}
-                disabled={busy}
+                disabled={busy || fieldBlurPins.length === 0}
               >
                 Apply
               </button>
@@ -36288,37 +36299,22 @@ export default function App() {
                     if (blurDrag === null) return;
                     const at = pointAt(event);
                     if (!at) return;
+                    if (typeof blurDrag === "object") {
+                      const { index, ring } = blurDrag;
+                      setFieldBlurPin(
+                        index,
+                        ring
+                          ? {
+                              radius: Math.min(
+                                250,
+                                pixelDistance(at, fieldBlurPins[index]),
+                              ),
+                            }
+                          : { x: at.x, y: at.y },
+                      );
+                      return;
+                    }
                     switch (blurDrag) {
-                      case "field1":
-                        setFieldBlurX1(at.x);
-                        setFieldBlurY1(at.y);
-                        break;
-                      case "field1ring":
-                        setFieldBlurRadius1(
-                          Math.min(
-                            250,
-                            pixelDistance(at, {
-                              x: fieldBlurX1,
-                              y: fieldBlurY1,
-                            }),
-                          ),
-                        );
-                        break;
-                      case "field2":
-                        setFieldBlurX2(at.x);
-                        setFieldBlurY2(at.y);
-                        break;
-                      case "field2ring":
-                        setFieldBlurRadius2(
-                          Math.min(
-                            250,
-                            pixelDistance(at, {
-                              x: fieldBlurX2,
-                              y: fieldBlurY2,
-                            }),
-                          ),
-                        );
-                        break;
                       case "iris":
                         setIrisBlurCenterX(at.x);
                         setIrisBlurCenterY(at.y);
@@ -36356,6 +36352,10 @@ export default function App() {
                     onPointerUp: end,
                     onPointerCancel: end,
                   });
+                  const controlId = (which: NonNullable<typeof blurDrag>) =>
+                    typeof which === "string"
+                      ? which
+                      : `field${which.index}${which.ring ? "ring" : ""}`;
                   const pin = (
                     which: NonNullable<typeof blurDrag>,
                     x: number,
@@ -36363,13 +36363,13 @@ export default function App() {
                     label: string,
                   ) => (
                     <div
-                      key={which}
+                      key={controlId(which)}
                       className="blur-pin"
                       role="slider"
                       aria-label={label}
                       aria-valuenow={0}
                       tabIndex={-1}
-                      data-blur-control={which}
+                      data-blur-control={controlId(which)}
                       style={{
                         left: percentOf(x, doc.width),
                         top: percentOf(y, doc.height),
@@ -36386,13 +36386,13 @@ export default function App() {
                     label: string,
                   ) => (
                     <div
-                      key={which}
+                      key={controlId(which)}
                       className="blur-ring"
                       role="slider"
                       aria-label={label}
                       aria-valuenow={radius}
                       tabIndex={-1}
-                      data-blur-control={which}
+                      data-blur-control={controlId(which)}
                       style={ringStyle({ x, y }, Math.max(radius, 1), doc)}
                       title={`${label}: drag the ring to set ${radius}px`}
                       {...handlers(which)}
@@ -36405,13 +36405,13 @@ export default function App() {
                     dashed: boolean,
                   ) => (
                     <div
-                      key={which}
+                      key={controlId(which)}
                       className={`blur-line${dashed ? " blur-line--band" : ""}`}
                       role="slider"
                       aria-label={label}
                       aria-valuenow={row}
                       tabIndex={-1}
-                      data-blur-control={which}
+                      data-blur-control={controlId(which)}
                       style={{ top: percentOf(row, doc.height) }}
                       title={`${label}: drag up or down`}
                       {...handlers(which)}
@@ -36419,34 +36419,22 @@ export default function App() {
                   );
                   return (
                     <>
-                      {showFieldBlurDialog && [
-                        ring(
-                          "field1ring",
-                          fieldBlurX1,
-                          fieldBlurY1,
-                          fieldBlurRadius1,
-                          "Field Blur pin 1 blur",
-                        ),
-                        pin(
-                          "field1",
-                          fieldBlurX1,
-                          fieldBlurY1,
-                          "Field Blur pin 1",
-                        ),
-                        ring(
-                          "field2ring",
-                          fieldBlurX2,
-                          fieldBlurY2,
-                          fieldBlurRadius2,
-                          "Field Blur pin 2 blur",
-                        ),
-                        pin(
-                          "field2",
-                          fieldBlurX2,
-                          fieldBlurY2,
-                          "Field Blur pin 2",
-                        ),
-                      ]}
+                      {showFieldBlurDialog &&
+                        fieldBlurPins.flatMap((p, index) => [
+                          ring(
+                            { kind: "field", index, ring: true },
+                            p.x,
+                            p.y,
+                            p.radius,
+                            `Field Blur pin ${index + 1} blur`,
+                          ),
+                          pin(
+                            { kind: "field", index, ring: false },
+                            p.x,
+                            p.y,
+                            `Field Blur pin ${index + 1}`,
+                          ),
+                        ])}
                       {showIrisBlurDialog && [
                         ring(
                           "irisring",

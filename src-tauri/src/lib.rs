@@ -7230,22 +7230,15 @@ fn iris_blur(
     })
 }
 
-/// Filter Gallery > Blur Gallery > Field Blur (two pins) on layer `id`.
+/// Filter Gallery > Blur Gallery > Field Blur on layer `id`: `pins`, each
+/// an `(x, y, radius)` triple, at least one.
 #[tauri::command]
-#[allow(clippy::too_many_arguments)]
 fn field_blur(
     state: State<'_, AppState>,
     id: LayerId,
-    x1: f32,
-    y1: f32,
-    radius1: u32,
-    x2: f32,
-    y2: f32,
-    radius2: u32,
+    pins: Vec<(f32, f32, u32)>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.field_blur(id, x1, y1, radius1, x2, y2, radius2)
-    })
+    edit_checkpointed(&state, |document| document.field_blur_with(id, &pins))
 }
 
 /// Filter Gallery > Blur Gallery > Spin Blur on layer `id`.

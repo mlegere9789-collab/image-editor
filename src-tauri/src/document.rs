@@ -25516,25 +25516,9 @@ impl Document {
         Ok(Some(bounds))
     }
 
-    /// Filter Gallery > Blur Gallery > Field Blur (two pins only): each
-    /// pin is a `(x, y, radius)` triple; a pixel exactly at a pin's own
-    /// position uses that pin's own `radius` outright, and every other
-    /// pixel's own blur radius is an inverse-distance-weighted average
-    /// of both pins' radii — `weight = 1.0 / distance` to each pin,
-    /// `radius = (weight1 · radius1 + weight2 · radius2) / (weight1 +
-    /// weight2)`, rounded to the nearest whole pixel — so the blur
-    /// radius itself varies smoothly and continuously across the whole
-    /// image, unlike [`Self::iris_blur`]/[`Self::tilt_shift`]'s own
-    /// fixed blur radius blended in only past a hard zone boundary.
-    /// [`box_blur_at`] is then run at that pixel's own interpolated
-    /// radius, its RGB channels alone copied into the output — alpha
-    /// untouched, the same convention [`Self::tilt_shift`] and
-    /// [`Self::iris_blur`] already keep. Photoshop's own Field Blur
-    /// accepts an arbitrary number of draggable pins with spline-
-    /// smoothed falloff between them; this project's own two-pin,
-    /// inverse-distance-weighted version is a documented scope cut
-    /// trading Photoshop's own richer interpolation for a simple,
-    /// well-known, and exactly hand-verifiable one.
+    /// [`Self::field_blur_with`] with exactly the two pins Photoshop's
+    /// own dialog used to start with, kept for callers that only ever
+    /// had two.
     #[allow(clippy::too_many_arguments)]
     pub fn field_blur(
         &mut self,
@@ -25546,7 +25530,43 @@ impl Document {
         y2: f32,
         radius2: u32,
     ) -> Result<Option<Rect>, String> {
-        if !x1.is_finite() || !y1.is_finite() || !x2.is_finite() || !y2.is_finite() {
+        self.field_blur_with(id, &[(x1, y1, radius1), (x2, y2, radius2)])
+    }
+
+    /// Filter Gallery > Blur Gallery > Field Blur: `pins`, each an
+    /// `(x, y, radius)` triple, at least one. A pixel exactly at a pin's
+    /// own position uses that pin's own `radius` outright; every other
+    /// pixel's own blur radius is an inverse-distance-weighted average of
+    /// every pin's radius — `weight = 1.0 / distance` to each pin,
+    /// `radius = Σ(weightᵢ · radiusᵢ) / Σ weightᵢ`, rounded to the
+    /// nearest whole pixel — so the blur radius itself varies smoothly
+    /// and continuously across the whole image, unlike
+    /// [`Self::iris_blur`]/[`Self::tilt_shift`]'s own fixed blur radius
+    /// blended in only past a hard zone boundary. With one pin the sum
+    /// has a single term, so its own weight cancels and every pixel gets
+    /// that pin's radius outright — a uniform box blur. [`box_blur_at`]
+    /// is then run at that pixel's own interpolated radius, its RGB
+    /// channels alone copied into the output — alpha untouched, the same
+    /// convention [`Self::tilt_shift`] and [`Self::iris_blur`] already
+    /// keep. Photoshop's own Field Blur takes an arbitrary number of
+    /// draggable pins with spline-smoothed falloff between them; this
+    /// project's own inverse-distance-weighted version is a documented
+    /// scope cut trading Photoshop's own richer interpolation for a
+    /// simple, well-known, and exactly hand-verifiable one that still
+    /// takes as many pins as the dialog holds. Errors on non-finite pin
+    /// coordinates or no pins at all.
+    pub fn field_blur_with(
+        &mut self,
+        id: LayerId,
+        pins: &[(f32, f32, u32)],
+    ) -> Result<Option<Rect>, String> {
+        if pins.is_empty() {
+            return Err("Field Blur needs at least one pin.".to_string());
+        }
+        if pins
+            .iter()
+            .any(|(x, y, _)| !x.is_finite() || !y.is_finite())
+        {
             return Err("Field Blur pin coordinates must be finite numbers.".to_string());
         }
         let bounds = self.copy_bounds();
@@ -25567,18 +25587,19 @@ impl Document {
                     continue;
                 }
                 let (px, py) = (col as f32, row as f32);
-                let radius = if px == x1 && py == y1 {
-                    radius1
-                } else if px == x2 && py == y2 {
-                    radius2
-                } else {
-                    let d1 = ((px - x1).powi(2) + (py - y1).powi(2)).sqrt();
-                    let d2 = ((px - x2).powi(2) + (py - y2).powi(2)).sqrt();
-                    let (w1, w2) = (1.0 / d1, 1.0 / d2);
-                    ((w1 * radius1 as f32 + w2 * radius2 as f32) / (w1 + w2))
-                        .round()
-                        .max(0.0) as u32
-                };
+                let radius =
+                    if let Some(&(_, _, r)) = pins.iter().find(|&&(x, y, _)| x == px && y == py) {
+                        r
+                    } else {
+                        let (mut weighted, mut total_weight) = (0f32, 0f32);
+                        for &(x, y, r) in pins {
+                            let d = ((px - x).powi(2) + (py - y).powi(2)).sqrt();
+                            let w = 1.0 / d;
+                            weighted += w * r as f32;
+                            total_weight += w;
+                        }
+                        (weighted / total_weight).round().max(0.0) as u32
+                    };
                 let blurred =
                     box_blur_at(&source, doc_width, width, height, row, col, radius as i64);
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
@@ -51331,6 +51352,49 @@ mod tests {
         assert_eq!(doc.layers()[0].pixels, solid(2, 2, [10, 20, 30, 255]));
         let mut empty = Document::new(2, 2).unwrap();
         assert!(empty.field_blur(999, 0.0, 0.0, 0, 2.0, 2.0, 4).is_err());
+    }
+
+    #[test]
+    fn field_blur_with_takes_any_number_of_pins() {
+        // Three pins: (0, 0) radius 0, (2, 0) radius 2, (1, 2) radius 6.
+        // At (1, 1): distances 1.41421356, 1.41421356, and 1.0, weights
+        // 0.70710677 each for the first two and 1.0 for the third;
+        // weighted radius (0.70710677*0 + 0.70710677*2 + 1.0*6) /
+        // 2.41421354 = 3.07106781, rounding to 3 -- its own radius-3
+        // box blur (which reaches every pixel of the 3x3 canvas,
+        // edge-clamped) averages to 50. (0, 0) sits exactly on the
+        // first pin, using its radius 0 outright -- untouched at 10.
+        // (2, 0) sits exactly on the second, radius 2 outright, whose
+        // box blur is 42.
+        let idx = |x: usize, y: usize| (y * 3 + x) * 4;
+        let (mut doc, id) = ramped_3x3();
+        doc.field_blur_with(id, &[(0.0, 0.0, 0), (2.0, 0.0, 2), (1.0, 2.0, 6)])
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[idx(1, 1)], 50);
+        assert_eq!(p[idx(0, 0)], 10);
+        assert_eq!(p[idx(2, 0)], 42);
+    }
+
+    #[test]
+    fn field_blur_with_one_pin_is_a_uniform_box_blur() {
+        // A single pin's own weight always cancels out of the sum, so
+        // every pixel not exactly on it gets that pin's radius outright
+        // -- a plain, uniform box_blur_at(radius) over the whole layer.
+        let (mut doc, id) = ramped_3x3();
+        doc.field_blur_with(id, &[(5.0, 5.0, 2)]).unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(p[0], 34); // (0, 0), radius-2 box blur
+        assert_eq!(p[16], 50); // (1, 1), radius-2 box blur
+    }
+
+    #[test]
+    fn field_blur_with_needs_at_least_one_pin() {
+        let (mut doc, id) = ramped_3x3();
+        assert!(doc
+            .field_blur_with(id, &[])
+            .unwrap_err()
+            .contains("one pin"));
     }
 
     #[test]
