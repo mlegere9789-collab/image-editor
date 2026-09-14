@@ -20759,6 +20759,47 @@ pixels.
 Brush Settings close the painting family's largest scope cut and the
 tip's scaling, angle, roundness and scatter; 612/618 unchanged.
 
+## Phase 347 — Crash-safe autosave and recovery
+
+The first pain point of `docs/PLAN_TO_100.md`'s section G, and the one
+users name most: Photoshop crashes, and unsaved work goes with it. The
+app now writes the open document to a recovery file thirty seconds
+after any edit — every edit re-arms the timer, so a burst of strokes
+writes once — and offers it back at the next launch. `autosave.rs`
+is the file side: `write` puts the project bytes (the same encoder
+Save Project and Cloud Documents use, so a recovery file is a
+complete version-2 project) under `autosave/recovery.imgproj` in the
+app's data directory by way of a temporary name renamed into place,
+so a crash mid-write never leaves a half file; `status` reports when
+it was written and how large it is; `read` and `discard` do what they
+say, a missing file being nothing to discard. Four commands wrap them
+(`autosave_project`, `autosave_status`, `recover_autosave`,
+`discard_autosave`), and the client does the rest: a timer effect on
+the document's generation counter, an "Autosaved 10:42:07" note beside
+Save Project, a launch-time check that opens a **Recover unsaved
+work?** dialog (the file's time and size, Recover or Discard) when a
+recovery file exists and nothing is open yet, and a successful Save
+Project discarding the recovery file, since the work is then on disk by
+the user's own hand.
+
+**Verified two ways.** `cargo test`: 1820 total (1813 lib + 7
+pipeline, up from 1819) — the recovery file's status is absent before
+any write, a write reports its size and stamps a real time, a second
+write replaces the first and leaves no temporary file behind, discard
+removes it and a second discard is not an error. `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings` and `npm run build`
+clean; the built frontend in Chromium, with the Tauri stub answering
+`autosave_status`, opened the recovery dialog with the file's time and
+size.
+
+Honest limitations: the interval is fixed at thirty seconds (Photoshop
+offers 5 to 60 minutes; thirty seconds costs one project encode of the
+open document, which for a large document is tenths of a second on a
+background thread the command already runs on); one recovery file,
+not one per document; and a recovery file is offered only when
+nothing is open at launch — an app started by double-clicking a file
+opens that file and keeps the recovery file for the next launch.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

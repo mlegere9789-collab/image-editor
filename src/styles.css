@@ -933,6 +933,14 @@ body {
   flex: 0 0 auto;
 }
 
+/* The autosave note beside Save Project. */
+.autosave-note {
+  font-size: 11px;
+  opacity: 0.7;
+  align-self: center;
+  white-space: nowrap;
+}
+
 /* The Assistant's transcript: notes (an action's result) quieter. */
 .assistant__transcript {
   max-height: 320px;

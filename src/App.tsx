@@ -682,6 +682,11 @@ export default function App() {
   // cross IPC: this only tells the `<img>` below which `composite://`
   // generation to fetch.
   const [generation, setGeneration] = useState<number | null>(null);
+  // Autosave: when the recovery file was last written this session, and
+  // the recovery offer at launch.
+  const [lastAutosaveAt, setLastAutosaveAt] = useState<number | null>(null);
+  const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<{ modifiedAt: number; bytes: number } | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [blendModes, setBlendModes] = useState<BlendModeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -7163,11 +7168,56 @@ export default function App() {
     try {
       await invoke("save_project", { path: destination });
       setError(null);
+      // The work is on disk by the user's own hand: the recovery file has
+      // nothing to add now.
+      await invoke("discard_autosave").catch(() => undefined);
+      setLastAutosaveAt(null);
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
+  }, []);
+
+  // Crash-safe autosave: every edit arms a 30-second timer (re-armed by
+  // later edits, so a burst of strokes writes once), and when it fires
+  // the open document goes to the recovery file. At launch, a recovery
+  // file left by a previous run is offered back before anything else.
+  const AUTOSAVE_DELAY_MS = 30_000;
+  const autosaveTimer = useRef<number | null>(null);
+  useEffect(() => {
+    if (generation === null || !hasDocumentRef.current) return;
+    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      autosaveTimer.current = null;
+      invoke<number>("autosave_project")
+        .then(() => setLastAutosaveAt(Date.now()))
+        .catch(() => undefined);
+    }, AUTOSAVE_DELAY_MS);
+    return () => {
+      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    };
+  }, [generation]);
+
+  useEffect(() => {
+    invoke<{ modifiedAt: number; bytes: number } | null>("autosave_status")
+      .then((status) => {
+        if (status && !hasDocumentRef.current) {
+          setRecoveryStatus(status);
+          setShowRecoveryDialog(true);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const recoverAutosave = useCallback(async () => {
+    setShowRecoveryDialog(false);
+    await runCommand("recover_autosave", {}, "top");
+  }, [runCommand]);
+
+  const discardAutosave = useCallback(async () => {
+    setShowRecoveryDialog(false);
+    await invoke("discard_autosave").catch(() => undefined);
   }, []);
 
   const openProject = useCallback(async () => {
@@ -9098,6 +9148,11 @@ export default function App() {
         >
           Save Project…
         </button>
+        {lastAutosaveAt !== null && (
+          <span className="autosave-note" title="Crash-safe autosave: the open document is written to a recovery file 30 seconds after each edit">
+            Autosaved {new Date(lastAutosaveAt).toLocaleTimeString()}
+          </span>
+        )}
         <button
           className="button button--quiet"
           onClick={() => void saveToCloud()}
@@ -19308,6 +19363,27 @@ export default function App() {
               </button>
               <button className="button button--quiet" onClick={() => setShowReviewDialog(false)} title="Close">
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRecoveryDialog && recoveryStatus && (
+        <div className="modal-overlay" role="presentation">
+          <div className="modal" role="dialog" aria-label="Recover unsaved work">
+            <h2 className="modal__heading">Recover unsaved work?</h2>
+            <p className="modal__hint">
+              A recovery file from {new Date(recoveryStatus.modifiedAt * 1000).toLocaleString()} (
+              {Math.max(1, Math.round(recoveryStatus.bytes / 1024))} KB) was left by a previous run that
+              did not close cleanly. Recover opens it as the document; Discard deletes it.
+            </p>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => void discardAutosave()} title="Delete the recovery file">
+                Discard
+              </button>
+              <button className="button" onClick={() => void recoverAutosave()} title="Open the recovered document">
+                Recover
               </button>
             </div>
           </div>

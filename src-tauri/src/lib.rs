@@ -1,6 +1,7 @@
 // Suppress the extra console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+pub mod autosave;
 pub mod blend;
 pub mod colorize;
 pub mod composite;
@@ -6901,6 +6902,60 @@ fn open_project(state: State<'_, AppState>, path: String) -> Result<Snapshot, St
     replace_open_document(&state, document)
 }
 
+/// Crash-safe autosave: the open document written as project-file bytes
+/// to `autosave/recovery.imgproj` under the app's data directory,
+/// atomically (a temporary file renamed into place), so a crash or a
+/// killed process never leaves a half-written recovery file and never
+/// loses more than the interval since the last autosave. Returns the
+/// bytes written.
+#[tauri::command]
+fn autosave_project(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<u64, String> {
+    let bytes = {
+        let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+        let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+        project::encode(document)?
+    };
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No data directory for autosave: {e}"))?;
+    autosave::write(&dir, &bytes)
+}
+
+/// What the recovery file holds, if anything: when it was written and
+/// how large it is -- shown at launch so the user can choose to recover.
+#[tauri::command]
+fn autosave_status(app: tauri::AppHandle) -> Option<autosave::Status> {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .and_then(|dir| autosave::status(&dir))
+}
+
+/// Recover: the recovery file opened as the document, exactly as Open
+/// Project would open it.
+#[tauri::command]
+fn recover_autosave(state: State<'_, AppState>, app: tauri::AppHandle) -> Result<Snapshot, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No data directory for autosave: {e}"))?;
+    let bytes = autosave::read(&dir)?;
+    let document = project::decode(&bytes)?;
+    replace_open_document(&state, document)
+}
+
+/// Discard the recovery file (after a successful save, or on the user's
+/// say-so).
+#[tauri::command]
+fn discard_autosave(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No data directory for autosave: {e}"))?;
+    autosave::discard(&dir)
+}
+
 /// Cloud Documents' own upload: the open document as project-file bytes,
 /// in memory, exactly [`save_project`]'s own format minus the filesystem
 /// write -- for the frontend to send wherever a user-configured Cloud
@@ -7431,6 +7486,10 @@ pub fn run() {
             read_content_credentials,
             export_layer,
             export_layer_bytes,
+            autosave_project,
+            autosave_status,
+            recover_autosave,
+            discard_autosave,
             paint_stroke_dynamic,
             tip_stroke_dynamic,
             select_from_mask,
