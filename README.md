@@ -22603,6 +22603,51 @@ screenshots checked by eye.
 
 Tests: 1887 Rust (1886 → 1887), 22 frontend.
 
+## Phase 381 — The shape tools' Shape and Path modes
+
+Six tool rows of section D, closing the shape tools' widest-shared
+scope cut. A new `Mode` select — Pixels, Shape, Path — joins the
+Rectangle, Ellipse, Triangle, Polygon, Star and Line tools' shared
+options bar. Pixels keeps every tool's old behaviour exactly. Shape
+routes the drag into `Document::add_shape_layer`, already built for
+the Shape Layer… dialog: a new top layer holding the shape's pixels,
+remembering its `ShapeSpec` so `set_shape` can redraw it later — a
+real, editable live shape layer, not a bake. Path is new:
+`Document::shape_outline` turns any `ShapeSpec` into plain vertices —
+the box corners for Rectangle and Triangle, the drag's own vertices
+for Polygon and Star, the two endpoints for Line, an inscribed 64-gon
+for Ellipse (a polygon approximation stated as such, this project
+having no Bézier arcs) — and `set_path_from_shape` replaces the
+current work path with them, closed for every shape but Line, which
+becomes an open two-point path as Photoshop draws a straight line.
+Nothing is painted in Path mode; the path renders through the same
+SVG overlay the Pen tools already use.
+
+**Verified.** One Rust test,
+`shape_tools_path_mode_sets_the_current_path_from_the_outline`,
+covering all seven `ShapeSpec` variants: a Rectangle box (1, 2)–(5, 6)
+gives the four corners in order, closed; the matching Triangle gives
+apex (3, 2), (5, 6), (1, 6); a Line from (0, 0) to (10, 10) gives just
+those two points, open; a square Polygon of 4 sides from centre
+(5, 5) through (10, 5) gives 4 vertices landing on the axes at
+(10, 5) and (0, 5); a Star of 5 points gives 10 vertices; an Ellipse
+in a 20×10 box gives 64 vertices, the first at (20, 5); a Custom
+shape's 3 points come back verbatim; a zero-area Rectangle and a
+2-sided Polygon both error exactly as the matching `draw_*` would,
+leaving the path untouched. In Chromium against the built frontend:
+the Rectangle, Star and Line tools all show the Mode select, a drag
+in Pixels mode sends `draw_rectangle` as before, Shape mode sends
+`add_shape_layer` with the same `ShapeSpec`, and Path mode sends
+`set_path_from_shape` — checked for a rectangle, a star, and a line.
+On the real app under Xvfb: a Rectangle drag in Shape mode added a
+second, named "rectangle shape" layer through the real IPC; switching
+to the Ellipse tool kept Shape mode (the setting is shared), and
+switching to Path mode and dragging drew a real dotted vector ellipse
+outline over the canvas — no new layer, no pixels painted — matching
+the Pen tools' own path rendering; four screenshots checked by eye.
+
+Tests: 1888 Rust (1887 → 1888), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

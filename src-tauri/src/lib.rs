@@ -5272,6 +5272,18 @@ fn set_text(
     })
 }
 
+/// The shape tools' Path mode: `spec`'s outline becomes the current work
+/// path instead of painting pixels.
+#[tauri::command]
+fn set_path_from_shape(
+    state: State<'_, AppState>,
+    spec: document::ShapeSpec,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.set_path_from_shape(&spec).map(|_| None)
+    })
+}
+
 /// The shape tools' Shape mode: a new shape layer drawn from `shape`.
 #[tauri::command]
 fn add_shape_layer(
@@ -8088,6 +8100,7 @@ pub fn run() {
             rename_tool_preset,
             set_text,
             add_shape_layer,
+            set_path_from_shape,
             set_shape,
             draw_custom_shape,
             convert_to_smart_object,

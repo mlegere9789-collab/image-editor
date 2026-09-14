@@ -10292,6 +10292,165 @@ impl Document {
         Ok(())
     }
 
+    /// The shape tools' outline — the polygon [`Self::draw_shape_layer`]'s
+    /// painters fill — as plain vertices: the box corners for Rectangle
+    /// (its rounded corners simplify to square ones here) and Triangle,
+    /// the samples of an inscribed 64-gon for Ellipse, the drag's own
+    /// vertices for Polygon and Star, the two endpoints for Line, and the
+    /// stored vertices for Custom. Errors exactly as the matching `draw_*`
+    /// does for a degenerate or invalid shape, without drawing anything.
+    fn shape_outline(spec: &ShapeSpec) -> Result<Vec<(f32, f32)>, String> {
+        match *spec {
+            ShapeSpec::Rectangle { x0, y0, x1, y1, .. } => {
+                if ![x0, y0, x1, y1].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Rectangle coordinates must be finite numbers.".to_string());
+                }
+                let (left, right) = (x0.min(x1), x0.max(x1));
+                let (top, bottom) = (y0.min(y1), y0.max(y1));
+                if right - left <= f32::EPSILON || bottom - top <= f32::EPSILON {
+                    return Err("The rectangle has no area.".to_string());
+                }
+                Ok(vec![
+                    (left, top),
+                    (right, top),
+                    (right, bottom),
+                    (left, bottom),
+                ])
+            }
+            ShapeSpec::Ellipse { x0, y0, x1, y1 } => {
+                if ![x0, y0, x1, y1].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Ellipse coordinates must be finite numbers.".to_string());
+                }
+                let (left, right) = (x0.min(x1), x0.max(x1));
+                let (top, bottom) = (y0.min(y1), y0.max(y1));
+                if right - left <= f32::EPSILON || bottom - top <= f32::EPSILON {
+                    return Err("The ellipse has no area.".to_string());
+                }
+                let (cx, cy) = ((left + right) / 2.0, (top + bottom) / 2.0);
+                let (rx, ry) = ((right - left) / 2.0, (bottom - top) / 2.0);
+                const SEGMENTS: u32 = 64;
+                Ok((0..SEGMENTS)
+                    .map(|k| {
+                        let a = std::f32::consts::TAU * k as f32 / SEGMENTS as f32;
+                        (cx + rx * a.cos(), cy + ry * a.sin())
+                    })
+                    .collect())
+            }
+            ShapeSpec::Triangle { x0, y0, x1, y1 } => {
+                if ![x0, y0, x1, y1].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Triangle coordinates must be finite numbers.".to_string());
+                }
+                let (left, right) = (x0.min(x1), x0.max(x1));
+                let (top, bottom) = (y0.min(y1), y0.max(y1));
+                if right - left <= f32::EPSILON || bottom - top <= f32::EPSILON {
+                    return Err("The triangle has no area.".to_string());
+                }
+                Ok(vec![
+                    ((left + right) / 2.0, top),
+                    (right, bottom),
+                    (left, bottom),
+                ])
+            }
+            ShapeSpec::Polygon {
+                cx,
+                cy,
+                x,
+                y,
+                sides,
+            } => {
+                if !(3..=100).contains(&sides) {
+                    return Err("A polygon needs between 3 and 100 sides.".to_string());
+                }
+                if ![cx, cy, x, y].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Polygon coordinates must be finite numbers.".to_string());
+                }
+                let radius = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+                if radius <= f32::EPSILON {
+                    return Err("The polygon has no radius.".to_string());
+                }
+                let start = (y - cy).atan2(x - cx);
+                Ok((0..sides)
+                    .map(|k| {
+                        let angle = start + std::f32::consts::TAU * k as f32 / sides as f32;
+                        (cx + radius * angle.cos(), cy + radius * angle.sin())
+                    })
+                    .collect())
+            }
+            ShapeSpec::Star {
+                cx,
+                cy,
+                x,
+                y,
+                points,
+                ratio,
+            } => {
+                if !(3..=100).contains(&points) {
+                    return Err("A star needs between 3 and 100 points.".to_string());
+                }
+                if !(1..=100).contains(&ratio) {
+                    return Err("Star ratio must be between 1 and 100 percent.".to_string());
+                }
+                if ![cx, cy, x, y].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Star coordinates must be finite numbers.".to_string());
+                }
+                let radius = ((x - cx).powi(2) + (y - cy).powi(2)).sqrt();
+                if radius <= f32::EPSILON {
+                    return Err("The star has no radius.".to_string());
+                }
+                let inner = radius * ratio as f32 / 100.0;
+                let start = (y - cy).atan2(x - cx);
+                Ok((0..2 * points)
+                    .map(|k| {
+                        let r = if k % 2 == 0 { radius } else { inner };
+                        let angle = start + std::f32::consts::PI * k as f32 / points as f32;
+                        (cx + r * angle.cos(), cy + r * angle.sin())
+                    })
+                    .collect())
+            }
+            ShapeSpec::Line { x0, y0, x1, y1, .. } => {
+                if ![x0, y0, x1, y1].iter().all(|v: &f32| v.is_finite()) {
+                    return Err("Line coordinates must be finite numbers.".to_string());
+                }
+                if (x0 - x1).abs() <= f32::EPSILON && (y0 - y1).abs() <= f32::EPSILON {
+                    return Err("The line has no length.".to_string());
+                }
+                Ok(vec![(x0, y0), (x1, y1)])
+            }
+            ShapeSpec::Custom { ref points } => {
+                if points.len() < 3 {
+                    return Err("A custom shape needs at least three points.".to_string());
+                }
+                if points.iter().any(|(x, y)| !x.is_finite() || !y.is_finite()) {
+                    return Err("Custom shape points must be finite coordinates.".to_string());
+                }
+                Ok(points.clone())
+            }
+        }
+    }
+
+    /// The shape tools in their Path mode: `spec`'s outline
+    /// ([`Self::shape_outline`]) replaces the current work path — closed
+    /// for every shape but Line, which becomes an open two-point path, as
+    /// Photoshop draws an open path for a straight line — instead of
+    /// painting any pixels. Errors exactly as [`Self::shape_outline`]
+    /// does, leaving the current path untouched.
+    pub fn set_path_from_shape(&mut self, spec: &ShapeSpec) -> Result<(), String> {
+        let closed = !matches!(spec, ShapeSpec::Line { .. });
+        let outline = Self::shape_outline(spec)?;
+        self.current_path = Some(Path {
+            anchors: outline
+                .into_iter()
+                .map(|point| PathAnchor {
+                    point,
+                    in_handle: None,
+                    out_handle: None,
+                })
+                .collect(),
+            closed,
+        });
+        Ok(())
+    }
+
     /// Layer > Smart Objects > Convert to Smart Object: layer `id` embeds
     /// its pixels as a source shown through the neutral transform, its
     /// pixels unchanged. Errors for a layer that already is a smart
@@ -63410,6 +63569,143 @@ colorspaces:
             .freeform_pen(&[(0.0, 0.0), (f32::NAN, 1.0)])
             .unwrap_err()
             .contains("finite"));
+    }
+
+    #[test]
+    fn shape_tools_path_mode_sets_the_current_path_from_the_outline() {
+        // Rectangle: the box corners, closed.
+        let mut doc = Document::new(20, 20).unwrap();
+        doc.set_path_from_shape(&ShapeSpec::Rectangle {
+            x0: 1.0,
+            y0: 2.0,
+            x1: 5.0,
+            y1: 6.0,
+            radius: 3,
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(path.closed);
+        assert_eq!(
+            path.anchors.iter().map(|a| a.point).collect::<Vec<_>>(),
+            vec![(1.0, 2.0), (5.0, 2.0), (5.0, 6.0), (1.0, 6.0)]
+        );
+        assert!(path
+            .anchors
+            .iter()
+            .all(|a| a.in_handle.is_none() && a.out_handle.is_none()));
+
+        // Triangle: apex at top centre, base along the bottom, closed.
+        doc.set_path_from_shape(&ShapeSpec::Triangle {
+            x0: 1.0,
+            y0: 2.0,
+            x1: 5.0,
+            y1: 6.0,
+        })
+        .unwrap();
+        assert_eq!(
+            doc.current_path()
+                .unwrap()
+                .anchors
+                .iter()
+                .map(|a| a.point)
+                .collect::<Vec<_>>(),
+            vec![(3.0, 2.0), (5.0, 6.0), (1.0, 6.0)]
+        );
+
+        // Line: the two endpoints only, open.
+        doc.set_path_from_shape(&ShapeSpec::Line {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 10.0,
+            y1: 10.0,
+            weight: 4,
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(!path.closed);
+        assert_eq!(
+            path.anchors.iter().map(|a| a.point).collect::<Vec<_>>(),
+            vec![(0.0, 0.0), (10.0, 10.0)]
+        );
+
+        // Polygon: 4 sides from the centre (5, 5) through (10, 5) --
+        // radius 5, axis-aligned, so the vertices land on the axes.
+        doc.set_path_from_shape(&ShapeSpec::Polygon {
+            cx: 5.0,
+            cy: 5.0,
+            x: 10.0,
+            y: 5.0,
+            sides: 4,
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(path.closed);
+        assert_eq!(path.anchors.len(), 4);
+        assert!((path.anchors[0].point.0 - 10.0).abs() < 1e-4);
+        assert!((path.anchors[0].point.1 - 5.0).abs() < 1e-4);
+        assert!((path.anchors[2].point.0 - 0.0).abs() < 1e-4);
+        assert!((path.anchors[2].point.1 - 5.0).abs() < 1e-4);
+
+        // Star: 2 * points anchors, closed.
+        doc.set_path_from_shape(&ShapeSpec::Star {
+            cx: 5.0,
+            cy: 5.0,
+            x: 10.0,
+            y: 5.0,
+            points: 5,
+            ratio: 50,
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(path.closed);
+        assert_eq!(path.anchors.len(), 10);
+
+        // Ellipse: a 64-gon inscribed in the box, closed.
+        doc.set_path_from_shape(&ShapeSpec::Ellipse {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 20.0,
+            y1: 10.0,
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(path.closed);
+        assert_eq!(path.anchors.len(), 64);
+        assert!((path.anchors[0].point.0 - 20.0).abs() < 1e-3);
+        assert!((path.anchors[0].point.1 - 5.0).abs() < 1e-3);
+
+        // Custom: the given points verbatim, closed.
+        doc.set_path_from_shape(&ShapeSpec::Custom {
+            points: vec![(0.0, 0.0), (10.0, 0.0), (5.0, 8.0)],
+        })
+        .unwrap();
+        let path = doc.current_path().unwrap();
+        assert!(path.closed);
+        assert_eq!(path.anchors.len(), 3);
+
+        // Errors as the matching draw_* would, leaving the path untouched.
+        let before = doc.current_path().unwrap().anchors.len();
+        assert!(doc
+            .set_path_from_shape(&ShapeSpec::Rectangle {
+                x0: 1.0,
+                y0: 1.0,
+                x1: 1.0,
+                y1: 1.0,
+                radius: 0,
+            })
+            .unwrap_err()
+            .contains("area"));
+        assert_eq!(doc.current_path().unwrap().anchors.len(), before);
+        assert!(doc
+            .set_path_from_shape(&ShapeSpec::Polygon {
+                cx: 0.0,
+                cy: 0.0,
+                x: 0.0,
+                y: 0.0,
+                sides: 2,
+            })
+            .unwrap_err()
+            .contains("sides"));
     }
 
     #[test]

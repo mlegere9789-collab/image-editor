@@ -3158,6 +3158,9 @@ export default function App() {
   const [shapeStrokeWidth, setShapeStrokeWidth] = useState(0);
   const [shapeStrokeColor, setShapeStrokeColor] = useState("#000000");
   const [shapeRadius, setShapeRadius] = useState(0);
+  const [shapeToolMode, setShapeToolMode] = useState<
+    "pixels" | "shape" | "path"
+  >("pixels");
   // Line tool: the line's weight in pixels; it is painted in the brush colour.
   const [lineWeight, setLineWeight] = useState(1);
   // Polygon tool: the number of sides; the drag runs from the centre to the first vertex.
@@ -10949,7 +10952,52 @@ export default function App() {
               shapeStrokeWidth > 0
                 ? [[sr, sg, sb, 255], shapeStrokeWidth]
                 : null;
-            if (tool === "triangle") {
+            const spec: ShapeSpec =
+              tool === "triangle"
+                ? { kind: "triangle", x0, y0, x1, y1 }
+                : tool === "star"
+                  ? {
+                      kind: "star",
+                      cx: x0,
+                      cy: y0,
+                      x: x1,
+                      y: y1,
+                      points: polygonSides,
+                      ratio: starRatio,
+                    }
+                  : tool === "polygon"
+                    ? {
+                        kind: "polygon",
+                        cx: x0,
+                        cy: y0,
+                        x: x1,
+                        y: y1,
+                        sides: polygonSides,
+                      }
+                    : tool === "line"
+                      ? { kind: "line", x0, y0, x1, y1, weight: lineWeight }
+                      : tool === "ellipse"
+                        ? { kind: "ellipse", x0, y0, x1, y1 }
+                        : {
+                            kind: "rectangle",
+                            x0,
+                            y0,
+                            x1,
+                            y1,
+                            radius: shapeRadius,
+                          };
+            if (shapeToolMode === "path") {
+              void runCommand("set_path_from_shape", { spec });
+            } else if (shapeToolMode === "shape") {
+              const shapeFillOrColor =
+                tool === "rectangle" || tool === "ellipse"
+                  ? fill
+                  : [r, g, b, 255];
+              void runCommand("add_shape_layer", {
+                name: `${spec.kind} shape`,
+                shape: { spec, fill: shapeFillOrColor, stroke },
+              });
+            } else if (tool === "triangle") {
               void runCommand("draw_triangle", {
                 id: selectedId,
                 x0,
@@ -11113,6 +11161,7 @@ export default function App() {
       shapeStrokeWidth,
       shapeStrokeColor,
       shapeRadius,
+      shapeToolMode,
       lineWeight,
       polygonSides,
       starRatio,
@@ -14734,6 +14783,25 @@ export default function App() {
               aria-label="Gradient end color"
               onChange={(event) => setGradientEndColor(event.target.value)}
             />
+          )}
+          {isRectangle && (
+            <label className="tools__slider">
+              Mode
+              <select
+                value={shapeToolMode}
+                disabled={!canPaint}
+                aria-label="Shape tool mode"
+                onChange={(event) =>
+                  setShapeToolMode(
+                    event.target.value as "pixels" | "shape" | "path",
+                  )
+                }
+              >
+                <option value="pixels">Pixels</option>
+                <option value="shape">Shape</option>
+                <option value="path">Path</option>
+              </select>
+            </label>
           )}
           {(tool === "polygon" || tool === "star") && (
             <label className="tools__slider">
