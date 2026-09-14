@@ -2915,6 +2915,73 @@ fn high_pass(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Sna
     edit_checkpointed(&state, |document| document.high_pass(id, radius))
 }
 
+/// Filter > Stylize > Extrude on layer `id` with its Type and Solid
+/// Front Faces.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn extrude_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    cell_size: u32,
+    depth: u32,
+    random: bool,
+    seed: u32,
+    kind: document::ExtrudeType,
+    solid_front: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.extrude_with(id, cell_size, depth, random, seed, kind, solid_front)
+    })
+}
+
+/// Filter > Stylize > Tiles on layer `id` with its Fill Empty Area.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn tiles_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    tile_size: u32,
+    max_offset: u32,
+    seed: u32,
+    fill: document::TilesFill,
+    fill_color: [u8; 4],
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.tiles_with(id, tile_size, max_offset, seed, fill, fill_color)
+    })
+}
+
+/// Filter Gallery > Sketch > Halftone Pattern on layer `id` with its
+/// full Pattern Type and the Line screen's angle.
+#[tauri::command]
+fn halftone_pattern_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    size: u32,
+    contrast: u32,
+    pattern: document::HalftonePattern,
+    diagonal: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.halftone_pattern_with(id, size, contrast, pattern, diagonal)
+    })
+}
+
+/// Filter Gallery > Sketch > Note Paper on layer `id` with its Relief.
+#[tauri::command]
+fn note_paper_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    image_balance: u32,
+    graininess: u32,
+    relief: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.note_paper_with(id, image_balance, graininess, relief, seed)
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -7819,6 +7886,10 @@ pub fn run() {
             wave_with,
             shear_with,
             offset_with,
+            extrude_with,
+            tiles_with,
+            halftone_pattern_with,
+            note_paper_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

@@ -2358,6 +2358,8 @@ export default function App() {
   const [extrudeSize, setExtrudeSize] = useState(20);
   const [extrudeDepth, setExtrudeDepth] = useState(30);
   const [extrudeRandom, setExtrudeRandom] = useState(false);
+  const [extrudeType, setExtrudeType] = useState("blocks");
+  const [extrudeSolidFront, setExtrudeSolidFront] = useState(true);
   const [showColoredPencilDialog, setShowColoredPencilDialog] = useState(false);
   const [coloredPencilWidth, setColoredPencilWidth] = useState(4);
   const [coloredPencilPressure, setColoredPencilPressure] = useState(8);
@@ -2464,6 +2466,7 @@ export default function App() {
   const [showNotePaperDialog, setShowNotePaperDialog] = useState(false);
   const [notePaperImageBalance, setNotePaperImageBalance] = useState(25);
   const [notePaperGraininess, setNotePaperGraininess] = useState(5);
+  const [notePaperRelief, setNotePaperRelief] = useState(11);
   const [showGraphicPenDialog, setShowGraphicPenDialog] = useState(false);
   const [graphicPenStrokeLength, setGraphicPenStrokeLength] = useState(5);
   const [graphicPenLightDarkBalance, setGraphicPenLightDarkBalance] =
@@ -2504,7 +2507,8 @@ export default function App() {
     useState(false);
   const [halftonePatternSize, setHalftonePatternSize] = useState(4);
   const [halftonePatternContrast, setHalftonePatternContrast] = useState(0);
-  const [halftonePatternType, setHalftonePatternType] = useState(0);
+  const [halftonePatternType, setHalftonePatternType] = useState("line");
+  const [halftoneDiagonal, setHalftoneDiagonal] = useState(false);
   const [showChromeDialog, setShowChromeDialog] = useState(false);
   const [chromeDetail, setChromeDetail] = useState(4);
   const [chromeSmoothness, setChromeSmoothness] = useState(7);
@@ -2531,6 +2535,8 @@ export default function App() {
   const [showTilesDialog, setShowTilesDialog] = useState(false);
   const [tilesTileSize, setTilesTileSize] = useState(6);
   const [tilesMaxOffset, setTilesMaxOffset] = useState(50);
+  const [tilesFill, setTilesFill] = useState("unalteredImage");
+  const [tilesBackgroundColor, setTilesBackgroundColor] = useState("#000000");
   const [showMosaicTilesDialog, setShowMosaicTilesDialog] = useState(false);
   const [mosaicTilesTileSize, setMosaicTilesTileSize] = useState(10);
   const [mosaicTilesGroutWidth, setMosaicTilesGroutWidth] = useState(2);
@@ -7444,15 +7450,25 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Add Noise/Mezzotint (used only in Random mode).
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("extrude", {
+    await runCommand("extrude_with", {
       id: selectedId,
       cellSize: extrudeSize,
       depth: extrudeDepth,
       random: extrudeRandom,
       seed,
+      kind: extrudeType,
+      solidFront: extrudeSolidFront,
     });
     setShowExtrudeDialog(false);
-  }, [runCommand, selectedId, extrudeSize, extrudeDepth, extrudeRandom]);
+  }, [
+    runCommand,
+    selectedId,
+    extrudeSize,
+    extrudeDepth,
+    extrudeRandom,
+    extrudeType,
+    extrudeSolidFront,
+  ]);
 
   const applyColoredPencil = useCallback(async () => {
     if (selectedId === null) return;
@@ -7854,14 +7870,21 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Film Grain.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("note_paper", {
+    await runCommand("note_paper_with", {
       id: selectedId,
       imageBalance: notePaperImageBalance,
       graininess: notePaperGraininess,
+      relief: notePaperRelief,
       seed,
     });
     setShowNotePaperDialog(false);
-  }, [runCommand, selectedId, notePaperImageBalance, notePaperGraininess]);
+  }, [
+    runCommand,
+    selectedId,
+    notePaperImageBalance,
+    notePaperGraininess,
+    notePaperRelief,
+  ]);
 
   const applyGraphicPen = useCallback(async () => {
     if (selectedId === null) return;
@@ -7993,11 +8016,12 @@ export default function App() {
 
   const applyHalftonePattern = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("halftone_pattern", {
+    await runCommand("halftone_pattern_with", {
       id: selectedId,
       size: halftonePatternSize,
       contrast: halftonePatternContrast,
-      patternType: halftonePatternType,
+      pattern: halftonePatternType,
+      diagonal: halftoneDiagonal,
     });
     setShowHalftonePatternDialog(false);
   }, [
@@ -8006,6 +8030,7 @@ export default function App() {
     halftonePatternSize,
     halftonePatternContrast,
     halftonePatternType,
+    halftoneDiagonal,
   ]);
 
   const applyChrome = useCallback(async () => {
@@ -8098,14 +8123,30 @@ export default function App() {
   const applyTiles = useCallback(async () => {
     if (selectedId === null) return;
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("tiles", {
+    const swatch =
+      tilesFill === "foregroundColor"
+        ? brushColor
+        : tilesFill === "backgroundColor"
+          ? tilesBackgroundColor
+          : null;
+    await runCommand("tiles_with", {
       id: selectedId,
       tileSize: tilesTileSize,
       maxOffset: tilesMaxOffset,
       seed,
+      fill: swatch === null ? tilesFill : "color",
+      fillColor: swatch === null ? [0, 0, 0, 0] : [...hexToRgb(swatch), 255],
     });
     setShowTilesDialog(false);
-  }, [runCommand, selectedId, tilesTileSize, tilesMaxOffset]);
+  }, [
+    runCommand,
+    selectedId,
+    tilesTileSize,
+    tilesMaxOffset,
+    tilesFill,
+    tilesBackgroundColor,
+    brushColor,
+  ]);
 
   const applyMosaicTiles = useCallback(async () => {
     if (selectedId === null) return;
@@ -28538,6 +28579,16 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Filter &gt; Stylize &gt; Extrude</h2>
+            <label className="control control--row">
+              <span className="control__label">Type</span>
+              <select
+                value={extrudeType}
+                onChange={(event) => setExtrudeType(event.target.value)}
+              >
+                <option value="blocks">Blocks</option>
+                <option value="pyramids">Pyramids</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Size
@@ -28582,6 +28633,14 @@ export default function App() {
                 name="extrude-depth-basis"
                 checked={extrudeRandom}
                 onChange={() => setExtrudeRandom(true)}
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Solid Front Faces</span>
+              <input
+                type="checkbox"
+                checked={extrudeSolidFront}
+                onChange={(event) => setExtrudeSolidFront(event.target.checked)}
               />
             </label>
             <div className="modal__actions">
@@ -28715,6 +28774,30 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control control--row">
+              <span className="control__label">Fill Empty Area</span>
+              <select
+                value={tilesFill}
+                onChange={(event) => setTilesFill(event.target.value)}
+              >
+                <option value="unalteredImage">Unaltered Image</option>
+                <option value="inverseImage">Inverse Image</option>
+                <option value="foregroundColor">Foreground Color</option>
+                <option value="backgroundColor">Background Color</option>
+              </select>
+            </label>
+            {tilesFill === "backgroundColor" && (
+              <label className="control control--row">
+                <span className="control__label">Background Color</span>
+                <input
+                  type="color"
+                  value={tilesBackgroundColor}
+                  onChange={(event) =>
+                    setTilesBackgroundColor(event.target.value)
+                  }
+                />
+              </label>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -30466,6 +30549,21 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control">
+              <span className="control__label">
+                Relief
+                <span className="control__value">{notePaperRelief}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={25}
+                value={notePaperRelief}
+                onChange={(event) =>
+                  setNotePaperRelief(Number(event.target.value))
+                }
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -31117,14 +31215,25 @@ export default function App() {
               <span className="control__label">Pattern Type</span>
               <select
                 value={halftonePatternType}
-                onChange={(event) =>
-                  setHalftonePatternType(Number(event.target.value))
-                }
+                onChange={(event) => setHalftonePatternType(event.target.value)}
               >
-                <option value={0}>Line</option>
-                <option value={1}>Dot</option>
+                <option value="circle">Circle</option>
+                <option value="dot">Dot</option>
+                <option value="line">Line</option>
               </select>
             </label>
+            {halftonePatternType === "line" && (
+              <label className="control control--row">
+                <span className="control__label">Diagonal Lines</span>
+                <input
+                  type="checkbox"
+                  checked={halftoneDiagonal}
+                  onChange={(event) =>
+                    setHalftoneDiagonal(event.target.checked)
+                  }
+                />
+              </label>
+            )}
             <div className="modal__actions">
               <button
                 className="button button--quiet"

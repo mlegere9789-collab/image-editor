@@ -93,6 +93,32 @@ pub enum OffsetFill {
     Transparent,
 }
 
+/// Filter > Stylize > Extrude's Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ExtrudeType {
+    Blocks,
+    Pyramids,
+}
+
+/// Filter > Stylize > Tiles' fill for what a slid tile uncovers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TilesFill {
+    UnalteredImage,
+    InverseImage,
+    Color,
+}
+
+/// Filter Gallery > Sketch > Halftone Pattern's Pattern Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HalftonePattern {
+    Circle,
+    Dot,
+    Line,
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16021,11 +16047,10 @@ impl Document {
     /// deliberately simplified stand-in for Photoshop's real 3-D block
     /// rendering (viewer-facing side walls, a genuine perspective pop),
     /// chosen because a closed-form diagonal shade is hand-verifiable in a
-    /// way that projecting cube faces isn't. Photoshop's Pyramids block
-    /// type and its stretched-image front faces (as opposed to Solid
-    /// Front Faces) are further, documented scope cuts — every block here
-    /// is a flat square filled with its own average colour, the same
-    /// anchored grid [`Self::mosaic`] uses.
+    /// way that projecting cube faces isn't. [`Self::extrude_with`] adds
+    /// Photoshop's Pyramids type and its un-solid front faces; here
+    /// every block is a flat square filled with its own average colour,
+    /// the same anchored grid [`Self::mosaic`] uses.
     ///
     /// `cell_size` (Photoshop's own 2..=255 range) sets the block size;
     /// `depth` (its own 1..=255 range) sets the maximum shading swing.
@@ -16048,6 +16073,36 @@ impl Document {
         depth: u32,
         random: bool,
         seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.extrude_with(
+            id,
+            cell_size,
+            depth,
+            random,
+            seed,
+            ExtrudeType::Blocks,
+            true,
+        )
+    }
+
+    /// [`Self::extrude`] with its Type and Solid Front Faces. Pyramids
+    /// shade each block as four faces lit from the top-left: the top
+    /// face (`|dy| ≥ |dx|`, `dy ≤ 0` about the block's centre) at
+    /// `+0.5`, the left at `+0.25`, the right at `−0.25` and the bottom
+    /// at `−0.5` of the block's own `factor · depth` swing. With
+    /// `solid_front` off, the shade is applied to each pixel's own
+    /// colour rather than the block's average — the image showing on
+    /// the faces, a stand-in for Photoshop's stretched front faces.
+    #[allow(clippy::too_many_arguments)]
+    pub fn extrude_with(
+        &mut self,
+        id: LayerId,
+        cell_size: u32,
+        depth: u32,
+        random: bool,
+        seed: u32,
+        kind: ExtrudeType,
+        solid_front: bool,
     ) -> Result<Option<Rect>, String> {
         if !(2..=255).contains(&cell_size) {
             return Err("Extrude size must be between 2 and 255 pixels.".to_string());
@@ -16096,22 +16151,43 @@ impl Document {
             })
             .collect();
         let max_offset = (cell - 1) as f32 * 2.0;
-        self.filter_pixels(id, |_, row, col| {
+        let centre = (cell - 1) as f32 / 2.0;
+        self.filter_pixels(id, |src, row, col| {
             let (cx, cy) = (col as usize / cell, row as usize / cell);
             let ci = cy * cells_x + cx;
             let (lx, ly) = (col as usize % cell, row as usize % cell);
-            let t = if max_offset > 0.0 {
-                ((cell - 1 - lx) + (cell - 1 - ly)) as f32 / max_offset - 0.5
-            } else {
-                0.0
+            let t = match kind {
+                ExtrudeType::Blocks if max_offset > 0.0 => {
+                    ((cell - 1 - lx) + (cell - 1 - ly)) as f32 / max_offset - 0.5
+                }
+                ExtrudeType::Blocks => 0.0,
+                ExtrudeType::Pyramids => {
+                    let (dx, dy) = (lx as f32 - centre, ly as f32 - centre);
+                    if dy.abs() >= dx.abs() {
+                        if dy <= 0.0 {
+                            0.5
+                        } else {
+                            -0.5
+                        }
+                    } else if dx < 0.0 {
+                        0.25
+                    } else {
+                        -0.25
+                    }
+                }
             };
             let shade = t * factors[ci] * depth as f32;
-            let avg = averages[ci];
+            let base = if solid_front {
+                averages[ci]
+            } else {
+                let at = (row as usize * doc_width + col as usize) * CHANNELS;
+                [src[at], src[at + 1], src[at + 2], src[at + 3]]
+            };
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
-                out[c] = (avg[c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
+                out[c] = (base[c] as f32 + shade).round().clamp(0.0, 255.0) as u8;
             }
-            out[3] = avg[3];
+            out[3] = base[3];
             out
         })
     }
@@ -19528,9 +19604,9 @@ impl Document {
     /// `image_balance`, the same threshold idea [`Self::stamp`] already
     /// uses. The grain breaks up the threshold boundary into a mottled,
     /// hand-torn edge rather than a clean line, reading as paper fibre.
-    /// A documented approximation — Photoshop's real Note Paper also
-    /// embosses the result with a Relief slider this project doesn't
-    /// model — not a port of Photoshop's own renderer. `graininess`
+    /// A documented approximation, not a port of Photoshop's own
+    /// renderer; [`Self::note_paper_with`] adds its Relief embossing.
+    /// `graininess`
     /// (this project's own `0..=10` range, a documented simplification
     /// of Photoshop's own dialog) scales the draw's spread, `draw *
     /// (graininess / 10) * 128`, added to the pixel's own luma before
@@ -19549,24 +19625,82 @@ impl Document {
         graininess: u32,
         seed: u32,
     ) -> Result<Option<Rect>, String> {
+        self.note_paper_with(id, image_balance, graininess, 0, seed)
+    }
+
+    /// [`Self::note_paper`] with Photoshop's Relief (`0..=25`): the
+    /// thresholded paper is embossed as if lit from the top-left, each
+    /// pixel offset by `(plane(x−1, y−1) − plane(x+1, y+1)) / 255 ·
+    /// relief · 5` — up to ±125 at relief 25 — so a black-to-white step
+    /// gets a shadowed edge on its white side and a white-to-black step a
+    /// lit edge on its black side; the interior stays pure. Relief 0 is
+    /// `note_paper` itself, draw for draw; a positive relief thresholds
+    /// the whole layer first (one draw per pixel in row-major order,
+    /// selection or not) so the neighbours it embosses against are the
+    /// thresholded ones. Neighbours clamp at the edges. Errors on a
+    /// relief above 25.
+    pub fn note_paper_with(
+        &mut self,
+        id: LayerId,
+        image_balance: u32,
+        graininess: u32,
+        relief: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
         if image_balance > 50 {
             return Err("Note Paper image balance must be between 0 and 50.".to_string());
         }
         if graininess > 10 {
             return Err("Note Paper graininess must be between 0 and 10.".to_string());
         }
+        if relief > 25 {
+            return Err("Note Paper relief must be between 0 and 25.".to_string());
+        }
         let doc_width = self.width as usize;
         let threshold = image_balance as f32 / 50.0 * 255.0;
         let factor = graininess as f32 / 10.0;
         let mut rng = XorShift32::new(seed);
-        self.filter_pixels(id, move |src, row, col| {
-            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+        let paper = |src: &[u8], base: usize, rng: &mut XorShift32| -> u8 {
             let luma = 0.299 * src[base] as f32
                 + 0.587 * src[base + 1] as f32
                 + 0.114 * src[base + 2] as f32;
             let offset = rng.next_unit() * factor * 128.0;
             let adjusted = (luma + offset).clamp(0.0, 255.0);
-            let v = if adjusted >= threshold { 255 } else { 0 };
+            if adjusted >= threshold {
+                255
+            } else {
+                0
+            }
+        };
+        if relief == 0 {
+            return self.filter_pixels(id, move |src, row, col| {
+                let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let v = paper(src, base, &mut rng);
+                [v, v, v, src[base + 3]]
+            });
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let plane: Vec<u8> = {
+            let layer = self.layer_mut(id)?;
+            if layer.locked {
+                return Err(format!("Layer \"{}\" is locked.", layer.name));
+            }
+            let pixels = &layer.pixels;
+            (0..doc_width * height as usize)
+                .map(|i| paper(pixels, i * CHANNELS, &mut rng))
+                .collect()
+        };
+        let at = move |x: i64, y: i64| -> f32 {
+            let x = x.clamp(0, width - 1) as usize;
+            let y = y.clamp(0, height - 1) as usize;
+            plane[y * doc_width + x] as f32
+        };
+        let strength = relief as f32 * 5.0;
+        self.filter_pixels(id, move |src, row, col| {
+            let (x, y) = (col as i64, row as i64);
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            let shade = (at(x - 1, y - 1) - at(x + 1, y + 1)) / 255.0 * strength;
+            let v = (at(x, y) + shade).round().clamp(0.0, 255.0) as u8;
             [v, v, v, src[base + 3]]
         })
     }
@@ -20057,17 +20191,16 @@ impl Document {
     /// bands `size` pixels wide, and each band is inked from its own left
     /// edge inward by a thickness proportional to that band's own
     /// darkness (`cell * measure / 255`, rounded and clamped to the
-    /// band's own width) — Photoshop's own 45°-diagonal line screen is a
-    /// documented scope cut in favour of these hand-checkable vertical
-    /// bands. `pattern_type` `1` is Dot: a grid of `size`-pixel cells,
+    /// band's own width) — [`Self::halftone_pattern_with`] adds
+    /// Photoshop's own 45°-diagonal line screen beside these
+    /// hand-checkable vertical bands. `pattern_type` `1` is Dot: a grid of `size`-pixel cells,
     /// each with a circular dot centred on the cell whose area is
     /// proportional to that cell's own darkness — the exact `(dx² + dy²)
     /// · 255 ≤ r² · measure` area test [`Self::color_halftone`] already
     /// uses per colour channel, applied here to one grayscale measure
     /// instead of three RGB channels, with a single un-offset screen
     /// rather than three angled ones. Photoshop's own Circle pattern type
-    /// is a documented scope cut, as a variant too close to Dot to be
-    /// worth a second, only subtly different area formula. `contrast`
+    /// is [`Self::halftone_pattern_with`]'s. `contrast`
     /// (Photoshop's own `0..=50` range) linearly amplifies each cell's
     /// own darkness measure away from its own neutral midpoint `128`,
     /// `128 + (measure_raw - 128) * (1.0 + contrast / 50.0)` — scale
@@ -20088,14 +20221,41 @@ impl Document {
         contrast: u32,
         pattern_type: u32,
     ) -> Result<Option<Rect>, String> {
+        if pattern_type > 1 {
+            return Err("Halftone Pattern type must be 0 (Line) or 1 (Dot).".to_string());
+        }
+        let pattern = if pattern_type == 0 {
+            HalftonePattern::Line
+        } else {
+            HalftonePattern::Dot
+        };
+        self.halftone_pattern_with(id, size, contrast, pattern, false)
+    }
+
+    /// [`Self::halftone_pattern`] with its full Pattern Type and, for
+    /// Line, the screen's angle. Circle inks concentric rings about the
+    /// layer's centre: ring `k` is the band of pixels whose distance
+    /// `r` from the centre has `⌊r / size⌋ = k`, its darkness measured
+    /// over that band exactly as a vertical band's is, and the inner
+    /// `thickness` pixels of the band (`r − k · size < thickness`) are
+    /// inked. `diagonal` turns the Line screen 45°: bands run along
+    /// `x + y` instead of `x`, `⌊(x + y) / size⌋` the band and `(x + y)
+    /// − k · size < thickness` the ink, so the lines climb from bottom
+    /// left to top right. Dot and the vertical Line are byte for byte
+    /// `halftone_pattern`'s.
+    pub fn halftone_pattern_with(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        contrast: u32,
+        pattern: HalftonePattern,
+        diagonal: bool,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=12).contains(&size) {
             return Err("Halftone Pattern size must be between 1 and 12.".to_string());
         }
         if contrast > 50 {
             return Err("Halftone Pattern contrast must be between 0 and 50.".to_string());
-        }
-        if pattern_type > 1 {
-            return Err("Halftone Pattern type must be 0 (Line) or 1 (Dot).".to_string());
         }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
@@ -20124,7 +20284,57 @@ impl Document {
             (128.0 + (255.0 - avg - 128.0) * scale).clamp(0.0, 255.0)
         };
         let mut ink_buf = vec![false; doc_width * self.height as usize];
-        if pattern_type == 0 {
+        if pattern == HalftonePattern::Circle || (pattern == HalftonePattern::Line && diagonal) {
+            // Bands by an arbitrary index: rings about the centre, or
+            // diagonals along x + y.
+            let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+            let position = |x: i64, y: i64| -> f32 {
+                if pattern == HalftonePattern::Circle {
+                    ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt()
+                } else {
+                    (x + y) as f32
+                }
+            };
+            let band = |x: i64, y: i64| (position(x, y) / cell as f32).floor() as usize;
+            let bands = band(0, 0)
+                .max(band(width - 1, 0))
+                .max(band(0, height - 1))
+                .max(band(width - 1, height - 1))
+                + 1;
+            let mut sums = vec![0.0f32; bands];
+            let mut counts = vec![0.0f32; bands];
+            for y in 0..height {
+                for x in 0..width {
+                    let base = (y as usize * doc_width + x as usize) * CHANNELS;
+                    let luma = 0.299 * source[base] as f32
+                        + 0.587 * source[base + 1] as f32
+                        + 0.114 * source[base + 2] as f32;
+                    let k = band(x, y);
+                    sums[k] += luma;
+                    counts[k] += 1.0;
+                }
+            }
+            let thicknesses: Vec<f32> = sums
+                .iter()
+                .zip(&counts)
+                .map(|(&sum, &count)| {
+                    if count == 0.0 {
+                        return 0.0;
+                    }
+                    let measure = (128.0 + (255.0 - sum / count - 128.0) * scale).clamp(0.0, 255.0);
+                    (cell as f32 * measure / 255.0)
+                        .round()
+                        .clamp(0.0, cell as f32)
+                })
+                .collect();
+            for y in 0..height {
+                for x in 0..width {
+                    let k = band(x, y);
+                    let along = position(x, y) - (k as i64 * cell) as f32;
+                    ink_buf[y as usize * doc_width + x as usize] = along < thicknesses[k];
+                }
+            }
+        } else if pattern == HalftonePattern::Line {
             for band_x0 in (0..width).step_by(size as usize) {
                 let band_x1 = (band_x0 + cell).min(width);
                 let measure = measure_over(band_x0, 0, band_x1, height);
@@ -20698,11 +20908,9 @@ impl Document {
     /// slid content still originates from *within that same cell's own
     /// original footprint*; anywhere the shift would pull from outside
     /// it, the pixel falls back to the layer's own unaltered original —
-    /// Photoshop's own "Unaltered Image" fill option, the only one of
-    /// its four fill choices (Background Color, Foreground Color,
-    /// Inverse Image, Unaltered Image) this project implements, a
-    /// documented scope cut since the other three need colour pickers or
-    /// an inversion pass this dialog doesn't otherwise call for. Alpha
+    /// Photoshop's own "Unaltered Image" fill option;
+    /// [`Self::tiles_with`] adds its other three (Inverse Image and the
+    /// Foreground/Background colours). Alpha
     /// moves with its own pixel, matching every other whole-pixel
     /// Distort/Stylize filter in this project. Confined to the
     /// selection: cell offsets are always drawn for the whole,
@@ -20716,6 +20924,30 @@ impl Document {
         tile_size: u32,
         max_offset: u32,
         seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.tiles_with(
+            id,
+            tile_size,
+            max_offset,
+            seed,
+            TilesFill::UnalteredImage,
+            [0; 4],
+        )
+    }
+
+    /// [`Self::tiles`] with Photoshop's Fill Empty Area: where a slid
+    /// tile no longer covers a pixel, Unaltered Image shows the pixel
+    /// as it was, Inverse Image its colour inverted (alpha kept), and
+    /// Color the given colour — the dialog's Foreground Color or
+    /// Background Color.
+    pub fn tiles_with(
+        &mut self,
+        id: LayerId,
+        tile_size: u32,
+        max_offset: u32,
+        seed: u32,
+        fill: TilesFill,
+        fill_color: [u8; CHANNELS],
     ) -> Result<Option<Rect>, String> {
         if !(1..=15).contains(&tile_size) {
             return Err("Tiles tile size must be between 1 and 15.".to_string());
@@ -20744,13 +20976,24 @@ impl Document {
             let (sx, sy) = (col as i64 - dx, row as i64 - dy);
             let (hx0, hx1) = (icx * cell, ((icx * cell + cell).min(width)));
             let (hy0, hy1) = (icy * cell, ((icy * cell + cell).min(height)));
-            let source_base = if sx >= hx0 && sx < hx1 && sy >= hy0 && sy < hy1 {
-                (sy as usize * doc_width + sx as usize) * CHANNELS
-            } else {
-                base
-            };
             let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&src[source_base..source_base + CHANNELS]);
+            if sx >= hx0 && sx < hx1 && sy >= hy0 && sy < hy1 {
+                let source_base = (sy as usize * doc_width + sx as usize) * CHANNELS;
+                out.copy_from_slice(&src[source_base..source_base + CHANNELS]);
+            } else {
+                match fill {
+                    TilesFill::UnalteredImage => out.copy_from_slice(&src[base..base + CHANNELS]),
+                    TilesFill::InverseImage => {
+                        out = [
+                            255 - src[base],
+                            255 - src[base + 1],
+                            255 - src[base + 2],
+                            src[base + 3],
+                        ]
+                    }
+                    TilesFill::Color => out = fill_color,
+                }
+            }
             out
         })
     }
@@ -44582,6 +44825,164 @@ mod tests {
         let id = doc.add_layer("r", &ramp, w, h).unwrap();
         doc.offset(id, 1, 0).unwrap();
         assert_eq!(doc.layers()[0].pixels, wrap);
+    }
+
+    #[test]
+    fn extrude_pyramids_light_four_faces() {
+        // Flat grey 128, one 3×3 block, depth 100, Level-based: factor
+        // 128/255, swing 50.2. Pyramids: the top face (including the
+        // apex) reads 128 + 25.1 → 153, the bottom 103, the left 128 +
+        // 12.5 → 141, the right 115.
+        let (mut doc, id) = flat_grey(3, 3);
+        doc.extrude_with(id, 3, 100, false, 1, ExtrudeType::Pyramids, true)
+            .unwrap();
+        assert_eq!(
+            red_plane(&doc),
+            vec![153, 153, 153, 141, 153, 115, 103, 103, 103]
+        );
+        // Blocks with solid faces is the old extrude.
+        let (mut doc, id) = flat_grey(4, 4);
+        doc.extrude_with(id, 2, 100, false, 1, ExtrudeType::Blocks, true)
+            .unwrap();
+        let (mut old, old_id) = flat_grey(4, 4);
+        old.extrude(old_id, 2, 100, false, 1).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        // Un-solid front faces keep each pixel's own colour: a 2×2 block
+        // of 0, 100, 200, 255 at depth 1 shades by at most 0.27, so the
+        // result is the source itself, where solid faces flatten it to
+        // the block's average 138.
+        let mut pixels = Vec::new();
+        for v in [0u8, 100, 200, 255] {
+            pixels.extend_from_slice(&[v, v, v, 255]);
+        }
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 2).unwrap();
+        doc.extrude_with(id, 2, 1, false, 1, ExtrudeType::Blocks, false)
+            .unwrap();
+        assert_eq!(red_plane(&doc), vec![0, 100, 200, 255]);
+        let mut doc = Document::new(2, 2).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 2).unwrap();
+        doc.extrude_with(id, 2, 1, false, 1, ExtrudeType::Blocks, true)
+            .unwrap();
+        assert_eq!(red_plane(&doc), vec![138, 138, 138, 138]);
+    }
+
+    #[test]
+    fn note_paper_relief_embosses_the_step() {
+        // No grain, balance 25 (threshold 127.5), relief 25 (±125 at a
+        // step). Left half black, right half white: the white side of the
+        // step is shadowed (255 − 125 = 130), the black side stays 0.
+        let (w, h) = (4u32, 4u32);
+        let half = |left: u8, right: u8| {
+            let mut pixels = Vec::new();
+            for _ in 0..h {
+                for x in 0..w {
+                    let v = if x < 2 { left } else { right };
+                    pixels.extend_from_slice(&[v, v, v, 255]);
+                }
+            }
+            pixels
+        };
+        let run = |pixels: &[u8], relief: u32| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("g", pixels, w, h).unwrap();
+            doc.note_paper_with(id, 25, 0, relief, 9).unwrap();
+            red_plane(&doc)
+        };
+        let dark_left = run(&half(0, 255), 25);
+        assert_eq!(dark_left[4 + 1], 0);
+        assert_eq!(dark_left[4 + 2], 130);
+        assert_eq!(dark_left[4 + 3], 255);
+        // White left, black right: the black side of the step is lit
+        // (0 + 125); the white side would go above 255 and clamps.
+        let light_left = run(&half(255, 0), 25);
+        assert_eq!(light_left[4], 255);
+        assert_eq!(light_left[4 + 1], 255);
+        assert_eq!(light_left[4 + 2], 125);
+        assert_eq!(light_left[4 + 3], 0);
+        // Relief 0 is note_paper, draw for draw, grain and all.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("g", &half(60, 200), w, h).unwrap();
+        doc.note_paper_with(id, 25, 5, 0, 77).unwrap();
+        let mut old = Document::new(w, h).unwrap();
+        let old_id = old.add_layer("g", &half(60, 200), w, h).unwrap();
+        old.note_paper(old_id, 25, 5, 77).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        assert!(doc.note_paper_with(id, 25, 5, 26, 1).is_err());
+    }
+
+    #[test]
+    fn halftone_pattern_circle_and_diagonal_screens() {
+        // Flat grey 128 at size 4, contrast 0: every band measures 127,
+        // so its inner two pixels are inked.
+        let run = |pattern: HalftonePattern, diagonal: bool| {
+            let (mut doc, id) = flat_grey(8, 8);
+            doc.halftone_pattern_with(id, 4, 0, pattern, diagonal)
+                .unwrap();
+            red_plane(&doc)
+        };
+        // Diagonal lines: inked where (x + y) mod 4 < 2.
+        let diagonal = run(HalftonePattern::Line, true);
+        for y in 0..8usize {
+            for x in 0..8usize {
+                let expected = if (x + y) % 4 < 2 { 0 } else { 255 };
+                assert_eq!(diagonal[y * 8 + x], expected, "({x}, {y})");
+            }
+        }
+        // Circles about (3.5, 3.5): (3, 3) at r 0.71 and (2, 3) at r 1.58
+        // are inked, (3, 0) at r 3.54 and (1, 3) at r 2.55 are paper, and
+        // (0, 0) at r 4.95 falls in ring 1's inner two pixels.
+        let circle = run(HalftonePattern::Circle, false);
+        assert_eq!(circle[3 * 8 + 3], 0);
+        assert_eq!(circle[3 * 8 + 2], 0);
+        assert_eq!(circle[3], 255);
+        assert_eq!(circle[3 * 8 + 1], 255);
+        assert_eq!(circle[0], 0);
+        // Dot and the vertical Line are halftone_pattern's own.
+        for (pattern, old) in [(HalftonePattern::Dot, 1), (HalftonePattern::Line, 0)] {
+            let (mut doc, id) = flat_grey(8, 8);
+            doc.halftone_pattern(id, 4, 0, old).unwrap();
+            assert_eq!(run(pattern, false), red_plane(&doc));
+        }
+    }
+
+    #[test]
+    fn tiles_fill_the_uncovered_pixels_three_ways() {
+        let (w, h) = (4u32, 4u32);
+        let ramp = red_ramp(w, h, 64);
+        // A seed whose first tile slides by exactly (1, 0) at tile size 2
+        // and 99 %: pixel (0, 0) is then uncovered and pixel (1, 0) reads
+        // pixel (0, 0).
+        let seed = (1u32..5000)
+            .map(|i| i.wrapping_mul(0x9E37_79B9))
+            .find(|&s| {
+                let mut r = XorShift32::new(s);
+                let dx = (1.98 * r.next_unit()).round();
+                let dy = (1.98 * r.next_unit()).round();
+                dx == 1.0 && dy == 0.0
+            })
+            .unwrap();
+        let run = |fill: TilesFill| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.tiles_with(id, 2, 99, seed, fill, [10, 20, 30, 255])
+                .unwrap();
+            doc.layers()[0].pixels.clone()
+        };
+        let unaltered = run(TilesFill::UnalteredImage);
+        let inverse = run(TilesFill::InverseImage);
+        let colour = run(TilesFill::Color);
+        assert_eq!(&unaltered[0..4], &[0, 0, 0, 255]);
+        assert_eq!(&inverse[0..4], &[255, 255, 255, 255]);
+        assert_eq!(&colour[0..4], &[10, 20, 30, 255]);
+        for out in [&unaltered, &inverse, &colour] {
+            assert_eq!(&out[4..8], &[0, 0, 0, 255]);
+        }
+        // Unaltered Image is the old tiles.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.tiles(id, 2, 99, seed).unwrap();
+        assert_eq!(doc.layers()[0].pixels, unaltered);
     }
 
     #[test]

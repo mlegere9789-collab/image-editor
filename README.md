@@ -21758,6 +21758,83 @@ screenshots checked by eye.
 
 Tests: 1851 Rust (1847 → 1851), 22 frontend.
 
+## Phase 365 — Stylize and Sketch options: Extrude pyramids, Tiles fills, Halftone circles and diagonals, Note Paper relief
+
+Four more section D scope cuts, on Stylize and the Sketch gallery,
+each a `*_with` command the old one now delegates to.
+
+**Extrude** (`extrude_with`, a Type select and a Solid Front Faces
+checkbox): Pyramids shade each block as four faces lit from the
+top-left — the top face (including the apex) at +0.5, the left at
++0.25, the right at −0.25 and the bottom at −0.5 of the block's own
+`factor · depth` swing, the face chosen by which of the pixel's
+offsets from the block's centre is larger and its sign. With Solid
+Front Faces off the shade is applied to each pixel's own colour rather
+than the block's average, the image showing on the faces — a stand-in
+for Photoshop's stretched faces.
+
+**Tiles** (`tiles_with`, a Fill Empty Area select): where a slid tile
+no longer covers a pixel, Unaltered Image shows the pixel as it was,
+Inverse Image its colour inverted with its alpha kept, Foreground
+Color the brush colour, Background Color a colour picked in the
+dialog.
+
+**Halftone Pattern** (`halftone_pattern_with`, Circle joins the Pattern
+Type select and Line gains a Diagonal Lines checkbox): Circle inks
+concentric rings about the layer's centre, ring `k` the band of pixels
+with `⌊r / size⌋ = k`, its darkness measured over the band exactly as a
+vertical band's is and its inner `thickness` pixels inked; Diagonal
+Lines turns the Line screen 45°, bands along `x + y` instead of `x`.
+Dot and the vertical Line are byte for byte the old filter's.
+
+**Note Paper** (`note_paper_with`, a Relief slider, 0–25, default 11
+as in Photoshop): the thresholded paper is embossed as if lit from the
+top-left, each pixel offset by `(plane(x−1, y−1) − plane(x+1, y+1)) /
+255 · relief · 5`, up to ±125, so a black-to-white step gets a
+shadowed edge on its white side and a white-to-black step a lit edge
+on its black side while the interior stays pure. Relief 0 is the old
+filter draw for draw; a positive relief thresholds the whole layer
+first so the neighbours it embosses against are the thresholded ones.
+
+**Verified.** Four Rust tests. `extrude_pyramids_light_four_faces`:
+flat grey 128 as one 3×3 pyramid at depth 100, Level-based (factor
+128/255, swing 50.2) reads 153 across the top face, 141 on the left,
+115 on the right, 103 across the bottom, the apex with the top; Blocks
+with solid faces equals `extrude`; un-solid faces on a 2×2 block of 0,
+100, 200, 255 at depth 1 return the source itself where solid faces
+flatten it to 138. `note_paper_relief_embosses_the_step` without
+grain at balance 25 and relief 25: black left / white right reads 0,
+130, 255 across the step's black side, white side and interior; white
+left / black right reads 255 and then 125 on the black side; relief 0
+equals `note_paper` with grain; relief 26 errors.
+`halftone_pattern_circle_and_diagonal_screens` on flat grey 128 at
+size 4 (every band measures 127, so two of four pixels are inked):
+Diagonal Lines ink exactly where `(x + y) mod 4 < 2`; Circle inks
+(3, 3) and (2, 3) inside ring 0, leaves (3, 0) and (1, 3) as paper, and
+inks (0, 0) at r 4.95 in ring 1's inner two pixels; Dot and Line
+equal the old types. `tiles_fill_the_uncovered_pixels_three_ways`
+with a seed whose first tile slides by (1, 0): the uncovered pixel (0,
+0) reads its own 0 under Unaltered Image, 255 under Inverse Image and
+the given colour under Color, pixel (1, 0) reads pixel (0, 0) under
+all three, and Unaltered Image equals `tiles`. In Chromium against the
+built frontend: Filter > Stylize > Extrude… shows Type (Blocks), Size,
+Depth, Level-based/Random and Solid Front Faces (on), and Pyramids
+with the faces unchecked sends `extrude_with` with `kind: "pyramids",
+solidFront: false`; Tiles… shows Fill Empty Area (Unaltered Image),
+Background Color reveals a colour input, and Apply sends `tiles_with`
+with `fill: "color"` and the picked colour, Inverse Image with `fill:
+"inverseImage"`; Filter Gallery > Sketch > Halftone Pattern… shows
+Pattern Type (Line) with Diagonal Lines, which sends `diagonal: true`,
+and Circle hides the checkbox and sends `pattern: "circle"`; Note
+Paper… shows Relief at 11, and 20 sends `relief: 20`; every dialog
+closes on Apply. On the real app under Xvfb, on the recovered
+brush-stroke document: Filter > Stylize > Extrude… with Pyramids at size 20 and depth 98,
+applied through the real IPC, popped the white stroke into a run of
+20-pixel pyramids with their four faces distinctly lit; five
+screenshots checked by eye.
+
+Tests: 1855 Rust (1851 → 1855), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
