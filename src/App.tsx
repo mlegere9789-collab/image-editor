@@ -10,6 +10,7 @@ import TabbedPanelGroup, { type PanelGroupMember } from "./TabbedPanelGroup";
 import DockZoneSplitter from "./DockZoneSplitter";
 import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
+import { BRUSH_TOOLS, optionsRule, PEOPLE_TOOLS, TIP_TOOLS } from "./optionsBar";
 import { markTourSeen, tourSeen } from "./tour";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import {
@@ -193,6 +194,10 @@ const PROGRESS_COMMANDS = new Set([
 const CANCELLED = "Cancelled.";
 const COMPACT_TOOLBAR_STORAGE_KEY = "legelabs.compactToolbar";
 const COLOR_SETTINGS_STORAGE_KEY = "legelabs.showColorSettings";
+/** `data-tool-option` values: the tools each shared control shows for. */
+const BRUSH_OPTION = BRUSH_TOOLS.join(" ");
+const TIP_OPTION = TIP_TOOLS.join(" ");
+const PEOPLE_OPTION = PEOPLE_TOOLS.join(" ");
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
@@ -9360,11 +9365,10 @@ export default function App() {
 
   return (
     <div className={`app${dropping ? " app--dropping" : ""}`}>
-      {hiddenTools.size > 0 && (
-        <style>
-          {[...hiddenTools].map((id) => `[data-tool="${id}"]{display:none!important}`).join("")}
-        </style>
-      )}
+      <style>
+        {[...hiddenTools].map((id) => `[data-tool="${id}"]{display:none!important}`).join("") +
+          optionsRule(tool)}
+      </style>
       <MenuBar entries={menuEntries} hidden={hiddenMenuCommands} />
       <header
         className={`toolbar${compactToolbar ? " toolbar--compact" : ""}${showColorSettings ? "" : " toolbar--no-color"}`}
@@ -9483,17 +9487,17 @@ export default function App() {
         >
           Artboards…
         </button>
-        <label className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
+        <label data-tool-option={TIP_OPTION} className="tools__slider" title="Paint the Brush tool with the defined tip instead of the round brush">
           <input type="checkbox" checked={useBrushTip} disabled={!document?.hasBrushTip} onChange={(event) => setUseBrushTip(event.target.checked)} />
           Tip {document?.hasBrushTip ? "" : "(none defined)"}
         </label>
         {useBrushTip && !brushDynamicsOn && (
-          <label className="tools__slider">
+          <label data-tool-option={TIP_OPTION} className="tools__slider">
             Spacing {tipSpacing}
             <input type="range" min={1} max={50} value={tipSpacing} onChange={(event) => setTipSpacing(Number(event.target.value))} />
           </label>
         )}
-        <label className="tools__slider" title="Brush Settings: paint dab by dab with spacing, shape dynamics, scattering, opacity jitter and hardness">
+        <label data-tool-option={TIP_OPTION} className="tools__slider" title="Brush Settings: paint dab by dab with spacing, shape dynamics, scattering, opacity jitter and hardness">
           <input type="checkbox" checked={brushDynamicsOn} onChange={(event) => setBrushDynamicsOn(event.target.checked)} />
           Brush Settings
         </label>
@@ -9890,6 +9894,7 @@ export default function App() {
             Use Dither
           </label>
           <label
+            data-section="color"
             className="tools__slider"
             title={
               renderingIntent === "absoluteColorimetric"
@@ -10400,39 +10405,6 @@ export default function App() {
 
         <div className="tools" role="group" aria-label="Selection tool">
           <button
-            className={`button button--quiet${tool === "selectRect" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "selectRect"}
-            onClick={() => setTool("selectRect")}
-            data-tool="selectRect"
-            data-tooltip-name="Rect Select"
-            data-tooltip="Rectangular Marquee: drag to select a rectangular region"
-          >
-            Rect Select
-          </button>
-          <button
-            className={`button button--quiet${tool === "selectEllipse" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "selectEllipse"}
-            onClick={() => setTool("selectEllipse")}
-            data-tool="selectEllipse"
-            data-tooltip-name="Ellipse Select"
-            data-tooltip="Elliptical Marquee: drag to select an elliptical region"
-          >
-            Ellipse Select
-          </button>
-          <button
-            className={`button button--quiet${tool === "magicWand" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "magicWand"}
-            onClick={() => setTool("magicWand")}
-            data-tool="magicWand"
-            data-tooltip-name="Magic Wand"
-            data-tooltip="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
-          >
-            Magic Wand
-          </button>
-          <button
             className="button button--quiet"
             onClick={() => setShowColorRangeDialog(true)}
             disabled={busy || !canPaint}
@@ -10495,28 +10467,6 @@ export default function App() {
             title="Load an alpha channel made by Image > Calculations as the selection (grey 128 and up)"
           >
             Load Channel…
-          </button>
-          <button
-            className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "selectRow"}
-            onClick={() => setTool("selectRow")}
-            data-tool="selectRow"
-            data-tooltip-name="Single Row"
-            data-tooltip="Single Row Marquee: selects one full-width, 1px-tall row"
-          >
-            Single Row
-          </button>
-          <button
-            className={`button button--quiet${tool === "selectColumn" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "selectColumn"}
-            onClick={() => setTool("selectColumn")}
-            data-tool="selectColumn"
-            data-tooltip-name="Single Column"
-            data-tooltip="Single Column Marquee: selects one full-height, 1px-wide column"
-          >
-            Single Column
           </button>
           <button
             className="button button--quiet"
@@ -10602,342 +10552,12 @@ export default function App() {
 
         <div className="tools" role="group" aria-label="Paint tool">
           <button
-            className={`button button--quiet${tool === "brush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "brush"}
-            onClick={() => setTool("brush")}
-            data-tool="brush"
-            data-tooltip-name="Brush"
-            data-tooltip="Brush: paint with the current colour, size, and opacity"
-          >
-            Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "eraser" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "eraser"}
-            onClick={() => setTool("eraser")}
-            data-tool="eraser"
-            data-tooltip-name="Eraser"
-            data-tooltip="Eraser: erase to transparency (or the background colour on a locked layer) with the current size and opacity"
-          >
-            Eraser
-          </button>
-          <button
-            className={`button button--quiet${tool === "magicEraser" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "magicEraser"}
-            onClick={() => setTool("magicEraser")}
-            data-tool="magicEraser"
-            data-tooltip-name="Magic Eraser"
-            data-tooltip="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
-          >
-            Magic Eraser
-          </button>
-          <button
-            className={`button button--quiet${tool === "backgroundEraser" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "backgroundEraser"}
-            onClick={() => setTool("backgroundEraser")}
-            data-tool="backgroundEraser"
-            data-tooltip-name="Background Eraser"
-            data-tooltip="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
-          >
-            Background Eraser
-          </button>
-          <button
-            className={`button button--quiet${tool === "dodge" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "dodge"}
-            onClick={() => setTool("dodge")}
-            data-tool="dodge"
-            data-tooltip-name="Dodge"
-            data-tooltip="Dodge: paint to lighten toward white (Flow sets the Exposure)"
-          >
-            Dodge
-          </button>
-          <button
-            className={`button button--quiet${tool === "burn" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "burn"}
-            onClick={() => setTool("burn")}
-            data-tool="burn"
-            data-tooltip-name="Burn"
-            data-tooltip="Burn: paint to darken toward black (Flow sets the Exposure)"
-          >
-            Burn
-          </button>
-          <button
-            className={`button button--quiet${tool === "sponge" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "sponge"}
-            onClick={() => setTool("sponge")}
-            data-tool="sponge"
-            data-tooltip-name="Sponge"
-            data-tooltip="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
-          >
-            Sponge
-          </button>
-          <button
-            className={`button button--quiet${tool === "blur" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "blur"}
-            onClick={() => setTool("blur")}
-            data-tool="blur"
-            data-tooltip-name="Blur"
-            data-tooltip="Blur: paint to soften (Flow sets the Strength)"
-          >
-            Blur
-          </button>
-          <button
-            className={`button button--quiet${tool === "sharpen" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "sharpen"}
-            onClick={() => setTool("sharpen")}
-            data-tool="sharpen"
-            data-tooltip-name="Sharpen"
-            data-tooltip="Sharpen: paint to sharpen (Flow sets the Strength)"
-          >
-            Sharpen
-          </button>
-          <button
-            className={`button button--quiet${tool === "smudge" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "smudge"}
-            onClick={() => setTool("smudge")}
-            data-tool="smudge"
-            data-tooltip-name="Smudge"
-            data-tooltip="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
-          >
-            Smudge
-          </button>
-          <button
-            className={`button button--quiet${tool === "colorReplace" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "colorReplace"}
-            onClick={() => setTool("colorReplace")}
-            data-tool="colorReplace"
-            data-tooltip-name="Color Replacement"
-            data-tooltip="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
-          >
-            Color Replacement
-          </button>
-          <button
-            className={`button button--quiet${tool === "redEye" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "redEye"}
-            onClick={() => setTool("redEye")}
-            data-tool="redEye"
-            data-tooltip-name="Red Eye"
-            data-tooltip="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
-          >
-            Red Eye
-          </button>
-          <button
-            className={`button button--quiet${tool === "ruler" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "ruler"}
-            onClick={() => setTool("ruler")}
-            data-tool="ruler"
-            data-tooltip-name="Ruler"
-            data-tooltip="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
-          >
-            Ruler
-          </button>
-          <button
-            className={`button button--quiet${tool === "colorSampler" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "colorSampler"}
-            onClick={() => setTool("colorSampler")}
-            data-tool="colorSampler"
-            data-tooltip-name="Color Sampler"
-            data-tooltip="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
-          >
-            Color Sampler
-          </button>
-          <button
-            className={`button button--quiet${tool === "count" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "count"}
-            onClick={() => setTool("count")}
-            data-tool="count"
-            data-tooltip-name="Count"
-            data-tooltip="Count: click to place numbered marks; the running total shows in the status bar"
-          >
-            Count
-          </button>
-          <button
-            className={`button button--quiet${tool === "note" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "note"}
-            onClick={() => setTool("note")}
-            data-tool="note"
-            data-tooltip-name="Note"
-            data-tooltip="Note: click to pin a text note; click a note's badge to edit or delete it"
-          >
-            Note
-          </button>
-          <button
-            className={`button button--quiet${tool === "move" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "move"}
-            onClick={() => setTool("move")}
-            data-tool="move"
-            data-tooltip-name="Move"
-            data-tooltip="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
-          >
-            Move
-          </button>
-          <button
-            className={`button button--quiet${tool === "polygonLasso" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "polygonLasso"}
-            onClick={() => setTool("polygonLasso")}
-            data-tool="polygonLasso"
-            data-tooltip-name="Polygonal Lasso"
-            data-tooltip="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
-          >
-            Polygonal Lasso
-          </button>
-          <button
-            className={`button button--quiet${tool === "lasso" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "lasso"}
-            onClick={() => setTool("lasso")}
-            data-tool="lasso"
-            data-tooltip-name="Lasso"
-            data-tooltip="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
-          >
-            Lasso
-          </button>
-          <button
-            className={`button button--quiet${tool === "magneticLasso" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "magneticLasso"}
-            onClick={() => setTool("magneticLasso")}
-            data-tool="magneticLasso"
-            data-tooltip-name="Magnetic Lasso"
-            data-tooltip="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
-          >
-            Magnetic Lasso
-          </button>
-          <button
-            className={`button button--quiet${isPen ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isPen}
-            onClick={() => setTool("pen")}
-            data-tool="pen"
-            data-tooltip-name="Pen"
-            data-tooltip="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
-          >
-            Pen
-          </button>
-          <button
-            className={`button button--quiet${isFreeformPen ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isFreeformPen}
-            onClick={() => setTool("freeformPen")}
-            data-tool="freeformPen"
-            data-tooltip-name="Freeform Pen"
-            data-tooltip="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
-          >
-            Freeform Pen
-          </button>
-          <button
-            className={`button button--quiet${isCurvaturePen ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isCurvaturePen}
-            onClick={() => setTool("curvaturePen")}
-            data-tool="curvaturePen"
-            data-tooltip-name="Curvature Pen"
-            data-tooltip="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
-          >
-            Curvature Pen
-          </button>
-          <button
-            className={`button button--quiet${isAddAnchorPoint ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isAddAnchorPoint}
-            onClick={() => setTool("addAnchorPoint")}
-            data-tool="addAnchorPoint"
-            data-tooltip-name="Add Anchor Point"
-            data-tooltip="Add Anchor Point: click near the path to insert a new anchor there"
-          >
-            Add Anchor Point
-          </button>
-          <button
-            className={`button button--quiet${isDeleteAnchorPoint ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isDeleteAnchorPoint}
-            onClick={() => setTool("deleteAnchorPoint")}
-            data-tool="deleteAnchorPoint"
-            data-tooltip-name="Delete Anchor Point"
-            data-tooltip="Delete Anchor Point: click an anchor to remove it"
-          >
-            Delete Anchor Point
-          </button>
-          <button
-            className={`button button--quiet${isConvertPoint ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isConvertPoint}
-            onClick={() => setTool("convertPoint")}
-            data-tool="convertPoint"
-            data-tooltip-name="Convert Point"
-            data-tooltip="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
-          >
-            Convert Point
-          </button>
-          <button
-            className={`button button--quiet${isPathSelection ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isPathSelection}
-            onClick={() => setTool("pathSelection")}
-            data-tool="pathSelection"
-            data-tooltip-name="Path Selection"
-            data-tooltip="Path Selection: drag anywhere to move the whole current path"
-          >
-            Path Selection
-          </button>
-          <button
-            className={`button button--quiet${isDirectSelection ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={isDirectSelection}
-            onClick={() => setTool("directSelection")}
-            data-tool="directSelection"
-            data-tooltip-name="Direct Selection"
-            data-tooltip="Direct Selection: drag an anchor to move just that point"
-          >
-            Direct Selection
-          </button>
-          <button
             className="button button--quiet"
             onClick={() => void runCommand("clear_path", {})}
             disabled={busy || !document?.currentPath}
             title="Discard the current path and start a new one"
           >
             New Path
-          </button>
-          <button
-            className={`button button--quiet${tool === "objectSelect" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "objectSelect"}
-            onClick={() => setTool("objectSelect")}
-            data-tool="objectSelect"
-            data-tooltip-name="Object Select"
-            data-tooltip="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
-          >
-            Object Select
-          </button>
-          <button
-            className={`button button--quiet${tool === "objectSelectLasso" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "objectSelectLasso"}
-            onClick={() => setTool("objectSelectLasso")}
-            data-tool="objectSelectLasso"
-            data-tooltip-name="Object Lasso"
-            data-tooltip="Object Selection, Lasso mode: draw a rough outline around an object to select it"
-          >
-            Object Lasso
           </button>
           <button
             className="button button--quiet"
@@ -10990,7 +10610,7 @@ export default function App() {
           >
             Select People
           </button>
-          <label
+          <label data-tool-option={PEOPLE_OPTION}
             className="tools__slider"
             title="Select > People > Individual Person Selection: the Nth-largest separate skin-toned region, 0 = the largest"
           >
@@ -11028,7 +10648,7 @@ export default function App() {
           >
             Select Hair
           </button>
-          <label
+          <label data-tool-option={PEOPLE_OPTION}
             className="tools__slider"
             title="Select > Subject > Person Components: which part of the person to select"
           >
@@ -11180,17 +10800,6 @@ export default function App() {
             Delete Mask
           </button>
           <button
-            className={`button button--quiet${tool === "vectorMask" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "vectorMask"}
-            onClick={() => setTool("vectorMask")}
-            data-tool="vectorMask"
-            data-tooltip-name="Vector Mask"
-            data-tooltip="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
-          >
-            Vector Mask
-          </button>
-          <button
             className="button button--quiet"
             onClick={() => setShowAdjustmentDialog(true)}
             disabled={busy || !hasDocument}
@@ -11208,266 +10817,11 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={openTypeDialog}
-            disabled={busy || !hasDocument}
-            title="Horizontal / Vertical Type tool: a text layer in the built-in 5×7 face, in the brush colour"
-          >
-            Type…
-          </button>
-          <button
-            className="button button--quiet"
-            onClick={openShapeLayerDialog}
-            disabled={busy || !hasDocument}
-            title="Shape mode of the shape tools, and the Custom Shape tool: a live shape layer, or a custom polygon painted in place"
-          >
-            Shape Layer…
-          </button>
-          <button
-            className="button button--quiet"
             onClick={openSmartDialog}
             disabled={busy || !hasDocument}
             title="Layer > Smart Objects: convert, create from layers, transform from the source, rasterize"
           >
             Smart Object…
-          </button>
-          <button
-            className="button button--quiet"
-            onClick={openFrameDialog}
-            disabled={busy || !hasDocument}
-            title="Frame tool: a masked frame layer that clips whatever is placed into it"
-          >
-            Frame…
-          </button>
-          <button
-            className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "selectionBrush"}
-            onClick={() => setTool("selectionBrush")}
-            data-tool="selectionBrush"
-            data-tooltip-name="Selection Brush"
-            data-tooltip="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
-          >
-            Selection Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "quickSelection" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "quickSelection"}
-            onClick={() => setTool("quickSelection")}
-            data-tool="quickSelection"
-            data-tooltip-name="Quick Selection"
-            data-tooltip="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
-          >
-            Quick Selection
-          </button>
-          <button
-            className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
-            disabled={!canPaint || !(document?.hasPattern ?? false)}
-            aria-pressed={tool === "patternStamp"}
-            onClick={() => setTool("patternStamp")}
-            data-tool="patternStamp"
-            data-tooltip-name="Pattern Stamp"
-            data-tooltip="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
-          >
-            Pattern Stamp
-          </button>
-          <button
-            className={`button button--quiet${tool === "cloneStamp" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "cloneStamp"}
-            onClick={() => setTool("cloneStamp")}
-            data-tool="cloneStamp"
-            data-tooltip-name="Clone Stamp"
-            data-tooltip="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
-          >
-            Clone Stamp
-          </button>
-          <button
-            className={`button button--quiet${tool === "healingBrush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "healingBrush"}
-            onClick={() => setTool("healingBrush")}
-            data-tool="healingBrush"
-            data-tooltip-name="Healing Brush"
-            data-tooltip="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
-          >
-            Healing Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "spotHealingBrush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "spotHealingBrush"}
-            onClick={() => setTool("spotHealingBrush")}
-            data-tool="spotHealingBrush"
-            data-tooltip-name="Spot Healing"
-            data-tooltip="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
-          >
-            Spot Healing
-          </button>
-          <button
-            className={`button button--quiet${tool === "remove" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "remove"}
-            onClick={() => setTool("remove")}
-            data-tool="remove"
-            data-tooltip-name="Remove"
-            data-tooltip="Remove: brush over an object to fill it from the surroundings outside the brushed area"
-          >
-            Remove
-          </button>
-          <button
-            className={`button button--quiet${tool === "patch" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "patch"}
-            onClick={() => setTool("patch")}
-            data-tool="patch"
-            data-tooltip-name="Patch"
-            data-tooltip="Patch: select the area to repair, then drag it onto the area to sample from"
-          >
-            Patch
-          </button>
-          <button
-            className={`button button--quiet${tool === "contentAwareMove" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "contentAwareMove"}
-            onClick={() => setTool("contentAwareMove")}
-            data-tool="contentAwareMove"
-            data-tooltip-name="Content-Aware Move"
-            data-tooltip="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
-          >
-            Content-Aware Move
-          </button>
-          <button
-            className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "historyBrush"}
-            onClick={() => setTool("historyBrush")}
-            data-tool="historyBrush"
-            data-tooltip-name="History Brush"
-            data-tooltip="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
-          >
-            History Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "mixerBrush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "mixerBrush"}
-            onClick={() => setTool("mixerBrush")}
-            data-tool="mixerBrush"
-            data-tooltip-name="Mixer Brush"
-            data-tooltip="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
-          >
-            Mixer Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "artHistoryBrush" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "artHistoryBrush"}
-            onClick={() => setTool("artHistoryBrush")}
-            data-tool="artHistoryBrush"
-            data-tooltip-name="Art History Brush"
-            data-tooltip="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
-          >
-            Art History Brush
-          </button>
-          <button
-            className={`button button--quiet${tool === "rectangle" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "rectangle"}
-            onClick={() => setTool("rectangle")}
-            data-tool="rectangle"
-            data-tooltip-name="Rectangle"
-            data-tooltip="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
-          >
-            Rectangle
-          </button>
-          <button
-            className={`button button--quiet${tool === "ellipse" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "ellipse"}
-            onClick={() => setTool("ellipse")}
-            data-tool="ellipse"
-            data-tooltip-name="Ellipse"
-            data-tooltip="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
-          >
-            Ellipse
-          </button>
-          <button
-            className={`button button--quiet${tool === "line" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "line"}
-            onClick={() => setTool("line")}
-            data-tool="line"
-            data-tooltip-name="Line"
-            data-tooltip="Line: drag to paint a straight line of the chosen weight in the brush colour"
-          >
-            Line
-          </button>
-          <button
-            className={`button button--quiet${tool === "polygon" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "polygon"}
-            onClick={() => setTool("polygon")}
-            data-tool="polygon"
-            data-tooltip-name="Polygon"
-            data-tooltip="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
-          >
-            Polygon
-          </button>
-          <button
-            className={`button button--quiet${tool === "star" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "star"}
-            onClick={() => setTool("star")}
-            data-tool="star"
-            data-tooltip-name="Star"
-            data-tooltip="Star: drag from the centre to the first point to paint a star in the brush colour"
-          >
-            Star
-          </button>
-          <button
-            className={`button button--quiet${tool === "triangle" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "triangle"}
-            onClick={() => setTool("triangle")}
-            data-tool="triangle"
-            data-tooltip-name="Triangle"
-            data-tooltip="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
-          >
-            Triangle
-          </button>
-          <button
-            className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
-            disabled={!hasDocument}
-            aria-pressed={tool === "eyedropper"}
-            onClick={() => setTool("eyedropper")}
-            data-tool="eyedropper"
-            data-tooltip-name="Eyedropper"
-            data-tooltip="Eyedropper: click the canvas to pick up its color"
-          >
-            Eyedropper
-          </button>
-          <button
-            className={`button button--quiet${tool === "paintBucket" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "paintBucket"}
-            onClick={() => setTool("paintBucket")}
-            data-tool="paintBucket"
-            data-tooltip-name="Paint Bucket"
-            data-tooltip="Paint Bucket: click to fill the connected region under the pointer"
-          >
-            Paint Bucket
-          </button>
-          <button
-            className={`button button--quiet${tool === "gradient" ? " button--active" : ""}`}
-            disabled={!canPaint}
-            aria-pressed={tool === "gradient"}
-            onClick={() => setTool("gradient")}
-            data-tool="gradient"
-            data-tooltip-name="Gradient"
-            data-tooltip="Gradient: drag to blend from color to end color along that line"
-          >
-            Gradient
           </button>
           <button
             className="button button--quiet"
@@ -13400,7 +12754,7 @@ export default function App() {
               </label>
             </>
           )}
-          <label className="tools__slider">
+          <label data-tool-option={BRUSH_OPTION} className="tools__slider">
             Size
             <input
               type="range"
@@ -13411,7 +12765,7 @@ export default function App() {
               onChange={(event) => setBrushSize(Number(event.target.value))}
             />
           </label>
-          <label className="tools__slider">
+          <label data-tool-option={BRUSH_OPTION} className="tools__slider">
             Flow
             <input
               type="range"
@@ -28742,6 +28096,659 @@ export default function App() {
       )}
 
       <div className="workspace">
+        <aside className="toolbox" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+          <button
+            className={`button button--quiet${tool === "selectRect" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectRect"}
+            onClick={() => setTool("selectRect")}
+            data-tool="selectRect"
+            data-tooltip-name="Rect Select"
+            data-tooltip="Rectangular Marquee: drag to select a rectangular region"
+          >
+            Rect Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectEllipse" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectEllipse"}
+            onClick={() => setTool("selectEllipse")}
+            data-tool="selectEllipse"
+            data-tooltip-name="Ellipse Select"
+            data-tooltip="Elliptical Marquee: drag to select an elliptical region"
+          >
+            Ellipse Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "magicWand" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magicWand"}
+            onClick={() => setTool("magicWand")}
+            data-tool="magicWand"
+            data-tooltip-name="Magic Wand"
+            data-tooltip="Magic Wand: click to select every pixel within Tolerance of the clicked colour on the selected layer"
+          >
+            Magic Wand
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectRow" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectRow"}
+            onClick={() => setTool("selectRow")}
+            data-tool="selectRow"
+            data-tooltip-name="Single Row"
+            data-tooltip="Single Row Marquee: selects one full-width, 1px-tall row"
+          >
+            Single Row
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectColumn" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectColumn"}
+            onClick={() => setTool("selectColumn")}
+            data-tool="selectColumn"
+            data-tooltip-name="Single Column"
+            data-tooltip="Single Column Marquee: selects one full-height, 1px-wide column"
+          >
+            Single Column
+          </button>
+          <button
+            className={`button button--quiet${tool === "brush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "brush"}
+            onClick={() => setTool("brush")}
+            data-tool="brush"
+            data-tooltip-name="Brush"
+            data-tooltip="Brush: paint with the current colour, size, and opacity"
+          >
+            Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "eraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "eraser"}
+            onClick={() => setTool("eraser")}
+            data-tool="eraser"
+            data-tooltip-name="Eraser"
+            data-tooltip="Eraser: erase to transparency (or the background colour on a locked layer) with the current size and opacity"
+          >
+            Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "magicEraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magicEraser"}
+            onClick={() => setTool("magicEraser")}
+            data-tool="magicEraser"
+            data-tooltip-name="Magic Eraser"
+            data-tooltip="Magic Eraser: click to erase every pixel within Tolerance of the clicked colour to transparency (Flow sets the erasure's opacity)"
+          >
+            Magic Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "backgroundEraser" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "backgroundEraser"}
+            onClick={() => setTool("backgroundEraser")}
+            data-tool="backgroundEraser"
+            data-tooltip-name="Background Eraser"
+            data-tooltip="Background Eraser: paint to erase only pixels within Tolerance of the colour under the stroke's start"
+          >
+            Background Eraser
+          </button>
+          <button
+            className={`button button--quiet${tool === "dodge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "dodge"}
+            onClick={() => setTool("dodge")}
+            data-tool="dodge"
+            data-tooltip-name="Dodge"
+            data-tooltip="Dodge: paint to lighten toward white (Flow sets the Exposure)"
+          >
+            Dodge
+          </button>
+          <button
+            className={`button button--quiet${tool === "burn" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "burn"}
+            onClick={() => setTool("burn")}
+            data-tool="burn"
+            data-tooltip-name="Burn"
+            data-tooltip="Burn: paint to darken toward black (Flow sets the Exposure)"
+          >
+            Burn
+          </button>
+          <button
+            className={`button button--quiet${tool === "sponge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "sponge"}
+            onClick={() => setTool("sponge")}
+            data-tool="sponge"
+            data-tooltip-name="Sponge"
+            data-tooltip="Sponge: paint to desaturate (or saturate) colour (Flow sets the strength)"
+          >
+            Sponge
+          </button>
+          <button
+            className={`button button--quiet${tool === "blur" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "blur"}
+            onClick={() => setTool("blur")}
+            data-tool="blur"
+            data-tooltip-name="Blur"
+            data-tooltip="Blur: paint to soften (Flow sets the Strength)"
+          >
+            Blur
+          </button>
+          <button
+            className={`button button--quiet${tool === "sharpen" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "sharpen"}
+            onClick={() => setTool("sharpen")}
+            data-tool="sharpen"
+            data-tooltip-name="Sharpen"
+            data-tooltip="Sharpen: paint to sharpen (Flow sets the Strength)"
+          >
+            Sharpen
+          </button>
+          <button
+            className={`button button--quiet${tool === "smudge" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "smudge"}
+            onClick={() => setTool("smudge")}
+            data-tool="smudge"
+            data-tooltip-name="Smudge"
+            data-tooltip="Smudge: drag to push colour along the stroke (Flow sets the Strength)"
+          >
+            Smudge
+          </button>
+          <button
+            className={`button button--quiet${tool === "colorReplace" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "colorReplace"}
+            onClick={() => setTool("colorReplace")}
+            data-tool="colorReplace"
+            data-tooltip-name="Color Replacement"
+            data-tooltip="Color Replacement: paint the brush colour's hue and saturation onto pixels near the colour under the stroke's start, keeping their lightness"
+          >
+            Color Replacement
+          </button>
+          <button
+            className={`button button--quiet${tool === "redEye" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "redEye"}
+            onClick={() => setTool("redEye")}
+            data-tool="redEye"
+            data-tooltip-name="Red Eye"
+            data-tooltip="Red Eye: click a red pupil to neutralise it (Flow sets the Darken Amount)"
+          >
+            Red Eye
+          </button>
+          <button
+            className={`button button--quiet${tool === "ruler" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "ruler"}
+            onClick={() => setTool("ruler")}
+            data-tool="ruler"
+            data-tooltip-name="Ruler"
+            data-tooltip="Ruler: drag to measure width, height, distance, and angle (shown in the status bar)"
+          >
+            Ruler
+          </button>
+          <button
+            className={`button button--quiet${tool === "colorSampler" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "colorSampler"}
+            onClick={() => setTool("colorSampler")}
+            data-tool="colorSampler"
+            data-tooltip-name="Color Sampler"
+            data-tooltip="Color Sampler: click to place up to ten sample points whose composite RGBA is read out in the status bar after every edit"
+          >
+            Color Sampler
+          </button>
+          <button
+            className={`button button--quiet${tool === "count" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "count"}
+            onClick={() => setTool("count")}
+            data-tool="count"
+            data-tooltip-name="Count"
+            data-tooltip="Count: click to place numbered marks; the running total shows in the status bar"
+          >
+            Count
+          </button>
+          <button
+            className={`button button--quiet${tool === "note" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "note"}
+            onClick={() => setTool("note")}
+            data-tool="note"
+            data-tooltip-name="Note"
+            data-tooltip="Note: click to pin a text note; click a note's badge to edit or delete it"
+          >
+            Note
+          </button>
+          <button
+            className={`button button--quiet${tool === "move" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "move"}
+            onClick={() => setTool("move")}
+            data-tool="move"
+            data-tooltip-name="Move"
+            data-tooltip="Move: drag to move the selected layer's pixels (or just the selected ones); arrow keys nudge"
+          >
+            Move
+          </button>
+          <button
+            className={`button button--quiet${tool === "polygonLasso" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "polygonLasso"}
+            onClick={() => setTool("polygonLasso")}
+            data-tool="polygonLasso"
+            data-tooltip-name="Polygonal Lasso"
+            data-tooltip="Polygonal Lasso: click to place vertices; click the first vertex again (or press Close) to select the polygon"
+          >
+            Polygonal Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "lasso" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "lasso"}
+            onClick={() => setTool("lasso")}
+            data-tool="lasso"
+            data-tooltip-name="Lasso"
+            data-tooltip="Lasso: drag a freehand outline; releasing closes it back to the start (Shift adds, Alt subtracts)"
+          >
+            Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "magneticLasso" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "magneticLasso"}
+            onClick={() => setTool("magneticLasso")}
+            data-tool="magneticLasso"
+            data-tooltip-name="Magnetic Lasso"
+            data-tooltip="Magnetic Lasso: drag a rough outline; each point snaps to the strongest edge within the Width (Shift adds, Alt subtracts)"
+          >
+            Magnetic Lasso
+          </button>
+          <button
+            className={`button button--quiet${isPen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isPen}
+            onClick={() => setTool("pen")}
+            data-tool="pen"
+            data-tooltip-name="Pen"
+            data-tooltip="Pen: click to place a corner anchor, drag to place a smooth one; click the first anchor again to close the path"
+          >
+            Pen
+          </button>
+          <button
+            className={`button button--quiet${isFreeformPen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isFreeformPen}
+            onClick={() => setTool("freeformPen")}
+            data-tool="freeformPen"
+            data-tooltip-name="Freeform Pen"
+            data-tooltip="Freeform Pen: drag a freehand trail; each sampled point becomes its own straight-cornered anchor"
+          >
+            Freeform Pen
+          </button>
+          <button
+            className={`button button--quiet${isCurvaturePen ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isCurvaturePen}
+            onClick={() => setTool("curvaturePen")}
+            data-tool="curvaturePen"
+            data-tooltip-name="Curvature Pen"
+            data-tooltip="Curvature Pen: click to place anchors; every interior one is smoothed automatically, no dragging needed"
+          >
+            Curvature Pen
+          </button>
+          <button
+            className={`button button--quiet${isAddAnchorPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isAddAnchorPoint}
+            onClick={() => setTool("addAnchorPoint")}
+            data-tool="addAnchorPoint"
+            data-tooltip-name="Add Anchor Point"
+            data-tooltip="Add Anchor Point: click near the path to insert a new anchor there"
+          >
+            Add Anchor Point
+          </button>
+          <button
+            className={`button button--quiet${isDeleteAnchorPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isDeleteAnchorPoint}
+            onClick={() => setTool("deleteAnchorPoint")}
+            data-tool="deleteAnchorPoint"
+            data-tooltip-name="Delete Anchor Point"
+            data-tooltip="Delete Anchor Point: click an anchor to remove it"
+          >
+            Delete Anchor Point
+          </button>
+          <button
+            className={`button button--quiet${isConvertPoint ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isConvertPoint}
+            onClick={() => setTool("convertPoint")}
+            data-tool="convertPoint"
+            data-tooltip-name="Convert Point"
+            data-tooltip="Convert Point: click a smooth anchor to make it a corner, or drag a corner anchor to make it smooth"
+          >
+            Convert Point
+          </button>
+          <button
+            className={`button button--quiet${isPathSelection ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isPathSelection}
+            onClick={() => setTool("pathSelection")}
+            data-tool="pathSelection"
+            data-tooltip-name="Path Selection"
+            data-tooltip="Path Selection: drag anywhere to move the whole current path"
+          >
+            Path Selection
+          </button>
+          <button
+            className={`button button--quiet${isDirectSelection ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={isDirectSelection}
+            onClick={() => setTool("directSelection")}
+            data-tool="directSelection"
+            data-tooltip-name="Direct Selection"
+            data-tooltip="Direct Selection: drag an anchor to move just that point"
+          >
+            Direct Selection
+          </button>
+          <button
+            className={`button button--quiet${tool === "objectSelect" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "objectSelect"}
+            onClick={() => setTool("objectSelect")}
+            data-tool="objectSelect"
+            data-tooltip-name="Object Select"
+            data-tooltip="Object Selection: drag a box around an object to select it — the largest thing inside that is not the box's background colour (Shift adds, Alt subtracts)"
+          >
+            Object Select
+          </button>
+          <button
+            className={`button button--quiet${tool === "objectSelectLasso" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "objectSelectLasso"}
+            onClick={() => setTool("objectSelectLasso")}
+            data-tool="objectSelectLasso"
+            data-tooltip-name="Object Lasso"
+            data-tooltip="Object Selection, Lasso mode: draw a rough outline around an object to select it"
+          >
+            Object Lasso
+          </button>
+          <button
+            className={`button button--quiet${tool === "vectorMask" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "vectorMask"}
+            onClick={() => setTool("vectorMask")}
+            data-tool="vectorMask"
+            data-tooltip-name="Vector Mask"
+            data-tooltip="Vector Mask: draw a closed path on the layer to mask it to the path's inside (Alt hides the inside instead)"
+          >
+            Vector Mask
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openTypeDialog}
+            disabled={busy || !hasDocument}
+            title="Horizontal / Vertical Type tool: a text layer in the built-in 5×7 face, in the brush colour"
+          >
+            Type…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openShapeLayerDialog}
+            disabled={busy || !hasDocument}
+            title="Shape mode of the shape tools, and the Custom Shape tool: a live shape layer, or a custom polygon painted in place"
+          >
+            Shape Layer…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={openFrameDialog}
+            disabled={busy || !hasDocument}
+            title="Frame tool: a masked frame layer that clips whatever is placed into it"
+          >
+            Frame…
+          </button>
+          <button
+            className={`button button--quiet${tool === "selectionBrush" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "selectionBrush"}
+            onClick={() => setTool("selectionBrush")}
+            data-tool="selectionBrush"
+            data-tooltip-name="Selection Brush"
+            data-tooltip="Selection Brush: paint to add to the selection at the brush size (Alt subtracts, Shift+Alt intersects)"
+          >
+            Selection Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "quickSelection" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "quickSelection"}
+            onClick={() => setTool("quickSelection")}
+            data-tool="quickSelection"
+            data-tooltip-name="Quick Selection"
+            data-tooltip="Quick Selection: paint over a region and the selection grows through similar connected colour at the Tolerance (Alt subtracts)"
+          >
+            Quick Selection
+          </button>
+          <button
+            className={`button button--quiet${tool === "patternStamp" ? " button--active" : ""}`}
+            disabled={!canPaint || !(document?.hasPattern ?? false)}
+            aria-pressed={tool === "patternStamp"}
+            onClick={() => setTool("patternStamp")}
+            data-tool="patternStamp"
+            data-tooltip-name="Pattern Stamp"
+            data-tooltip="Pattern Stamp tool: paints the pattern captured by Edit > Define Pattern, tiles aligned to the canvas"
+          >
+            Pattern Stamp
+          </button>
+          <button
+            className={`button button--quiet${tool === "cloneStamp" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "cloneStamp"}
+            onClick={() => setTool("cloneStamp")}
+            data-tool="cloneStamp"
+            data-tooltip-name="Clone Stamp"
+            data-tooltip="Clone Stamp: Alt-click to set the source, then paint to copy pixels from there (aligned)"
+          >
+            Clone Stamp
+          </button>
+          <button
+            className={`button button--quiet${tool === "healingBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "healingBrush"}
+            onClick={() => setTool("healingBrush")}
+            data-tool="healingBrush"
+            data-tooltip-name="Healing Brush"
+            data-tooltip="Healing Brush: Alt-click to set the source, then paint its texture matched to the destination's tone"
+          >
+            Healing Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "spotHealingBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "spotHealingBrush"}
+            onClick={() => setTool("spotHealingBrush")}
+            data-tool="spotHealingBrush"
+            data-tooltip-name="Spot Healing"
+            data-tooltip="Spot Healing Brush: paint over a blemish to replace it with the mean of its surroundings"
+          >
+            Spot Healing
+          </button>
+          <button
+            className={`button button--quiet${tool === "remove" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "remove"}
+            onClick={() => setTool("remove")}
+            data-tool="remove"
+            data-tooltip-name="Remove"
+            data-tooltip="Remove: brush over an object to fill it from the surroundings outside the brushed area"
+          >
+            Remove
+          </button>
+          <button
+            className={`button button--quiet${tool === "patch" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "patch"}
+            onClick={() => setTool("patch")}
+            data-tool="patch"
+            data-tooltip-name="Patch"
+            data-tooltip="Patch: select the area to repair, then drag it onto the area to sample from"
+          >
+            Patch
+          </button>
+          <button
+            className={`button button--quiet${tool === "contentAwareMove" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "contentAwareMove"}
+            onClick={() => setTool("contentAwareMove")}
+            data-tool="contentAwareMove"
+            data-tooltip-name="Content-Aware Move"
+            data-tooltip="Content-Aware Move: select an area, then drag it; the hole it leaves is filled from its surroundings"
+          >
+            Content-Aware Move
+          </button>
+          <button
+            className={`button button--quiet${tool === "historyBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "historyBrush"}
+            onClick={() => setTool("historyBrush")}
+            data-tool="historyBrush"
+            data-tooltip-name="History Brush"
+            data-tooltip="History Brush: press Set Source to remember the current state, then paint to restore pixels from it"
+          >
+            History Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "mixerBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "mixerBrush"}
+            onClick={() => setTool("mixerBrush")}
+            data-tool="mixerBrush"
+            data-tooltip-name="Mixer Brush"
+            data-tooltip="Mixer Brush: paint from a reservoir of the brush colour mixed with the canvas by Wet and Mix, at Load opacity"
+          >
+            Mixer Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "artHistoryBrush" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "artHistoryBrush"}
+            onClick={() => setTool("artHistoryBrush")}
+            data-tool="artHistoryBrush"
+            data-tooltip-name="Art History Brush"
+            data-tooltip="Art History Brush: stylised dabs averaged from the History Brush's source, where the picture has changed"
+          >
+            Art History Brush
+          </button>
+          <button
+            className={`button button--quiet${tool === "rectangle" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "rectangle"}
+            onClick={() => setTool("rectangle")}
+            data-tool="rectangle"
+            data-tooltip-name="Rectangle"
+            data-tooltip="Rectangle: drag a box to paint it with the brush colour, an inside stroke, and rounded corners"
+          >
+            Rectangle
+          </button>
+          <button
+            className={`button button--quiet${tool === "ellipse" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "ellipse"}
+            onClick={() => setTool("ellipse")}
+            data-tool="ellipse"
+            data-tooltip-name="Ellipse"
+            data-tooltip="Ellipse: drag a box to paint the ellipse inside it with the brush colour and an inside stroke"
+          >
+            Ellipse
+          </button>
+          <button
+            className={`button button--quiet${tool === "line" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "line"}
+            onClick={() => setTool("line")}
+            data-tool="line"
+            data-tooltip-name="Line"
+            data-tooltip="Line: drag to paint a straight line of the chosen weight in the brush colour"
+          >
+            Line
+          </button>
+          <button
+            className={`button button--quiet${tool === "polygon" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "polygon"}
+            onClick={() => setTool("polygon")}
+            data-tool="polygon"
+            data-tooltip-name="Polygon"
+            data-tooltip="Polygon: drag from the centre to the first corner to paint a regular polygon in the brush colour"
+          >
+            Polygon
+          </button>
+          <button
+            className={`button button--quiet${tool === "star" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "star"}
+            onClick={() => setTool("star")}
+            data-tool="star"
+            data-tooltip-name="Star"
+            data-tooltip="Star: drag from the centre to the first point to paint a star in the brush colour"
+          >
+            Star
+          </button>
+          <button
+            className={`button button--quiet${tool === "triangle" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "triangle"}
+            onClick={() => setTool("triangle")}
+            data-tool="triangle"
+            data-tooltip-name="Triangle"
+            data-tooltip="Triangle: drag a box to paint the triangle that fits it, apex at the top, in the brush colour"
+          >
+            Triangle
+          </button>
+          <button
+            className={`button button--quiet${tool === "eyedropper" ? " button--active" : ""}`}
+            disabled={!hasDocument}
+            aria-pressed={tool === "eyedropper"}
+            onClick={() => setTool("eyedropper")}
+            data-tool="eyedropper"
+            data-tooltip-name="Eyedropper"
+            data-tooltip="Eyedropper: click the canvas to pick up its color"
+          >
+            Eyedropper
+          </button>
+          <button
+            className={`button button--quiet${tool === "paintBucket" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "paintBucket"}
+            onClick={() => setTool("paintBucket")}
+            data-tool="paintBucket"
+            data-tooltip-name="Paint Bucket"
+            data-tooltip="Paint Bucket: click to fill the connected region under the pointer"
+          >
+            Paint Bucket
+          </button>
+          <button
+            className={`button button--quiet${tool === "gradient" ? " button--active" : ""}`}
+            disabled={!canPaint}
+            aria-pressed={tool === "gradient"}
+            onClick={() => setTool("gradient")}
+            data-tool="gradient"
+            data-tooltip-name="Gradient"
+            data-tooltip="Gradient: drag to blend from color to end color along that line"
+          >
+            Gradient
+          </button>
+        </aside>
         {leftDockedPanels.length > 0 && <div className="dock-zone dock-zone--left">{leftDockedPanels}</div>}
         <main className="stage">
           {error && (

@@ -25,9 +25,14 @@ export const TOUR_STEPS: readonly TourStep[] = [
     body: "File, Edit, Image, Layer, Type, Select, Filter, View, Window, and Help, laid out the way Photoshop's are. Every command in the app is here, with its shortcut beside it.",
   },
   {
+    target: ".toolbox",
+    title: "The toolbox",
+    body: "Every tool, in Photoshop's own column at the left of the canvas. Pick one and its options appear in the bar above; Edit > Toolbar hides the tools you never use.",
+  },
+  {
     target: "header.toolbar",
-    title: "The toolbar and tools",
-    body: "Tools and their settings live here. Window > Workspace > Compact Toolbar keeps only the tools once you know the menus; Edit > Toolbar hides tools you never use.",
+    title: "The options bar",
+    body: "The active tool's settings, and a few commands no menu names. Window > Workspace > Compact Toolbar keeps it to that; turn it off to see every command as a button.",
   },
   {
     target: ".stage",

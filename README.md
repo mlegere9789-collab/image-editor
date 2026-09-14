@@ -21239,10 +21239,10 @@ own first-launch experience is a home screen and a set of guided
 tutorials; this app's is a short tour of its surfaces, run once on its
 own the first time the app opens and again from the Help menu.
 
-**Mechanism.** `src/tour.ts` holds the steps as data — seven cards, the
-first and last untargeted, the five between pointed at the menu bar,
-the toolbar, the canvas, the right dock, and the status bar by CSS
-selector — with `tourStep` to walk them, a `legelabs.tourSeen` flag in
+**Mechanism.** `src/tour.ts` holds the steps as data — seven cards at first (eight
+since Phase 357 split the toolbox from the options bar), the first and
+last untargeted, those between pointed at the menu bar, the toolbar,
+the canvas, the right dock, and the status bar by CSS selector — with `tourStep` to walk them, a `legelabs.tourSeen` flag in
 the browser, and `cardPlacement`, which sits the card below its
 target's box when there is room, above it otherwise, and centred when
 neither fits or there is no target, always inside the viewport by a
@@ -21342,6 +21342,51 @@ screenshot of the lean toolbar was checked by eye: title row, tool
 rows, canvas, panels.
 
 Tests unchanged: 1839 Rust, 18 frontend.
+
+## Phase 357 — The toolbox and the options bar
+
+The "options bar" item of `docs/PLAN_TO_100.md` section B.4, and the
+end of the toolbar's clutter. Until now the 60 tool buttons sat in the
+toolbar's rows among their own settings; with the menu bar carrying
+the commands (Phase 348) and the colour strip put away (Phase 356), the
+toolbar was 320 px of mostly tools.
+
+**Mechanism.** The tool buttons — every `data-tool` button and the
+Type, Shape Layer, and Frame buttons — moved out of the toolbar into a
+`<aside class="toolbox">` at the left of the workspace: Photoshop's own
+column of tools beside the canvas, here a three-column grid 276 px wide
+that holds all 60 without scrolling in an 800 px window. The move was
+a cut of the JSX elements themselves, none of which sat inside a
+conditional, so every handler, tooltip, hidden-tool rule, and active
+state came along unchanged. What stays in the toolbar is the options
+bar: the tool settings that already rendered only for their tool
+(Move's Auto-Select, Smart Guides, and transform controls; the Magic
+Wand's tolerance and contiguity; the lassos' modes; the shape tools'
+sides, ratios, and weights; and so on), plus the shared ones — Size and
+Flow for the twenty brush-engine tools, the tip and Brush Settings
+toggles for the Brush and Eraser, the people selectors for the object
+selection tools — now tagged `data-tool-option="tool tool …"` and hidden
+for every other tool by one generated rule (`optionsRule` in
+`src/optionsBar.ts`, appended to the same inline stylesheet that hides
+Edit > Toolbar's hidden tools). The Welcome Tour gained a card for the
+toolbox and describes the toolbar as the options bar.
+
+**Verified two ways.** `npm test` (`src/optionsBar.test.ts`, 2 tests):
+the rule names the active tool and strips anything that is not an
+identifier; the tool lists are distinct identifiers that include the
+brushes and exclude Move. Then the built app in Chromium (`vite
+preview` + Playwright, 1,200 × 800): the toolbar is 88 px tall with no
+document and after picking tools (it was 320 px before), the toolbox
+276 px wide with 60 buttons all visible and no scrolling, the canvas
+655 px tall, the page's scroll width 1,200; picking the Brush shows
+Tip, Brush Settings, Symmetry, Size, and Flow; the Magic Wand shows
+Tolerance and Contiguous and none of the brush settings; Move shows
+Auto-Select, Smart Guides, Show Transform Controls, and Interpolation.
+Two screenshots were checked by eye, the first of which caught the
+toolbox's buttons squashed by a flex column and led to the grid. The
+Xvfb live-verification gap from the previous phases stands.
+
+**Frontend tests: 20** (18 → 20). Rust tests unchanged at 1839.
 
 ## Prerequisites
 
