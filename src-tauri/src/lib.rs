@@ -13,6 +13,7 @@ pub mod generate;
 pub mod generative_fill;
 pub mod hdr;
 pub mod icc;
+pub mod inpaint;
 pub mod landscape_mixer;
 pub mod ocio;
 pub mod png;
@@ -1228,9 +1229,16 @@ fn content_aware_move(
 
 /// Edit > Content-Aware Fill: fill the selected pixels of layer `id` from
 /// their surroundings. A whole, discrete action, so it checkpoints itself.
-#[tauri::command]
-fn content_aware_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.content_aware_fill(id))
+#[tauri::command(async)]
+fn content_aware_fill(
+    state: State<'_, AppState>,
+    id: LayerId,
+    options: Option<document::ContentAwareFillOptions>,
+    on_progress: Channel<ProgressEvent>,
+) -> Result<Snapshot, String> {
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.content_aware_fill_with(id, &options.unwrap_or_default(), progress)
+    })
 }
 
 /// Filter > Generative Fill (no prompt — see `generative_fill`'s own

@@ -14,6 +14,34 @@ use crate::blend::BlendMode;
 use crate::composite::{to_byte, to_unit, Rect};
 use crate::progress::{Progress, Silent, Span};
 
+/// Edit > Content-Aware Fill's options, as the dialog sends them.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ContentAwareFillOptions {
+    /// Sampling Area: only pixels within this many of the selection are
+    /// sources; `None` or 0 means the whole layer.
+    pub sampling_margin: Option<u32>,
+    /// Mirror: source patches may be flipped left-for-right.
+    pub mirror: bool,
+    /// Rotation Adaptation: source patches may turn by these steps.
+    pub rotation: crate::inpaint::Rotation,
+    /// Color Adaptation: blend the fill into its border.
+    pub color_adaptation: bool,
+    pub seed: u64,
+}
+
+impl Default for ContentAwareFillOptions {
+    fn default() -> Self {
+        ContentAwareFillOptions {
+            sampling_margin: None,
+            mirror: false,
+            rotation: crate::inpaint::Rotation::None,
+            color_adaptation: true,
+            seed: 1,
+        }
+    }
+}
+
 pub type LayerId = u64;
 
 /// Bytes per pixel in every buffer this module produces or accepts.
@@ -24224,6 +24252,25 @@ impl Document {
     /// documented scope cuts. Returns the selection's bounding box; errors
     /// with nothing selected or on a locked or unknown layer.
     pub fn content_aware_fill(&mut self, id: LayerId) -> Result<Option<Rect>, String> {
+        self.content_aware_fill_with(id, &ContentAwareFillOptions::default(), &mut Silent)
+    }
+
+    /// Edit > Content-Aware Fill with its options: the selection is
+    /// rebuilt by patch synthesis (see [`crate::inpaint`]) from the
+    /// Sampling Area — every unselected pixel of the layer, or only those
+    /// within `sampling_margin` of the selection — with Mirror, Rotation
+    /// Adaptation, and Color Adaptation as Photoshop offers them, every
+    /// round reported to `progress`. A layer or sampling area with no room
+    /// for a single source patch (the 7×7 the synthesis matches) falls
+    /// back to the ring-mean fill of before, so a tiny image still fills.
+    /// Returns the selection's bounds; errors with nothing selected or on
+    /// a locked or unknown layer.
+    pub fn content_aware_fill_with(
+        &mut self,
+        id: LayerId,
+        options: &ContentAwareFillOptions,
+        progress: &mut dyn Progress,
+    ) -> Result<Option<Rect>, String> {
         let bits = self.selected_bits()?;
         let (width, height) = (self.width, self.height);
         let bounds = SelectionMask {
@@ -24238,11 +24285,41 @@ impl Document {
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
-        let source = layer.pixels.clone();
-        for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
-            let (x, y) = (idx as u32 % width, idx as u32 / width);
-            let fill = Self::ring_mean(&source, width, height, x, y);
-            layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS].copy_from_slice(&fill);
+        let sampling = match options.sampling_margin {
+            Some(margin) if margin > 0 => {
+                Some(crate::inpaint::within(&bits, width, height, margin))
+            }
+            _ => None,
+        };
+        let synthesis = crate::inpaint::Options {
+            mirror: options.mirror,
+            rotation: options.rotation,
+            color_adaptation: options.color_adaptation,
+            seed: options.seed,
+            ..crate::inpaint::Options::default()
+        };
+        let mut pixels = std::mem::take(&mut layer.pixels);
+        let result = crate::inpaint::inpaint(
+            &mut pixels,
+            width,
+            height,
+            &bits,
+            sampling.as_deref(),
+            &synthesis,
+            progress,
+        );
+        layer.pixels = pixels;
+        match result {
+            Ok(()) => {}
+            Err(e) if e == crate::inpaint::NO_SOURCE => {
+                let source = layer.pixels.clone();
+                for (idx, _) in bits.iter().enumerate().filter(|(_, &b)| b) {
+                    let (x, y) = (idx as u32 % width, idx as u32 / width);
+                    let fill = Self::ring_mean(&source, width, height, x, y);
+                    layer.pixels[idx * CHANNELS..(idx + 1) * CHANNELS].copy_from_slice(&fill);
+                }
+            }
+            Err(e) => return Err(e),
         }
         Ok(Some(bounds))
     }
@@ -34601,6 +34678,71 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.generative_fill(id).is_err());
         assert_eq!(pixel(&doc, id, 0, 0)[0], 10);
+    }
+
+    #[test]
+    fn content_aware_fill_synthesises_texture_across_a_selection_on_a_real_sized_layer() {
+        // Vertical stripes, a 12×12 hole: the fill continues the stripes
+        // (the ring mean of Phase 185 could only blur them), touches no
+        // unselected pixel, and honours the sampling margin.
+        let (w, h) = (48u32, 48u32);
+        let mut pixels = Vec::new();
+        for _y in 0..h {
+            for x in 0..w {
+                pixels.extend_from_slice(&if (x / 4) % 2 == 0 {
+                    [220, 40, 40, 255]
+                } else {
+                    [30, 30, 200, 255]
+                });
+            }
+        }
+        let truth = pixels.clone();
+        // Something to fill: the selection starts blank.
+        for y in 18..30u32 {
+            for x in 18..30u32 {
+                let i = ((y * w + x) * 4) as usize;
+                pixels[i..i + 4].copy_from_slice(&[0, 0, 0, 0]);
+            }
+        }
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("stripes", &pixels, w, h).unwrap();
+        doc.select_rectangle(18.0, 18.0, 30.0, 30.0).unwrap();
+        let options = ContentAwareFillOptions {
+            sampling_margin: Some(10),
+            color_adaptation: false,
+            ..ContentAwareFillOptions::default()
+        };
+        let mut recorder = crate::progress::Recorder::default();
+        let rect = doc
+            .content_aware_fill_with(id, &options, &mut recorder)
+            .unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 18,
+                y0: 18,
+                x1: 30,
+                y1: 30
+            })
+        );
+        assert!(!recorder.reports.is_empty());
+        let filled = &doc.layers()[0].pixels;
+        let mut error = 0.0;
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let inside = (18..30).contains(&x) && (18..30).contains(&y);
+                if inside {
+                    for c in 0..3 {
+                        error += (filled[i + c] as f64 - truth[i + c] as f64).abs();
+                    }
+                    assert_eq!(filled[i + 3], 255);
+                } else {
+                    assert_eq!(filled[i..i + 4], truth[i..i + 4]);
+                }
+            }
+        }
+        assert!(error / (144.0 * 3.0) < 6.0, "mean error {}", error / 432.0);
     }
 
     #[test]

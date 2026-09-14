@@ -179,6 +179,7 @@ const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
 
 /** The commands that run long enough to report progress and take a Cancel. */
 const PROGRESS_COMMANDS = new Set([
+  "content_aware_fill",
   "generate_image",
   "reference_image",
   "prompt_to_edit",
@@ -1497,6 +1498,13 @@ export default function App() {
   // opacity jitter and hardness -- on when the checkbox is.
   const [brushDynamicsOn, setBrushDynamicsOn] = useState(false);
   const [showBrushSettings, setShowBrushSettings] = useState(false);
+  // Edit > Content-Aware Fill…: Photoshop's own fill options.
+  const [showContentAwareFillDialog, setShowContentAwareFillDialog] = useState(false);
+  const [cafSamplingMargin, setCafSamplingMargin] = useState(0);
+  const [cafMirror, setCafMirror] = useState(false);
+  const [cafRotation, setCafRotation] = useState<"none" | "low" | "medium" | "high" | "full">("none");
+  const [cafColorAdaptation, setCafColorAdaptation] = useState<"none" | "default" | "high" | "veryHigh">("default");
+  const [cafSeed, setCafSeed] = useState(1);
   const [brushDynamics, setBrushDynamics] = useState<BrushDynamics>({
     spacingPercent: 25,
     sizeJitter: 0,
@@ -9999,13 +10007,11 @@ export default function App() {
           </button>
           <button
             className="button button--quiet"
-            onClick={() => {
-              if (selectedId !== null) void runCommand("content_aware_fill", { id: selectedId });
-            }}
+            onClick={() => setShowContentAwareFillDialog(true)}
             disabled={busy || !canPaint || !hasSelection}
-            title="Edit > Content-Aware Fill (replace the selection with the mean of its surroundings)"
+            title="Edit > Content-Aware Fill…: rebuild the selection from patches of its surroundings, with Sampling Area, Mirror, Rotation Adaptation, and Color Adaptation"
           >
-            Content-Aware Fill
+            Content-Aware Fill…
           </button>
           <button
             className="button button--quiet"
@@ -19747,6 +19753,102 @@ export default function App() {
               </button>
               <button className="button button--quiet" onClick={() => setShowReviewDialog(false)} title="Close">
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContentAwareFillDialog && (
+        <div
+          className="modal-overlay"
+          onClick={() => setShowContentAwareFillDialog(false)}
+          role="presentation"
+        >
+          <div
+            className="modal"
+            role="dialog"
+            aria-label="Content-Aware Fill"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Edit &gt; Content-Aware Fill</h2>
+            <p className="modal__hint">
+              The selection is rebuilt from patches of the pixels around it — PatchMatch
+              synthesis, coarse to fine — so texture continues into it. Sampling Area limits
+              the sources to a margin around the selection (0 samples the whole layer);
+              Mirror and Rotation Adaptation let patches flip and turn by quarter turns;
+              Color Adaptation blends the fill into its border.
+            </p>
+            <label className="control">
+              <span className="control__label">Sampling Area margin (px, 0 = whole layer)</span>
+              <input
+                type="number"
+                min={0}
+                max={4096}
+                value={cafSamplingMargin}
+                onChange={(event) => setCafSamplingMargin(Math.max(0, Number(event.target.value) || 0))}
+              />
+            </label>
+            <label className="control control--row">
+              <input type="checkbox" checked={cafMirror} onChange={(event) => setCafMirror(event.target.checked)} />
+              <span className="control__label">Mirror</span>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Rotation Adaptation</span>
+              <select value={cafRotation} onChange={(event) => setCafRotation(event.target.value as typeof cafRotation)}>
+                <option value="none">None</option>
+                <option value="low">Low (half turns)</option>
+                <option value="medium">Medium (half turns)</option>
+                <option value="high">High (quarter turns)</option>
+                <option value="full">Full (quarter turns)</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Color Adaptation</span>
+              <select
+                value={cafColorAdaptation}
+                onChange={(event) => setCafColorAdaptation(event.target.value as typeof cafColorAdaptation)}
+              >
+                <option value="none">None</option>
+                <option value="default">Default</option>
+                <option value="high">High</option>
+                <option value="veryHigh">Very High</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Seed</span>
+              <input
+                type="number"
+                min={0}
+                value={cafSeed}
+                onChange={(event) => setCafSeed(Math.max(0, Math.floor(Number(event.target.value) || 0)))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowContentAwareFillDialog(false)}>
+                Cancel
+              </button>
+              <button
+                className="button"
+                onClick={() => {
+                  setShowContentAwareFillDialog(false);
+                  if (selectedId === null) return;
+                  const rotation =
+                    cafRotation === "none" ? "none" : cafRotation === "high" || cafRotation === "full" ? "quarter" : "half";
+                  void runCommand("content_aware_fill", {
+                    id: selectedId,
+                    options: {
+                      samplingMargin: cafSamplingMargin > 0 ? cafSamplingMargin : null,
+                      mirror: cafMirror,
+                      rotation,
+                      colorAdaptation: cafColorAdaptation !== "none",
+                      seed: cafSeed,
+                    },
+                  });
+                }}
+                disabled={busy || selectedId === null}
+              >
+                Fill
               </button>
             </div>
           </div>

@@ -21076,6 +21076,83 @@ live-verification gap from the previous phases stands.
 
 **Frontend tests: 15** (13 → 15). Rust tests unchanged at 1827.
 
+## Phase 352 — Content-Aware Fill's patch synthesis (Sampling Area, Mirror, Rotation and Color Adaptation)
+
+The first of Phase D's scope cuts by impact: Phase 185's Content-Aware
+Fill replaced every selected pixel with the ring mean of its
+surroundings — a blur, where Photoshop's fill continues the texture
+around the hole into it. This phase builds the synthesis.
+
+**Mechanism.** `src-tauri/src/inpaint.rs` is PatchMatch (Barnes,
+Shechtman, Finkelstein & Goldman, SIGGRAPH 2009) inside the
+coarse-to-fine vote-and-refine loop of Wexler, Shechtman & Irani (PAMI
+2007) — the method Photoshop's own fill descends from. An image pyramid
+halves the layer while it stays at least two patches wide (a coarse
+pixel is hole if any child is, and a source only if every child is), at
+most five levels. At the coarsest level the hole is first filled by
+diffusion from its border; at every level, each pixel whose 7×7 patch
+overlaps the hole is matched to a patch drawn wholly from the sampling
+area — random initialisation from the list of valid centres, then four
+passes of propagation from scan-order neighbours and random search at
+halving radii — and every hole pixel takes the mean of what the patches
+covering it propose; three match-then-vote rounds per level, the
+finished level's matches seeding the next finer one (a child of a
+coarse target reads the child of the coarse source that the transform
+maps it to, so mirrored and turned blocks swap children correctly — the
+bug the mirror test caught). Source patches may be mirrored and turned
+by quarter turns: a patch's footprint is the same square under every
+such transform, so validity is transform-independent and only the
+offset mapping changes. Colour Adaptation is Poisson blending (Pérez,
+Gangnet & Blake, SIGGRAPH 2003): the fill keeps its own gradients —
+taken from the vote's proposals as they continue past the hole's border
+— but takes the border's colours, by Gauss–Seidel sweeps to a 0.05
+tolerance. Every round reports to the Phase 349 progress strip, and a
+refused report cancels before a byte is written. A splitmix64 generator
+makes every fill reproducible from its seed.
+
+`Document::content_aware_fill_with` takes the options as the dialog
+sends them: Sampling Area as a margin around the selection (`within`,
+the Chebyshev neighbourhood by summed-area table; 0 = the whole layer),
+Mirror, Rotation Adaptation (Photoshop's None/Low/Medium/High/Full
+mapped onto none, half turns, half turns, quarter turns, quarter turns
+— its continuous angles are a documented scope cut), Color Adaptation
+(None off; Default/High/Very High on), and the seed. A layer or
+sampling area with no room for a single source patch falls back to the
+ring-mean fill of before, so the 3×3 documents of the existing tests
+still fill. The command runs off the main thread with a progress
+channel; the toolbar button now opens the dialog (Edit > Content-Aware
+Fill…).
+
+**Verified two ways.** `cargo test` (`inpaint::`, 6 tests, and one
+document test): the eight transforms and their allowed sets; vertical
+stripes of period 8 with a 12×12 hole synthesise back with a mean
+error under 6 levels where the ring mean's exceeds 40, two pyramid
+levels report six rounds in order, no pixel outside the hole moves,
+and the same seed reproduces the fill byte for byte; a sampling area
+that is the red half of a red/blue layer fills a hole in the blue half
+solid red, and a sampling area or a layer too small for a patch is
+`NO_SOURCE`; a climbing sawtooth on the left and its mirror image on
+the right, sampled only from the left, fills its hole with an error
+under 4 with Mirror on and more than three times that without, and
+horizontal stripes on the left with vertical on the right do the same
+for Rotation Adaptation; a flat grey field whose only source is a
+brighter one fills bright without Color Adaptation and within one
+level of the border's grey with it; a fill cancelled at its second
+report writes nothing. On a real 48×48 document, `content_aware_fill_with`
+with a sampling margin of 10 rebuilds a blanked 12×12 selection of
+stripes to a mean error under 6, opaque, touching nothing outside, and
+returns the selection's bounds. Then the built app in Chromium (`vite
+preview` + Playwright, the Tauri bridge stubbed): File > New…, Select
+All, Edit > Content-Aware Fill… from the menu bar opens the dialog;
+margin 24, Mirror on, Rotation High, Color Adaptation None, seed 7 sends
+`{samplingMargin: 24, mirror: true, rotation: "quarter", colorAdaptation:
+false, seed: 7}` with the progress channel, the strip reads
+"Content-Aware Fill 1/3" at its first report, and the command's return clears it
+with no error. The Xvfb live-verification gap from the previous phases
+stands.
+
+**1834 Rust tests total** (1827 → 1834: 1827 lib + 7 pipeline). Frontend tests unchanged at 15.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

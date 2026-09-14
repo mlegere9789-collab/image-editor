@@ -108,7 +108,7 @@ pub fn list(data_dir: &Path) -> Result<Vec<Action>, String> {
             actions.push(action);
         }
     }
-    actions.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    actions.sort_by_key(|a| a.name.to_lowercase());
     Ok(actions)
 }
 
