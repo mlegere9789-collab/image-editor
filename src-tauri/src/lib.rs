@@ -15,6 +15,7 @@ pub mod icc;
 pub mod landscape_mixer;
 pub mod ocio;
 pub mod png;
+pub mod progress;
 pub mod project;
 pub mod restoration;
 pub mod style_transfer;
@@ -23,11 +24,14 @@ pub mod tiff;
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::Serialize;
+use tauri::ipc::Channel;
 use tauri::{Manager, State};
+
+use progress::Progress;
 
 use blend::BlendMode;
 use composite::Rect;
@@ -82,6 +86,74 @@ struct AppState {
     /// layer pipeline doesn't (yet) consume, the same "app-level, not
     /// per-document" shape as `ocio_config` above.
     hdr_source: Mutex<Option<hdr::HdrImage>>,
+    /// Raised by [`cancel_operation`] while a long command runs; the
+    /// command's [`ChannelProgress`] sees it at its next report and the
+    /// operation stops with [`progress::CANCELLED`]. Cleared when the
+    /// next long command starts.
+    cancel: AtomicBool,
+}
+
+/// One report of a long operation, as the frontend's progress strip
+/// shows it: `done` of `total` units of `stage`.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProgressEvent {
+    stage: String,
+    done: usize,
+    total: usize,
+}
+
+/// The desktop app's [`Progress`]: every report goes down a Tauri
+/// channel to the frontend's progress strip, and a report made after
+/// Cancel was pressed is refused, so the operation stops.
+struct ChannelProgress<'a> {
+    channel: &'a Channel<ProgressEvent>,
+    cancel: &'a AtomicBool,
+}
+
+impl Progress for ChannelProgress<'_> {
+    fn report(&mut self, stage: &str, done: usize, total: usize) -> Result<(), String> {
+        if self.cancel.load(Ordering::SeqCst) {
+            return Err(progress::CANCELLED.to_string());
+        }
+        // A closed channel (the page navigated away) is not a reason to
+        // stop the work; the result still lands in the document.
+        let _ = self.channel.send(ProgressEvent {
+            stage: stage.to_string(),
+            done,
+            total,
+        });
+        Ok(())
+    }
+}
+
+/// A long command's checkpointed edit: clears any stale Cancel, runs
+/// `edit_fn` with a [`ChannelProgress`] over `on_progress`, and — as
+/// [`edit_checkpointed`] does — puts the document back if it fails or is
+/// cancelled, so nothing half-done is left behind and undo history stays
+/// as it was.
+fn edit_with_progress<F>(
+    state: &AppState,
+    on_progress: &Channel<ProgressEvent>,
+    edit_fn: F,
+) -> Result<Snapshot, String>
+where
+    F: FnOnce(&mut Document, &mut dyn Progress) -> Result<Option<Rect>, String>,
+{
+    state.cancel.store(false, Ordering::SeqCst);
+    let mut progress = ChannelProgress {
+        channel: on_progress,
+        cancel: &state.cancel,
+    };
+    edit_checkpointed(state, |document| edit_fn(document, &mut progress))
+}
+
+/// Cancel: asks the long command in flight, if any, to stop at its next
+/// progress report. The command returns [`progress::CANCELLED`] and its
+/// checkpoint restores the document.
+#[tauri::command]
+fn cancel_operation(state: State<'_, AppState>) {
+    state.cancel.store(true, Ordering::SeqCst);
 }
 
 /// Undo/redo stacks of whole-document snapshots. A checkpoint clones the
@@ -512,7 +584,7 @@ fn serve_composite(cache: &CompositeCache) -> tauri::http::Response<Vec<u8>> {
 /// that are one step of a longer gesture (a stroke, an opacity drag) call
 /// this directly — the frontend checkpoints once, at the start of the
 /// gesture, not on every step.
-fn edit<F>(state: &State<'_, AppState>, edit: F) -> Result<Snapshot, String>
+fn edit<F>(state: &AppState, edit: F) -> Result<Snapshot, String>
 where
     F: FnOnce(&mut Document) -> Result<Option<Rect>, String>,
 {
@@ -524,12 +596,23 @@ where
 
 /// [`edit`], preceded by a checkpoint — for commands that are a whole,
 /// discrete user action on their own rather than one step of a longer one.
-fn edit_checkpointed<F>(state: &State<'_, AppState>, edit_fn: F) -> Result<Snapshot, String>
+/// An edit that fails (or is cancelled) is undone on the spot: the
+/// document goes back to the checkpoint, which comes off the undo stack
+/// again, so a failed command neither leaves a half-done document nor an
+/// undo entry that does nothing.
+fn edit_checkpointed<F>(state: &AppState, edit_fn: F) -> Result<Snapshot, String>
 where
     F: FnOnce(&mut Document) -> Result<Option<Rect>, String>,
 {
     push_checkpoint(state)?;
-    edit(state, edit_fn)
+    let result = edit(state, edit_fn);
+    if result.is_err() {
+        let mut history = state.history.lock().map_err(|_| POISONED.to_string())?;
+        if let Some(before) = history.undo.pop_back() {
+            *state.document.lock().map_err(|_| POISONED.to_string())? = Some(before);
+        }
+    }
+    result
 }
 
 const POISONED: &str = "The document is in an inconsistent state; please reopen the image.";
@@ -1124,20 +1207,22 @@ fn generative_fill(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, 
 
 /// Generate Image: this project's own text-conditioned diffusion model,
 /// on the device, as a new top layer -- see `Document::generate_image`.
-#[tauri::command]
+#[tauri::command(async)]
 fn generate_image(
     state: State<'_, AppState>,
     prompt: String,
     seed: u64,
     steps: Option<usize>,
     guidance: Option<f32>,
+    on_progress: Channel<ProgressEvent>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.generate_image(
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.generate_image_with(
             &prompt,
             seed,
             steps.unwrap_or(generate::DEFAULT_STEPS),
             guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+            progress,
         )?;
         Ok(None)
     })
@@ -1145,7 +1230,8 @@ fn generate_image(
 
 /// Reference Images: a generation that starts from layer `reference`
 /// (SDEdit at `strength`) -- see `Document::reference_image`.
-#[tauri::command]
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 fn reference_image(
     state: State<'_, AppState>,
     reference: LayerId,
@@ -1154,15 +1240,17 @@ fn reference_image(
     strength: f32,
     steps: Option<usize>,
     guidance: Option<f32>,
+    on_progress: Channel<ProgressEvent>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.reference_image(
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.reference_image_with(
             reference,
             &prompt,
             seed,
             strength,
             steps.unwrap_or(generate::DEFAULT_STEPS),
             guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+            progress,
         )?;
         Ok(None)
     })
@@ -1170,7 +1258,8 @@ fn reference_image(
 
 /// Prompt to Edit: the selection on layer `id` redrawn under `prompt`
 /// by SDEdit at `strength` -- see `Document::prompt_to_edit`.
-#[tauri::command]
+#[tauri::command(async)]
+#[allow(clippy::too_many_arguments)]
 fn prompt_to_edit(
     state: State<'_, AppState>,
     id: LayerId,
@@ -1179,22 +1268,24 @@ fn prompt_to_edit(
     strength: f32,
     steps: Option<usize>,
     guidance: Option<f32>,
+    on_progress: Channel<ProgressEvent>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.prompt_to_edit(
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.prompt_to_edit_with(
             id,
             &prompt,
             seed,
             strength,
             steps.unwrap_or(generate::DEFAULT_STEPS),
             guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+            progress,
         )
     })
 }
 
 /// Generative Upscale: Super Zoom, then SDEdit over every tile at a low
 /// strength -- see `Document::generative_upscale`.
-#[tauri::command]
+#[tauri::command(async)]
 fn generative_upscale(
     state: State<'_, AppState>,
     prompt: String,
@@ -1202,28 +1293,31 @@ fn generative_upscale(
     strength: f32,
     steps: Option<usize>,
     guidance: Option<f32>,
+    on_progress: Channel<ProgressEvent>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.generative_upscale(
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.generative_upscale_with(
             &prompt,
             seed,
             strength,
             steps.unwrap_or(10),
             guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+            progress,
         )
     })
 }
 
 /// Generative Layers: draw generated layer `id` again at `seed`, or the
 /// seed after its last one.
-#[tauri::command]
+#[tauri::command(async)]
 fn regenerate_layer(
     state: State<'_, AppState>,
     id: LayerId,
     seed: Option<u64>,
+    on_progress: Channel<ProgressEvent>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| {
-        document.regenerate_layer(id, seed)?;
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.regenerate_layer_with(id, seed, progress)?;
         Ok(None)
     })
 }
@@ -3518,9 +3612,14 @@ fn merge_down(state: State<'_, AppState>, id: LayerId) -> Result<Snapshot, Strin
 /// whole document, via a real pretrained model bundled into this binary
 /// and run entirely locally through `tract` — see
 /// `src-tauri/src/super_resolution.rs` and `src-tauri/models/NOTICE.md`.
-#[tauri::command]
-fn super_zoom(state: State<'_, AppState>) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.ai_super_resolution())
+#[tauri::command(async)]
+fn super_zoom(
+    state: State<'_, AppState>,
+    on_progress: Channel<ProgressEvent>,
+) -> Result<Snapshot, String> {
+    edit_with_progress(&state, &on_progress, |document, progress| {
+        document.ai_super_resolution_with(progress)
+    })
 }
 
 /// Neural Filters > Colorize: a real, self-trained on-device AI model —
@@ -7487,6 +7586,7 @@ pub fn run() {
             export_layer,
             export_layer_bytes,
             autosave_project,
+            cancel_operation,
             autosave_status,
             recover_autosave,
             discard_autosave,
@@ -7547,6 +7647,53 @@ mod tests {
         // No data directory at all is fine.
         load_persisted_fonts(&dir.join("missing"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_failed_checkpointed_edit_restores_the_document_and_its_history() {
+        let state = AppState::default();
+        let mut document = Document::new(2, 2).unwrap();
+        document.add_layer("base", &[9u8; 16], 2, 2).unwrap();
+        *state.document.lock().unwrap() = Some(document);
+
+        // A successful edit leaves its checkpoint behind.
+        let ok = edit_checkpointed(&state, |document| {
+            document.add_layer("more", &[1u8; 16], 2, 2)?;
+            Ok(None)
+        });
+        assert!(ok.is_ok());
+        assert_eq!(state.history.lock().unwrap().undo.len(), 1);
+        assert_eq!(
+            state
+                .document
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .layers()
+                .len(),
+            2
+        );
+
+        // A failed one -- here cancelled partway, after a layer was added
+        // -- puts the document back and takes its checkpoint with it.
+        let cancelled = edit_checkpointed(&state, |document| {
+            document.add_layer("half done", &[2u8; 16], 2, 2)?;
+            Err(progress::CANCELLED.to_string())
+        });
+        assert_eq!(cancelled.err(), Some(progress::CANCELLED.to_string()));
+        assert_eq!(state.history.lock().unwrap().undo.len(), 1);
+        assert_eq!(
+            state
+                .document
+                .lock()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .layers()
+                .len(),
+            2
+        );
     }
 
     #[test]

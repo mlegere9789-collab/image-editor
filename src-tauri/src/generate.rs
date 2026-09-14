@@ -21,6 +21,8 @@
 use std::io::Cursor;
 use std::sync::OnceLock;
 
+use crate::progress::{Progress, Silent, Span};
+
 use tract_onnx::prelude::*;
 
 pub const IMAGE_SIZE: usize = 64;
@@ -239,12 +241,18 @@ pub fn ddim_timesteps(steps: usize) -> Vec<usize> {
 /// The DDIM loop from `x` (CHW, batch of one) down `ts` to a clean
 /// image in [-1, 1]: one batched model run per step, guidance mixing the
 /// conditioned and unconditioned predictions, the DDIM update between.
+/// Each step is reported to `progress` as one unit of `span` under
+/// `stage`; a refused report stops the loop with the cancelled error.
+#[allow(clippy::too_many_arguments)]
 fn ddim(
     mut x: Vec<f32>,
     ts: &[usize],
     category: usize,
     caption: &[f32],
     guidance: f32,
+    progress: &mut dyn Progress,
+    span: Span,
+    stage: &str,
 ) -> Result<Vec<f32>, String> {
     let alphas = cosine_alphas_cumprod(TIMESTEPS);
     let n = 3 * IMAGE_SIZE * IMAGE_SIZE;
@@ -252,6 +260,7 @@ fn ddim(
         let mut batch = x.clone();
         batch.extend_from_slice(&x);
         let eps = predict_noise(&batch, t, category, caption)?;
+        span.report(progress, stage, i + 1)?;
         let a_t = alphas[t];
         let next = if i + 1 < ts.len() {
             Some(alphas[ts[i + 1]])
@@ -318,6 +327,31 @@ pub fn sdedit_rgb(
     steps: usize,
     guidance: f32,
 ) -> Result<Vec<u8>, String> {
+    sdedit_rgb_with(
+        reference,
+        prompt,
+        seed,
+        strength,
+        steps,
+        guidance,
+        &mut Silent,
+        Span::whole(steps),
+    )
+}
+
+/// [`sdedit_rgb`], reporting each denoising step as one unit of `span`
+/// to `progress` under the stage "Editing" and stopping when refused.
+#[allow(clippy::too_many_arguments)]
+pub fn sdedit_rgb_with(
+    reference: &[u8],
+    prompt: &str,
+    seed: u64,
+    strength: f32,
+    steps: usize,
+    guidance: f32,
+    progress: &mut dyn Progress,
+    span: Span,
+) -> Result<Vec<u8>, String> {
     if reference.len() != IMAGE_SIZE * IMAGE_SIZE * 3 {
         return Err(format!(
             "SDEdit takes a {IMAGE_SIZE}x{IMAGE_SIZE} RGB reference, not {} bytes.",
@@ -356,6 +390,9 @@ pub fn sdedit_rgb(
         category,
         &caption,
         guidance,
+        progress,
+        span,
+        "Editing",
     )?;
     Ok(rgb_from_chw(&x0))
 }
@@ -371,6 +408,26 @@ pub fn generate_rgb(
     steps: usize,
     guidance: f32,
 ) -> Result<Vec<u8>, String> {
+    generate_rgb_with(
+        prompt,
+        seed,
+        steps,
+        guidance,
+        &mut Silent,
+        Span::whole(steps),
+    )
+}
+
+/// [`generate_rgb`], reporting each denoising step as one unit of `span`
+/// to `progress` under the stage "Generating" and stopping when refused.
+pub fn generate_rgb_with(
+    prompt: &str,
+    seed: u64,
+    steps: usize,
+    guidance: f32,
+    progress: &mut dyn Progress,
+    span: Span,
+) -> Result<Vec<u8>, String> {
     if prompt.trim().is_empty() {
         return Err("Generate Image needs a prompt.".to_string());
     }
@@ -383,7 +440,16 @@ pub fn generate_rgb(
     let category = category_of_prompt(prompt);
     let caption = caption_vector(prompt);
     let x = gaussian_noise(seed, 3 * IMAGE_SIZE * IMAGE_SIZE);
-    let x0 = ddim(x, &ddim_timesteps(steps), category, &caption, guidance)?;
+    let x0 = ddim(
+        x,
+        &ddim_timesteps(steps),
+        category,
+        &caption,
+        guidance,
+        progress,
+        span,
+        "Generating",
+    )?;
     Ok(rgb_from_chw(&x0))
 }
 
@@ -500,6 +566,31 @@ mod tests {
         );
         let spread = a.iter().max().unwrap() - a.iter().min().unwrap();
         assert!(spread > 32, "an image, not a flat colour: spread {spread}");
+        // Every step reports, and a refused report stops the loop.
+        let mut recorder = crate::progress::Recorder::default();
+        let b =
+            generate_rgb_with("a lake at dawn", 1, 2, 2.0, &mut recorder, Span::whole(2)).unwrap();
+        assert_eq!(a, b);
+        assert_eq!(
+            recorder.reports,
+            vec![
+                ("Generating".to_string(), 1, 2),
+                ("Generating".to_string(), 2, 2)
+            ]
+        );
+        let mut cancelling = crate::progress::Recorder::cancelling_at(1);
+        assert_eq!(
+            generate_rgb_with(
+                "a lake at dawn",
+                1,
+                2,
+                2.0,
+                &mut cancelling,
+                Span { base: 4, total: 8 }
+            ),
+            Err(crate::progress::CANCELLED.to_string())
+        );
+        assert_eq!(cancelling.reports, vec![("Generating".to_string(), 5, 8)]);
         assert!(generate_rgb("   ", 1, 3, 2.0).is_err());
         assert!(generate_rgb("lake", 1, 1, 2.0).is_err());
         assert!(generate_rgb("lake", 1, 3, -1.0).is_err());

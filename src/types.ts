@@ -695,3 +695,10 @@ export type Tool =
   | "eyedropper"
   | "paintBucket"
   | "gradient";
+
+/** One report from a long command: `done` of `total` units of `stage`. */
+export type ProgressEvent = {
+  stage: string;
+  done: number;
+  total: number;
+};

@@ -20881,6 +20881,72 @@ losing it. The Xvfb live-verification gap from the previous phases stands.
 
 **Frontend tests: 9** (0 → 9, Node's test runner). Rust tests unchanged at 1820.
 
+## Phase 349 — Progress and Cancel for the long operations
+
+The second pain point in `docs/PLAN_TO_100.md` section B.3: "AI features
+that stall the whole app". A generation, a Super Zoom, or a Generative
+Upscale runs for up to a minute on a CPU, and until now the app showed
+nothing but disabled buttons until it was done, with no way to stop it.
+
+**Mechanism.** `src-tauri/src/progress.rs` gives the core one line to the
+user: a `Progress` trait whose `report(stage, done, total)` an operation
+calls at every unit of work, and which answers `Err("Cancelled.")` when
+the operation should stop — the operation returns that error unchanged
+and leaves its output unfinished. `Silent` never cancels (what every
+existing caller passes); `Recorder` remembers every report and cancels at
+a chosen one (what tests pass); `Span` places one operation's reports
+inside a larger one, so Generative Upscale's tiles move one bar smoothly
+rather than restarting it per tile. The DDIM loop reports every
+denoising step ("Generating" / "Editing"); Super Zoom reports every
+block the model runs ("Super Zoom"); Generate Image, Reference Images,
+Prompt to Edit, Generative Upscale, Generative Layers' Regenerate, and
+Super Zoom each gain a `_with(…, progress)` form, the plain form
+delegating with `Silent`.
+
+The desktop app's `Progress` is `ChannelProgress`: every report goes down
+a Tauri IPC channel (`tauri::ipc::Channel`) to the frontend, and a report
+made after Cancel was pressed is refused. The six commands now run off
+the main thread (`#[tauri::command(async)]`), so the new `cancel_operation`
+command — which raises an `AtomicBool` on `AppState` — can arrive while
+one is in flight; each clears any stale cancel before it starts.
+
+`edit_checkpointed` now undoes an edit that fails: the document goes back
+to the checkpoint it took, and the checkpoint comes off the undo stack
+again. Before, any failing command left a half-done document and an undo
+entry that did nothing; a cancelled Generative Upscale, which has already
+Super Zoomed the document when its first tile is refused, would have left
+it upscaled. Now every failure and every cancel leaves the document and
+its history as they were.
+
+In the frontend, `runCommand` attaches a `Channel` to the six commands and
+shows a progress strip in the status bar — stage, `done/total`, a real
+`<progress>`, and Cancel, which invokes `cancel_operation`, reads
+"Cancelling", and disables itself; a command that ends with "Cancelled."
+is not an error, so the strip simply goes away.
+
+**Verified two ways.** `cargo test`: `Recorder` keeps every report and
+cancels where asked; `Span` places reports inside the whole and passes
+a refusal through; `generate_rgb_with` reports (1, 2) then (2, 2) under
+"Generating" for a two-step run and returns the same pixels as the plain
+form, and a recorder that refuses its first report stops it after one
+model run with `Cancelled.` and a single report of 5/8 through a span
+based at 4; `edit_checkpointed` on a real `AppState` keeps a successful
+edit's checkpoint and, for an edit that adds a layer and then returns
+`Cancelled.`, restores the two-layer document and leaves the undo stack
+at one entry. Then the built app in Chromium (`vite preview` +
+Playwright, the Tauri bridge stubbed with a real `DocumentView` dumped
+from `Document::view()` and a Super Zoom that reports four blocks a
+quarter-second apart): File > New… from the menu bar opens a document;
+Filter > Neural Filters > Super Zoom shows the strip at "Starting", then
+"Super Zoom 2/4" with the bar at 2 of 4; Cancel reads "Cancelling" and
+disables; the command's rejection with "Cancelled." takes the strip away
+with no error notice and `cancel_operation` recorded after `super_zoom`;
+the channel argument serialises as `__CHANNEL__:<id>` as Tauri expects;
+a full run ends with the strip gone and the toolbar enabled again. The
+Xvfb live-verification gap from the previous phases stands.
+
+**1823 Rust tests total** (1820 → 1823: 1816 lib + 7 pipeline). Frontend tests: 9.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

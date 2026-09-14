@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
@@ -12,6 +12,7 @@ import MenuBar, { toolbarEntries } from "./MenuBar";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import type {
   Adjustment,
+  ProgressEvent,
   BrushDynamics,
   Interpolation,
   ApplyBlend,
@@ -156,6 +157,18 @@ const ALL_TOOLS: { id: Tool; label: string }[] = [
 /** LegeLabs local-storage keys — per-installation UI preferences, never
  * document data, so they live in the browser, not on the document. */
 const HIDDEN_TOOLS_STORAGE_KEY = "legelabs.hiddenTools";
+
+/** The commands that run long enough to report progress and take a Cancel. */
+const PROGRESS_COMMANDS = new Set([
+  "generate_image",
+  "reference_image",
+  "prompt_to_edit",
+  "generative_upscale",
+  "regenerate_layer",
+  "super_zoom",
+]);
+/** What a cancelled command returns — shown as a notice, not an error. */
+const CANCELLED = "Cancelled.";
 const COMPACT_TOOLBAR_STORAGE_KEY = "legelabs.compactToolbar";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
@@ -695,6 +708,15 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [blendModes, setBlendModes] = useState<BlendModeInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // The long command in flight, as its last progress report: the
+  // progress strip in the status bar, with its Cancel button.
+  const [progress, setProgress] = useState<ProgressEvent | null>(null);
+  const cancelOperation = useCallback(() => {
+    setProgress((current) => (current ? { ...current, stage: "Cancelling" } : current));
+    void invoke("cancel_operation").catch(() => {
+      // Nothing to cancel any more.
+    });
+  }, []);
   const [busy, setBusy] = useState(false);
   const [dropping, setDropping] = useState(false);
   const [canUndo, setCanUndo] = useState(false);
@@ -2583,6 +2605,14 @@ export default function App() {
     ) => {
       const ticket = ++requestId.current;
       setBusy(true);
+      if (PROGRESS_COMMANDS.has(command)) {
+        const onProgress = new Channel<ProgressEvent>();
+        onProgress.onmessage = (event) => {
+          if (ticket === requestId.current) setProgress(event);
+        };
+        args = { ...args, onProgress };
+        setProgress({ stage: "Starting", done: 0, total: 1 });
+      }
       try {
         const snapshot = await invoke<Snapshot>(command, args);
         if (ticket !== requestId.current) return;
@@ -2670,9 +2700,14 @@ export default function App() {
         }
       } catch (err) {
         if (ticket !== requestId.current) return;
-        setError(String(err));
+        // A cancel is the user's own doing, not a failure: the document is
+        // back as it was, and the strip simply goes away.
+        setError(String(err) === CANCELLED ? null : String(err));
       } finally {
-        if (ticket === requestId.current) setBusy(false);
+        if (ticket === requestId.current) {
+          setBusy(false);
+          setProgress(null);
+        }
       }
     },
     [],
@@ -28307,6 +28342,27 @@ export default function App() {
       {floatingPanels}
 
       <footer className="statusbar">
+        {progress && (
+          <div className="progress-strip" role="status" aria-live="polite">
+            <span className="progress-strip__stage">
+              {progress.stage}
+              {progress.total > 1 && ` ${progress.done}/${progress.total}`}
+            </span>
+            <progress
+              className="progress-strip__bar"
+              value={progress.done}
+              max={Math.max(progress.total, 1)}
+            />
+            <button
+              className="button button--quiet progress-strip__cancel"
+              onClick={cancelOperation}
+              disabled={progress.stage === "Cancelling"}
+              title="Stop the operation in flight at its next step and put the document back as it was"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         {document ? (
           <>
             <span className="statusbar__name">

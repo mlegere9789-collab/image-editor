@@ -43,6 +43,17 @@ pub const SCALE: usize = 3;
 /// the bundled model fails to load or run (it never should — a broken
 /// build would fail every call identically, not just this one).
 pub fn upscale_rgba(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+    upscale_rgba_with(pixels, width, height, &mut crate::progress::Silent)
+}
+
+/// [`upscale_rgba`], reporting each `TILE`×`TILE` block the model runs
+/// as one unit under the stage "Super Zoom" and stopping when refused.
+pub fn upscale_rgba_with(
+    pixels: &[u8],
+    width: u32,
+    height: u32,
+    progress: &mut dyn crate::progress::Progress,
+) -> Result<Vec<u8>, String> {
     if width == 0 || height == 0 {
         return Err("Super Zoom needs a non-empty image.".to_string());
     }
@@ -77,7 +88,7 @@ pub fn upscale_rgba(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, S
 
     let out_width = width * SCALE;
     let out_height = height * SCALE;
-    let y_out = upscale_luma_tiled(&y_plane, width, height)?;
+    let y_out = upscale_luma_tiled(&y_plane, width, height, progress)?;
     let cb_out = bicubic_upsample_plane(&cb_plane, width, height, SCALE);
     let cr_out = bicubic_upsample_plane(&cr_plane, width, height, SCALE);
     let a_out = bicubic_upsample_plane(&a_plane, width, height, SCALE);
@@ -125,9 +136,16 @@ pub(crate) fn ycbcr_to_rgb(y: f32, cb: f32, cr: f32) -> (u8, u8, u8) {
 /// through the bundled network one `TILE * TILE` block at a time and
 /// stitches the real outputs into one `width * SCALE` by `height * SCALE`
 /// plane.
-fn upscale_luma_tiled(y_plane: &[f32], width: usize, height: usize) -> Result<Vec<f32>, String> {
+fn upscale_luma_tiled(
+    y_plane: &[f32],
+    width: usize,
+    height: usize,
+    progress: &mut dyn crate::progress::Progress,
+) -> Result<Vec<f32>, String> {
     let padded_w = width.div_ceil(TILE) * TILE;
     let padded_h = height.div_ceil(TILE) * TILE;
+    let tiles = (padded_w / TILE) * (padded_h / TILE);
+    let mut done = 0;
 
     let model_bytes: &[u8] = include_bytes!("../models/super-resolution-10.onnx");
     let model = tract_onnx::onnx()
@@ -161,6 +179,9 @@ fn upscale_luma_tiled(y_plane: &[f32], width: usize, height: usize) -> Result<Ve
             let output = result[0].to_array_view::<f32>().map_err(|err| {
                 format!("Super Zoom's model returned an unreadable result: {err}")
             })?;
+
+            done += 1;
+            progress.report("Super Zoom", done, tiles)?;
 
             let dst_ty = ty * SCALE;
             let dst_tx = tx * SCALE;

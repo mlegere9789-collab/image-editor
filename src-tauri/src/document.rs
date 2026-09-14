@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
 use crate::composite::{to_byte, to_unit, Rect};
+use crate::progress::{Progress, Silent, Span};
 
 pub type LayerId = u64;
 
@@ -8494,7 +8495,20 @@ impl Document {
         steps: usize,
         guidance: f32,
     ) -> Result<LayerId, String> {
-        let upscaled = Self::generated_pixels(prompt, seed, steps, guidance)?;
+        self.generate_image_with(prompt, seed, steps, guidance, &mut Silent)
+    }
+
+    /// [`Self::generate_image`], reporting to `progress` (the model's
+    /// steps, then Super Zoom's tile) and stopping when refused.
+    pub fn generate_image_with(
+        &mut self,
+        prompt: &str,
+        seed: u64,
+        steps: usize,
+        guidance: f32,
+        progress: &mut dyn Progress,
+    ) -> Result<LayerId, String> {
+        let upscaled = Self::generated_pixels(prompt, seed, steps, guidance, progress)?;
         let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
         let name: String = prompt.trim().chars().take(24).collect();
         let id = self.add_layer(name, &upscaled, side, side)?;
@@ -8543,10 +8557,42 @@ impl Document {
         steps: usize,
         guidance: f32,
     ) -> Result<LayerId, String> {
+        self.reference_image_with(
+            reference,
+            prompt,
+            seed,
+            strength,
+            steps,
+            guidance,
+            &mut Silent,
+        )
+    }
+
+    /// [`Self::reference_image`], reporting to `progress` and stopping
+    /// when refused.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reference_image_with(
+        &mut self,
+        reference: LayerId,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+        progress: &mut dyn Progress,
+    ) -> Result<LayerId, String> {
         let small = self.layer_rgb_at_model_size(reference)?;
-        let upscaled = Self::upscaled_rgba(&crate::generate::sdedit_rgb(
-            &small, prompt, seed, strength, steps, guidance,
-        )?)?;
+        let edited = crate::generate::sdedit_rgb_with(
+            &small,
+            prompt,
+            seed,
+            strength,
+            steps,
+            guidance,
+            progress,
+            Span::whole(steps),
+        )?;
+        let upscaled = Self::upscaled_rgba_with(&edited, progress)?;
         let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
         let name: String = if prompt.trim().is_empty() {
             "Reference".to_string()
@@ -8582,6 +8628,22 @@ impl Document {
         steps: usize,
         guidance: f32,
     ) -> Result<Option<Rect>, String> {
+        self.prompt_to_edit_with(id, prompt, seed, strength, steps, guidance, &mut Silent)
+    }
+
+    /// [`Self::prompt_to_edit`], reporting each denoising step to
+    /// `progress` and stopping when refused.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prompt_to_edit_with(
+        &mut self,
+        id: LayerId,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+        progress: &mut dyn Progress,
+    ) -> Result<Option<Rect>, String> {
         let bits = self.selected_bits()?;
         let (w, h) = (self.width as usize, self.height as usize);
         let (bx0, by0, bx1, by1) = crate::generative_fill::mask_bounds(&bits, w, h)
@@ -8606,7 +8668,16 @@ impl Document {
                 small[i * 3 + c] = (v * 255.0).round().clamp(0.0, 255.0) as u8;
             }
         }
-        let edited = crate::generate::sdedit_rgb(&small, prompt, seed, strength, steps, guidance)?;
+        let edited = crate::generate::sdedit_rgb_with(
+            &small,
+            prompt,
+            seed,
+            strength,
+            steps,
+            guidance,
+            progress,
+            Span::whole(steps),
+        )?;
         let back: Vec<Vec<f32>> = (0..3)
             .map(|c| {
                 let plane: Vec<f32> = (0..side * side)
@@ -8654,10 +8725,37 @@ impl Document {
         steps: usize,
         guidance: f32,
     ) -> Result<Option<Rect>, String> {
-        let rect = self.ai_super_resolution()?;
+        self.generative_upscale_with(prompt, seed, strength, steps, guidance, &mut Silent)
+    }
+
+    /// [`Self::generative_upscale`], reporting to `progress` — Super
+    /// Zoom's tiles, then every denoising step of every edited tile as
+    /// one span — and stopping when refused. A refusal partway leaves
+    /// the document Super Zoomed with no tile edited; the app's
+    /// checkpoint puts it back.
+    pub fn generative_upscale_with(
+        &mut self,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+        progress: &mut dyn Progress,
+    ) -> Result<Option<Rect>, String> {
+        let rect = self.ai_super_resolution_with(progress)?;
         let (w, h) = (self.width as usize, self.height as usize);
         let mut pixels = std::mem::take(&mut self.layers[0].pixels);
-        let result = Self::sdedit_tiles(&mut pixels, w, h, prompt, seed, strength, steps, guidance);
+        let result = Self::sdedit_tiles(
+            &mut pixels,
+            w,
+            h,
+            prompt,
+            seed,
+            strength,
+            steps,
+            guidance,
+            progress,
+        );
         self.layers[0].pixels = pixels;
         result?;
         Ok(rect)
@@ -8674,6 +8772,7 @@ impl Document {
         strength: f32,
         steps: usize,
         guidance: f32,
+        progress: &mut dyn Progress,
     ) -> Result<(), String> {
         const TILE: usize = crate::generate::IMAGE_SIZE;
         const STRIDE: usize = 48;
@@ -8698,8 +8797,10 @@ impl Document {
         let mut sum = vec![0.0f32; w * h * 3];
         let mut weight = vec![0.0f32; w * h];
         let mut tile_index = 0u64;
-        for &ty in &starts(h) {
-            for &tx in &starts(w) {
+        let (rows, columns) = (starts(h), starts(w));
+        let total = rows.len() * columns.len() * steps;
+        for &ty in &rows {
+            for &tx in &columns {
                 let mut tile = vec![0u8; TILE * TILE * 3];
                 for y in 0..TILE {
                     for x in 0..TILE {
@@ -8710,13 +8811,18 @@ impl Document {
                             .copy_from_slice(&pixels[src..src + 3]);
                     }
                 }
-                let edited = crate::generate::sdedit_rgb(
+                let edited = crate::generate::sdedit_rgb_with(
                     &tile,
                     prompt,
                     seed.wrapping_add(tile_index),
                     strength,
                     steps,
                     guidance,
+                    progress,
+                    Span {
+                        base: tile_index as usize * steps,
+                        total,
+                    },
                 )?;
                 tile_index += 1;
                 for y in 0..TILE {
@@ -8753,19 +8859,26 @@ impl Document {
         seed: u64,
         steps: usize,
         guidance: f32,
+        progress: &mut dyn Progress,
     ) -> Result<Vec<u8>, String> {
-        Self::upscaled_rgba(&crate::generate::generate_rgb(
-            prompt, seed, steps, guidance,
-        )?)
+        let rgb = crate::generate::generate_rgb_with(
+            prompt,
+            seed,
+            steps,
+            guidance,
+            progress,
+            Span::whole(steps),
+        )?;
+        Self::upscaled_rgba_with(&rgb, progress)
     }
 
-    fn upscaled_rgba(rgb: &[u8]) -> Result<Vec<u8>, String> {
+    fn upscaled_rgba_with(rgb: &[u8], progress: &mut dyn Progress) -> Result<Vec<u8>, String> {
         let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
         for p in rgb.chunks_exact(3) {
             rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
         }
         let side = crate::generate::IMAGE_SIZE as u32;
-        crate::super_resolution::upscale_rgba(&rgba, side, side)
+        crate::super_resolution::upscale_rgba_with(&rgba, side, side, progress)
     }
 
     /// Generative Layers: draws generated layer `id` again -- at `seed`,
@@ -8774,6 +8887,17 @@ impl Document {
     /// the layer. Errors for a layer Generate Image did not make, a
     /// locked layer, or as `generate_rgb` does.
     pub fn regenerate_layer(&mut self, id: LayerId, seed: Option<u64>) -> Result<(), String> {
+        self.regenerate_layer_with(id, seed, &mut Silent)
+    }
+
+    /// [`Self::regenerate_layer`], reporting to `progress` and stopping
+    /// when refused.
+    pub fn regenerate_layer_with(
+        &mut self,
+        id: LayerId,
+        seed: Option<u64>,
+        progress: &mut dyn Progress,
+    ) -> Result<(), String> {
         let position = self
             .generated
             .iter()
@@ -8787,19 +8911,28 @@ impl Document {
         let upscaled = match record.reference {
             Some(reference) if self.layer(reference).is_ok() => {
                 let small = self.layer_rgb_at_model_size(reference)?;
-                Self::upscaled_rgba(&crate::generate::sdedit_rgb(
+                let edited = crate::generate::sdedit_rgb_with(
                     &small,
                     &record.prompt,
                     seed,
                     record.strength,
                     record.steps,
                     record.guidance,
-                )?)?
+                    progress,
+                    Span::whole(record.steps),
+                )?;
+                Self::upscaled_rgba_with(&edited, progress)?
             }
             Some(_) => {
                 return Err("The reference layer this was made from no longer exists.".to_string())
             }
-            None => Self::generated_pixels(&record.prompt, seed, record.steps, record.guidance)?,
+            None => Self::generated_pixels(
+                &record.prompt,
+                seed,
+                record.steps,
+                record.guidance,
+                progress,
+            )?,
         };
         let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
         let pixels = self.placed_on_canvas(&upscaled, side, side)?;
@@ -16921,14 +17054,25 @@ impl Document {
     /// [`crate::super_resolution::upscale_rgba`]) if the bundled model
     /// itself fails to load or run.
     pub fn ai_super_resolution(&mut self) -> Result<Option<Rect>, String> {
+        self.ai_super_resolution_with(&mut Silent)
+    }
+
+    /// [`Self::ai_super_resolution`], reporting each block the model
+    /// runs to `progress` and stopping when refused — before the
+    /// document is touched, so a refusal leaves it as it was.
+    pub fn ai_super_resolution_with(
+        &mut self,
+        progress: &mut dyn Progress,
+    ) -> Result<Option<Rect>, String> {
         if self.layers.is_empty() {
             return Err("Nothing to Super Zoom — the document has no layers.".to_string());
         }
         let composite = crate::composite::flatten(self);
-        let upscaled = crate::super_resolution::upscale_rgba(
+        let upscaled = crate::super_resolution::upscale_rgba_with(
             &composite.pixels,
             composite.width,
             composite.height,
+            progress,
         )?;
         let scale = crate::super_resolution::SCALE as u32;
         let new_width = composite.width * scale;
