@@ -1545,6 +1545,12 @@ body {
   display: none;
 }
 
+/* Edit > Color Settings > Show Color Settings, off: the colour-management
+ * strip leaves the toolbar; its commands stay in the menu bar. */
+.toolbar--no-color [data-section="color"] {
+  display: none;
+}
+
 /* The progress strip: a long command's live report in the status bar,
  * with the Cancel that stops it -- see README Phase 349. */
 .progress-strip {

@@ -21308,6 +21308,41 @@ Xvfb live-verification gap from the previous phases stands.
 
 Tests unchanged: 1839 Rust, 18 frontend.
 
+## Phase 356 — The colour-management strip shows on request
+
+The last always-on clutter of the toolbar after Phase 355: the three
+rows of colour management — Image > Mode and Bits/Channel, Assign and
+Convert to Profile with their rendering intent, engine, dither, and
+black-point compensation, the Color Management Policy and working
+space, the device profiles and OpenColorIO configuration, Proof Setup
+and Gamut Warning — sat above the tools for every user, every day.
+Photoshop keeps all of that in dialogs behind Edit > Color Settings
+and Image > Mode.
+
+**Mechanism.** Every one of those controls carries `data-section="color"`
+— found by their own menu-path titles (`Image > Mode`, `Edit > Assign
+Profile`, `Edit > Convert to Profile`, `Color Settings >`, `Edit > Color
+Settings`, `View > Proof`, `View > Gamut`, `File > Import > Import
+HDR`, and the two OCIO selects), 26 elements in the source — and one
+rule, `.toolbar--no-color [data-section="color"] { display: none }`,
+takes them off the toolbar. A toggle button, Edit > Color Settings >
+Color Settings, shows them again; it is a browser preference, off by
+default, and the menu bar reads it as a check mark. The hidden
+controls stay in the document, so their commands — the profile
+imports, Convert…, the OCIO loads — still run from the menu bar.
+
+**Verified.** The built app in Chromium (`vite preview` + Playwright,
+1,200 × 800): a fresh install shows 20 colour-management elements in
+the DOM and none of them visible, the toolbar class `toolbar--no-color`
+set; Edit > Color Settings from the menu bar lists the Color Settings
+toggle unchecked; choosing it shows 14 of them (the rest wait on state
+— a 32-bit document, a loaded OCIO config), stores
+`legelabs.showColorSettings = true`, and a reload keeps them shown. A
+screenshot of the lean toolbar was checked by eye: title row, tool
+rows, canvas, panels.
+
+Tests unchanged: 1839 Rust, 18 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -192,6 +192,7 @@ const PROGRESS_COMMANDS = new Set([
 /** What a cancelled command returns — shown as a notice, not an error. */
 const CANCELLED = "Cancelled.";
 const COMPACT_TOOLBAR_STORAGE_KEY = "legelabs.compactToolbar";
+const COLOR_SETTINGS_STORAGE_KEY = "legelabs.showColorSettings";
 const KEY_BINDINGS_STORAGE_KEY = "legelabs.keyBindings";
 const WORKSPACES_STORAGE_KEY = "legelabs.workspaces";
 const HIDDEN_MENU_COMMANDS_STORAGE_KEY = "legelabs.hiddenMenuCommands";
@@ -2487,6 +2488,27 @@ export default function App() {
     });
   }, [lockWorkspace]);
   const menuEntries = useCallback(() => toolbarEntries(window.document), []);
+  // Edit > Color Settings > Show Color Settings: the colour-management
+  // strip (Image > Mode, profiles, policies, proof, OCIO) is shown on
+  // request; its commands stay reachable from the menu bar either way.
+  const [showColorSettings, setShowColorSettings] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLOR_SETTINGS_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleColorSettings = useCallback(() => {
+    setShowColorSettings((previous) => {
+      const next = !previous;
+      try {
+        localStorage.setItem(COLOR_SETTINGS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
   // Edit > Menus (Custom Menus): commands hidden from the menu bar, kept
   // in the browser like hiddenTools above by each command's own key --
   // its menu path and label, e.g. "Edit > Transform > Rotate…".
@@ -9344,7 +9366,9 @@ export default function App() {
         </style>
       )}
       <MenuBar entries={menuEntries} hidden={hiddenMenuCommands} />
-      <header className={`toolbar${compactToolbar ? " toolbar--compact" : ""}`}>
+      <header
+        className={`toolbar${compactToolbar ? " toolbar--compact" : ""}${showColorSettings ? "" : " toolbar--no-color"}`}
+      >
         <h1 className="toolbar__title">LegeLabs: Photo Editing Suite</h1>
         <button title="File > New…"
           className="button"
@@ -9419,6 +9443,14 @@ export default function App() {
           title="Window > Workspace > Compact Toolbar: keep only the tools and the buttons no menu names on the toolbar; every menu command stays reachable from the menu bar above"
         >
           Compact Toolbar
+        </button>
+        <button
+          className={`button button--quiet${showColorSettings ? " button--active" : ""}`}
+          onClick={toggleColorSettings}
+          aria-pressed={showColorSettings}
+          title="Edit > Color Settings > Show Color Settings: show the colour-management strip on the toolbar — Image > Mode, profiles, policies, proof, OCIO"
+        >
+          Color Settings
         </button>
         <button
           className="button button--quiet"
@@ -9514,7 +9546,7 @@ export default function App() {
           Content Credentials
         </label>
         {document?.bitDepth === "thirtyTwo" && (
-          <button
+          <button data-section="color"
             className="button button--quiet"
             onClick={() => void exportTiff32f()}
             disabled={busy || !hasDocument}
@@ -9697,7 +9729,7 @@ export default function App() {
           >
             Calculations…
           </button>
-          <label className="tools__slider" title="Image > Mode">
+          <label data-section="color" className="tools__slider" title="Image > Mode">
             Mode
             <select
               value={document?.mode ?? "rgb"}
@@ -9742,11 +9774,11 @@ export default function App() {
               <option value="thirtyTwo">32 Bits/Channel</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title={`Image > Mode > HDR Support: imports a real Radiance .hdr file -- real scene-referred float samples that can genuinely exceed 1.0 (an "overbright" highlight no normal byte can represent), kept separate from this document's own 8-bit layer pipeline for real HDR Histogram analysis.${hdrSource ? ` Loaded: ${hdrSource.width}x${hdrSource.height}, max luma ${hdrSource.maxLuma.toFixed(2)}.` : " None loaded."}`}
           >
-            <button title="File > Import > Import HDR (.hdr)…"
+            <button data-section="color" title="File > Import > Import HDR (.hdr)…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadHdrSource()}
@@ -9758,7 +9790,7 @@ export default function App() {
               {hdrSource ? `${hdrSource.width}×${hdrSource.height}` : "None"}
             </span>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Edit > Assign Profile: relabels the working space without touching a pixel"
           >
@@ -9775,7 +9807,7 @@ export default function App() {
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile: the profile the button below remaps every layer's own pixels into, unlike Assign Profile"
           >
@@ -9790,7 +9822,7 @@ export default function App() {
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <button
+          <button data-section="color"
             className="button button--quiet"
             onClick={() => {
               if (useDitherForProfile) {
@@ -9815,7 +9847,7 @@ export default function App() {
           >
             Convert…
           </button>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile > Rendering Intent: Relative Colorimetric adapts the source's own white onto the destination's before converting (this app's original, still-default behavior); Absolute Colorimetric skips that adaptation, preserving the real colorimetric relationship instead -- a visible tint whenever the two profiles' own native white points genuinely differ (only ProPhoto RGB's D50 does, against sRGB/Adobe RGB's shared D65); Perceptual and Saturation each compress an out-of-gamut colour toward a real anchor (a fixed mid-grey, or the colour's own luma) instead of clipping each channel independently."
           >
@@ -9831,7 +9863,7 @@ export default function App() {
               <option value="saturation">Saturation</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Color Settings > Conversion Engine: which of two real implementations computes the conversion above. Analytic evaluates the exact published RGB<->XYZ matrices per pixel (this app's original, still-default behavior). Look Up Table is the technique real CMMs (littleCMS, Apple ColorSync, Adobe's own ACE) use internally: the same analytic pipeline is sampled once onto a coarse 3D grid, then every pixel is resolved by trilinear interpolation through that grid instead -- byte-identical to Analytic only where a pixel lands exactly on one of the grid's own vertices, and genuinely, visibly different everywhere else."
           >
@@ -9845,7 +9877,7 @@ export default function App() {
               <option value="lookupTable">Look Up Table</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Edit > Convert to Profile > Use Dither: perturbs each channel's own rounding to break up gradient banding"
           >
@@ -9873,7 +9905,7 @@ export default function App() {
             />
             Black Point Compensation
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="Color Settings > Color Management Policies: what happens when a project is opened with an embedded profile that differs from the working space below. Preserve keeps the file's own profile untouched (this app's original behavior); Convert to Working Space remaps it right after loading. A project missing a profile outright is Ask When Opening's own, separately-scoped dialog, not this."
           >
@@ -9889,7 +9921,7 @@ export default function App() {
               <option value="convert">Convert to Working Space</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title="The working space Color Management Policy's own Convert to Working Space option converts an opened project into."
           >
@@ -9904,11 +9936,11 @@ export default function App() {
               <option value="proPhotoRgb">ProPhoto RGB</option>
             </select>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title={`Color Settings > Monitor Profile: a real, parsed .icc/.icm file describing the display's own colour response.${monitorProfile ? ` Currently: ${monitorProfile.description ?? monitorProfile.colorSpace} (${monitorProfile.deviceClass}).` : " None imported."}`}
           >
-            <button title="Edit > Color Settings > Monitor Profile…"
+            <button data-section="color" title="Edit > Color Settings > Monitor Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importMonitorProfile()}
@@ -9920,11 +9952,11 @@ export default function App() {
               {monitorProfile ? (monitorProfile.description ?? monitorProfile.colorSpace) : "None"}
             </span>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title={`Color Settings > Input Device Profile: a real, parsed .icc/.icm file for a scanner or camera's own colour response.${inputDeviceProfile ? ` Currently: ${inputDeviceProfile.description ?? inputDeviceProfile.colorSpace} (${inputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button title="Edit > Color Settings > Input Device Profile…"
+            <button data-section="color" title="Edit > Color Settings > Input Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importInputDeviceProfile()}
@@ -9938,11 +9970,11 @@ export default function App() {
                 : "None"}
             </span>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title={`Color Settings > Output Device Profile: a real, parsed .icc/.icm file for a printer or other output device's own colour response.${outputDeviceProfile ? ` Currently: ${outputDeviceProfile.description ?? outputDeviceProfile.colorSpace} (${outputDeviceProfile.deviceClass}).` : " None imported."}`}
           >
-            <button title="Edit > Color Settings > Output Device Profile…"
+            <button data-section="color" title="Edit > Color Settings > Output Device Profile…"
               type="button"
               className="button button--quiet"
               onClick={() => void importOutputDeviceProfile()}
@@ -9956,11 +9988,11 @@ export default function App() {
                 : "None"}
             </span>
           </label>
-          <label
+          <label data-section="color"
             className="tools__slider"
             title={`Color Settings > OpenColorIO Configuration: a real, parsed .ocio config file -- its own real colour spaces become available below as OCIO Input Color Space Assignment's From/To choices.${ocioConfig ? ` Loaded: ${ocioConfig.colorspaceNames.length} colour space(s)${ocioConfig.ocioProfileVersion !== null ? `, profile version ${ocioConfig.ocioProfileVersion}` : ""}.` : " None loaded."}`}
           >
-            <button title="Edit > Color Settings > Load OCIO Configuration…"
+            <button data-section="color" title="Edit > Color Settings > Load OCIO Configuration…"
               type="button"
               className="button button--quiet"
               onClick={() => void loadOcioConfig()}
@@ -9973,7 +10005,7 @@ export default function App() {
             </span>
           </label>
           {ocioConfig && Object.keys(ocioConfig.roles).length > 0 && (
-            <label
+            <label data-section="color"
               className="tools__slider"
               title="Color Settings > OpenColorIO Working Space: the loaded config's own real role this document treats as its OCIO working space -- picking one re-points OCIO Input Color Space Assignment's own To select at that role's real colour space"
             >
@@ -9992,7 +10024,7 @@ export default function App() {
             </label>
           )}
           {ocioConfig && (
-            <button
+            <button data-section="color"
               type="button"
               className="button button--quiet"
               onClick={() => setShowOcioPanel((shown) => !shown)}
@@ -10001,7 +10033,7 @@ export default function App() {
               {showOcioPanel ? "Hide OCIO Panel" : "Show OCIO Panel"}
             </button>
           )}
-          <label className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
+          <label data-section="color" className="tools__slider" title="View > Proof Setup, shown with Proof Colors on">
             Proof
             <select
               value={proof}
@@ -10016,7 +10048,7 @@ export default function App() {
             </select>
           </label>
           {proof === "paperink" && (
-            <label className="tools__slider" title="Proof Setup > Custom's Simulate Paper Color and Simulate Black Ink">
+            <label data-section="color" className="tools__slider" title="Proof Setup > Custom's Simulate Paper Color and Simulate Black Ink">
               Paper
               <input type="color" value={proofPaperColor} onChange={(event) => setProofPaperColor(event.target.value)} />
               Ink
@@ -10024,7 +10056,7 @@ export default function App() {
             </label>
           )}
           {proof === "gamut" && (
-            <label
+            <label data-section="color"
               className="tools__slider"
               title="View > Gamut Warning: flags any pixel whose naive CMYK ink split exceeds this app's own reachable Total Ink Limit"
             >
@@ -12048,7 +12080,7 @@ export default function App() {
           </button>
           {ocioConfig && (
             <>
-              <label
+              <label data-section="color"
                 className="tools__slider"
                 title="Color Settings > OCIO Input Color Space Assignment: reassign the selected layer's own pixels from this real colour space into the one below, through the loaded OpenColorIO configuration's own transform chain"
               >
@@ -12065,7 +12097,7 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <label className="tools__slider" title="The real colour space OCIO Input Color Space Assignment converts into">
+              <label data-section="color" className="tools__slider" title="The real colour space OCIO Input Color Space Assignment converts into">
                 OCIO To
                 <select
                   value={ocioToColorSpace}
@@ -12079,7 +12111,7 @@ export default function App() {
                   ))}
                 </select>
               </label>
-              <button
+              <button data-section="color"
                 className="button button--quiet"
                 onClick={() =>
                   selectedId !== null &&
