@@ -21835,6 +21835,74 @@ screenshots checked by eye.
 
 Tests: 1855 Rust (1851 → 1855), 22 frontend.
 
+## Phase 366 — Artistic gallery options: Cutout fidelity, Dry Brush and Watercolor texture, Paint Daubs brushes, Sponge smoothness, Rough Pastels texture
+
+Six Artistic-gallery scope cuts of section D, each a `*_with` command
+the old one delegates to.
+
+**Cutout** (`cutout_with`, an Edge Fidelity slider 1–3): before
+quantizing, the smoothed sample is mixed back toward the pixel's own
+colour by `(fidelity − 1) / 2` — none at 1, half at 2, all at 3, where
+the edges are exactly the original's and only the levels remain.
+
+**Dry Brush and Watercolor** (`dry_brush_with`, `watercolor_with`, a
+Texture slider 1–3): texture 1 leaves the paint alone; each step above
+it is a `texturizer_with` Canvas pass at scale 4 with relief `4 ·
+(texture − 1)`, lit from the top-left, over the painted result.
+
+**Paint Daubs** (`paint_daubs_with`, a Brush Type select): Simple is
+the old filter; Light Rough and Dark Rough daub the same way and then
+lift (`v · 1.1 + 10`) or sink (`v · 0.9 − 10`) the paint; Wide Sharp
+and Wide Blurry daub with twice the radius, keeping a quarter more or
+a quarter less of the original; Sparkle pushes every pixel whose luma
+exceeds 200 to white.
+
+**Sponge** (`sponge_with`, a Smoothness slider 1–15): the blotches are
+softened afterwards by a box blur of radius `(smoothness − 1) / 5`,
+none at 1–5, one pixel at 6–10, two at 11–15.
+
+**Rough Pastels** (`rough_pastels_with`, Texture, Scaling, Light and
+Invert joining the Relief slider): a `texturizer_with` pass over the
+strokes, its scale `scaling · 8 / 100` pixels (50–200 %, so 4 to 16)
+and its relief the dialog's own, in place of the plain contrast boost
+the old filter made from that relief.
+
+**Verified.** Five Rust tests. `cutout_edge_fidelity_follows_the_original`
+on a 0|255 step with six levels and simplicity 1: the pixel left of the
+edge reads 102, 51, 0 at fidelity 1, 2, 3 and the pixel right of it
+153, 204, 255; fidelity 1 equals `cutout`; 4 errors.
+`dry_brush_and_watercolor_textures_lay_canvas_over_the_paint` on flat
+grey: texture 1 leaves 128 everywhere, 2 embosses by ±4 and 3 by ±8
+(both filters); texture 1 equals the old filter on a ramp; 4 and 0
+error. `paint_daubs_brush_types_shape_the_daub`: flat 100 stays 100
+under Simple, Wide Sharp, Wide Blurry and Sparkle, lifts to 120 under
+Light Rough and sinks to 80 under Dark Rough; Sparkle pushes flat 220
+to 255; on a 0|255 step at brush size 5 the pixel before the edge
+reads 85 (Simple), 102 (Wide Blurry, radius 2) and 77 (Wide Sharp,
+keeping a quarter of the original); Simple equals `paint_daubs`.
+`sponge_smoothness_softens_the_blotches`: smoothness 1 and 5 equal
+`sponge`, 15 differs and produces a value no blotch has, a flat layer
+stays flat, 16 errors. `rough_pastels_texture_is_the_texturizer_over_the_strokes`:
+with no stroke smoothing, Canvas at 100 % and relief 10 lit from the
+left equals `texturizer_with` at scale 8 pixel for pixel (118 and 138
+present), 200 % equals scale 16, relief 0 is flat, the textureless
+call equals `rough_pastels`, 49 % errors. In Chromium against the
+built frontend: Filter Gallery > Artistic > Cutout… shows Edge
+Fidelity (2) and 3 sends `cutout_with` with `edgeFidelity: 3`; Dry
+Brush… and Watercolor… show Texture (1) and send `texture: 3` and `2`;
+Paint Daubs… shows Brush Type (Simple) and Wide Blurry sends `brush:
+"wideBlurry"`; Sponge… shows Smoothness (5) and 12 sends `smoothness:
+12`; Rough Pastels… shows Texture (Canvas), Scaling 100 %, Light (Top
+Left) and Invert after Relief, and Burlap, 150 %, Right, inverted
+sends `rough_pastels_with` with `texture: "burlap", scaling: 150,
+lightDirection: 2, invert: true`; every dialog closes on Apply. On the
+real app under Xvfb, on the recovered brush-stroke document: Filter
+Gallery > Artistic > Paint Daubs… with Dark Rough applied through the
+real IPC sank the white stroke to a rough grey; screenshots checked by
+eye.
+
+Tests: 1860 Rust (1855 → 1860), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

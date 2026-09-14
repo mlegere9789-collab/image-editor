@@ -2982,6 +2982,103 @@ fn note_paper_with(
     })
 }
 
+/// Filter Gallery > Artistic > Cutout on layer `id` with its Edge Fidelity.
+#[tauri::command]
+fn cutout_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    levels: u32,
+    edge_simplicity: u32,
+    edge_fidelity: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.cutout_with(id, levels, edge_simplicity, edge_fidelity)
+    })
+}
+
+/// Filter Gallery > Artistic > Dry Brush on layer `id` with its Texture.
+#[tauri::command]
+fn dry_brush_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    brush_detail: u32,
+    texture: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.dry_brush_with(id, brush_size, brush_detail, texture)
+    })
+}
+
+/// Filter Gallery > Artistic > Paint Daubs on layer `id` with its Brush Type.
+#[tauri::command]
+fn paint_daubs_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    sharpness: u32,
+    brush: document::PaintDaubsBrush,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.paint_daubs_with(id, brush_size, sharpness, brush)
+    })
+}
+
+/// Filter Gallery > Artistic > Sponge on layer `id` with its Smoothness.
+#[tauri::command]
+fn sponge_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_size: u32,
+    definition: u32,
+    smoothness: u32,
+    seed: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.sponge_with(id, brush_size, definition, smoothness, seed)
+    })
+}
+
+/// Filter Gallery > Artistic > Watercolor on layer `id` with its Texture.
+#[tauri::command]
+fn watercolor_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    brush_detail: u32,
+    shadow_intensity: u32,
+    texture: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.watercolor_with(id, brush_detail, shadow_intensity, texture)
+    })
+}
+
+/// Filter Gallery > Artistic > Rough Pastels on layer `id` with its
+/// Texture, Scaling, Light and Invert.
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn rough_pastels_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    stroke_length: u32,
+    stroke_detail: u32,
+    relief: u32,
+    texture: document::TexturizerTexture,
+    scaling: u32,
+    light_direction: u32,
+    invert: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.rough_pastels_with(
+            id,
+            stroke_length,
+            stroke_detail,
+            relief,
+            Some((texture, scaling, light_direction, invert)),
+        )
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -7890,6 +7987,12 @@ pub fn run() {
             tiles_with,
             halftone_pattern_with,
             note_paper_with,
+            cutout_with,
+            dry_brush_with,
+            paint_daubs_with,
+            sponge_with,
+            watercolor_with,
+            rough_pastels_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

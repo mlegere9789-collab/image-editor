@@ -2367,9 +2367,11 @@ export default function App() {
   const [showCutoutDialog, setShowCutoutDialog] = useState(false);
   const [cutoutLevels, setCutoutLevels] = useState(4);
   const [cutoutSimplicity, setCutoutSimplicity] = useState(4);
+  const [cutoutFidelity, setCutoutFidelity] = useState(2);
   const [showDryBrushDialog, setShowDryBrushDialog] = useState(false);
   const [dryBrushSize, setDryBrushSize] = useState(4);
   const [dryBrushDetail, setDryBrushDetail] = useState(6);
+  const [dryBrushTexture, setDryBrushTexture] = useState(1);
   const [showFilmGrainDialog, setShowFilmGrainDialog] = useState(false);
   const [filmGrainAmount, setFilmGrainAmount] = useState(6);
   const [filmGrainHighlightArea, setFilmGrainHighlightArea] = useState(4);
@@ -2385,9 +2387,11 @@ export default function App() {
   const [showSpongeDialog, setShowSpongeDialog] = useState(false);
   const [spongeBrushSize, setSpongeBrushSize] = useState(3);
   const [spongeDefinition, setSpongeDefinition] = useState(12);
+  const [spongeSmoothness, setSpongeSmoothness] = useState(5);
   const [showWatercolorDialog, setShowWatercolorDialog] = useState(false);
   const [watercolorBrushDetail, setWatercolorBrushDetail] = useState(10);
   const [watercolorShadowIntensity, setWatercolorShadowIntensity] = useState(3);
+  const [watercolorTexture, setWatercolorTexture] = useState(1);
   const [showDarkStrokesDialog, setShowDarkStrokesDialog] = useState(false);
   const [darkStrokesBalance, setDarkStrokesBalance] = useState(4);
   const [darkStrokesBlackIntensity, setDarkStrokesBlackIntensity] = useState(6);
@@ -2430,6 +2434,7 @@ export default function App() {
   const [showPaintDaubsDialog, setShowPaintDaubsDialog] = useState(false);
   const [paintDaubsBrushSize, setPaintDaubsBrushSize] = useState(10);
   const [paintDaubsSharpness, setPaintDaubsSharpness] = useState(10);
+  const [paintDaubsBrush, setPaintDaubsBrush] = useState("simple");
   const [showPaletteKnifeDialog, setShowPaletteKnifeDialog] = useState(false);
   const [paletteKnifeStrokeSize, setPaletteKnifeStrokeSize] = useState(10);
   const [paletteKnifeStrokeDetail, setPaletteKnifeStrokeDetail] = useState(2);
@@ -2447,6 +2452,10 @@ export default function App() {
   const [roughPastelsStrokeLength, setRoughPastelsStrokeLength] = useState(10);
   const [roughPastelsStrokeDetail, setRoughPastelsStrokeDetail] = useState(10);
   const [roughPastelsRelief, setRoughPastelsRelief] = useState(10);
+  const [roughPastelsTexture, setRoughPastelsTexture] = useState("canvas");
+  const [roughPastelsScaling, setRoughPastelsScaling] = useState(100);
+  const [roughPastelsLight, setRoughPastelsLight] = useState(7);
+  const [roughPastelsInvert, setRoughPastelsInvert] = useState(false);
   const [showUnderpaintingDialog, setShowUnderpaintingDialog] = useState(false);
   const [underpaintingBrushSize, setUnderpaintingBrushSize] = useState(8);
   const [underpaintingTextureCoverage, setUnderpaintingTextureCoverage] =
@@ -7489,23 +7498,25 @@ export default function App() {
 
   const applyCutout = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("cutout", {
+    await runCommand("cutout_with", {
       id: selectedId,
       levels: cutoutLevels,
       edgeSimplicity: cutoutSimplicity,
+      edgeFidelity: cutoutFidelity,
     });
     setShowCutoutDialog(false);
-  }, [runCommand, selectedId, cutoutLevels, cutoutSimplicity]);
+  }, [runCommand, selectedId, cutoutLevels, cutoutSimplicity, cutoutFidelity]);
 
   const applyDryBrush = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("dry_brush", {
+    await runCommand("dry_brush_with", {
       id: selectedId,
       brushSize: dryBrushSize,
       brushDetail: dryBrushDetail,
+      texture: dryBrushTexture,
     });
     setShowDryBrushDialog(false);
-  }, [runCommand, selectedId, dryBrushSize, dryBrushDetail]);
+  }, [runCommand, selectedId, dryBrushSize, dryBrushDetail, dryBrushTexture]);
 
   const applyFilmGrain = useCallback(async () => {
     if (selectedId === null) return;
@@ -7560,21 +7571,29 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Crystallize.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("sponge", {
+    await runCommand("sponge_with", {
       id: selectedId,
       brushSize: spongeBrushSize,
       definition: spongeDefinition,
+      smoothness: spongeSmoothness,
       seed,
     });
     setShowSpongeDialog(false);
-  }, [runCommand, selectedId, spongeBrushSize, spongeDefinition]);
+  }, [
+    runCommand,
+    selectedId,
+    spongeBrushSize,
+    spongeDefinition,
+    spongeSmoothness,
+  ]);
 
   const applyWatercolor = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("watercolor", {
+    await runCommand("watercolor_with", {
       id: selectedId,
       brushDetail: watercolorBrushDetail,
       shadowIntensity: watercolorShadowIntensity,
+      texture: watercolorTexture,
     });
     setShowWatercolorDialog(false);
   }, [
@@ -7582,6 +7601,7 @@ export default function App() {
     selectedId,
     watercolorBrushDetail,
     watercolorShadowIntensity,
+    watercolorTexture,
   ]);
 
   const applyDarkStrokes = useCallback(async () => {
@@ -7735,13 +7755,20 @@ export default function App() {
 
   const applyPaintDaubs = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("paint_daubs", {
+    await runCommand("paint_daubs_with", {
       id: selectedId,
       brushSize: paintDaubsBrushSize,
       sharpness: paintDaubsSharpness,
+      brush: paintDaubsBrush,
     });
     setShowPaintDaubsDialog(false);
-  }, [runCommand, selectedId, paintDaubsBrushSize, paintDaubsSharpness]);
+  }, [
+    runCommand,
+    selectedId,
+    paintDaubsBrushSize,
+    paintDaubsSharpness,
+    paintDaubsBrush,
+  ]);
 
   const applyPaletteKnife = useCallback(async () => {
     if (selectedId === null) return;
@@ -7796,11 +7823,15 @@ export default function App() {
 
   const applyRoughPastels = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("rough_pastels", {
+    await runCommand("rough_pastels_with", {
       id: selectedId,
       strokeLength: roughPastelsStrokeLength,
       strokeDetail: roughPastelsStrokeDetail,
       relief: roughPastelsRelief,
+      texture: roughPastelsTexture,
+      scaling: roughPastelsScaling,
+      lightDirection: roughPastelsLight,
+      invert: roughPastelsInvert,
     });
     setShowRoughPastelsDialog(false);
   }, [
@@ -7809,6 +7840,10 @@ export default function App() {
     roughPastelsStrokeLength,
     roughPastelsStrokeDetail,
     roughPastelsRelief,
+    roughPastelsTexture,
+    roughPastelsScaling,
+    roughPastelsLight,
+    roughPastelsInvert,
   ]);
 
   const applyUnderpainting = useCallback(async () => {
@@ -29328,6 +29363,21 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control">
+              <span className="control__label">
+                Edge Fidelity
+                <span className="control__value">{cutoutFidelity}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={cutoutFidelity}
+                onChange={(event) =>
+                  setCutoutFidelity(Number(event.target.value))
+                }
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -29385,6 +29435,21 @@ export default function App() {
                 value={dryBrushDetail}
                 onChange={(event) =>
                   setDryBrushDetail(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Texture
+                <span className="control__value">{dryBrushTexture}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={dryBrushTexture}
+                onChange={(event) =>
+                  setDryBrushTexture(Number(event.target.value))
                 }
               />
             </label>
@@ -29683,6 +29748,21 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control">
+              <span className="control__label">
+                Smoothness
+                <span className="control__value">{spongeSmoothness}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                value={spongeSmoothness}
+                onChange={(event) =>
+                  setSpongeSmoothness(Number(event.target.value))
+                }
+              />
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -29742,6 +29822,21 @@ export default function App() {
                 value={watercolorShadowIntensity}
                 onChange={(event) =>
                   setWatercolorShadowIntensity(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Texture
+                <span className="control__value">{watercolorTexture}</span>
+              </span>
+              <input
+                type="range"
+                min={1}
+                max={3}
+                value={watercolorTexture}
+                onChange={(event) =>
+                  setWatercolorTexture(Number(event.target.value))
                 }
               />
             </label>
@@ -29891,6 +29986,20 @@ export default function App() {
                   setPaintDaubsSharpness(Number(event.target.value))
                 }
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Brush Type</span>
+              <select
+                value={paintDaubsBrush}
+                onChange={(event) => setPaintDaubsBrush(event.target.value)}
+              >
+                <option value="simple">Simple</option>
+                <option value="lightRough">Light Rough</option>
+                <option value="darkRough">Dark Rough</option>
+                <option value="wideSharp">Wide Sharp</option>
+                <option value="wideBlurry">Wide Blurry</option>
+                <option value="sparkle">Sparkle</option>
+              </select>
             </label>
             <div className="modal__actions">
               <button
@@ -30209,6 +30318,61 @@ export default function App() {
                 value={roughPastelsRelief}
                 onChange={(event) =>
                   setRoughPastelsRelief(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Texture</span>
+              <select
+                value={roughPastelsTexture}
+                onChange={(event) => setRoughPastelsTexture(event.target.value)}
+              >
+                <option value="canvas">Canvas</option>
+                <option value="brick">Brick</option>
+                <option value="burlap">Burlap</option>
+                <option value="sandstone">Sandstone</option>
+              </select>
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Scaling
+                <span className="control__value">{roughPastelsScaling}%</span>
+              </span>
+              <input
+                type="range"
+                min={50}
+                max={200}
+                value={roughPastelsScaling}
+                onChange={(event) =>
+                  setRoughPastelsScaling(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Light</span>
+              <select
+                value={roughPastelsLight}
+                onChange={(event) =>
+                  setRoughPastelsLight(Number(event.target.value))
+                }
+              >
+                <option value={0}>Top</option>
+                <option value={1}>Top Right</option>
+                <option value={2}>Right</option>
+                <option value={3}>Bottom Right</option>
+                <option value={4}>Bottom</option>
+                <option value={5}>Bottom Left</option>
+                <option value={6}>Left</option>
+                <option value={7}>Top Left</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Invert</span>
+              <input
+                type="checkbox"
+                checked={roughPastelsInvert}
+                onChange={(event) =>
+                  setRoughPastelsInvert(event.target.checked)
                 }
               />
             </label>

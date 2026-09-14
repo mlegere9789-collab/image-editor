@@ -119,6 +119,18 @@ pub enum HalftonePattern {
     Line,
 }
 
+/// Filter Gallery > Artistic > Paint Daubs' Brush Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PaintDaubsBrush {
+    Simple,
+    LightRough,
+    DarkRough,
+    WideSharp,
+    WideBlurry,
+    Sparkle,
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -16390,16 +16402,36 @@ impl Document {
         levels: u32,
         edge_simplicity: u32,
     ) -> Result<Option<Rect>, String> {
+        self.cutout_with(id, levels, edge_simplicity, 1)
+    }
+
+    /// [`Self::cutout`] with Photoshop's Edge Fidelity (`1..=3`): how
+    /// closely the cut shapes' edges follow the original. Before
+    /// quantizing, the smoothed sample is mixed back toward the pixel's
+    /// own colour by `(edge_fidelity − 1) / 2` — none at 1 (`cutout`
+    /// itself), half at 2, all of it at 3, where the edges are exactly
+    /// the original's own and only the levels remain.
+    pub fn cutout_with(
+        &mut self,
+        id: LayerId,
+        levels: u32,
+        edge_simplicity: u32,
+        edge_fidelity: u32,
+    ) -> Result<Option<Rect>, String> {
         if !(2..=8).contains(&levels) {
             return Err("Cutout levels must be between 2 and 8.".to_string());
         }
         if edge_simplicity > 10 {
             return Err("Cutout edge simplicity must be between 0 and 10.".to_string());
         }
+        if !(1..=3).contains(&edge_fidelity) {
+            return Err("Cutout edge fidelity must be between 1 and 3.".to_string());
+        }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let radius = edge_simplicity as i64;
         let step = 255.0 / (levels as f32 - 1.0);
+        let fidelity = (edge_fidelity - 1) as f32 / 2.0;
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let sampled = if radius > 0 {
@@ -16409,14 +16441,35 @@ impl Document {
                 px.copy_from_slice(&src[base..base + CHANNELS]);
                 px
             };
-            let quantize = |v: u8| -> u8 { ((v as f32 / step).round() * step).round() as u8 };
+            let quantize = |sampled: u8, own: u8| -> u8 {
+                let v = sampled as f32 * (1.0 - fidelity) + own as f32 * fidelity;
+                ((v / step).round() * step).round() as u8
+            };
             [
-                quantize(sampled[0]),
-                quantize(sampled[1]),
-                quantize(sampled[2]),
+                quantize(sampled[0], src[base]),
+                quantize(sampled[1], src[base + 1]),
+                quantize(sampled[2], src[base + 2]),
                 src[base + 3],
             ]
         })
+    }
+
+    /// The canvas texture Dry Brush and Watercolor lay over their paint:
+    /// Photoshop's `1..=3` Texture, `1` leaving the paint alone and
+    /// each step above it a [`Self::texturizer_with`] Canvas pass at
+    /// scale 4 with relief `4 · (texture − 1)`, lit from the top-left.
+    fn canvas_texture(&mut self, id: LayerId, texture: u32) -> Result<Option<Rect>, String> {
+        if texture == 1 {
+            return Ok(None);
+        }
+        self.texturizer_with(
+            id,
+            TexturizerTexture::Canvas,
+            4,
+            4 * (texture - 1),
+            7,
+            false,
+        )
     }
 
     /// Filter Gallery > Artistic > Dry Brush: a documented approximation
@@ -16436,6 +16489,32 @@ impl Document {
     /// the selection and errors on an out-of-range parameter or a
     /// locked/unknown layer.
     pub fn dry_brush(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        brush_detail: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.dry_brush_with(id, brush_size, brush_detail, 1)
+    }
+
+    /// [`Self::dry_brush`] with Photoshop's Texture (`1..=3`), the canvas
+    /// grain of [`Self::canvas_texture`] laid over the paint.
+    pub fn dry_brush_with(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        brush_detail: u32,
+        texture: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=3).contains(&texture) {
+            return Err("Dry Brush texture must be between 1 and 3.".to_string());
+        }
+        let painted = self.dry_brush_paint(id, brush_size, brush_detail)?;
+        self.canvas_texture(id, texture)?;
+        Ok(painted)
+    }
+
+    fn dry_brush_paint(
         &mut self,
         id: LayerId,
         brush_size: u32,
@@ -16739,6 +16818,44 @@ impl Document {
         definition: u32,
         seed: u32,
     ) -> Result<Option<Rect>, String> {
+        self.sponge_with(id, brush_size, definition, 1, seed)
+    }
+
+    /// [`Self::sponge`] with Photoshop's Smoothness (`1..=15`): the
+    /// blotches are softened afterwards by a [`box_blur_at`] pass of
+    /// radius `(smoothness − 1) / 5` — none at 1..=5 (`sponge` itself),
+    /// one pixel at 6..=10, two at 11..=15 — so their edges bleed into
+    /// each other the way a wet sponge's do.
+    pub fn sponge_with(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        definition: u32,
+        smoothness: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=15).contains(&smoothness) {
+            return Err("Sponge smoothness must be between 1 and 15.".to_string());
+        }
+        let blotched = self.sponge_blotches(id, brush_size, definition, seed)?;
+        let radius = ((smoothness - 1) / 5) as i64;
+        if radius == 0 {
+            return Ok(blotched);
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        self.filter_pixels(id, move |src, row, col| {
+            box_blur_at(src, doc_width, width, height, row, col, radius)
+        })
+    }
+
+    fn sponge_blotches(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        definition: u32,
+        seed: u32,
+    ) -> Result<Option<Rect>, String> {
         if brush_size > 10 {
             return Err("Sponge brush size must be between 0 and 10.".to_string());
         }
@@ -16798,6 +16915,32 @@ impl Document {
     /// selection and errors on an out-of-range parameter or a
     /// locked/unknown layer.
     pub fn watercolor(
+        &mut self,
+        id: LayerId,
+        brush_detail: u32,
+        shadow_intensity: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.watercolor_with(id, brush_detail, shadow_intensity, 1)
+    }
+
+    /// [`Self::watercolor`] with Photoshop's Texture (`1..=3`), the
+    /// paper grain of [`Self::canvas_texture`] laid over the wash.
+    pub fn watercolor_with(
+        &mut self,
+        id: LayerId,
+        brush_detail: u32,
+        shadow_intensity: u32,
+        texture: u32,
+    ) -> Result<Option<Rect>, String> {
+        if !(1..=3).contains(&texture) {
+            return Err("Watercolor texture must be between 1 and 3.".to_string());
+        }
+        let washed = self.watercolor_wash(id, brush_detail, shadow_intensity)?;
+        self.canvas_texture(id, texture)?;
+        Ok(washed)
+    }
+
+    fn watercolor_wash(
         &mut self,
         id: LayerId,
         brush_detail: u32,
@@ -19037,6 +19180,23 @@ impl Document {
         brush_size: u32,
         sharpness: u32,
     ) -> Result<Option<Rect>, String> {
+        self.paint_daubs_with(id, brush_size, sharpness, PaintDaubsBrush::Simple)
+    }
+
+    /// [`Self::paint_daubs`] with Photoshop's six Brush Types. Simple is
+    /// `paint_daubs`. Light Rough and Dark Rough daub the same way and
+    /// then lift (`v · 1.1 + 10`) or sink (`v · 0.9 − 10`) the paint.
+    /// Wide Sharp and Wide Blurry daub with twice the radius, Wide Sharp
+    /// keeping a quarter more of the original (`sharpness / 40 + 0.25`)
+    /// and Wide Blurry a quarter less. Sparkle daubs simply and then
+    /// pushes every pixel whose luma exceeds 200 to white.
+    pub fn paint_daubs_with(
+        &mut self,
+        id: LayerId,
+        brush_size: u32,
+        sharpness: u32,
+        brush: PaintDaubsBrush,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=50).contains(&brush_size) {
             return Err("Paint Daubs brush size must be between 1 and 50.".to_string());
         }
@@ -19045,18 +19205,38 @@ impl Document {
         }
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
-        let radius = (brush_size / 5).max(1) as i64;
-        let factor = sharpness as f32 / 40.0;
+        let mut radius = (brush_size / 5).max(1) as i64;
+        let mut factor = sharpness as f32 / 40.0;
+        match brush {
+            PaintDaubsBrush::WideSharp => {
+                radius *= 2;
+                factor = (factor + 0.25).min(1.0);
+            }
+            PaintDaubsBrush::WideBlurry => {
+                radius *= 2;
+                factor = (factor - 0.25).max(0.0);
+            }
+            _ => {}
+        }
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             let blurred = box_blur_at(src, doc_width, width, height, row, col, radius);
-            let mut out = [0u8; CHANNELS];
+            let mut daub = [0.0f32; 3];
             for c in 0..3 {
                 let orig = src[base + c] as f32;
                 let bl = blurred[c] as f32;
-                out[c] = (bl * (1.0 - factor) + orig * factor)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                daub[c] = bl * (1.0 - factor) + orig * factor;
+            }
+            let luma = 0.299 * daub[0] + 0.587 * daub[1] + 0.114 * daub[2];
+            let mut out = [0u8; CHANNELS];
+            for c in 0..3 {
+                let v = match brush {
+                    PaintDaubsBrush::LightRough => daub[c] * 1.1 + 10.0,
+                    PaintDaubsBrush::DarkRough => daub[c] * 0.9 - 10.0,
+                    PaintDaubsBrush::Sparkle if luma > 200.0 => 255.0,
+                    _ => daub[c],
+                };
+                out[c] = v.round().clamp(0.0, 255.0) as u8;
             }
             out[3] = src[base + 3];
             out
@@ -19308,6 +19488,48 @@ impl Document {
     /// other filter here built on [`Self::filter_pixels`]. Errors on an
     /// out-of-range parameter or a locked/unknown layer.
     pub fn rough_pastels(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        stroke_detail: u32,
+        relief: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.rough_pastels_with(id, stroke_length, stroke_detail, relief, None)
+    }
+
+    /// [`Self::rough_pastels`] with Photoshop's own texture controls:
+    /// `texture` as `(kind, scaling, light_direction, invert)` lays a
+    /// [`Self::texturizer_with`] pass over the strokes, its scale
+    /// `scaling · 8 / 100` pixels (Photoshop's `50..=200` %, so 4 to 16)
+    /// and its relief the dialog's own `relief`, in place of the plain
+    /// contrast boost `rough_pastels` (`None`) makes from that relief.
+    pub fn rough_pastels_with(
+        &mut self,
+        id: LayerId,
+        stroke_length: u32,
+        stroke_detail: u32,
+        relief: u32,
+        texture: Option<(TexturizerTexture, u32, u32, bool)>,
+    ) -> Result<Option<Rect>, String> {
+        if let Some((_, scaling, _, _)) = texture {
+            if !(50..=200).contains(&scaling) {
+                return Err("Rough Pastels scaling must be between 50 and 200 percent.".to_string());
+            }
+        }
+        let stroked = self.rough_pastels_strokes(
+            id,
+            stroke_length,
+            stroke_detail,
+            if texture.is_some() { 0 } else { relief },
+        )?;
+        if let Some((kind, scaling, light_direction, invert)) = texture {
+            let scale = (scaling * 8 / 100).max(1);
+            self.texturizer_with(id, kind, scale, relief, light_direction, invert)?;
+        }
+        Ok(stroked)
+    }
+
+    fn rough_pastels_strokes(
         &mut self,
         id: LayerId,
         stroke_length: u32,
@@ -44983,6 +45205,213 @@ mod tests {
         let id = doc.add_layer("r", &ramp, w, h).unwrap();
         doc.tiles(id, 2, 99, seed).unwrap();
         assert_eq!(doc.layers()[0].pixels, unaltered);
+    }
+
+    fn grey_row(values: &[u8]) -> Vec<u8> {
+        values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn cutout_edge_fidelity_follows_the_original() {
+        // A 6-wide step 0|255, six levels (step 51), simplicity 1: the
+        // blurred pixel left of the edge samples 85 → level 2 → 102.
+        // Fidelity 2 mixes half the original back (42.5 → level 1 → 51),
+        // fidelity 3 all of it (0). Right of the edge: 153, 204, 255.
+        let pixels = grey_row(&[0, 0, 0, 255, 255, 255]);
+        let run = |fidelity: u32| {
+            let mut doc = Document::new(6, 1).unwrap();
+            let id = doc.add_layer("g", &pixels, 6, 1).unwrap();
+            doc.cutout_with(id, 6, 1, fidelity).unwrap();
+            red_plane(&doc)
+        };
+        assert_eq!(run(1)[2], 102);
+        assert_eq!(run(2)[2], 51);
+        assert_eq!(run(3)[2], 0);
+        assert_eq!(run(1)[3], 153);
+        assert_eq!(run(2)[3], 204);
+        assert_eq!(run(3)[3], 255);
+        let mut doc = Document::new(6, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 6, 1).unwrap();
+        doc.cutout(id, 6, 1).unwrap();
+        assert_eq!(red_plane(&doc), run(1));
+        assert!(doc.cutout_with(id, 6, 1, 4).is_err());
+    }
+
+    #[test]
+    fn dry_brush_and_watercolor_textures_lay_canvas_over_the_paint() {
+        // Flat grey with no smoothing: texture 1 leaves 128 everywhere,
+        // texture 2 embosses the 4-pixel canvas by ±4, texture 3 by ±8.
+        let run = |texture: u32, watercolor: bool| {
+            let (mut doc, id) = flat_grey(8, 8);
+            if watercolor {
+                doc.watercolor_with(id, 14, 0, texture).unwrap();
+            } else {
+                doc.dry_brush_with(id, 0, 10, texture).unwrap();
+            }
+            red_plane(&doc)
+        };
+        for watercolor in [false, true] {
+            assert!(run(1, watercolor).iter().all(|&v| v == 128));
+            let two = run(2, watercolor);
+            assert!(two.iter().all(|&v| v == 124 || v == 128 || v == 132));
+            assert!(two.contains(&124) && two.contains(&132));
+            let three = run(3, watercolor);
+            assert!(three.iter().all(|&v| v == 120 || v == 128 || v == 136));
+            assert!(three.contains(&120) && three.contains(&136));
+        }
+        // Texture 1 is the old filter on a real picture.
+        let pixels = grey_row(&[0, 40, 80, 120, 160, 200, 240, 255]);
+        let mut doc = Document::new(8, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 8, 1).unwrap();
+        doc.dry_brush_with(id, 1, 5, 1).unwrap();
+        let mut old = Document::new(8, 1).unwrap();
+        let old_id = old.add_layer("g", &pixels, 8, 1).unwrap();
+        old.dry_brush(old_id, 1, 5).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        let (mut doc, id) = flat_grey(2, 2);
+        assert!(doc.dry_brush_with(id, 0, 0, 4).is_err());
+        assert!(doc.watercolor_with(id, 1, 0, 0).is_err());
+    }
+
+    #[test]
+    fn paint_daubs_brush_types_shape_the_daub() {
+        // Flat grey 100: Simple, Wide Sharp, Wide Blurry and Sparkle leave
+        // it; Light Rough lifts it to 120, Dark Rough sinks it to 80.
+        let run = |value: u8, brush: PaintDaubsBrush| {
+            let pixels = grey_row(&[value; 4]);
+            let mut doc = Document::new(2, 2).unwrap();
+            let id = doc.add_layer("g", &pixels, 2, 2).unwrap();
+            doc.paint_daubs_with(id, 5, 0, brush).unwrap();
+            red_plane(&doc)[0]
+        };
+        assert_eq!(run(100, PaintDaubsBrush::Simple), 100);
+        assert_eq!(run(100, PaintDaubsBrush::WideSharp), 100);
+        assert_eq!(run(100, PaintDaubsBrush::WideBlurry), 100);
+        assert_eq!(run(100, PaintDaubsBrush::Sparkle), 100);
+        assert_eq!(run(100, PaintDaubsBrush::LightRough), 120);
+        assert_eq!(run(100, PaintDaubsBrush::DarkRough), 80);
+        // Sparkle pushes a bright 220 to white.
+        assert_eq!(run(220, PaintDaubsBrush::Sparkle), 255);
+        assert_eq!(run(220, PaintDaubsBrush::Simple), 220);
+        // On a step 0|255 with brush size 5 (radius 1, wide 2) and no
+        // sharpness: Simple's pixel 3 averages 0, 0, 255 → 85; Wide
+        // Blurry's averages five → 102; Wide Sharp keeps a quarter of the
+        // original 0 → 76.5 → 77.
+        let pixels = grey_row(&[0, 0, 0, 0, 255, 255, 255, 255]);
+        let step = |brush: PaintDaubsBrush| {
+            let mut doc = Document::new(8, 1).unwrap();
+            let id = doc.add_layer("g", &pixels, 8, 1).unwrap();
+            doc.paint_daubs_with(id, 5, 0, brush).unwrap();
+            red_plane(&doc)[3]
+        };
+        assert_eq!(step(PaintDaubsBrush::Simple), 85);
+        assert_eq!(step(PaintDaubsBrush::WideBlurry), 102);
+        assert_eq!(step(PaintDaubsBrush::WideSharp), 77);
+        let mut old = Document::new(8, 1).unwrap();
+        let old_id = old.add_layer("g", &pixels, 8, 1).unwrap();
+        old.paint_daubs(old_id, 5, 0).unwrap();
+        assert_eq!(red_plane(&old)[3], 85);
+    }
+
+    #[test]
+    fn sponge_smoothness_softens_the_blotches() {
+        // Half black, half white: the blotches are averages of their own
+        // cells; smoothness 1..=5 is sponge itself, 6 and up blur the
+        // blotch edges so some pixel takes a value no blotch has.
+        let (w, h) = (12u32, 8u32);
+        let mut pixels = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                let v = if x < 6 { 0 } else { 255 };
+                pixels.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        let run = |smoothness: u32| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("g", &pixels, w, h).unwrap();
+            doc.sponge_with(id, 2, 0, smoothness, 5).unwrap();
+            red_plane(&doc)
+        };
+        let plain = run(1);
+        assert_eq!(run(5), plain);
+        let mut old = Document::new(w, h).unwrap();
+        let old_id = old.add_layer("g", &pixels, w, h).unwrap();
+        old.sponge(old_id, 2, 0, 5).unwrap();
+        assert_eq!(red_plane(&old), plain);
+        let soft = run(15);
+        assert_ne!(soft, plain);
+        let blotch_values: std::collections::HashSet<u8> = plain.iter().copied().collect();
+        assert!(soft.iter().any(|v| !blotch_values.contains(v)));
+        // A flat layer stays flat at any smoothness.
+        let (mut doc, id) = flat_grey(6, 6);
+        doc.sponge_with(id, 2, 0, 15, 5).unwrap();
+        assert!(red_plane(&doc).iter().all(|&v| v == 128));
+        assert!(doc.sponge_with(id, 2, 0, 16, 5).is_err());
+    }
+
+    #[test]
+    fn rough_pastels_texture_is_the_texturizer_over_the_strokes() {
+        // Flat grey, no stroke smoothing (length 0, detail 20): the
+        // strokes are the source, so Canvas at 100 % (scale 8), relief 10,
+        // lit from the left, is exactly texturizer_with's own result.
+        let (mut doc, id) = flat_grey(16, 16);
+        doc.rough_pastels_with(
+            id,
+            0,
+            20,
+            10,
+            Some((TexturizerTexture::Canvas, 100, 6, false)),
+        )
+        .unwrap();
+        let (mut plain, plain_id) = flat_grey(16, 16);
+        plain
+            .texturizer_with(plain_id, TexturizerTexture::Canvas, 8, 10, 6, false)
+            .unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&plain));
+        assert!(red_plane(&doc).contains(&118) && red_plane(&doc).contains(&138));
+        // Scaling 200 % doubles the cell to 16, relief 0 leaves it flat,
+        // and None is the old rough_pastels.
+        let (mut doc, id) = flat_grey(16, 16);
+        doc.rough_pastels_with(
+            id,
+            0,
+            20,
+            10,
+            Some((TexturizerTexture::Canvas, 200, 6, false)),
+        )
+        .unwrap();
+        let (mut plain, plain_id) = flat_grey(16, 16);
+        plain
+            .texturizer_with(plain_id, TexturizerTexture::Canvas, 16, 10, 6, false)
+            .unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&plain));
+        let (mut doc, id) = flat_grey(16, 16);
+        doc.rough_pastels_with(
+            id,
+            0,
+            20,
+            0,
+            Some((TexturizerTexture::Brick, 100, 6, false)),
+        )
+        .unwrap();
+        assert!(red_plane(&doc).iter().all(|&v| v == 128));
+        let pixels = grey_row(&[0, 40, 80, 120, 160, 200, 240, 255]);
+        let mut doc = Document::new(8, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 8, 1).unwrap();
+        doc.rough_pastels_with(id, 10, 10, 10, None).unwrap();
+        let mut old = Document::new(8, 1).unwrap();
+        let old_id = old.add_layer("g", &pixels, 8, 1).unwrap();
+        old.rough_pastels(old_id, 10, 10, 10).unwrap();
+        assert_eq!(red_plane(&doc), red_plane(&old));
+        assert!(doc
+            .rough_pastels_with(
+                id,
+                0,
+                20,
+                10,
+                Some((TexturizerTexture::Canvas, 49, 6, false))
+            )
+            .is_err());
     }
 
     #[test]
