@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 603.**
+**618 distinct capabilities tracked. Currently shipped: 604.**
 
 ## PART I — EVERY TOOL
 
@@ -294,7 +294,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] Color Range — Skin Tones (`ColorRange::SkinTones`, the classic RGB rule R > 95, G > 40, B > 20, spread > 15, R − G > 15, R > G, R > B; the Reds…Magentas hue sectors and Highlights/Midtones/Shadows luma bands ship alongside; Detect Faces is a documented scope cut — see README Phase 226)
 - [x] Select Subject (duplicate of SUBJECT SELECTION in PART II, shipped there — checked here for consistency)
 - [x] Select Subject — Device Processing (Photoshop's own choice between an on-device model and Adobe's cloud service; this project's `select_subject` has exactly one code path, a local Rust heuristic with no network call of any kind, so it is on-device processing by construction — a documentation fix, not new work)
-- [ ] Select Subject — Cloud Processing (would need an actual online detection service this project has none of; a permanent scope cut, not merely deferred pending more time)
+- [x] Select Subject — Cloud Processing (a "Select Subject (Cloud)" button sends the selected layer to image-editor-server's `/select-subject`, a heavier detector than the on-device heuristic: the canvas edge's colours as a background model, foreground and background colour models refitted each round, and the exact minimum cut of the contrast-weighted pixel graph (GrabCut's iterated graph cuts, reimplemented, with Dinic's max-flow), at up to 320 pixels on the long side, the largest region kept; the mask lands in the selection per the selection mode through `select_from_mask`. Not a learned detector — see README Phase 339)
 - [x] Remove Background (`remove_background`, the subject kept and every other pixel of the layer made fully transparent, the selection left as it was — see README Phase 210)
 - [x] Select People — Individual Person Selection (`people_bits_at`/`select_people_at_with`, README Phase 287: the finder's own connected components, sorted largest first, indexed instead of always taking the largest — a real, honest way to pick out one of several *separate* people in a photo. Two people who touch or overlap are still one component to this heuristic, which real per-instance segmentation would tell apart and this does not)
 - [x] Select People — Person Components (`person_components_bits`/`select_person_component_with`: the same largest skin-toned component `face_bbox` finds, split into Face (its own top 35% by height — a coarse head:body proportion, not a face detector of its own), Body (the rest), and Hair (`hair_bits`, below). An honest classical partition, not Photoshop's own neural person segmentation — Body here is skin only, not clothing — see README Phase 295)

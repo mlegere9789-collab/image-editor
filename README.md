@@ -20216,6 +20216,80 @@ comments on board items are a documented scope cut.
 Firefly Boards Integration flips to shipped as its open equivalent
 (603/618).
 
+## Phase 339 — Select Subject — Cloud Processing
+
+Photoshop offers Select Subject on the device or in the cloud, the
+cloud path being the heavier model. This app's on-device Select
+Subject is a heuristic — the largest 4-connected region that is not
+the canvas edge's colour, within a tolerance — and it does what a
+heuristic does: fragments on noise and stops at any pixel near the
+background colour. The cloud path is a real, heavier segmentation on
+image-editor-server, `server/src/segment.rs`: GrabCut's iterated
+graph cuts (Rother, Kolmogorov & Blake, SIGGRAPH 2004), reimplemented.
+The two-pixel canvas edge is the background as the heuristic assumes,
+but as a colour *model* — five k-means clusters with per-cluster
+variance, the paper's Gaussian mixtures with isotropic components —
+and a pixel starts as subject when that model finds it less likely
+than the ring's own 98th-percentile pixel by a margin that grows with
+the tolerance. Each of up to four rounds refits a foreground and a
+background model to the current labelling, gives every pixel the
+negative log-likelihood under each as its cost of being labelled the
+other way, charges neighbours a contrast-weighted cost for differing
+(the paper's β from the mean squared neighbour difference, γ = 50),
+pins the ring to background, and takes the exact minimum cut of that
+graph as the new labelling. The cut is Dinic's max-flow on the
+4-connected grid, written here with an iterative blocking-flow phase
+so a long grid path cannot overflow the stack, and the source side of
+the residual graph is the subject; the largest connected region is
+kept, since Select Subject is one subject. Work happens at up to 320
+pixels on the long side (box-averaged down, the mask resampled back),
+so a 1600-pixel photo costs what a 320-pixel one does. The endpoint
+is `POST /select-subject`, PNG in, PNG mask out, run on a blocking
+thread so the server keeps answering.
+
+The app side is two small pieces: `Document::select_mask_bits`, which
+lands a canvas-sized mask in the selection per the selection mode
+exactly as the finder's own result lands, and a `select_from_mask`
+command that decodes the returned PNG (alpha ≥ 128 is subject) and
+checks its size against the canvas. The client's **Select Subject
+(Cloud)** button, beside Select Subject, exports the selected layer,
+posts it at the current tolerance, and lands the mask per the
+selection mode.
+
+**Verified three ways.** `cargo test` in `server/`: 22 tests (17 →
+22) — the max-flow against three hand-computed graphs (a 5-unit cut
+with its source side, a 1-unit bottleneck, an undirected edge with an
+unreachable branch, and no path at all); the colour model separating
+two colours; a noisy blob (±20 per channel on both sides) recovered
+with fewer than 15 of 1,920 pixels wrong and IoU above 0.97, only the
+larger of two blobs kept, a flat image and a too-small one refused; a
+2× downscale-upscale round trip within 200 pixels of the truth; the
+PNG path end to end; and the HTTP route with a red square on blue
+(the square's corners in, the pixels just outside out, 401 without a
+token, 400 for bytes that are not a PNG or an empty body).
+`src-tauri`: 1805 (1798 lib + 7 pipeline, up from 1804) —
+`select_mask_bits` landing the finder's own expected grid in New and
+Add modes, and refusing a wrong-sized or empty mask. Live: the
+release server, given a 1600×1200 scene (a noisy elliptical subject on
+a noisy gradient background, written by a script) answered in 0.39 s
+with a mask that agreed with the true ellipse on 99.82% of pixels.
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` clean
+in both crates, `npm run build` clean.
+
+Honest limitations: this is a classical segmentation, not a learned
+detector — it finds the region that differs from the edge's colours
+and hangs together, and will not pick a subject that shares the
+background's palette; the mask is hard-edged at the working
+resolution, resampled nearest, so on a large image its edge is a
+few pixels coarse (the on-device Refine Edge tools apply to it like
+any selection); and the tolerance's meaning differs from the
+on-device one (a likelihood margin rather than a per-channel
+distance).
+
+Select Subject — Cloud Processing flips to shipped (604/618). Section
+C2 of `docs/PLAN_TO_100.md` is complete; Refine Hair (C3) is next,
+while the text-conditioned model (C1) trains.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

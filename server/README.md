@@ -2,7 +2,8 @@
 
 The self-hosted backend behind the desktop app's cloud rows: **Cloud
 Documents**, **Search Your Cloud Files**, **Invite to Edit**, **Share
-for Review**, **Libraries**, **Fonts** and **Boards**. One Rust binary (axum), one data directory, no database.
+for Review**, **Libraries**, **Fonts**, **Boards** and **Select Subject — Cloud
+Processing**. One Rust binary (axum), one data directory, no database.
 
 ```bash
 cd server
@@ -83,6 +84,7 @@ admin token; review-link routes need no token (the link is the secret).
 | PATCH | `/boards/{id}/items/{n}` `{ x?, y?, w?, h?, text?, name? }` | owner or editor | `{ item }` -- move, resize, retitle, rewrite |
 | GET | `/boards/{id}/items/{n}/blob` | anyone with access | an image item's bytes |
 | DELETE | `/boards/{id}/items/{n}` | owner or editor | 204 |
+| POST | `/select-subject?tolerance=32` (image/png, ≤ 64 MB) | user | a PNG mask the image's size, white and opaque on the subject, transparent elsewhere -- GrabCut-style iterated graph cuts from a canvas-edge background model, at up to 320 pixels on the long side; 404 when no subject is found |
 | GET | `/fonts` | user | `{ fonts: [{ family, category, license, source }] }` -- the bundled catalogue of open-licensed Google Fonts families, then any `.ttf`/`.otf` in `<data-dir>/fonts/local/` (source `local`) |
 | GET | `/fonts/{family}/file?weight=400&italic=false` | user | the family's TrueType bytes (`font/ttf`): a local file as it is; a catalogue family fetched from Google Fonts on first request and cached under `<data-dir>/fonts/cache/` |
 

@@ -4320,6 +4320,34 @@ export default function App() {
     });
   }, [cloudFetch, boardAction, activeBoardId]);
 
+  // Select Subject -- Cloud Processing: the selected layer's pixels go to
+  // image-editor-server's heavier detector (colour models and an exact
+  // graph cut, at the app's own tolerance) and the mask it returns lands
+  // in the selection through `select_from_mask`, per the selection mode.
+  const [cloudSubjectBusy, setCloudSubjectBusy] = useState(false);
+  const selectSubjectInCloud = useCallback(async () => {
+    if (selectedId === null) return;
+    if (!cloudEndpoint) {
+      setError("Select Subject (Cloud) needs an endpoint -- set one in Edit > External Services.");
+      return;
+    }
+    setCloudSubjectBusy(true);
+    try {
+      const bytes = await invoke<number[]>("export_layer_bytes", { id: selectedId });
+      const response = await cloudFetch(`/select-subject?tolerance=${magicWandTolerance}`, {
+        method: "POST",
+        headers: { "Content-Type": "image/png" },
+        body: new Uint8Array(bytes),
+      });
+      const mask = new Uint8Array(await response.arrayBuffer());
+      await runCommand("select_from_mask", { mask: Array.from(mask), mode: selectionMode });
+    } catch (err) {
+      setError(`Select Subject (Cloud) failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCloudSubjectBusy(false);
+    }
+  }, [selectedId, cloudEndpoint, cloudFetch, magicWandTolerance, selectionMode, runCommand]);
+
   const setReviewCommentResolved = useCallback(
     async (commentId: number, resolved: boolean) => {
       if (activeReviewId === null) return;
@@ -10036,6 +10064,14 @@ export default function App() {
             title="Select > Subject: select the largest thing on the layer that is not its edge colour, at the Tolerance"
           >
             Select Subject
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => void selectSubjectInCloud()}
+            disabled={busy || cloudSubjectBusy || !canPaint || !cloudEndpoint}
+            title="Select > Subject, Cloud Processing: image-editor-server's heavier detector (colour models and an exact graph cut), the result landing as the selection"
+          >
+            Select Subject (Cloud)
           </button>
           <button
             className="button button--quiet"

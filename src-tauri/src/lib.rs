@@ -749,6 +749,36 @@ fn select_subject(
     })
 }
 
+/// Select Subject -- Cloud Processing's landing: `mask` is the PNG the
+/// server returned (opaque where the subject is), the canvas's size,
+/// combined with the selection per `mode`.
+#[tauri::command]
+fn select_from_mask(
+    state: State<'_, AppState>,
+    mask: Vec<u8>,
+    mode: Option<document::SelectionMode>,
+) -> Result<Snapshot, String> {
+    let decoded = png::decode_bytes(&mask).map_err(|err| format!("Not a readable mask: {err}"))?;
+    let bits: Vec<bool> = decoded
+        .pixels
+        .chunks_exact(4)
+        .map(|p| p[3] >= 128)
+        .collect();
+    edit_checkpointed(&state, |document| {
+        if (decoded.width, decoded.height) != (document.width(), document.height()) {
+            return Err(format!(
+                "The mask is {}x{} but the canvas is {}x{}.",
+                decoded.width,
+                decoded.height,
+                document.width(),
+                document.height()
+            ));
+        }
+        document.select_mask_bits(mode.unwrap_or(document::SelectionMode::New), bits)?;
+        Ok(None)
+    })
+}
+
 /// Select > Mask All Objects: every object on layer `id` saved as a named
 /// selection, all of them selected together.
 #[tauri::command]
@@ -7179,6 +7209,7 @@ pub fn run() {
             read_content_credentials,
             export_layer,
             export_layer_bytes,
+            select_from_mask,
             export_composite_bytes,
             list_fonts,
             register_font,

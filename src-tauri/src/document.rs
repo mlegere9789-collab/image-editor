@@ -6108,6 +6108,24 @@ impl Document {
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
+    /// Select Subject -- Cloud Processing's landing: a mask the size of the
+    /// canvas, one bit per pixel, combined with the selection per `mode`
+    /// exactly as the on-device finder's result is. Errors for a mask of
+    /// the wrong size or one that selects nothing.
+    pub fn select_mask_bits(&mut self, mode: SelectionMode, bits: Vec<bool>) -> Result<(), String> {
+        let (width, height) = (self.width, self.height);
+        if bits.len() != width as usize * height as usize {
+            return Err(format!(
+                "The mask is the wrong size: {} bits for a {width}x{height} canvas.",
+                bits.len()
+            ));
+        }
+        if !bits.iter().any(|&b| b) {
+            return Err("No object was found in that area.".to_string());
+        }
+        self.combine_with(mode, mask_selection(width, height, bits)?)
+    }
+
     /// [`Self::select_object_in_bits`]'s finder on its own: the object's
     /// bitmap, without touching the selection.
     fn find_object_in_bits(
@@ -35457,6 +35475,33 @@ mod tests {
         let (mut doc, id) = object_scene();
         doc.select_subject_with(SelectionMode::New, id, 0).unwrap();
         assert_eq!(selection_grid(&doc), OBJECT_GRID);
+    }
+
+    #[test]
+    fn select_mask_bits_lands_a_cloud_mask_like_the_finder_would() {
+        let (mut doc, _) = object_scene();
+        let bits: Vec<bool> = OBJECT_GRID
+            .iter()
+            .flat_map(|row| row.chars().map(|c| c == '#'))
+            .collect();
+        doc.select_mask_bits(SelectionMode::New, bits.clone())
+            .unwrap();
+        assert_eq!(selection_grid(&doc), OBJECT_GRID);
+        doc.select_rectangle(0.0, 0.0, 7.0, 1.0).unwrap();
+        doc.select_mask_bits(SelectionMode::Add, bits.clone())
+            .unwrap();
+        assert_eq!(
+            selection_grid(&doc),
+            ["#######", ".......", "..###..", "..###..", "..###..", ".......", "......."]
+        );
+        assert!(doc
+            .select_mask_bits(SelectionMode::New, vec![true; 3])
+            .unwrap_err()
+            .contains("wrong size"));
+        assert!(doc
+            .select_mask_bits(SelectionMode::New, vec![false; bits.len()])
+            .unwrap_err()
+            .contains("No object"));
     }
 
     #[test]

@@ -104,6 +104,7 @@ pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
             axum::routing::patch(update_board_item).delete(delete_board_item),
         )
         .route("/boards/{id}/items/{item}/blob", get(get_board_item_blob))
+        .route("/select-subject", post(select_subject))
         .route("/fonts", get(list_fonts))
         .route("/fonts/{family}/file", get(font_file))
         .route("/reviews/{id}", get(get_review))
@@ -643,6 +644,49 @@ async fn delete_board_item(
 ) -> Result<StatusCode, ApiError> {
     app.delete_board_item(&user, id, item)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct SubjectQuery {
+    #[serde(default = "default_tolerance")]
+    tolerance: u8,
+}
+
+fn default_tolerance() -> u8 {
+    32
+}
+
+/// Select Subject -- Cloud Processing: a PNG in, a PNG mask out (white
+/// and opaque on the subject), computed by `segment` on a blocking
+/// thread so the server keeps answering meanwhile.
+async fn select_subject(
+    AuthUser(_): AuthUser,
+    axum::extract::Query(query): axum::extract::Query<SubjectQuery>,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    if body.is_empty() {
+        return Err(ApiError(
+            StatusCode::BAD_REQUEST,
+            "send the layer as PNG bytes".into(),
+        ));
+    }
+    let mask = tokio::task::spawn_blocking(move || {
+        crate::segment::select_subject_png(&body, query.tolerance)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|m| {
+        if m.starts_with("no subject") {
+            ApiError(StatusCode::NOT_FOUND, m)
+        } else {
+            ApiError(StatusCode::BAD_REQUEST, m)
+        }
+    })?;
+    Ok((
+        [(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))],
+        mask,
+    )
+        .into_response())
 }
 
 async fn list_fonts(AuthUser(_): AuthUser, State(app): State<Shared>) -> Json<serde_json::Value> {
@@ -1312,6 +1356,74 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn select_subject_over_http() {
+        let app = app();
+        // A red square on blue, as PNG.
+        let (w, h) = (24u32, 24u32);
+        let mut rgba = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                let inside = (6..18).contains(&x) && (6..18).contains(&y);
+                rgba.extend_from_slice(if inside {
+                    &[220, 40, 40, 255]
+                } else {
+                    &[30, 60, 200, 255]
+                });
+            }
+        }
+        let mut png = Vec::new();
+        use image::ImageEncoder;
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(&rgba, w, h, image::ExtendedColorType::Rgba8)
+            .unwrap();
+        let (status, _) = call(
+            &app.router,
+            "POST",
+            "/select-subject",
+            None,
+            Some(("image/png", png.clone())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            "/select-subject?tolerance=8",
+            Some(&app.owner),
+            Some(("image/png", png)),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let mask =
+            image::ImageReader::with_format(std::io::Cursor::new(&body), image::ImageFormat::Png)
+                .decode()
+                .unwrap()
+                .to_rgba8();
+        assert_eq!(mask.get_pixel(12, 12).0, [255, 255, 255, 255]);
+        assert_eq!(mask.get_pixel(2, 2).0, [0, 0, 0, 0]);
+        assert_eq!(mask.get_pixel(6, 6).0, [255, 255, 255, 255]);
+        assert_eq!(mask.get_pixel(18, 18).0, [0, 0, 0, 0]);
+        let (status, _) = call(
+            &app.router,
+            "POST",
+            "/select-subject",
+            Some(&app.owner),
+            Some(("image/png", b"nope".to_vec())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &app.router,
+            "POST",
+            "/select-subject",
+            Some(&app.owner),
+            Some(("image/png", Vec::new())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

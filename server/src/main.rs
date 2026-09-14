@@ -14,6 +14,7 @@
 
 mod api;
 mod fonts;
+mod segment;
 mod store;
 
 use std::net::SocketAddr;
