@@ -17,13 +17,27 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::store::{Principal, Role, Store, StoreError};
 
-pub type Shared = Arc<Store>;
+/// What every handler shares: the store, and the data directory the
+/// font cache lives under.
+pub struct App {
+    pub store: Store,
+    pub data_dir: std::path::PathBuf,
+}
+
+impl std::ops::Deref for App {
+    type Target = Store;
+    fn deref(&self) -> &Store {
+        &self.store
+    }
+}
+
+pub type Shared = Arc<App>;
 
 /// The largest document the server accepts: the same 64 MB the desktop
 /// app's own `check_canvas_bytes` allows.
 pub const MAX_DOCUMENT_BYTES: usize = 64 * 1024 * 1024;
 
-pub fn router(store: Store) -> Router {
+pub fn router(store: Store, data_dir: std::path::PathBuf) -> Router {
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([
@@ -72,6 +86,8 @@ pub fn router(store: Store) -> Router {
             axum::routing::delete(delete_asset),
         )
         .route("/libraries/{id}/assets/{asset}/blob", get(get_asset_blob))
+        .route("/fonts", get(list_fonts))
+        .route("/fonts/{family}/file", get(font_file))
         .route("/reviews/{id}", get(get_review))
         .route("/reviews/{id}/document", get(get_review_document))
         .route("/reviews/{id}/comments", post(add_comment))
@@ -81,7 +97,7 @@ pub fn router(store: Store) -> Router {
         )
         .layer(axum::extract::DefaultBodyLimit::max(MAX_DOCUMENT_BYTES))
         .layer(cors)
-        .with_state(Arc::new(store))
+        .with_state(Arc::new(App { store, data_dir }))
 }
 
 /// An error the client can read: `{ "error": "..." }` with the status
@@ -482,6 +498,41 @@ async fn delete_asset(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn list_fonts(AuthUser(_): AuthUser, State(app): State<Shared>) -> Json<serde_json::Value> {
+    Json(json!({ "fonts": crate::fonts::list(&app.data_dir) }))
+}
+
+#[derive(Deserialize)]
+struct FontQuery {
+    #[serde(default = "regular")]
+    weight: u16,
+    #[serde(default)]
+    italic: bool,
+}
+
+fn regular() -> u16 {
+    400
+}
+
+async fn font_file(
+    AuthUser(_): AuthUser,
+    State(app): State<Shared>,
+    Path(family): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<FontQuery>,
+) -> Result<Response, ApiError> {
+    let data_dir = app.data_dir.clone();
+    let bytes = tokio::task::spawn_blocking(move || {
+        crate::fonts::font_file(&data_dir, &family, query.weight, query.italic)
+    })
+    .await
+    .map_err(|e| ApiError(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))??;
+    Ok((
+        [(header::CONTENT_TYPE, HeaderValue::from_static("font/ttf"))],
+        bytes,
+    )
+        .into_response())
+}
+
 #[derive(Deserialize, Serialize)]
 struct Resolved {
     resolved: bool,
@@ -505,19 +556,19 @@ mod tests {
     use http_body_util::BodyExt;
     use tower::ServiceExt;
 
-    struct App {
+    struct TestApp {
         router: Router,
         admin: String,
         owner: String,
         _dir: tempfile::TempDir,
     }
 
-    fn app() -> App {
+    fn app() -> TestApp {
         let dir = tempfile::tempdir().unwrap();
         let (store, tokens) = Store::open(dir.path()).unwrap();
         let tokens = tokens.unwrap();
-        App {
-            router: router(store),
+        TestApp {
+            router: router(store, dir.path().to_path_buf()),
             admin: tokens.admin_token,
             owner: tokens.owner_token,
             _dir: dir,
@@ -1001,6 +1052,68 @@ mod tests {
         )
         .await;
         assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn fonts_over_http() {
+        let app = app();
+        let (status, _) = call(&app.router, "GET", "/fonts", None, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, body) = call(&app.router, "GET", "/fonts", Some(&app.owner), None).await;
+        assert_eq!(status, StatusCode::OK);
+        let fonts = json(&body);
+        assert!(fonts["fonts"].as_array().unwrap().len() > 100);
+        assert!(fonts["fonts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["family"] == "Open Sans"));
+        // A local file is served as it is; an unknown family is 404; a
+        // cached catalogue file is served without network.
+        let local = app._dir.path().join("fonts").join("local");
+        std::fs::create_dir_all(&local).unwrap();
+        std::fs::write(local.join("House.ttf"), b"TTF").unwrap();
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            "/fonts/House/file",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"TTF");
+        let (status, _) = call(
+            &app.router,
+            "GET",
+            "/fonts/Nope/file",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let cache = app._dir.path().join("fonts").join("cache");
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(cache.join("lato-700.ttf"), b"LATO").unwrap();
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            "/fonts/Lato/file?weight=700",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"LATO");
+        let (status, _) = call(
+            &app.router,
+            "GET",
+            "/fonts/Lato/file?weight=450",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

@@ -1708,6 +1708,11 @@ pub struct TextLayer {
     pub size: u32,
     pub color: [u8; 4],
     pub vertical: bool,
+    /// An activated face from [`crate::fonts`] to draw with, at `size`
+    /// pixels; `None` is the built-in bitmap face at `size` pixels per
+    /// face pixel, so projects from before fonts existed load unchanged.
+    #[serde(default)]
+    pub font: Option<String>,
 }
 
 /// The built-in face: a 5×7 bitmap glyph per character, each row a
@@ -8056,6 +8061,9 @@ impl Document {
         if text.text.trim().is_empty() {
             return Err("A text layer needs some text.".to_string());
         }
+        if let Some(name) = text.font.as_deref() {
+            return self.render_text_with_font(text, name);
+        }
         if !(1..=64).contains(&text.size) {
             return Err("Text Size must be between 1 and 64.".to_string());
         }
@@ -8092,6 +8100,50 @@ impl Document {
                                 pixels[base..base + CHANNELS].copy_from_slice(&text.color);
                             }
                         }
+                    }
+                }
+            }
+        }
+        Ok(pixels)
+    }
+
+    /// [`Self::render_text`] for a text layer drawn with an activated
+    /// font face: every glyph `crate::fonts::layout` places is blended in
+    /// by its coverage -- the text's colour, its alpha scaled by the
+    /// coverage, the higher alpha winning where glyphs overlap -- clipped
+    /// to the canvas. Errors for a face that is not activated or a size
+    /// outside `1..=MAX_SIZE`.
+    fn render_text_with_font(&self, text: &TextLayer, name: &str) -> Result<Vec<u8>, String> {
+        if !(1..=crate::fonts::MAX_SIZE).contains(&text.size) {
+            return Err(format!(
+                "Text Size must be between 1 and {} for a font face.",
+                crate::fonts::MAX_SIZE
+            ));
+        }
+        let font = crate::fonts::get(name)
+            .ok_or_else(|| format!("Font \"{name}\" is not activated -- activate it in Fonts…"))?;
+        let (width, height) = (self.width as i64, self.height as i64);
+        let mut pixels = vec![0u8; self.buffer_len()];
+        for glyph in crate::fonts::layout(&font, &text.text, text.size, text.vertical) {
+            for row in 0..glyph.height {
+                let py = text.y as i64 + glyph.y as i64 + row as i64;
+                if py < 0 || py >= height {
+                    continue;
+                }
+                for col in 0..glyph.width {
+                    let px = text.x as i64 + glyph.x as i64 + col as i64;
+                    if px < 0 || px >= width {
+                        continue;
+                    }
+                    let coverage = glyph.coverage[row * glyph.width + col];
+                    if coverage == 0 {
+                        continue;
+                    }
+                    let alpha = ((text.color[3] as u32 * coverage as u32).div_ceil(255)) as u8;
+                    let base = (py as usize * self.width as usize + px as usize) * CHANNELS;
+                    if alpha > pixels[base + 3] {
+                        pixels[base..base + 3].copy_from_slice(&text.color[..3]);
+                        pixels[base + 3] = alpha;
                     }
                 }
             }
@@ -53336,6 +53388,7 @@ colorspaces:
             size,
             color: [255, 0, 0, 255],
             vertical,
+            font: None,
         }
     }
 
@@ -53381,6 +53434,79 @@ colorspaces:
             glyph('~'),
             [0b11111, 0b10001, 0b10001, 0b10001, 0b10001, 0b10001, 0b11111]
         );
+    }
+
+    #[test]
+    fn text_layer_with_a_font_face_blends_fontdue_coverage_and_clips() {
+        let mut doc = Document::new(40, 40).unwrap();
+        let mut layer = text("H", 4, 2, 24, false);
+        layer.font = Some(crate::fonts::BUNDLED.to_string());
+        layer.color = [10, 20, 30, 200];
+        let id = doc.add_text_layer("type", &layer).unwrap();
+        // Every pixel with coverage is where fontdue put it, at the
+        // text's colour, with alpha = 200 × coverage / 255 (rounded up).
+        let font = crate::fonts::get(crate::fonts::BUNDLED).unwrap();
+        let placed = crate::fonts::layout(&font, "H", 24, false);
+        assert_eq!(placed.len(), 1);
+        let glyph = &placed[0];
+        let mut expected = std::collections::BTreeMap::new();
+        for row in 0..glyph.height {
+            for col in 0..glyph.width {
+                let coverage = glyph.coverage[row * glyph.width + col];
+                if coverage > 0 {
+                    let x = (4 + glyph.x + col as i32) as u32;
+                    let y = (2 + glyph.y + row as i32) as u32;
+                    expected.insert((x, y), ((200 * coverage as u32).div_ceil(255)) as u8);
+                }
+            }
+        }
+        assert!(expected.len() > 40, "H at 24px covers a real area");
+        let mut seen = 0;
+        for y in 0..40 {
+            for x in 0..40 {
+                let p = pixel(&doc, id, x, y);
+                match expected.get(&(x, y)) {
+                    Some(alpha) => {
+                        assert_eq!(p, [10, 20, 30, *alpha], "at ({x}, {y})");
+                        seen += 1;
+                    }
+                    None => assert_eq!(p, [0, 0, 0, 0], "at ({x}, {y})"),
+                }
+            }
+        }
+        assert_eq!(seen, expected.len());
+        assert_eq!(
+            doc.layers()[0].text.as_ref().unwrap().font.as_deref(),
+            Some("Open Sans")
+        );
+
+        // The same text far off the canvas draws nothing and errors for
+        // nothing; a face that is not activated, or a size past the
+        // limit, is refused with the layer untouched.
+        let mut off = layer.clone();
+        off.x = 1000;
+        let off_id = doc.add_text_layer("off", &off).unwrap();
+        assert!(lit(&doc, off_id).is_empty());
+        let mut missing = layer.clone();
+        missing.font = Some("Nope".into());
+        assert!(doc
+            .set_text(id, &missing)
+            .unwrap_err()
+            .contains("not activated"));
+        let mut huge = layer.clone();
+        huge.size = crate::fonts::MAX_SIZE + 1;
+        assert!(doc.set_text(id, &huge).unwrap_err().contains("1024"));
+        assert_eq!(
+            pixel(&doc, id, 4 + glyph.x as u32, 2 + glyph.y as u32 + 2)[..3],
+            [10, 20, 30]
+        );
+        // A bitmap-face layer is untouched by any of this: size 64 still
+        // draws, size 65 is still refused as before.
+        let mut bitmap = text("I", 0, 0, 65, false);
+        assert!(doc.set_text(id, &bitmap).unwrap_err().contains("64"));
+        bitmap.size = 1;
+        doc.set_text(id, &bitmap).unwrap();
+        assert_eq!(lit(&doc, id).len(), 11);
     }
 
     #[test]

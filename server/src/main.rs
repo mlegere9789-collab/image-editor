@@ -13,6 +13,7 @@
 //! whose token is printed once and stored only as a hash.
 
 mod api;
+mod fonts;
 mod store;
 
 use std::net::SocketAddr;
@@ -74,7 +75,7 @@ async fn main() {
             args.data_dir.join("admin.token").display()
         );
     }
-    let app = api::router(store);
+    let app = api::router(store, args.data_dir.clone());
     let listener = match tokio::net::TcpListener::bind(args.listen).await {
         Ok(listener) => listener,
         Err(e) => {

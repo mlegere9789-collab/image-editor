@@ -259,6 +259,7 @@ type CloudAsset = {
   added_by: string;
   added_at: number;
 };
+type FontEntry = { family: string; category: string; license: string; source: string };
 type CloudReview = {
   id: string;
   document: string;
@@ -1585,8 +1586,20 @@ export default function App() {
   const [typeText, setTypeText] = useState("Type");
   const [typeX, setTypeX] = useState(0);
   const [typeY, setTypeY] = useState(0);
-  const [typeSize, setTypeSize] = useState(4);
+  const [typeSize, setTypeSize] = useState(32);
   const [typeVertical, setTypeVertical] = useState(false);
+  // The face a text layer draws with: an activated font (the bundled
+  // Open Sans by default) or null for the built-in 5×7 bitmap face.
+  const [typeFont, setTypeFont] = useState<string | null>("Open Sans");
+  const [activatedFonts, setActivatedFonts] = useState<string[]>(["Open Sans"]);
+  // Fonts (Adobe Fonts' open equivalent): image-editor-server's catalogue
+  // of open-licensed families, each one click from activation.
+  const [showFontsDialog, setShowFontsDialog] = useState(false);
+  const [fontCatalogue, setFontCatalogue] = useState<FontEntry[]>([]);
+  const [fontSearch, setFontSearch] = useState("");
+  const [fontWeight, setFontWeight] = useState<"400" | "700">("400");
+  const [fontItalic, setFontItalic] = useState(false);
+  const [fontsBusy, setFontsBusy] = useState(false);
   // The shape tools' Shape mode and the Custom Shape tool.
   const [showShapeLayerDialog, setShowShapeLayerDialog] = useState(false);
   const [shapeKind, setShapeKind] = useState<ShapeSpec["kind"]>("rectangle");
@@ -4623,8 +4636,24 @@ export default function App() {
   /** The type the dialog describes, in the brush colour. */
   const currentText = useCallback((): TextLayer => {
     const [r, g, b] = hexToRgb(brushColor);
-    return { text: typeText, x: typeX, y: typeY, size: typeSize, color: [r, g, b, 255], vertical: typeVertical };
-  }, [brushColor, typeText, typeX, typeY, typeSize, typeVertical]);
+    return {
+      text: typeText,
+      x: typeX,
+      y: typeY,
+      size: typeSize,
+      color: [r, g, b, 255],
+      vertical: typeVertical,
+      font: typeFont,
+    };
+  }, [brushColor, typeText, typeX, typeY, typeSize, typeVertical, typeFont]);
+
+  const refreshActivatedFonts = useCallback(async () => {
+    try {
+      setActivatedFonts(await invoke<string[]>("list_fonts"));
+    } catch {
+      // Outside Tauri (a browser preview) the bundled face is all there is.
+    }
+  }, []);
 
   const openTypeDialog = useCallback(() => {
     const existing = document?.layers.find((layer) => layer.id === selectedId)?.text ?? null;
@@ -4634,9 +4663,65 @@ export default function App() {
       setTypeY(existing.y);
       setTypeSize(existing.size);
       setTypeVertical(existing.vertical);
+      setTypeFont(existing.font ?? null);
     }
+    void refreshActivatedFonts();
     setShowTypeDialog(true);
-  }, [document, selectedId]);
+  }, [document, selectedId, refreshActivatedFonts]);
+
+  // Fonts: the server's catalogue, and activation -- the family's TrueType
+  // file fetched through the server (which caches it) and handed to
+  // `register_font`, after which the Type dialog lists it.
+  const refreshFontCatalogue = useCallback(async () => {
+    setFontsBusy(true);
+    try {
+      const response = await cloudFetch("/fonts");
+      const body = (await response.json()) as { fonts?: FontEntry[] };
+      setFontCatalogue(Array.isArray(body.fonts) ? body.fonts : []);
+    } catch (err) {
+      setFontCatalogue([]);
+      setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setFontsBusy(false);
+    }
+  }, [cloudFetch]);
+
+  const activateFont = useCallback(
+    async (entry: FontEntry) => {
+      setFontsBusy(true);
+      try {
+        const query = entry.source === "local" ? "" : `?weight=${fontWeight}&italic=${fontItalic}`;
+        const response = await cloudFetch(`/fonts/${encodeURIComponent(entry.family)}/file${query}`);
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        const name =
+          entry.source === "local"
+            ? entry.family
+            : `${entry.family}${fontWeight === "700" ? " Bold" : ""}${fontItalic ? " Italic" : ""}`;
+        const names = await invoke<string[]>("register_font", { name, bytes: Array.from(bytes) });
+        setActivatedFonts(names);
+        setTypeFont(name);
+      } catch (err) {
+        setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setFontsBusy(false);
+      }
+    },
+    [cloudFetch, fontWeight, fontItalic],
+  );
+
+  const activateFontFile = useCallback(async () => {
+    const path = await open({ multiple: false, filters: [{ name: "Fonts", extensions: ["ttf", "otf"] }] });
+    if (typeof path !== "string") return;
+    setFontsBusy(true);
+    try {
+      const names = await invoke<string[]>("register_font_file", { path });
+      setActivatedFonts(names);
+    } catch (err) {
+      setError(`Fonts failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setFontsBusy(false);
+    }
+  }, []);
 
   const addTextLayer = useCallback(async () => {
     const text = currentText();
@@ -8460,6 +8545,18 @@ export default function App() {
           title="Libraries: shared asset libraries on image-editor-server -- colours, gradient and adjustment presets, graphics"
         >
           Libraries…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => {
+            setShowFontsDialog(true);
+            void refreshActivatedFonts();
+            void refreshFontCatalogue();
+          }}
+          disabled={busy}
+          title="Fonts: activate open-licensed families from image-editor-server's catalogue, or a font file of your own, for the Type tools"
+        >
+          Fonts…
         </button>
         <button
           className="button button--quiet"
@@ -17465,6 +17562,99 @@ export default function App() {
         </div>
       )}
 
+      {showFontsDialog && (
+        <div className="modal-overlay" onClick={() => setShowFontsDialog(false)} role="presentation">
+          <div
+            className="modal modal--panel"
+            role="dialog"
+            aria-label="Fonts"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Fonts</h2>
+            <p className="modal__hint">
+              Open-licensed families from image-editor-server&apos;s catalogue (each with its
+              licence named), fetched through the server and activated for the Type tools —
+              Adobe Fonts&apos; open equivalent. Activated faces are kept on this machine.
+              Any font file of your own works too.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Search</span>
+              <input
+                type="text"
+                value={fontSearch}
+                onChange={(event) => setFontSearch(event.target.value)}
+                placeholder="family or category"
+                style={{ flex: 1 }}
+              />
+              <select value={fontWeight} onChange={(event) => setFontWeight(event.target.value as "400" | "700")}>
+                <option value="400">Regular</option>
+                <option value="700">Bold</option>
+              </select>
+              <label className="control control--row">
+                <input type="checkbox" checked={fontItalic} onChange={(event) => setFontItalic(event.target.checked)} />
+                <span className="control__label">Italic</span>
+              </label>
+              <button
+                className="button button--quiet"
+                onClick={() => void activateFontFile()}
+                disabled={fontsBusy}
+                title="Activate a .ttf or .otf file from this machine"
+              >
+                Font file…
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first. A font file of your own still works.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {fontCatalogue.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>No catalogue loaded.</span>
+                </li>
+              )}
+              {fontCatalogue
+                .filter((entry) => {
+                  const q = fontSearch.trim().toLowerCase();
+                  return !q || entry.family.toLowerCase().includes(q) || entry.category.toLowerCase().includes(q);
+                })
+                .map((entry) => {
+                  const name =
+                    entry.source === "local"
+                      ? entry.family
+                      : `${entry.family}${fontWeight === "700" ? " Bold" : ""}${fontItalic ? " Italic" : ""}`;
+                  const active = activatedFonts.includes(name);
+                  return (
+                    <li key={`${entry.source}:${entry.family}`} className="cloud-search__row">
+                      <span>
+                        {entry.family} <em>({entry.category}, {entry.license})</em>
+                      </span>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void activateFont(entry)}
+                        disabled={fontsBusy || active}
+                        title={active ? `${name} is activated` : `Activate ${name} for the Type tools`}
+                      >
+                        {active ? "Activated" : "Activate"}
+                      </button>
+                    </li>
+                  );
+                })}
+            </ul>
+            <p className="modal__hint">
+              Activated: {activatedFonts.join(", ")}
+            </p>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowFontsDialog(false)} title="Close">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showInviteDialog && (
         <div className="modal-overlay" onClick={() => setShowInviteDialog(false)} role="presentation">
           <div
@@ -19901,9 +20091,29 @@ export default function App() {
           <div className="modal" role="dialog" aria-label="Type" onClick={(event) => event.stopPropagation()}>
             <h2 className="modal__heading">Type</h2>
             <p className="modal__hint">
-              A text layer in the built-in 5×7 face, in the brush colour. Lines drop below
-              (or, vertically, columns step right). Edit the selected text layer or add a new one.
+              A text layer in an activated font (Fonts… adds more) or the built-in 5×7 face,
+              in the brush colour. Lines drop below (or, vertically, columns step right).
+              Edit the selected text layer or add a new one.
             </p>
+            <label className="control control--row">
+              <span className="control__label">Face</span>
+              <select
+                value={typeFont ?? ""}
+                onChange={(event) => {
+                  const next = event.target.value === "" ? null : event.target.value;
+                  setTypeFont(next);
+                  if (next === null) setTypeSize((size) => Math.min(size, 64));
+                }}
+                style={{ flex: 1 }}
+              >
+                <option value="">Built-in 5×7 bitmap</option>
+                {activatedFonts.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">Text</span>
               <textarea rows={3} value={typeText} onChange={(event) => setTypeText(event.target.value)} />
@@ -19913,7 +20123,13 @@ export default function App() {
               <input type="number" value={typeX} onChange={(event) => setTypeX(Math.round(Number(event.target.value)))} />
               <input type="number" value={typeY} onChange={(event) => setTypeY(Math.round(Number(event.target.value)))} />
               <span className="control__label">Size</span>
-              <input type="number" min={1} max={64} value={typeSize} onChange={(event) => setTypeSize(Math.max(1, Math.round(Number(event.target.value))))} />
+              <input
+                type="number"
+                min={1}
+                max={typeFont === null ? 64 : 1024}
+                value={typeSize}
+                onChange={(event) => setTypeSize(Math.max(1, Math.round(Number(event.target.value))))}
+              />
               <label className="control control--row">
                 <input type="checkbox" checked={typeVertical} onChange={(event) => setTypeVertical(event.target.checked)} />
                 <span className="control__label">Vertical</span>

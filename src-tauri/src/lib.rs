@@ -6,6 +6,7 @@ pub mod colorize;
 pub mod composite;
 pub mod content_credentials;
 pub mod document;
+pub mod fonts;
 pub mod generative_fill;
 pub mod hdr;
 pub mod icc;
@@ -6488,6 +6489,84 @@ fn export_layer(state: State<'_, AppState>, id: LayerId, path: String) -> Result
     export_layer_pixels(document, id, Path::new(&path))
 }
 
+/// Fonts: every activated face, the bundled Open Sans always among them.
+#[tauri::command]
+fn list_fonts() -> Vec<String> {
+    fonts::names()
+}
+
+/// Fonts: activates a TrueType/OpenType face under `name` for the Type
+/// tools, and keeps its bytes in the app's data directory (`fonts/`,
+/// with a `fonts.json` manifest) so it is there at the next launch.
+#[tauri::command]
+fn register_font(
+    app: tauri::AppHandle,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<Vec<String>, String> {
+    fonts::register(&name, &bytes)?;
+    if let Ok(dir) = app.path().app_data_dir() {
+        persist_font(&dir, name.trim(), &bytes)?;
+    }
+    Ok(fonts::names())
+}
+
+/// Fonts: activates the TrueType/OpenType file at `path` under its file
+/// stem, kept like [`register_font`]'s.
+#[tauri::command]
+fn register_font_file(app: tauri::AppHandle, path: String) -> Result<Vec<String>, String> {
+    let path = Path::new(&path);
+    let name = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| "That path has no file name.".to_string())?
+        .to_string();
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+    fonts::register(&name, &bytes)?;
+    if let Ok(dir) = app.path().app_data_dir() {
+        persist_font(&dir, &name, &bytes)?;
+    }
+    Ok(fonts::names())
+}
+
+/// Writes an activated face under the data directory and records it in
+/// the manifest; [`load_persisted_fonts`] reads them back at launch.
+fn persist_font(data_dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
+    let fonts_dir = data_dir.join("fonts");
+    std::fs::create_dir_all(&fonts_dir)
+        .map_err(|e| format!("Could not create {}: {e}", fonts_dir.display()))?;
+    let manifest_path = fonts_dir.join("fonts.json");
+    let mut manifest: std::collections::BTreeMap<String, String> = std::fs::read(&manifest_path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let file = format!("{}.ttf", manifest.len() + 1);
+    let file = manifest.get(name).cloned().unwrap_or(file);
+    std::fs::write(fonts_dir.join(&file), bytes)
+        .map_err(|e| format!("Could not write the font: {e}"))?;
+    manifest.insert(name.to_string(), file);
+    let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&manifest_path, json)
+        .map_err(|e| format!("Could not write the font manifest: {e}"))
+}
+
+/// Re-activates every face [`persist_font`] kept. A face that no longer
+/// parses is skipped, not fatal.
+fn load_persisted_fonts(data_dir: &Path) {
+    let fonts_dir = data_dir.join("fonts");
+    let manifest: std::collections::BTreeMap<String, String> =
+        std::fs::read(fonts_dir.join("fonts.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default();
+    for (name, file) in manifest {
+        if let Ok(bytes) = std::fs::read(fonts_dir.join(file)) {
+            let _ = fonts::register(&name, &bytes);
+        }
+    }
+}
+
 /// Layer `id` as PNG bytes -- what [`export_layer`] writes to a path,
 /// returned instead, for sending somewhere other than the filesystem
 /// (a library's graphic asset). Reads the open document without
@@ -6629,6 +6708,12 @@ fn blend_modes() -> Vec<BlendModeInfo> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .setup(|app| {
+            if let Ok(dir) = app.path().app_data_dir() {
+                load_persisted_fonts(&dir);
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         // Serves the cached composite to `<img src="composite://composite.png?g=…">`
         // in the frontend, so a re-render ships raw PNG bytes over a normal
@@ -7084,6 +7169,9 @@ pub fn run() {
             read_content_credentials,
             export_layer,
             export_layer_bytes,
+            list_fonts,
+            register_font,
+            register_font_file,
             add_artboard,
             rename_artboard,
             delete_artboard,
@@ -7104,6 +7192,37 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn activated_fonts_are_kept_across_launches() {
+        let dir = std::env::temp_dir().join(format!("image-editor-fonts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bytes = include_bytes!("../fonts/OpenSans-Regular.ttf");
+        persist_font(&dir, "Kept Face", bytes).unwrap();
+        persist_font(&dir, "Other Face", bytes).unwrap();
+        // Re-persisting a name overwrites its file rather than adding one.
+        persist_font(&dir, "Kept Face", bytes).unwrap();
+        let manifest: std::collections::BTreeMap<String, String> =
+            serde_json::from_slice(&std::fs::read(dir.join("fonts").join("fonts.json")).unwrap())
+                .unwrap();
+        assert_eq!(manifest.len(), 2);
+        assert_eq!(manifest["Kept Face"], "1.ttf");
+        assert_eq!(manifest["Other Face"], "2.ttf");
+        assert_eq!(
+            std::fs::read(dir.join("fonts").join("1.ttf"))
+                .unwrap()
+                .len(),
+            bytes.len()
+        );
+        // A launch loads them; a file that no longer parses is skipped.
+        std::fs::write(dir.join("fonts").join("2.ttf"), b"broken").unwrap();
+        load_persisted_fonts(&dir);
+        assert!(fonts::names().contains(&"Kept Face".to_string()));
+        assert!(!fonts::names().contains(&"Other Face".to_string()));
+        // No data directory at all is fine.
+        load_persisted_fonts(&dir.join("missing"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn every_blend_mode_is_offered_to_the_ui() {

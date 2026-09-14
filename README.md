@@ -20075,6 +20075,87 @@ there is no thumbnail for graphics in the list, only the name.
 Creative Cloud Libraries flips to shipped as its open equivalent
 (601/618).
 
+## Phase 337 — Real fonts for the Type tools, and Fonts (Adobe Fonts' open equivalent)
+
+Adobe Fonts is a catalogue of licensed families a click from active
+in the Type tool. Building its open equivalent meant the Type tools
+first had to draw real fonts: since Phase 253 they rendered a built-in
+5×7 bitmap face, and "a scalable outline font" was one of their
+documented scope cuts. Both land here.
+
+`src-tauri/src/fonts.rs` is a process-wide font registry over
+`fontdue` (a pure-Rust TrueType/OpenType parser and rasteriser, from
+crates.io). One face is bundled — Open Sans Regular, under the SIL
+Open Font License 1.1, `src-tauri/fonts/OFL.txt` alongside it — so
+a text layer can use a real scalable font with nothing activated.
+`TextLayer` gained `font: Option<String>` with a serde default, so
+every project saved before this phase loads and renders exactly as it
+did, and `render_text` branches on it: with a face, `fonts::layout`
+runs `fontdue`'s own layout (glyph advances and kerning from the font,
+lines dropping by its line height; vertical type stacks a line's
+characters one line-height apart and steps the next line a
+line-height right) and rasterises each glyph, and the document blends
+each glyph's coverage into the text colour — the higher alpha winning
+where glyphs overlap — clipped to the canvas, at sizes up to 1024
+pixels; with no face, the bitmap path is byte-for-byte what it was.
+Activating a face (`register_font`, or `register_font_file` for a
+`.ttf`/`.otf` the user picks) also writes it under the app's data
+directory with a `fonts.json` manifest, and launch re-activates them.
+
+The server gained the catalogue: `fonts_catalogue.json`, 142
+families with their category and licence as Google Fonts publishes
+them (SIL OFL 1.1, Apache 2.0, Ubuntu Font Licence 1.0 — nothing
+else), and `GET /fonts/{family}/file?weight=&italic=`, which resolves
+the family through Google Fonts' CSS API (asking as a plain client so
+the answer is TrueType rather than WOFF2), fetches the file from
+Google's own servers, caches it under `<data-dir>/fonts/cache/` and
+serves it as `font/ttf` — a second request never touches the network.
+Any `.ttf`/`.otf` the operator drops in `<data-dir>/fonts/local/` is
+listed and served under its file name. The client's **Fonts…**
+dialog searches the catalogue by family or category, chooses Regular
+or Bold and italic, and *Activate* fetches through the server and
+hands the bytes to `register_font`; the **Type** dialog gained a
+*Face* select — the built-in bitmap or any activated face — with the
+size limit following the choice, and defaults to Open Sans at 32
+pixels.
+
+**Verified three ways.** `cargo test`: 1804 total (1797 lib + 7
+pipeline, up from 1800/1793) — `fonts.rs`'s registry rules and a
+layout test that checks every placed bitmap against `fontdue`'s own
+rasterisation of the same character, line drop, advance, vertical
+stacking and that spaces place nothing; `document.rs`'s font-face
+layer test, which recomputes every expected pixel from `fonts::layout`
+independently and asserts the layer matches it exactly (colour,
+rounded-up alpha, nothing lit elsewhere), then off-canvas text,
+an unactivated face, a size past the limit, and the bitmap path
+unchanged; and `lib.rs`'s persistence round trip (manifest,
+overwrite by name, a broken file skipped at launch, a missing
+directory fine). `server/`: 15 tests (11 → 15) — the catalogue's
+licences and order, the CSS parse that accepts only `fonts.gstatic.com`
+TrueType URLs, local files listed and served, cached files served
+without network, and the HTTP routes. Live: the real server fetched
+Lato Bold Italic from Google Fonts through this sandbox's proxy in
+0.7 s (`file` reports a TrueType font, 74,836 bytes), served the
+cached copy in 15 ms byte-identical, and 404s an unknown family; the
+built frontend in Playwright's Chromium listed all 142 families,
+filtered "lato" to one row, and *Activate* fetched
+`/fonts/Lato/file?weight=700&italic=false` (200) before stopping at
+`register_font`, the one step that needs Tauri's IPC. `cargo fmt
+--check` and `cargo clippy --all-targets -- -D warnings` clean in
+both crates, `npm run build` clean.
+
+Honest limitations: weights other than 400 and 700 are one query
+parameter away on the server but not offered in the dialog; variable
+axes and per-glyph OpenType features are not exposed (`fontdue`
+applies the font's kerning, nothing more); on-canvas typing remains
+the Type tools' one documented scope cut; and the catalogue's
+licences are as Google Fonts publishes them — the file's own name
+table is the authority for any single font.
+
+Adobe Fonts integration flips to shipped as its open equivalent
+(602/618), and the Type tools' "scalable outline font" scope cut is
+closed.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

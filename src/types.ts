@@ -72,6 +72,8 @@ export type TextLayer = {
   size: number;
   color: [number, number, number, number];
   vertical: boolean;
+  /** An activated font face to draw with; `null` is the built-in bitmap face. */
+  font: string | null;
 };
 
 /** Mirrors `ShapeSpec` / `ShapeLayer` in src-tauri/src/document.rs: a

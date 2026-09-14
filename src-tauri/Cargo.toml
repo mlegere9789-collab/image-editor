@@ -24,3 +24,4 @@ image = { version = "0.25", default-features = false, features = ["png", "tiff",
 crc32fast = "1"
 bytemuck = "1"
 tract-onnx = "0.21"
+fontdue = "0.9"
