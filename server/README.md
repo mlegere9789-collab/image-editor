@@ -1,8 +1,8 @@
 # image-editor-server
 
 The self-hosted backend behind the desktop app's cloud rows: **Cloud
-Documents**, **Search Your Cloud Files**, **Invite to Edit** and **Share
-for Review**. One Rust binary (axum), one data directory, no database.
+Documents**, **Search Your Cloud Files**, **Invite to Edit**, **Share
+for Review** and **Libraries**. One Rust binary (axum), one data directory, no database.
 
 ```bash
 cd server
@@ -28,6 +28,7 @@ curl -X POST -H "Authorization: Bearer $ADMIN" -H "Content-Type: application/jso
   admin.token        the admin token, for the operator
   index.json         users (token hashes), documents, shares, reviews -- rewritten atomically
   blobs/<id>/<n>     every saved version of every document, never overwritten
+  blobs/lib-<id>/<n> a library's graphic assets
 ```
 
 ## HTTP contract
@@ -58,6 +59,17 @@ admin token; review-link routes need no token (the link is the secret).
 | GET | `/reviews/{id}/document` | link holder | the pinned version's bytes |
 | POST | `/reviews/{id}/comments` `{ author, text, x?, y?, parent? }` | link holder | `{ comment }` (201); `x`/`y` pin a point as fractions 0..1; `parent` replies to a thread's first comment |
 | PUT | `/reviews/{id}/comments/{n}/resolved` `{ resolved }` | owner or editor | `{ comment }` |
+| GET | `/libraries` | user | `{ libraries: [{ id, name, owner, access, assets }] }` |
+| POST | `/libraries` `{ name }` | user | `{ library }` (201) |
+| DELETE | `/libraries/{id}` | owner | 204, assets and blobs included |
+| GET | `/libraries/{id}/shares` | owner | `{ shares: [{ user, role }] }` |
+| PUT | `/libraries/{id}/shares/{user}` `{ role }` | owner | share (or change the role) |
+| DELETE | `/libraries/{id}/shares/{user}` | owner | 204 |
+| GET | `/libraries/{id}/assets` | anyone with access | `{ assets: [{ id, name, kind, data, bytes, added_by, added_at }] }` |
+| POST | `/libraries/{id}/assets` `{ name, kind, data }` | owner or editor | `{ asset }` (201); `kind` is `color`, `gradient` or `adjustment`; a name already used within that kind is replaced |
+| PUT | `/libraries/{id}/graphics/{name}` (octet-stream) | owner or editor | `{ asset }` (201) -- a `graphic` asset, its PNG bytes |
+| GET | `/libraries/{id}/assets/{n}/blob` | anyone with access | a graphic's bytes |
+| DELETE | `/libraries/{id}/assets/{n}` | owner or editor | 204 |
 
 Document names: 1-200 characters, no `/`. User names: 1-64 of
 `[A-Za-z0-9._-]`. A document the caller has no access to reads as

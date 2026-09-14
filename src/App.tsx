@@ -249,6 +249,16 @@ type CloudComment = {
   posted_at: number;
   resolved: boolean;
 };
+type CloudLibrary = { id: number; name: string; owner: string; access: "owner" | "edit" | "view"; assets: number };
+type CloudAsset = {
+  id: number;
+  name: string;
+  kind: "color" | "gradient" | "adjustment" | "graphic";
+  data: unknown;
+  bytes: number;
+  added_by: string;
+  added_at: number;
+};
 type CloudReview = {
   id: string;
   document: string;
@@ -1229,6 +1239,20 @@ export default function App() {
   const [reviewCommentText, setReviewCommentText] = useState("");
   const [reviewReplyTo, setReviewReplyTo] = useState<number | null>(null);
   const [reviewBusy, setReviewBusy] = useState(false);
+  // Libraries (Creative Cloud Libraries' open equivalent): shared asset
+  // libraries on image-editor-server -- colours, gradient presets,
+  // adjustment presets and graphics -- used from and added to here.
+  const [showLibrariesDialog, setShowLibrariesDialog] = useState(false);
+  const [cloudLibraries, setCloudLibraries] = useState<CloudLibrary[]>([]);
+  const [activeLibraryId, setActiveLibraryId] = useState<number | null>(null);
+  const [cloudAssets, setCloudAssets] = useState<CloudAsset[]>([]);
+  const [newLibraryName, setNewLibraryName] = useState("");
+  const [libraryAssetName, setLibraryAssetName] = useState("");
+  const [libraryGradientName, setLibraryGradientName] = useState("");
+  const [libraryAdjustmentName, setLibraryAdjustmentName] = useState("");
+  const [libraryShareUser, setLibraryShareUser] = useState("");
+  const [libraryShareRole, setLibraryShareRole] = useState<"edit" | "view">("edit");
+  const [libraryBusy, setLibraryBusy] = useState(false);
   // PART XXX > Turn a Photograph into Linework: Find Edges into
   // Threshold at this level, the audit's own named recipe.
   const [lineworkThreshold, setLineworkThreshold] = useState(128);
@@ -3893,6 +3917,180 @@ export default function App() {
     }
     await refreshCloudReviews();
   }, [cloudFetch, activeReviewId, reviewCommentAuthor, reviewCommentText, reviewReplyTo, refreshCloudReviews]);
+
+  // Libraries: the list, the shown library's assets, and every way in
+  // and out of it. Names are unique within a kind on the server, so
+  // adding under an existing name replaces.
+  const refreshCloudAssets = useCallback(
+    async (libraryId: number) => {
+      const response = await cloudFetch(`/libraries/${libraryId}/assets`);
+      const body = (await response.json()) as { assets?: CloudAsset[] };
+      setCloudAssets(Array.isArray(body.assets) ? body.assets : []);
+    },
+    [cloudFetch],
+  );
+
+  const refreshCloudLibraries = useCallback(async () => {
+    setLibraryBusy(true);
+    try {
+      const response = await cloudFetch("/libraries");
+      const body = (await response.json()) as { libraries?: CloudLibrary[] };
+      const libraries = Array.isArray(body.libraries) ? body.libraries : [];
+      setCloudLibraries(libraries);
+      const shown =
+        activeLibraryId !== null && libraries.some((l) => l.id === activeLibraryId)
+          ? activeLibraryId
+          : (libraries[0]?.id ?? null);
+      setActiveLibraryId(shown);
+      if (shown !== null) await refreshCloudAssets(shown);
+      else setCloudAssets([]);
+    } catch (err) {
+      setCloudLibraries([]);
+      setCloudAssets([]);
+      setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setLibraryBusy(false);
+    }
+  }, [cloudFetch, activeLibraryId, refreshCloudAssets]);
+
+  // Every library action: run it, then re-read, reporting the server's
+  // refusal if there was one.
+  const libraryAction = useCallback(
+    async (action: () => Promise<void>) => {
+      setLibraryBusy(true);
+      try {
+        await action();
+      } catch (err) {
+        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+        setLibraryBusy(false);
+        return;
+      }
+      await refreshCloudLibraries();
+    },
+    [refreshCloudLibraries],
+  );
+
+  const createCloudLibrary = useCallback(async () => {
+    const name = newLibraryName.trim();
+    if (!name) return;
+    await libraryAction(async () => {
+      const response = await cloudFetch("/libraries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await response.json()) as { library?: CloudLibrary };
+      if (body.library) setActiveLibraryId(body.library.id);
+      setNewLibraryName("");
+    });
+  }, [cloudFetch, libraryAction, newLibraryName]);
+
+  const addJsonAsset = useCallback(
+    async (name: string, kind: CloudAsset["kind"], data: unknown) => {
+      if (activeLibraryId === null || !name.trim()) return;
+      const libraryId = activeLibraryId;
+      await libraryAction(async () => {
+        await cloudFetch(`/libraries/${libraryId}/assets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), kind, data }),
+        });
+      });
+    },
+    [cloudFetch, libraryAction, activeLibraryId],
+  );
+
+  const addLayerAsGraphic = useCallback(async () => {
+    if (activeLibraryId === null || selectedId === null || !document) return;
+    const libraryId = activeLibraryId;
+    const layer = document.layers.find((l) => l.id === selectedId);
+    const name = libraryAssetName.trim() || layer?.name || "Graphic";
+    await libraryAction(async () => {
+      const bytes = await invoke<number[]>("export_layer_bytes", { id: selectedId });
+      await cloudFetch(`/libraries/${libraryId}/graphics/${encodeURIComponent(name)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: new Uint8Array(bytes),
+      });
+      setLibraryAssetName("");
+    });
+  }, [cloudFetch, libraryAction, activeLibraryId, selectedId, document, libraryAssetName]);
+
+  const useCloudAsset = useCallback(
+    async (asset: CloudAsset) => {
+      if (activeLibraryId === null) return;
+      const libraryId = activeLibraryId;
+      try {
+        switch (asset.kind) {
+          case "color": {
+            const hex = (asset.data as { hex?: string })?.hex;
+            if (hex) setBrushColor(hex);
+            break;
+          }
+          case "gradient": {
+            const data = asset.data as { startColor?: number[]; endColor?: number[] };
+            await runCommand("save_gradient_preset", {
+              name: asset.name,
+              startColor: data.startColor,
+              endColor: data.endColor,
+            });
+            break;
+          }
+          case "adjustment": {
+            const data = asset.data as { adjustment?: unknown };
+            await runCommand("save_adjustment_preset", { name: asset.name, adjustment: data.adjustment });
+            break;
+          }
+          case "graphic": {
+            setLibraryBusy(true);
+            const response = await cloudFetch(`/libraries/${libraryId}/assets/${asset.id}/blob`);
+            const buffer = await response.arrayBuffer();
+            await runCommand("add_layer_from_bytes", { name: asset.name, bytes: Array.from(new Uint8Array(buffer)) }, "top");
+            break;
+          }
+        }
+      } catch (err) {
+        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`);
+      } finally {
+        setLibraryBusy(false);
+      }
+    },
+    [cloudFetch, runCommand, activeLibraryId],
+  );
+
+  const deleteCloudAsset = useCallback(
+    async (asset: CloudAsset) => {
+      if (activeLibraryId === null) return;
+      const libraryId = activeLibraryId;
+      await libraryAction(async () => {
+        await cloudFetch(`/libraries/${libraryId}/assets/${asset.id}`, { method: "DELETE" });
+      });
+    },
+    [cloudFetch, libraryAction, activeLibraryId],
+  );
+
+  const deleteCloudLibrary = useCallback(async () => {
+    if (activeLibraryId === null) return;
+    const libraryId = activeLibraryId;
+    await libraryAction(async () => {
+      await cloudFetch(`/libraries/${libraryId}`, { method: "DELETE" });
+      setActiveLibraryId(null);
+    });
+  }, [cloudFetch, libraryAction, activeLibraryId]);
+
+  const shareCloudLibrary = useCallback(async () => {
+    const user = libraryShareUser.trim();
+    if (activeLibraryId === null || !user) return;
+    const libraryId = activeLibraryId;
+    await libraryAction(async () => {
+      await cloudFetch(`/libraries/${libraryId}/shares/${encodeURIComponent(user)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: libraryShareRole }),
+      });
+      setLibraryShareUser("");
+    });
+  }, [cloudFetch, libraryAction, activeLibraryId, libraryShareUser, libraryShareRole]);
 
   const setReviewCommentResolved = useCallback(
     async (commentId: number, resolved: boolean) => {
@@ -8251,6 +8449,17 @@ export default function App() {
           title="Share for Review: a link to the cloud document's current version anyone can open and comment on"
         >
           Share for Review…
+        </button>
+        <button
+          className="button button--quiet"
+          onClick={() => {
+            setShowLibrariesDialog(true);
+            void refreshCloudLibraries();
+          }}
+          disabled={busy}
+          title="Libraries: shared asset libraries on image-editor-server -- colours, gradient and adjustment presets, graphics"
+        >
+          Libraries…
         </button>
         <button
           className="button button--quiet"
@@ -16980,10 +17189,286 @@ export default function App() {
         </div>
       )}
 
+      {showLibrariesDialog && (
+        <div className="modal-overlay" onClick={() => setShowLibrariesDialog(false)} role="presentation">
+          <div
+            className="modal modal--panel"
+            role="dialog"
+            aria-label="Libraries"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 className="modal__heading">Libraries</h2>
+            <p className="modal__hint">
+              Asset libraries on image-editor-server, shared between users the way
+              Creative Cloud Libraries are: colours, gradient presets, adjustment presets
+              and graphics. Use puts an asset into this document (a colour becomes the
+              brush colour, a graphic a new layer); Add sends one from it.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">New library</span>
+              <input
+                type="text"
+                value={newLibraryName}
+                onChange={(event) => setNewLibraryName(event.target.value)}
+                placeholder="name"
+                style={{ flex: 1 }}
+              />
+              <button
+                className="button"
+                onClick={() => void createCloudLibrary()}
+                disabled={libraryBusy || !cloudEndpoint || !newLibraryName.trim()}
+                title="Create a library"
+              >
+                Create
+              </button>
+            </label>
+            {!cloudEndpoint && (
+              <p className="modal__hint">
+                No Cloud Documents endpoint is configured — set one in External Services
+                first.
+              </p>
+            )}
+            <ul className="cloud-search__list">
+              {cloudLibraries.length === 0 && (
+                <li className="cloud-search__row">
+                  <span>No libraries yet.</span>
+                </li>
+              )}
+              {cloudLibraries.map((library) => (
+                <li key={library.id} className="cloud-search__row">
+                  <span>
+                    {library.name}
+                    {library.access !== "owner" ? ` (${library.owner}, can ${library.access})` : ""} —{" "}
+                    {library.assets} {library.assets === 1 ? "asset" : "assets"}
+                  </span>
+                  <button
+                    className="button button--quiet"
+                    onClick={() => {
+                      setActiveLibraryId(library.id);
+                      void refreshCloudAssets(library.id).catch((err: unknown) =>
+                        setError(`Libraries failed: ${err instanceof Error ? err.message : String(err)}`),
+                      );
+                    }}
+                    disabled={library.id === activeLibraryId}
+                    title="Show this library's assets"
+                  >
+                    {library.id === activeLibraryId ? "Shown" : "Show"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            {(() => {
+              const library = cloudLibraries.find((l) => l.id === activeLibraryId);
+              if (!library) return null;
+              const canEdit = library.access !== "view";
+              return (
+                <>
+                  <ul className="cloud-search__list">
+                    {cloudAssets.length === 0 && (
+                      <li className="cloud-search__row">
+                        <span>Empty library.</span>
+                      </li>
+                    )}
+                    {cloudAssets.map((asset) => (
+                      <li key={asset.id} className="cloud-search__row">
+                        <span>
+                          {asset.kind === "color" && (
+                            <span
+                              aria-hidden="true"
+                              style={{
+                                display: "inline-block",
+                                width: 12,
+                                height: 12,
+                                marginRight: 6,
+                                verticalAlign: "middle",
+                                background: (asset.data as { hex?: string })?.hex ?? "transparent",
+                                border: "1px solid var(--border)",
+                              }}
+                            />
+                          )}
+                          {asset.name} <em>({asset.kind})</em>
+                        </span>
+                        <span style={{ display: "flex", gap: 4 }}>
+                          <button
+                            className="button button--quiet"
+                            onClick={() => void useCloudAsset(asset)}
+                            disabled={libraryBusy || busy || (asset.kind !== "color" && !hasDocument)}
+                            title={
+                              asset.kind === "color"
+                                ? "Make this the brush colour"
+                                : asset.kind === "graphic"
+                                  ? "Place this graphic as a new layer"
+                                  : `Add this ${asset.kind} preset to the document`
+                            }
+                          >
+                            Use
+                          </button>
+                          {canEdit && (
+                            <button
+                              className="button button--quiet"
+                              onClick={() => void deleteCloudAsset(asset)}
+                              disabled={libraryBusy}
+                              title="Remove this asset from the library"
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {canEdit && (
+                    <>
+                      <label className="control control--row">
+                        <span className="control__label">Add</span>
+                        <input
+                          type="text"
+                          value={libraryAssetName}
+                          onChange={(event) => setLibraryAssetName(event.target.value)}
+                          placeholder="asset name"
+                          style={{ flex: 1 }}
+                        />
+                        <button
+                          className="button button--quiet"
+                          onClick={() => void addJsonAsset(libraryAssetName || brushColor, "color", { hex: brushColor })}
+                          disabled={libraryBusy}
+                          title={`Add the brush colour ${brushColor} to the library`}
+                        >
+                          Brush colour
+                        </button>
+                        <button
+                          className="button button--quiet"
+                          onClick={() => void addLayerAsGraphic()}
+                          disabled={libraryBusy || busy || selectedId === null}
+                          title="Add the selected layer to the library as a graphic"
+                        >
+                          Selected layer
+                        </button>
+                      </label>
+                      {document && document.gradientPresets.length > 0 && (
+                        <label className="control control--row">
+                          <span className="control__label">Gradient preset</span>
+                          <select
+                            value={libraryGradientName}
+                            onChange={(event) => setLibraryGradientName(event.target.value)}
+                            style={{ flex: 1 }}
+                          >
+                            <option value="">choose…</option>
+                            {document.gradientPresets.map((preset) => (
+                              <option key={preset.name} value={preset.name}>
+                                {preset.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="button button--quiet"
+                            onClick={() => {
+                              const preset = document.gradientPresets.find((p) => p.name === libraryGradientName);
+                              if (preset) {
+                                void addJsonAsset(preset.name, "gradient", {
+                                  startColor: preset.startColor,
+                                  endColor: preset.endColor,
+                                });
+                              }
+                            }}
+                            disabled={libraryBusy || !libraryGradientName}
+                            title="Add this gradient preset to the library"
+                          >
+                            Add
+                          </button>
+                        </label>
+                      )}
+                      {document && document.adjustmentPresets.length > 0 && (
+                        <label className="control control--row">
+                          <span className="control__label">Adjustment preset</span>
+                          <select
+                            value={libraryAdjustmentName}
+                            onChange={(event) => setLibraryAdjustmentName(event.target.value)}
+                            style={{ flex: 1 }}
+                          >
+                            <option value="">choose…</option>
+                            {document.adjustmentPresets.map((preset) => (
+                              <option key={preset.name} value={preset.name}>
+                                {preset.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="button button--quiet"
+                            onClick={() => {
+                              const preset = document.adjustmentPresets.find((p) => p.name === libraryAdjustmentName);
+                              if (preset) {
+                                void addJsonAsset(preset.name, "adjustment", { adjustment: preset.adjustment });
+                              }
+                            }}
+                            disabled={libraryBusy || !libraryAdjustmentName}
+                            title="Add this adjustment preset to the library"
+                          >
+                            Add
+                          </button>
+                        </label>
+                      )}
+                    </>
+                  )}
+                  {library.access === "owner" && (
+                    <label className="control control--row">
+                      <span className="control__label">Share with</span>
+                      <input
+                        type="text"
+                        value={libraryShareUser}
+                        onChange={(event) => setLibraryShareUser(event.target.value)}
+                        placeholder="user name"
+                        style={{ flex: 1 }}
+                      />
+                      <select
+                        value={libraryShareRole}
+                        onChange={(event) => setLibraryShareRole(event.target.value as "edit" | "view")}
+                      >
+                        <option value="edit">Can edit</option>
+                        <option value="view">Can view</option>
+                      </select>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void shareCloudLibrary()}
+                        disabled={libraryBusy || !libraryShareUser.trim()}
+                        title="Share this library with another user"
+                      >
+                        Share
+                      </button>
+                      <button
+                        className="button button--quiet"
+                        onClick={() => void deleteCloudLibrary()}
+                        disabled={libraryBusy}
+                        title="Delete this library and everything in it"
+                      >
+                        Delete library
+                      </button>
+                    </label>
+                  )}
+                </>
+              );
+            })()}
+            <div className="modal__actions">
+              <button
+                className="button button--quiet"
+                onClick={() => void refreshCloudLibraries()}
+                disabled={libraryBusy || !cloudEndpoint}
+                title="Re-fetch the libraries"
+              >
+                Refresh
+              </button>
+              <button className="button button--quiet" onClick={() => setShowLibrariesDialog(false)} title="Close">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showInviteDialog && (
         <div className="modal-overlay" onClick={() => setShowInviteDialog(false)} role="presentation">
           <div
-            className="modal modal--wide"
+            className="modal modal--panel"
             role="dialog"
             aria-label="Invite to Edit"
             onClick={(event) => event.stopPropagation()}
@@ -17058,7 +17543,7 @@ export default function App() {
       {showReviewDialog && (
         <div className="modal-overlay" onClick={() => setShowReviewDialog(false)} role="presentation">
           <div
-            className="modal modal--wide"
+            className="modal modal--panel"
             role="dialog"
             aria-label="Share for Review"
             onClick={(event) => event.stopPropagation()}

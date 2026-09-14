@@ -101,16 +101,20 @@ struct DocumentRecord {
     shares: BTreeMap<String, Role>,
 }
 
+fn access_of(owner: &str, shares: &BTreeMap<String, Role>, user: &str) -> Option<Access> {
+    if owner == user {
+        Some(Access::Owner)
+    } else {
+        shares.get(user).map(|role| match role {
+            Role::Edit => Access::Edit,
+            Role::View => Access::View,
+        })
+    }
+}
+
 impl DocumentRecord {
     fn access_for(&self, user: &str) -> Option<Access> {
-        if self.owner == user {
-            Some(Access::Owner)
-        } else {
-            self.shares.get(user).map(|role| match role {
-                Role::Edit => Access::Edit,
-                Role::View => Access::View,
-            })
-        }
+        access_of(&self.owner, &self.shares, user)
     }
 
     fn latest(&self) -> &VersionRecord {
@@ -155,6 +159,48 @@ pub struct Comment {
     pub resolved: bool,
 }
 
+/// One item of a library: a small JSON-described asset (a colour, a
+/// gradient, an adjustment preset) or a graphic whose PNG bytes live in
+/// a blob file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Asset {
+    pub id: u64,
+    pub name: String,
+    pub kind: String,
+    pub data: serde_json::Value,
+    pub bytes: u64,
+    pub added_by: String,
+    pub added_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct LibraryRecord {
+    id: u64,
+    owner: String,
+    name: String,
+    shares: BTreeMap<String, Role>,
+    assets: Vec<Asset>,
+    next_asset_id: u64,
+}
+
+impl LibraryRecord {
+    fn access_for(&self, user: &str) -> Option<Access> {
+        access_of(&self.owner, &self.shares, user)
+    }
+}
+
+/// A library as its user sees it.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct LibrarySummary {
+    pub id: u64,
+    pub name: String,
+    pub owner: String,
+    pub access: Access,
+    pub assets: usize,
+}
+
+pub const ASSET_KINDS: [&str; 4] = ["color", "gradient", "adjustment", "graphic"];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ReviewRecord {
     id: String,
@@ -186,6 +232,14 @@ struct Index {
     documents: Vec<DocumentRecord>,
     reviews: Vec<ReviewRecord>,
     next_document_id: u64,
+    #[serde(default)]
+    libraries: Vec<LibraryRecord>,
+    #[serde(default = "one")]
+    next_library_id: u64,
+}
+
+fn one() -> u64 {
+    1
 }
 
 /// The two tokens minted on first start, shown once and never stored.
@@ -301,6 +355,8 @@ impl Store {
             documents: Vec::new(),
             reviews: Vec::new(),
             next_document_id: 1,
+            libraries: Vec::new(),
+            next_library_id: 1,
         };
         let store = Store {
             root: root.to_path_buf(),
@@ -777,6 +833,254 @@ impl Store {
     }
 }
 
+impl Store {
+    fn asset_blob_path(&self, library_id: u64, asset_id: u64) -> PathBuf {
+        self.root
+            .join("blobs")
+            .join(format!("lib-{library_id}"))
+            .join(asset_id.to_string())
+    }
+
+    fn library_index(index: &Index, user: &str, id: u64) -> Result<(usize, Access)> {
+        let position = index
+            .libraries
+            .iter()
+            .position(|l| l.id == id)
+            .ok_or(StoreError::NotFound)?;
+        let access = index.libraries[position]
+            .access_for(user)
+            .ok_or(StoreError::NotFound)?;
+        Ok((position, access))
+    }
+
+    /// Every library `user` can open: their own first, then shared ones.
+    pub fn list_libraries(&self, user: &str) -> Vec<LibrarySummary> {
+        let index = self.index.lock().expect("index lock");
+        let mut list: Vec<LibrarySummary> = index
+            .libraries
+            .iter()
+            .filter_map(|l| {
+                Some(LibrarySummary {
+                    id: l.id,
+                    name: l.name.clone(),
+                    owner: l.owner.clone(),
+                    access: l.access_for(user)?,
+                    assets: l.assets.len(),
+                })
+            })
+            .collect();
+        list.sort_by(|a, b| {
+            (a.access != Access::Owner)
+                .cmp(&(b.access != Access::Owner))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        list
+    }
+
+    pub fn create_library(&self, user: &str, name: &str) -> Result<LibrarySummary> {
+        let name = name.trim();
+        validate_document_name(name)?;
+        let mut index = self.index.lock().expect("index lock");
+        if index
+            .libraries
+            .iter()
+            .any(|l| l.owner == user && l.name == name)
+        {
+            return Err(StoreError::Conflict(format!(
+                "you already have a library named \"{name}\""
+            )));
+        }
+        let id = index.next_library_id;
+        index.next_library_id += 1;
+        index.libraries.push(LibraryRecord {
+            id,
+            owner: user.into(),
+            name: name.into(),
+            shares: BTreeMap::new(),
+            assets: Vec::new(),
+            next_asset_id: 1,
+        });
+        self.persist(&index)?;
+        Ok(LibrarySummary {
+            id,
+            name: name.into(),
+            owner: user.into(),
+            access: Access::Owner,
+            assets: 0,
+        })
+    }
+
+    pub fn delete_library(&self, user: &str, id: u64) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        index.libraries.remove(position);
+        self.persist(&index)?;
+        let dir = self.root.join("blobs").join(format!("lib-{id}"));
+        if dir.exists() {
+            fs::remove_dir_all(dir)?;
+        }
+        Ok(())
+    }
+
+    pub fn list_library_shares(&self, user: &str, id: u64) -> Result<Vec<Share>> {
+        let index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        Ok(index.libraries[position]
+            .shares
+            .iter()
+            .map(|(user, role)| Share {
+                user: user.clone(),
+                role: *role,
+            })
+            .collect())
+    }
+
+    pub fn set_library_share(&self, user: &str, id: u64, target: &str, role: Role) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        if !Self::user_exists(&index, target) {
+            return Err(StoreError::Invalid(format!("no user named \"{target}\"")));
+        }
+        if index.libraries[position].owner == target {
+            return Err(StoreError::Invalid(
+                "the owner already has full access".into(),
+            ));
+        }
+        index.libraries[position].shares.insert(target.into(), role);
+        self.persist(&index)
+    }
+
+    pub fn remove_library_share(&self, user: &str, id: u64, target: &str) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if access != Access::Owner {
+            return Err(StoreError::Forbidden);
+        }
+        if index.libraries[position].shares.remove(target).is_none() {
+            return Err(StoreError::NotFound);
+        }
+        self.persist(&index)
+    }
+
+    pub fn list_assets(&self, user: &str, id: u64) -> Result<Vec<Asset>> {
+        let index = self.index.lock().expect("index lock");
+        let (position, _) = Self::library_index(&index, user, id)?;
+        Ok(index.libraries[position].assets.clone())
+    }
+
+    /// Adds an asset: `data` describes it for every kind but `graphic`,
+    /// whose PNG goes in `blob`. Needs edit access. Names are unique
+    /// within a kind, so re-adding replaces.
+    pub fn add_asset(
+        &self,
+        user: &str,
+        id: u64,
+        name: &str,
+        kind: &str,
+        data: serde_json::Value,
+        blob: Option<&[u8]>,
+    ) -> Result<Asset> {
+        let name = name.trim();
+        validate_document_name(name)?;
+        if !ASSET_KINDS.contains(&kind) {
+            return Err(StoreError::Invalid(format!(
+                "an asset is one of {}",
+                ASSET_KINDS.join(", ")
+            )));
+        }
+        if (kind == "graphic") != blob.is_some() {
+            return Err(StoreError::Invalid(
+                "a graphic is its PNG bytes; every other kind is JSON data".into(),
+            ));
+        }
+        if blob.is_some_and(<[u8]>::is_empty) {
+            return Err(StoreError::Invalid(
+                "an empty graphic cannot be added".into(),
+            ));
+        }
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if !access.can_edit() {
+            return Err(StoreError::Forbidden);
+        }
+        let library = &mut index.libraries[position];
+        if let Some(existing) = library
+            .assets
+            .iter()
+            .position(|a| a.kind == kind && a.name == name)
+        {
+            let old = library.assets.remove(existing);
+            let path = self.asset_blob_path(id, old.id);
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+        let asset_id = library.next_asset_id;
+        library.next_asset_id += 1;
+        if let Some(bytes) = blob {
+            let path = self.asset_blob_path(id, asset_id);
+            fs::create_dir_all(path.parent().expect("blob dir"))?;
+            write_atomic(&path, bytes)?;
+        }
+        let asset = Asset {
+            id: asset_id,
+            name: name.into(),
+            kind: kind.into(),
+            data,
+            bytes: blob.map_or(0, |b| b.len() as u64),
+            added_by: user.into(),
+            added_at: now(),
+        };
+        library.assets.push(asset.clone());
+        self.persist(&index)?;
+        Ok(asset)
+    }
+
+    pub fn get_asset_blob(&self, user: &str, id: u64, asset_id: u64) -> Result<Vec<u8>> {
+        let index = self.index.lock().expect("index lock");
+        let (position, _) = Self::library_index(&index, user, id)?;
+        let asset = index.libraries[position]
+            .assets
+            .iter()
+            .find(|a| a.id == asset_id)
+            .ok_or(StoreError::NotFound)?;
+        if asset.kind != "graphic" {
+            return Err(StoreError::NotFound);
+        }
+        Ok(fs::read(self.asset_blob_path(id, asset_id))?)
+    }
+
+    pub fn delete_asset(&self, user: &str, id: u64, asset_id: u64) -> Result<()> {
+        let mut index = self.index.lock().expect("index lock");
+        let (position, access) = Self::library_index(&index, user, id)?;
+        if !access.can_edit() {
+            return Err(StoreError::Forbidden);
+        }
+        let library = &mut index.libraries[position];
+        let at = library
+            .assets
+            .iter()
+            .position(|a| a.id == asset_id)
+            .ok_or(StoreError::NotFound)?;
+        library.assets.remove(at);
+        self.persist(&index)?;
+        let path = self.asset_blob_path(id, asset_id);
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1088,6 +1392,190 @@ mod tests {
             Err(StoreError::NotFound)
         );
         assert!(store.list_documents("owner").is_empty());
+    }
+
+    #[test]
+    fn libraries_hold_json_assets_and_graphics_under_the_same_roles() {
+        let (dir, store, _) = fresh();
+        store.create_user("ana").unwrap();
+        let lib = store.create_library("owner", " Brand ").unwrap();
+        assert_eq!(lib.name, "Brand");
+        assert!(matches!(
+            store.create_library("owner", "Brand"),
+            Err(StoreError::Conflict(_))
+        ));
+        assert!(matches!(
+            store.create_library("owner", ""),
+            Err(StoreError::Invalid(_))
+        ));
+        let red = store
+            .add_asset(
+                "owner",
+                lib.id,
+                "Red",
+                "color",
+                serde_json::json!({ "hex": "#ff0000" }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(red.id, 1);
+        let logo = store
+            .add_asset(
+                "owner",
+                lib.id,
+                "Logo",
+                "graphic",
+                serde_json::Value::Null,
+                Some(b"PNG..."),
+            )
+            .unwrap();
+        assert_eq!(logo.bytes, 6);
+        assert_eq!(
+            store.get_asset_blob("owner", lib.id, logo.id).unwrap(),
+            b"PNG..."
+        );
+        assert_eq!(
+            store.get_asset_blob("owner", lib.id, red.id),
+            Err(StoreError::NotFound)
+        );
+        assert!(matches!(
+            store.add_asset("owner", lib.id, "x", "brush", serde_json::Value::Null, None),
+            Err(StoreError::Invalid(_))
+        ));
+        assert!(matches!(
+            store.add_asset(
+                "owner",
+                lib.id,
+                "x",
+                "graphic",
+                serde_json::Value::Null,
+                None
+            ),
+            Err(StoreError::Invalid(_))
+        ));
+        assert!(matches!(
+            store.add_asset(
+                "owner",
+                lib.id,
+                "x",
+                "color",
+                serde_json::Value::Null,
+                Some(b"png")
+            ),
+            Err(StoreError::Invalid(_))
+        ));
+        assert!(matches!(
+            store.add_asset(
+                "owner",
+                lib.id,
+                "x",
+                "graphic",
+                serde_json::Value::Null,
+                Some(b"")
+            ),
+            Err(StoreError::Invalid(_))
+        ));
+        // Re-adding a name within a kind replaces it; across kinds it does not.
+        let red2 = store
+            .add_asset(
+                "owner",
+                lib.id,
+                "Red",
+                "color",
+                serde_json::json!({ "hex": "#ee0000" }),
+                None,
+            )
+            .unwrap();
+        store
+            .add_asset(
+                "owner",
+                lib.id,
+                "Red",
+                "gradient",
+                serde_json::json!({ "startColor": [255, 0, 0, 255], "endColor": [0, 0, 0, 255] }),
+                None,
+            )
+            .unwrap();
+        let assets = store.list_assets("owner", lib.id).unwrap();
+        assert_eq!(assets.len(), 3);
+        assert_eq!(assets.iter().filter(|a| a.name == "Red").count(), 2);
+        assert_eq!(
+            assets.iter().find(|a| a.kind == "color").unwrap().id,
+            red2.id
+        );
+
+        // Shares work exactly as for documents.
+        assert_eq!(store.list_assets("ana", lib.id), Err(StoreError::NotFound));
+        store
+            .set_library_share("owner", lib.id, "ana", Role::View)
+            .unwrap();
+        assert_eq!(store.list_assets("ana", lib.id).unwrap().len(), 3);
+        assert_eq!(
+            store.add_asset(
+                "ana",
+                lib.id,
+                "Blue",
+                "color",
+                serde_json::json!({ "hex": "#0000ff" }),
+                None
+            ),
+            Err(StoreError::Forbidden)
+        );
+        assert_eq!(
+            store.delete_asset("ana", lib.id, logo.id),
+            Err(StoreError::Forbidden)
+        );
+        store
+            .set_library_share("owner", lib.id, "ana", Role::Edit)
+            .unwrap();
+        store
+            .add_asset(
+                "ana",
+                lib.id,
+                "Blue",
+                "color",
+                serde_json::json!({ "hex": "#0000ff" }),
+                None,
+            )
+            .unwrap();
+        assert_eq!(store.list_libraries("ana")[0].access, Access::Edit);
+        assert_eq!(store.list_libraries("ana")[0].assets, 4);
+        assert_eq!(
+            store.delete_library("ana", lib.id),
+            Err(StoreError::Forbidden)
+        );
+        assert_eq!(
+            store.list_library_shares("owner", lib.id).unwrap(),
+            vec![Share {
+                user: "ana".into(),
+                role: Role::Edit
+            }]
+        );
+        store.remove_library_share("owner", lib.id, "ana").unwrap();
+        assert_eq!(store.list_assets("ana", lib.id), Err(StoreError::NotFound));
+
+        // Deleting an asset removes its blob; reopening keeps the rest.
+        store.delete_asset("owner", lib.id, logo.id).unwrap();
+        assert!(!dir
+            .path()
+            .join("blobs")
+            .join(format!("lib-{}", lib.id))
+            .join(logo.id.to_string())
+            .exists());
+        assert_eq!(
+            store.delete_asset("owner", lib.id, logo.id),
+            Err(StoreError::NotFound)
+        );
+        drop(store);
+        let (reopened, _) = Store::open(dir.path()).unwrap();
+        assert_eq!(reopened.list_assets("owner", lib.id).unwrap().len(), 3);
+        reopened.delete_library("owner", lib.id).unwrap();
+        assert!(reopened.list_libraries("owner").is_empty());
+        assert!(!dir
+            .path()
+            .join("blobs")
+            .join(format!("lib-{}", lib.id))
+            .exists());
     }
 
     #[test]

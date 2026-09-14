@@ -20010,6 +20010,71 @@ behind the operator's own TLS terminator when it leaves localhost.
 Photoshop Cloud Documents, Search Your Cloud Files, Invite to Edit and
 Share for Review flip to shipped (600/618).
 
+## Phase 336 — Libraries (Creative Cloud Libraries' open equivalent)
+
+The second C2 row: Creative Cloud Libraries are shared collections of
+reusable assets — colours, styles, graphics — that follow a team
+across documents. This project's equivalent is a library on
+image-editor-server: owned by a user, shared with others under the
+same two roles documents have, holding assets of four kinds. Three are
+small JSON records — a colour (`{ hex }`), a gradient preset (its two
+colours), an adjustment preset (the same `Adjustment` value the
+document's own preset list stores) — and the fourth, a graphic, is a
+PNG kept as a blob file, produced by a new `export_layer_bytes` command
+that returns what `export_layer` would have written to disk. Within a
+library, names are unique per kind, so adding "Red" as a colour
+replaces the colour "Red" and leaves a gradient "Red" alone.
+
+The store gained `LibraryRecord`/`Asset` and the same access helper
+documents use (`access_of`, now shared by both), with the rules tested
+without HTTP: creation and duplicate names, every kind/blob
+combination the server refuses (an unknown kind, a graphic without
+bytes, a non-graphic with bytes, an empty graphic), replacement within
+a kind, view/edit/owner exactly as for documents, a deleted asset's
+blob gone from disk, a reopen keeping the rest, and a deleted library
+taking its blob directory with it. The index format grew two fields
+with serde defaults, so a data directory from Phase 335 opens
+unchanged. The API added ten routes (in `server/README.md`), tested
+through the router.
+
+The client's **Libraries…** dialog lists every library the user can
+see (shared ones with their owner and role), creates new ones, shows
+the chosen library's assets with a swatch for colours, and offers
+*Use* on each — a colour becomes the brush colour, a gradient or
+adjustment lands in the document's own preset list through the
+existing `save_gradient_preset`/`save_adjustment_preset` commands, a
+graphic is fetched and placed through `add_layer_from_bytes` like a
+pasted screenshot — and, with edit access, *Remove*, plus *Add* from
+the brush colour, the selected layer, or any of the document's
+gradient and adjustment presets. The owner shares or deletes the
+library from the same dialog. The three service dialogs moved to a
+new `modal--panel` width with wrapping rows, after the browser check
+below showed the 360-pixel modal clipping their button rows.
+
+**Verified three ways.** `cargo test` in `server/`: 11 tests (9 → 11;
+the store's library rules above, and the HTTP round trip: create,
+colour asset, graphic by PUT, blob fetched back byte-for-byte, the
+count in the listing, a refused kind, delete asset, delete library).
+The built frontend in Playwright's Chromium against the running
+server: Libraries… created "Brand", added the brush colour as "Studio
+white", shared it with `ana` as Can edit, and *Use* on the colour
+succeeded; the server's own `/libraries/1/assets` then held `{ "hex":
+"#ffffff" }` under that name and `/libraries/1/shares` held `ana,
+edit`. `cargo fmt --check` and `cargo clippy --all-targets -- -D
+warnings` clean in both crates, `npm run build` clean.
+`export_layer_bytes` is a wrapper over two already-tested functions
+(`layer_pixels`, `png::encode_pixels`) and adds no Rust test of its
+own.
+
+Honest limitations: brushes, patterns, character styles and layer
+styles are not library kinds yet — the four kinds are the ones with a
+one-line round trip into the document today; a graphic is placed at
+the document's size, as `add_layer_from_bytes` places anything; and
+there is no thumbnail for graphics in the list, only the name.
+
+Creative Cloud Libraries flips to shipped as its open equivalent
+(601/618).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

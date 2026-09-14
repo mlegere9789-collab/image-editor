@@ -919,6 +919,20 @@ body {
   overflow-y: auto;
 }
 
+/* The service dialogs (Libraries, Invite to Edit, Share for Review):
+   lists with several buttons per row, so wider, and rows that wrap. */
+.modal--panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal--panel .control--row {
+  flex-wrap: wrap;
+}
+.modal--panel .control--row .button {
+  flex: 0 0 auto;
+}
+
 .modal__section {
   margin: 6px 0 0;
   font-size: 12px;

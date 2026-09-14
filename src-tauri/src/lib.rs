@@ -6488,6 +6488,18 @@ fn export_layer(state: State<'_, AppState>, id: LayerId, path: String) -> Result
     export_layer_pixels(document, id, Path::new(&path))
 }
 
+/// Layer `id` as PNG bytes -- what [`export_layer`] writes to a path,
+/// returned instead, for sending somewhere other than the filesystem
+/// (a library's graphic asset). Reads the open document without
+/// mutating it.
+#[tauri::command]
+fn export_layer_bytes(state: State<'_, AppState>, id: LayerId) -> Result<Vec<u8>, String> {
+    let guard = state.document.lock().map_err(|_| POISONED.to_string())?;
+    let document = guard.as_ref().ok_or_else(|| NO_DOCUMENT.to_string())?;
+    let pixels = document.layer_pixels(id)?;
+    png::encode_pixels(document.width(), document.height(), &pixels)
+}
+
 /// The Artboard Tool: adds a named region of the canvas.
 #[tauri::command]
 fn add_artboard(
@@ -7071,6 +7083,7 @@ pub fn run() {
             hdr_histogram,
             read_content_credentials,
             export_layer,
+            export_layer_bytes,
             add_artboard,
             rename_artboard,
             delete_artboard,

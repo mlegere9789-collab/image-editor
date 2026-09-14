@@ -55,6 +55,23 @@ pub fn router(store: Store) -> Router {
             "/documents/{name}/reviews",
             get(list_reviews).post(create_review),
         )
+        .route("/libraries", get(list_libraries).post(create_library))
+        .route("/libraries/{id}", axum::routing::delete(delete_library))
+        .route("/libraries/{id}/shares", get(list_library_shares))
+        .route(
+            "/libraries/{id}/shares/{user}",
+            axum::routing::put(set_library_share).delete(remove_library_share),
+        )
+        .route("/libraries/{id}/assets", get(list_assets).post(add_asset))
+        .route(
+            "/libraries/{id}/graphics/{name}",
+            axum::routing::put(add_graphic),
+        )
+        .route(
+            "/libraries/{id}/assets/{asset}",
+            axum::routing::delete(delete_asset),
+        )
+        .route("/libraries/{id}/assets/{asset}/blob", get(get_asset_blob))
         .route("/reviews/{id}", get(get_review))
         .route("/reviews/{id}/document", get(get_review_document))
         .route("/reviews/{id}/comments", post(add_comment))
@@ -344,6 +361,125 @@ async fn add_comment(
 ) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
     let comment = store.add_comment(&id, &body.author, &body.text, body.x, body.y, body.parent)?;
     Ok((StatusCode::CREATED, Json(json!({ "comment": comment }))))
+}
+
+async fn list_libraries(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+) -> Json<serde_json::Value> {
+    Json(json!({ "libraries": store.list_libraries(&user) }))
+}
+
+#[derive(Deserialize)]
+struct NewLibrary {
+    name: String,
+}
+
+async fn create_library(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Json(body): Json<NewLibrary>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let library = store.create_library(&user, &body.name)?;
+    Ok((StatusCode::CREATED, Json(json!({ "library": library }))))
+}
+
+async fn delete_library(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<StatusCode, ApiError> {
+    store.delete_library(&user, id)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_library_shares(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(
+        json!({ "shares": store.list_library_shares(&user, id)? }),
+    ))
+}
+
+async fn set_library_share(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path((id, target)): Path<(u64, String)>,
+    Json(body): Json<ShareBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    store.set_library_share(&user, id, &target, body.role)?;
+    Ok(Json(json!({ "user": target, "role": body.role })))
+}
+
+async fn remove_library_share(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path((id, target)): Path<(u64, String)>,
+) -> Result<StatusCode, ApiError> {
+    store.remove_library_share(&user, id, &target)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_assets(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path(id): Path<u64>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    Ok(Json(json!({ "assets": store.list_assets(&user, id)? })))
+}
+
+#[derive(Deserialize)]
+struct NewAsset {
+    name: String,
+    kind: String,
+    #[serde(default)]
+    data: serde_json::Value,
+}
+
+async fn add_asset(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path(id): Path<u64>,
+    Json(body): Json<NewAsset>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let asset = store.add_asset(&user, id, &body.name, &body.kind, body.data, None)?;
+    Ok((StatusCode::CREATED, Json(json!({ "asset": asset }))))
+}
+
+async fn add_graphic(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path((id, name)): Path<(u64, String)>,
+    body: Bytes,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let asset = store.add_asset(
+        &user,
+        id,
+        &name,
+        "graphic",
+        serde_json::Value::Null,
+        Some(&body),
+    )?;
+    Ok((StatusCode::CREATED, Json(json!({ "asset": asset }))))
+}
+
+async fn get_asset_blob(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path((id, asset)): Path<(u64, u64)>,
+) -> Result<Response, ApiError> {
+    Ok(octets(store.get_asset_blob(&user, id, asset)?))
+}
+
+async fn delete_asset(
+    AuthUser(user): AuthUser,
+    State(store): State<Shared>,
+    Path((id, asset)): Path<(u64, u64)>,
+) -> Result<StatusCode, ApiError> {
+    store.delete_asset(&user, id, asset)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Deserialize, Serialize)]
@@ -767,6 +903,104 @@ mod tests {
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = call(&app.router, "GET", &format!("/reviews/{id}"), None, None).await;
         assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn libraries_over_http() {
+        let app = app();
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            "/libraries",
+            Some(&app.owner),
+            Some(("application/json", br#"{"name":"Brand"}"#.to_vec())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let id = json(&body)["library"]["id"].as_u64().unwrap();
+        let (status, body) = call(
+            &app.router,
+            "POST",
+            &format!("/libraries/{id}/assets"),
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br##"{"name":"Red","kind":"color","data":{"hex":"#ff0000"}}"##.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(json(&body)["asset"]["data"]["hex"], "#ff0000");
+        let (status, body) = call(
+            &app.router,
+            "PUT",
+            &format!("/libraries/{id}/graphics/Logo"),
+            Some(&app.owner),
+            Some(("application/octet-stream", b"PNGBYTES".to_vec())),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let logo = json(&body)["asset"]["id"].as_u64().unwrap();
+        let (status, body) = call(
+            &app.router,
+            "GET",
+            &format!("/libraries/{id}/assets/{logo}/blob"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, b"PNGBYTES");
+        let (_, body) = call(&app.router, "GET", "/libraries", Some(&app.owner), None).await;
+        assert_eq!(json(&body)["libraries"][0]["assets"], 2);
+        let (status, _) = call(
+            &app.router,
+            "POST",
+            &format!("/libraries/{id}/assets"),
+            Some(&app.owner),
+            Some((
+                "application/json",
+                br#"{"name":"x","kind":"brush"}"#.to_vec(),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        let (status, _) = call(
+            &app.router,
+            "DELETE",
+            &format!("/libraries/{id}/assets/{logo}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let (_, body) = call(
+            &app.router,
+            "GET",
+            &format!("/libraries/{id}/assets"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(json(&body)["assets"].as_array().unwrap().len(), 1);
+        let (status, _) = call(
+            &app.router,
+            "GET",
+            "/libraries/999/assets",
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = call(
+            &app.router,
+            "DELETE",
+            &format!("/libraries/{id}"),
+            Some(&app.owner),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
     }
 
     #[tokio::test]
