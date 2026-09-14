@@ -1826,6 +1826,9 @@ export default function App() {
   const [magneticContrast, setMagneticContrast] = useState(32);
   const [sharpenProtectDetail, setSharpenProtectDetail] = useState(false);
   const [sharpenSampleAll, setSharpenSampleAll] = useState(false);
+  // Sample All Layers for the other neighbourhood tools: Blur, Smudge,
+  // Clone Stamp, Healing Brush, Spot Healing Brush and Mixer Brush.
+  const [sampleAllLayers, setSampleAllLayers] = useState(false);
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [showColorRangeDialog, setShowColorRangeDialog] = useState(false);
   const [colorRangeColor, setColorRangeColor] = useState("#ff0000");
@@ -9529,6 +9532,7 @@ export default function App() {
           points,
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
+          sampleAllLayers,
         });
       } else if (tool === "blur" || tool === "sharpen") {
         void runCommand(tool === "blur" ? "blur_stroke" : "sharpen_stroke", {
@@ -9541,7 +9545,7 @@ export default function App() {
                 protectDetail: sharpenProtectDetail,
                 sampleAllLayers: sharpenSampleAll,
               }
-            : {}),
+            : { sampleAllLayers }),
         });
       } else if (tool === "historyBrush") {
         void runCommand("history_stroke", {
@@ -9559,6 +9563,7 @@ export default function App() {
           wet: mixerWet,
           load: mixerLoad,
           mix: mixerMix,
+          sampleAllLayers,
         });
       } else if (tool === "artHistoryBrush") {
         void runCommand("art_history_stroke", {
@@ -9580,6 +9585,7 @@ export default function App() {
           id: selectedId,
           points,
           radius: brushSize,
+          sampleAllLayers,
         });
       } else if (tool === "healingBrush") {
         void runCommand("heal_stroke", {
@@ -9587,6 +9593,7 @@ export default function App() {
           points,
           radius: brushSize,
           offset: cloneOffset.current ?? [0, 0],
+          sampleAllLayers,
         });
       } else if (tool === "cloneStamp") {
         void runCommand("clone_stroke", {
@@ -9594,6 +9601,7 @@ export default function App() {
           points,
           radius: brushSize,
           offset: cloneOffset.current ?? [0, 0],
+          sampleAllLayers,
         });
       } else if (tool === "patternStamp") {
         void runCommand("pattern_stamp_stroke", {
@@ -9672,6 +9680,7 @@ export default function App() {
       magicWandTolerance,
       sharpenProtectDetail,
       sharpenSampleAll,
+      sampleAllLayers,
       channelView,
     ],
   );
@@ -14840,6 +14849,24 @@ export default function App() {
                 {magneticContrast}
               </label>
             </>
+          )}
+          {[
+            "blur",
+            "smudge",
+            "mixerBrush",
+            "spotHealingBrush",
+            "healingBrush",
+            "cloneStamp",
+          ].includes(tool) && (
+            <label className="tools__slider">
+              <input
+                type="checkbox"
+                checked={sampleAllLayers}
+                disabled={!canPaint}
+                onChange={(event) => setSampleAllLayers(event.target.checked)}
+              />
+              Sample All Layers
+            </label>
           )}
           {tool === "sharpen" && (
             <>

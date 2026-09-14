@@ -22261,6 +22261,42 @@ canvas alone; three screenshots checked by eye.
 
 Tests: 1875 Rust (1873 → 1875), 22 frontend.
 
+## Phase 373 — Sample All Layers for the neighbourhood tools
+
+Six tool rows of section D carried the same scope cut: Photoshop's
+Sample All Layers, which the Sharpen tool alone honoured since Phase
+200. `Document::stroke_sampling` now gives the option to every tool
+that reads its surroundings — Blur, Smudge, Clone Stamp, Healing
+Brush, Spot Healing Brush and Mixer Brush: with the flag the stroke
+reads the pre-stroke composite of every visible layer instead of the
+layer alone, and paints the result onto the layer, exactly as
+Sharpen's own flag does; `stroke` is the flag off. The six stroke
+commands take an optional `sampleAllLayers`, and the options bar shows
+one Sample All Layers checkbox for those tools (Sharpen keeps its
+own).
+
+**Verified.** One Rust test,
+`sample_all_layers_reads_the_composite_under_the_neighbourhood_tools`,
+on an opaque white layer under a transparent one holding a black dot:
+a full-strength Blur dab on the dot leaves it black alone (its 3×3 is
+transparent black) and lifts it to 226 sampling all layers (eight
+white neighbours); a Clone Stamp dab with no offset onto an empty
+layer paints nothing alone and the composite's white sampling all
+layers; a Spot Healing dab heals the dot to the composite's white
+sampling all layers and leaves it black alone; `stroke` is the flag
+off. In Chromium against the built frontend: choosing Blur, Smudge,
+Spot Healing, Clone Stamp, Healing Brush or Mixer Brush shows the
+checkbox in the options bar and Rect Select does not; a drag sends
+`sampleAllLayers: false` and, after ticking it, `true` for Blur,
+Smudge, Spot Healing and Mixer Brush (Clone Stamp and Healing Brush
+wait for an Alt-click source before they stroke, as before). On the
+real app under Xvfb, on the recovered document: picking the Blur tool
+puts Sample All Layers in the options bar between the colour swatch
+and Size; ticked, a drag along the stroke ran through the real IPC
+and softened it further; three screenshots checked by eye.
+
+Tests: 1876 Rust (1875 → 1876), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

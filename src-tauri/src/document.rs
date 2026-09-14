@@ -18537,7 +18537,25 @@ impl Document {
         radius: f32,
         stroke: Stroke<'_>,
     ) -> Result<Option<Rect>, String> {
-        self.stroke_inner(id, points, radius, stroke, None)
+        self.stroke_inner(id, points, radius, stroke, None, false)
+    }
+
+    /// [`Self::stroke`] with Photoshop's Sample All Layers for the tools
+    /// that read their surroundings — Blur, Smudge, Clone Stamp, Healing
+    /// Brush, Spot Healing Brush and Mixer Brush: with
+    /// `sample_all_layers` they read the pre-stroke composite of every
+    /// visible layer instead of this layer alone, and paint the result
+    /// onto this layer, exactly as the Sharpen tool's own flag already
+    /// does. Other tools ignore the flag.
+    pub fn stroke_sampling(
+        &mut self,
+        id: LayerId,
+        points: &[(f32, f32)],
+        radius: f32,
+        stroke: Stroke<'_>,
+        sample_all_layers: bool,
+    ) -> Result<Option<Rect>, String> {
+        self.stroke_inner(id, points, radius, stroke, None, sample_all_layers)
     }
 
     /// [`Self::stroke`] laid down dab by dab under `dynamics` (Brush
@@ -18555,7 +18573,7 @@ impl Document {
         dynamics: &BrushDynamics,
     ) -> Result<Option<Rect>, String> {
         dynamics.validate()?;
-        self.stroke_inner(id, points, radius, stroke, Some(dynamics))
+        self.stroke_inner(id, points, radius, stroke, Some(dynamics), false)
     }
 
     fn stroke_inner(
@@ -18565,6 +18583,7 @@ impl Document {
         radius: f32,
         stroke: Stroke<'_>,
         dynamics: Option<&BrushDynamics>,
+        sample_all_layers: bool,
     ) -> Result<Option<Rect>, String> {
         if points.is_empty() {
             return Ok(None);
@@ -18598,11 +18617,24 @@ impl Document {
         };
         // Sample All Layers reads the pre-stroke composite, which has to be
         // built before the layer is mutably borrowed.
-        let composite_snapshot: Option<Vec<u8>> = match stroke {
+        let wants_composite = matches!(
+            stroke,
             Stroke::Sharpen {
                 sample_all_layers: true,
                 ..
-            } => {
+            }
+        ) || (sample_all_layers
+            && matches!(
+                stroke,
+                Stroke::Blur { .. }
+                    | Stroke::Clone { .. }
+                    | Stroke::Mixer { .. }
+                    | Stroke::Smudge { .. }
+                    | Stroke::Heal { .. }
+                    | Stroke::SpotHeal
+            ));
+        let composite_snapshot: Option<Vec<u8>> = match wants_composite {
+            true => {
                 let this: &Document = self;
                 let mut pixels = Vec::with_capacity(this.buffer_len());
                 for y in 0..this.height {
@@ -18612,7 +18644,7 @@ impl Document {
                 }
                 Some(pixels)
             }
-            _ => None,
+            false => None,
         };
         let layer = self.layer_mut(id)?;
         if layer.locked {
@@ -18773,7 +18805,11 @@ impl Document {
                         continue;
                     }
                     Stroke::Clone { offset } => {
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let sx = (x0 + col as u32) as i64 + offset.0 as i64;
                         let sy = (y0 + row as u32) as i64 + offset.1 as i64;
                         if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
@@ -18795,8 +18831,12 @@ impl Document {
                         load,
                         mix,
                     } => {
-                        let canvas =
-                            &snapshot.as_ref().expect("taken above")[base..base + CHANNELS];
+                        let canvas_source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
+                        let canvas = &canvas_source[base..base + CHANNELS];
                         let pickup = wet as f32 / 100.0 * (mix as f32 / 100.0);
                         let mut out = [255u8; CHANNELS];
                         for ((slot, &paint), &under) in
@@ -18844,7 +18884,11 @@ impl Document {
                         (color, to_unit(color[3]) * c)
                     }
                     Stroke::Heal { offset } => {
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let sx = (x0 + col as u32) as i64 + offset.0 as i64;
                         let sy = (y0 + row as u32) as i64 + offset.1 as i64;
                         if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
@@ -18879,7 +18923,11 @@ impl Document {
                         if layer.pixels[base + 3] == 0 {
                             continue;
                         }
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let mean = Self::ring_mean(
                             source,
                             width,
@@ -18898,7 +18946,11 @@ impl Document {
                         if layer.pixels[base + 3] == 0 {
                             continue;
                         }
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let (px, py) = ((x0 + col as u32) as i64, (y0 + row as u32) as i64);
                         let (w, h) = (width as i64, height as i64);
                         let covered = |sx: i64, sy: i64| {
@@ -18973,7 +19025,11 @@ impl Document {
                         if smudge_offset == (0, 0) {
                             continue;
                         }
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let sx = (x0 + col as u32) as i64 + smudge_offset.0 as i64;
                         let sy = (y0 + row as u32) as i64 + smudge_offset.1 as i64;
                         if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
@@ -19027,7 +19083,11 @@ impl Document {
                         continue;
                     }
                     Stroke::Blur { strength } => {
-                        let source = snapshot.as_ref().expect("taken above");
+                        let source: &[u8] = if sample_all_layers {
+                            composite_snapshot.as_deref().expect("taken above")
+                        } else {
+                            snapshot.as_ref().expect("taken above")
+                        };
                         let blurred = box_blur_at(
                             source,
                             width as usize,
@@ -46265,6 +46325,92 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn sample_all_layers_reads_the_composite_under_the_neighbourhood_tools() {
+        // An opaque white layer under a transparent one with a black dot.
+        let dot_layer = || {
+            let mut px = vec![0u8; 5 * 5 * 4];
+            px[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 4].copy_from_slice(&[0, 0, 0, 255]);
+            px
+        };
+        let setup = |top_px: &[u8]| {
+            let mut doc = Document::new(5, 5).unwrap();
+            doc.add_layer("b", &solid(5, 5, [255, 255, 255, 255]), 5, 5)
+                .unwrap();
+            let top = doc.add_layer("t", top_px, 5, 5).unwrap();
+            (doc, top)
+        };
+        let dot_red = |doc: &Document| doc.layers()[1].pixels[(2 * 5 + 2) * 4];
+        // Blur at full strength: alone, the dot's 3×3 is transparent black
+        // and it stays black; sampling all layers it sees eight white
+        // neighbours and lifts to 226.
+        let (mut doc, top) = setup(&dot_layer());
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Blur { strength: 100 },
+            false,
+        )
+        .unwrap();
+        assert_eq!(dot_red(&doc), 0);
+        let (mut doc, top) = setup(&dot_layer());
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Blur { strength: 100 },
+            true,
+        )
+        .unwrap();
+        assert_eq!(dot_red(&doc), 226);
+        // Clone Stamp with no offset onto an empty layer: alone it copies a
+        // transparent pixel and paints nothing; sampling all layers it
+        // paints the composite's white.
+        let empty = vec![0u8; 5 * 5 * 4];
+        let (mut doc, top) = setup(&empty);
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Clone { offset: (0, 0) },
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[1].pixels[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 4],
+            &[0, 0, 0, 0]
+        );
+        let (mut doc, top) = setup(&empty);
+        doc.stroke_sampling(
+            top,
+            &[(2.5, 2.5)],
+            0.5,
+            Stroke::Clone { offset: (0, 0) },
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[1].pixels[(2 * 5 + 2) * 4..(2 * 5 + 2) * 4 + 4],
+            &[255, 255, 255, 255]
+        );
+        // Spot Healing: alone the dot's ring is transparent; sampling all
+        // layers the ring is white and the dot heals to white.
+        let (mut doc, top) = setup(&dot_layer());
+        doc.stroke_sampling(top, &[(2.5, 2.5)], 0.5, Stroke::SpotHeal, true)
+            .unwrap();
+        assert_eq!(dot_red(&doc), 255);
+        let (mut doc, top) = setup(&dot_layer());
+        doc.stroke_sampling(top, &[(2.5, 2.5)], 0.5, Stroke::SpotHeal, false)
+            .unwrap();
+        assert_eq!(dot_red(&doc), 0);
+        // The flag means nothing to a plain brush, and stroke is the flag off.
+        let (mut doc, top) = setup(&dot_layer());
+        doc.stroke(top, &[(2.5, 2.5)], 0.5, Stroke::Blur { strength: 100 })
+            .unwrap();
+        assert_eq!(dot_red(&doc), 0);
     }
 
     #[test]

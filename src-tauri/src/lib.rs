@@ -4339,9 +4339,16 @@ fn blur_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     strength: u8,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Blur { strength })
+        document.stroke_sampling(
+            id,
+            &points,
+            radius,
+            Stroke::Blur { strength },
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 
@@ -4381,9 +4388,16 @@ fn clone_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     offset: (i32, i32),
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Clone { offset })
+        document.stroke_sampling(
+            id,
+            &points,
+            radius,
+            Stroke::Clone { offset },
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 
@@ -4396,9 +4410,16 @@ fn smudge_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     strength: u8,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Smudge { strength })
+        document.stroke_sampling(
+            id,
+            &points,
+            radius,
+            Stroke::Smudge { strength },
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 
@@ -4450,9 +4471,16 @@ fn heal_stroke(
     points: Vec<(f32, f32)>,
     radius: f32,
     offset: (i32, i32),
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::Heal { offset })
+        document.stroke_sampling(
+            id,
+            &points,
+            radius,
+            Stroke::Heal { offset },
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 
@@ -4465,9 +4493,16 @@ fn spot_heal_stroke(
     id: LayerId,
     points: Vec<(f32, f32)>,
     radius: f32,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(id, &points, radius, Stroke::SpotHeal)
+        document.stroke_sampling(
+            id,
+            &points,
+            radius,
+            Stroke::SpotHeal,
+            sample_all_layers.unwrap_or(false),
+        )
     })
 }
 
@@ -5656,9 +5691,10 @@ fn mixer_stroke(
     wet: u8,
     load: u8,
     mix: u8,
+    sample_all_layers: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.stroke(
+        document.stroke_sampling(
             id,
             &points,
             radius,
@@ -5668,6 +5704,7 @@ fn mixer_stroke(
                 load,
                 mix,
             },
+            sample_all_layers.unwrap_or(false),
         )
     })
 }
