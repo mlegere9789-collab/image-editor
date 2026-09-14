@@ -3681,9 +3681,13 @@ export default function App() {
 
   const applyPerspectiveWarp = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("perspective_warp", { id: selectedId, planes: warpPlanes });
+    await runCommand("perspective_warp", {
+      id: selectedId,
+      planes: warpPlanes,
+      interpolation: interpolationArg ?? "bicubic",
+    });
     setShowPerspectiveWarp(false);
-  }, [runCommand, selectedId, warpPlanes]);
+  }, [runCommand, selectedId, warpPlanes, interpolationArg]);
 
   const loadWarpMesh = useCallback(
     async (style: WarpStyle, bend: number, horizontal: number, vertical: number) => {
@@ -3743,9 +3747,9 @@ export default function App() {
 
   const applyWarp = useCallback(async () => {
     if (selectedId === null || !warpMesh) return;
-    await runCommand("warp", { id: selectedId, mesh: warpMesh });
+    await runCommand("warp", { id: selectedId, mesh: warpMesh, interpolation: interpolationArg ?? "bicubic" });
     setShowWarpDialog(false);
-  }, [runCommand, selectedId, warpMesh]);
+  }, [runCommand, selectedId, warpMesh, interpolationArg]);
 
   const openCylinderDialog = useCallback(() => {
     setShowWarpDialog(false);
@@ -3754,9 +3758,14 @@ export default function App() {
 
   const applyCylinderWarp = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("cylindrical_warp", { id: selectedId, angle: cylinderAngle, tilt: cylinderTilt });
+    await runCommand("cylindrical_warp", {
+      id: selectedId,
+      angle: cylinderAngle,
+      tilt: cylinderTilt,
+      interpolation: interpolationArg ?? "bicubic",
+    });
     setShowCylinderDialog(false);
-  }, [runCommand, selectedId, cylinderAngle, cylinderTilt]);
+  }, [runCommand, selectedId, cylinderAngle, cylinderTilt, interpolationArg]);
 
   const openLiquifyDialog = useCallback(async () => {
     if (document) setLiquifyCenter([Math.round(document.width / 2), Math.round(document.height / 2)]);
@@ -4887,9 +4896,13 @@ export default function App() {
 
   const applyPuppetWarp = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("puppet_warp", { id: selectedId, options: puppetOptions });
+    await runCommand("puppet_warp", {
+      id: selectedId,
+      options: puppetOptions,
+      interpolation: interpolationArg ?? "bicubic",
+    });
     setShowPuppetDialog(false);
-  }, [runCommand, selectedId, puppetOptions]);
+  }, [runCommand, selectedId, puppetOptions, interpolationArg]);
 
   const openSpotDialog = useCallback(
     (dialog: { mode: "new" } | { mode: "edit"; name: string } | { mode: "convert"; name: string }) => {
@@ -4964,9 +4977,13 @@ export default function App() {
 
   const applyDistort = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("distort", { id: selectedId, corners: distortCorners });
+    await runCommand("distort", {
+      id: selectedId,
+      corners: distortCorners,
+      interpolation: interpolationArg ?? "bicubic",
+    });
     setShowDistortDialog(false);
-  }, [runCommand, selectedId, distortCorners]);
+  }, [runCommand, selectedId, distortCorners, interpolationArg]);
 
   const applyPerspective = useCallback(async () => {
     if (selectedId === null) return;
@@ -4974,9 +4991,10 @@ export default function App() {
       id: selectedId,
       horizontal: perspectiveHorizontal,
       vertical: perspectiveVertical,
+      interpolation: interpolationArg ?? "bicubic",
     });
     setShowPerspectiveDialog(false);
-  }, [runCommand, selectedId, perspectiveHorizontal, perspectiveVertical]);
+  }, [runCommand, selectedId, perspectiveHorizontal, perspectiveVertical, interpolationArg]);
 
   const applyDefringe = useCallback(async () => {
     if (selectedId === null) return;

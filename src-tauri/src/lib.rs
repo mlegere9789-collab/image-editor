@@ -1882,8 +1882,11 @@ fn perspective_warp(
     state: State<'_, AppState>,
     id: LayerId,
     planes: Vec<document::PerspectivePlane>,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.perspective_warp(id, &planes))
+    edit_checkpointed(&state, |document| {
+        document.perspective_warp_with(id, &planes, interpolation.unwrap_or_default())
+    })
 }
 
 /// Filter > Vanishing Point's own Stamp tool: a perspective-correct
@@ -1918,8 +1921,11 @@ fn warp(
     state: State<'_, AppState>,
     id: LayerId,
     mesh: document::WarpMesh,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.warp(id, &mesh))
+    edit_checkpointed(&state, |document| {
+        document.warp_with(id, &mesh, interpolation.unwrap_or_default())
+    })
 }
 
 /// Warp's starting mesh for layer `id`: the Warp Style at `bend` with the
@@ -1946,9 +1952,10 @@ fn cylindrical_warp(
     id: LayerId,
     angle: f32,
     tilt: f32,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.cylindrical_warp(id, angle, tilt)
+        document.cylindrical_warp_with(id, angle, tilt, interpolation.unwrap_or_default())
     })
 }
 
@@ -2062,8 +2069,11 @@ fn puppet_warp(
     state: State<'_, AppState>,
     id: LayerId,
     options: document::PuppetWarp,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.puppet_warp(id, &options))
+    edit_checkpointed(&state, |document| {
+        document.puppet_warp_with(id, &options, interpolation.unwrap_or_default())
+    })
 }
 
 /// Puppet Warp's Show Mesh: the mesh over layer `id` and where the pins
@@ -6758,8 +6768,11 @@ fn distort(
     state: State<'_, AppState>,
     id: LayerId,
     corners: [[f32; 2]; 4],
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.distort(id, corners))
+    edit_checkpointed(&state, |document| {
+        document.distort_with(id, corners, interpolation.unwrap_or_default())
+    })
 }
 
 /// Edit > Transform > Perspective on layer `id`: mirrored corner insets.
@@ -6769,9 +6782,10 @@ fn perspective(
     id: LayerId,
     horizontal: f32,
     vertical: f32,
+    interpolation: Option<document::Interpolation>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.perspective(id, horizontal, vertical)
+        document.perspective_with(id, horizontal, vertical, interpolation.unwrap_or_default())
     })
 }
 

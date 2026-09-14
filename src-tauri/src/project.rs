@@ -9,7 +9,10 @@
 //! artboards, notes, count marks, the work path, presets, saved
 //! selections and the selection, mode and depth, groups, generated-layer
 //! records, and the defined pattern. A mask, a smart object's source, and
-//! the pattern travel as further PNG blobs after the layer's own.
+//! the pattern travel as further PNG blobs after the layer's own. Version
+//! 3 adds the alpha channels, spot channels, the brush tip, and the
+//! pattern presets as blobs after the pattern, and Layer Comps, the
+//! Indexed Color table, and Duotone's inks to the document records.
 //!
 //! Layout, chosen to reuse the PNG codec already in `png.rs` rather than
 //! inventing a second pixel format or pulling in an archive library:
@@ -21,6 +24,7 @@
 //!                        opacity/blend_mode/locked/png_len, in stack order
 //! <layer 0 PNG bytes>[<layer 0 mask PNG>][<layer 0 smart source PNG>]
 //! <layer 1 PNG bytes>...[<pattern PNG>]
+//! [<channel PNG>...][<spot PNG>...][<brush tip f32s>][<pattern preset PNG>...]
 //! ```
 //!
 //! Each layer's own pixels are PNG-encoded independently and concatenated
@@ -33,7 +37,10 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::blend::BlendMode;
-use crate::document::{ColorProfile, Document, DocumentRecords, LayerId, LayerRecords, Pattern};
+use crate::document::{
+    AlphaChannel, BrushTip, ColorProfile, Document, DocumentRecords, LayerId, LayerRecords,
+    Pattern, SpotChannel,
+};
 use crate::png;
 
 const MAGIC: &[u8; 5] = b"IEDP1";
@@ -64,6 +71,51 @@ struct Manifest {
     pattern_png_len: u32,
     #[serde(default)]
     pattern_size: (u32, u32),
+    /// Version 3: alpha channels, spot channels, the brush tip, and the
+    /// pattern presets, whose planes follow the pattern's PNG in this
+    /// order. Absent (empty) in older files.
+    #[serde(default)]
+    channels: Vec<PlaneManifest>,
+    #[serde(default)]
+    spots: Vec<SpotManifest>,
+    #[serde(default)]
+    brush_tip: Option<TipManifest>,
+    #[serde(default)]
+    pattern_presets: Vec<PatternPresetManifest>,
+}
+
+/// An alpha channel: its name and the byte length of its grey PNG.
+#[derive(Serialize, Deserialize)]
+struct PlaneManifest {
+    name: String,
+    png_len: u32,
+}
+
+/// A spot channel: its ink and the byte length of its density PNG.
+#[derive(Serialize, Deserialize)]
+struct SpotManifest {
+    name: String,
+    color: [u8; 3],
+    solidity: f32,
+    png_len: u32,
+}
+
+/// The brush tip: its size and the byte length of its coverages, kept
+/// exact as little-endian `f32`s rather than quantised to a PNG.
+#[derive(Serialize, Deserialize)]
+struct TipManifest {
+    width: u32,
+    height: u32,
+    len: u32,
+}
+
+/// A pattern preset: its name, size, and the byte length of its PNG.
+#[derive(Serialize, Deserialize)]
+struct PatternPresetManifest {
+    name: String,
+    width: u32,
+    height: u32,
+    png_len: u32,
 }
 
 fn one() -> u32 {
@@ -150,15 +202,66 @@ pub fn encode(document: &Document) -> Result<Vec<u8>, String> {
     let pattern_png_len = pattern_bytes.len() as u32;
     layer_bytes.push(pattern_bytes);
 
+    // Version 3: the channel planes, spot planes, brush tip, and pattern
+    // presets, after the pattern.
+    let mut channels = Vec::with_capacity(document.channels().len());
+    for channel in document.channels() {
+        let bytes = encode_plane(width, height, &channel.pixels)
+            .map_err(|err| format!("Could not encode channel '{}': {err}", channel.name))?;
+        channels.push(PlaneManifest {
+            name: channel.name.clone(),
+            png_len: bytes.len() as u32,
+        });
+        layer_bytes.push(bytes);
+    }
+    let mut spots = Vec::with_capacity(document.spots().len());
+    for spot in document.spots() {
+        let bytes = encode_plane(width, height, &spot.pixels)
+            .map_err(|err| format!("Could not encode spot channel '{}': {err}", spot.name))?;
+        spots.push(SpotManifest {
+            name: spot.name.clone(),
+            color: spot.color,
+            solidity: spot.solidity,
+            png_len: bytes.len() as u32,
+        });
+        layer_bytes.push(bytes);
+    }
+    let brush_tip = document.brush_tip().map(|tip| {
+        let bytes: Vec<u8> = tip.values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        let manifest = TipManifest {
+            width: tip.width,
+            height: tip.height,
+            len: bytes.len() as u32,
+        };
+        layer_bytes.push(bytes);
+        manifest
+    });
+    let mut pattern_presets = Vec::with_capacity(document.pattern_presets().len());
+    for (name, pattern) in document.pattern_presets() {
+        let bytes = png::encode_pixels(pattern.width, pattern.height, &pattern.pixels)
+            .map_err(|err| format!("Could not encode pattern preset '{name}': {err}"))?;
+        pattern_presets.push(PatternPresetManifest {
+            name: name.clone(),
+            width: pattern.width,
+            height: pattern.height,
+            png_len: bytes.len() as u32,
+        });
+        layer_bytes.push(bytes);
+    }
+
     let manifest = Manifest {
         width,
         height,
         profile: Some(document.profile()),
         layers,
-        version: 2,
+        version: 3,
         records: document.document_records(),
         pattern_png_len,
         pattern_size,
+        channels,
+        spots,
+        brush_tip,
+        pattern_presets,
     };
     let manifest_json = serde_json::to_vec(&manifest)
         .map_err(|err| format!("Could not encode the project manifest: {err}"))?;
@@ -271,6 +374,77 @@ pub fn decode(bytes: &[u8]) -> Result<Document, String> {
             height: decoded.height,
             pixels: decoded.pixels,
         })?;
+    }
+    if manifest.version >= 3 {
+        let mut plane = |len: u32, what: &str| -> Result<Vec<u8>, String> {
+            let decoded = png::decode_bytes(take(len, what)?)
+                .map_err(|err| format!("Corrupt {what}: {err}"))?;
+            if decoded.width != manifest.width || decoded.height != manifest.height {
+                return Err(format!("The {what} does not match the document's size."));
+            }
+            Ok(decoded.pixels.chunks_exact(4).map(|p| p[0]).collect())
+        };
+        let mut channels = Vec::with_capacity(manifest.channels.len());
+        for entry in &manifest.channels {
+            channels.push(AlphaChannel {
+                name: entry.name.clone(),
+                pixels: plane(entry.png_len, &format!("channel '{}'", entry.name))?,
+            });
+        }
+        let mut spots = Vec::with_capacity(manifest.spots.len());
+        for entry in &manifest.spots {
+            spots.push(SpotChannel {
+                name: entry.name.clone(),
+                color: entry.color,
+                solidity: entry.solidity,
+                pixels: plane(entry.png_len, &format!("spot channel '{}'", entry.name))?,
+            });
+        }
+        let brush_tip = match &manifest.brush_tip {
+            Some(tip) => {
+                let bytes = take(tip.len, "brush tip")?;
+                if bytes.len() % 4 != 0 {
+                    return Err("Corrupt brush tip.".to_string());
+                }
+                Some(BrushTip {
+                    width: tip.width,
+                    height: tip.height,
+                    values: bytes
+                        .chunks_exact(4)
+                        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+                        .collect(),
+                })
+            }
+            None => None,
+        };
+        let mut presets = Vec::with_capacity(manifest.pattern_presets.len());
+        for entry in &manifest.pattern_presets {
+            let decoded = png::decode_bytes(take(
+                entry.png_len,
+                &format!("pattern preset '{}'", entry.name),
+            )?)
+            .map_err(|err| format!("Corrupt pattern preset '{}': {err}", entry.name))?;
+            if (decoded.width, decoded.height) != (entry.width, entry.height) {
+                return Err(format!(
+                    "Pattern preset '{}' does not match its manifest.",
+                    entry.name
+                ));
+            }
+            presets.push((
+                entry.name.clone(),
+                Pattern {
+                    width: decoded.width,
+                    height: decoded.height,
+                    pixels: decoded.pixels,
+                },
+            ));
+        }
+        document.restore_channels(channels)?;
+        document.restore_spots(spots)?;
+        if let Some(tip) = brush_tip {
+            document.restore_brush_tip(tip)?;
+        }
+        document.restore_pattern_presets(presets)?;
     }
     if manifest.version >= 2 {
         document.restore_document_records(manifest.records, |old| {
@@ -480,6 +654,151 @@ mod tests {
         assert_eq!(reloaded.view().generated_layers.len(), 1);
         // And it all survives a second save: the format is stable.
         assert_eq!(encode(&reloaded).unwrap().len(), bytes.len());
+    }
+
+    #[test]
+    fn version_three_keeps_channels_spots_the_brush_tip_presets_comps_and_palettes() {
+        use crate::document::{
+            AlphaChannel, BrushTip, Ink, LayerComp, LayerCompState, Palette, SpotChannel,
+        };
+        let (w, h) = (6u32, 4u32);
+        let mut document = Document::new(w, h).unwrap();
+        let mut photo = Vec::new();
+        for i in 0..(w * h) as u8 {
+            photo.extend_from_slice(&[i * 10, 255 - i * 10, 7, 255]);
+        }
+        let base = document.add_layer("photo", &photo, w, h).unwrap();
+        let top = document
+            .add_layer("top", &[200u8; 6 * 4 * 4], w, h)
+            .unwrap();
+        // Alpha and spot channels with real planes, a brush tip from the
+        // photo, a defined pattern saved as a preset, two layer comps,
+        // and an Indexed Color table.
+        let plane: Vec<u8> = (0..(w * h) as u8).map(|i| i * 9).collect();
+        document
+            .restore_channels(vec![AlphaChannel {
+                name: "cut-out".to_string(),
+                pixels: plane.clone(),
+            }])
+            .unwrap();
+        document
+            .restore_spots(vec![SpotChannel {
+                name: "PANTONE-ish".to_string(),
+                color: [220, 30, 90],
+                solidity: 37.5,
+                pixels: plane.iter().rev().copied().collect(),
+            }])
+            .unwrap();
+        document.select_rectangle(1.0, 1.0, 4.0, 3.0).unwrap();
+        document.define_brush_tip(base).unwrap();
+        document.define_pattern(base).unwrap();
+        document.save_pattern_preset("window").unwrap();
+        document.deselect();
+        document.save_layer_comp("both").unwrap();
+        document.set_visible(top, false).unwrap();
+        document.set_opacity(top, 0.25).unwrap();
+        document.save_layer_comp("photo only").unwrap();
+        document
+            .convert_to_indexed(Palette::Adaptive { colors: 4 })
+            .unwrap();
+        let tip = document.brush_tip().unwrap().clone();
+        assert!(tip.values.iter().any(|&v| v > 0.0 && v < 1.0));
+
+        let bytes = encode(&document).unwrap();
+        let reloaded = decode(&bytes).unwrap();
+        assert_eq!(reloaded.channels(), document.channels());
+        assert_eq!(reloaded.spots(), document.spots());
+        assert_eq!(reloaded.brush_tip(), Some(&tip));
+        assert_eq!(reloaded.pattern_presets(), document.pattern_presets());
+        assert_eq!(reloaded.color_table(), document.color_table());
+        let records = reloaded.document_records();
+        assert_eq!(records.color_table.len(), 4);
+        assert_eq!(records.layer_comps.len(), 2);
+        assert_eq!(records.layer_comps[1].name, "photo only");
+        // The comps' layer ids are remapped to the reloaded layers.
+        let reloaded_top = reloaded
+            .layers()
+            .iter()
+            .find(|layer| layer.name == "top")
+            .unwrap()
+            .id;
+        let state = records.layer_comps[1]
+            .states
+            .iter()
+            .find(|state| state.id == reloaded_top)
+            .unwrap();
+        assert_eq!(
+            *state,
+            LayerCompState {
+                id: reloaded_top,
+                visible: false,
+                opacity: 0.25,
+                blend_mode: BlendMode::Normal
+            }
+        );
+        // Duotone inks ride along as records too.
+        let mut duo = Document::new(2, 2).unwrap();
+        duo.add_layer(
+            "grey",
+            &[
+                90u8, 90, 90, 255, 200, 200, 200, 255, 0, 0, 0, 255, 255, 255, 255, 255,
+            ],
+            2,
+            2,
+        )
+        .unwrap();
+        let inks = vec![
+            Ink {
+                color: [0, 0, 0],
+                curve: Vec::new(),
+            },
+            Ink {
+                color: [200, 120, 0],
+                curve: vec![(0, 0), (128, 90), (255, 255)],
+            },
+        ];
+        duo.convert_to_duotone(&inks).unwrap();
+        let back = decode(&encode(&duo).unwrap()).unwrap();
+        assert_eq!(back.document_records().duotone, inks);
+        assert_eq!(back.document_records().mode, duo.document_records().mode);
+        // A comp whose layers are all gone is dropped rather than kept empty.
+        let mut lone = Document::new(2, 2).unwrap();
+        let only = lone.add_layer("only", &[1u8; 16], 2, 2).unwrap();
+        lone.save_layer_comp("solo").unwrap();
+        let mut records = lone.document_records();
+        records.layer_comps.push(LayerComp {
+            name: "ghost".to_string(),
+            states: vec![LayerCompState {
+                id: 999,
+                visible: true,
+                opacity: 1.0,
+                blend_mode: BlendMode::Normal,
+            }],
+        });
+        lone.restore_document_records(records, |old| if old == only { Some(only) } else { None });
+        assert_eq!(
+            lone.document_records()
+                .layer_comps
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["solo"]
+        );
+        // Bad planes are refused.
+        let mut small = Document::new(2, 2).unwrap();
+        assert!(small
+            .restore_channels(vec![AlphaChannel {
+                name: "x".to_string(),
+                pixels: vec![0; 3],
+            }])
+            .is_err());
+        assert!(small
+            .restore_brush_tip(BrushTip {
+                width: 2,
+                height: 2,
+                values: vec![0.5; 3],
+            })
+            .is_err());
     }
 
     #[test]

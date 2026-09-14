@@ -21388,6 +21388,81 @@ Xvfb live-verification gap from the previous phases stands.
 
 **Frontend tests: 20** (18 → 20). Rust tests unchanged at 1839.
 
+## Phase 358 — Project format version 3: channels, spot channels, the brush tip, presets, comps, and palettes
+
+Phase D's "project format: alpha/spot channels, layer comps, brush tip"
+cut. Version 2 (Phase 345) saved every layer record and the document's
+own; what it still dropped on save was everything with a pixel plane
+of its own or made after version 2 was laid out: the alpha channels
+Calculations makes, spot colour channels, the brush tip Define Brush
+Preset captures, the Pattern Presets, Layer Comps, and Indexed Color's
+table and Duotone's inks.
+
+**Mechanism.** The manifest gains four lists — `channels` (name and PNG
+length), `spots` (name, ink colour, solidity, PNG length), `brush_tip`
+(size and byte length), `pattern_presets` (name, size, PNG length) —
+and their blobs follow the pattern's PNG in that order: each plane an
+opaque grey PNG as masks already are, the tip's coverages kept exact as
+little-endian `f32`s rather than quantised, each preset a PNG. Layer
+Comps, the colour table, and the inks are plain data and join
+`DocumentRecords` (`LayerComp` and `LayerCompState` now derive serde),
+the comps' layer ids remapped on load as groups' and generated layers'
+are, a comp whose layers are all gone dropped rather than kept empty.
+`restore_channels`, `restore_spots`, `restore_brush_tip`, and
+`restore_pattern_presets` check every plane against the document's
+size (and a spot's solidity, a tip's coverages) before taking it. The
+version number is 3; every new manifest field defaults, so version 1
+and 2 files read exactly as before — their own tests still pass.
+
+**Verified.** `cargo test` (`project::`, one new test): a 6×4 document
+with an alpha channel and a spot channel carrying real planes, a brush
+tip defined from a selection of the photo (with coverages strictly
+between 0 and 1), a defined pattern saved as a preset, two layer comps
+(the second with the top layer hidden at 25 %), and an Adaptive
+four-colour Indexed table round-trips through `encode`/`decode` with the
+channels, spots, tip, presets, and table equal, four table entries, two
+comps, and the second comp's state for the reloaded top layer reading
+hidden, 0.25, Normal under its new id; a Duotone document's two inks
+and mode come back; a comp referring only to a vanished layer is
+dropped while a real one stays; a three-byte plane on a 2×2 document
+and a tip whose values do not match its size are refused. Version 1
+and 2 fixtures still read.
+
+**1840 Rust tests total** (1839 → 1840: 1833 lib + 7 pipeline). Frontend tests unchanged at 20.
+
+## Phase 359 — Distort, Perspective, Warp, Perspective Warp, Puppet Warp, and Cylinder resample by Interpolation
+
+Phase D's "Distort/Perspective/Warp bicubic" cut. Phase 344 gave the
+Transform family — Scale, Rotate, Skew, Free Transform, Transform
+Controls — Photoshop's Interpolation option through
+`sample_interpolated` (nearest, bilinear, and bicubic with
+premultiplied-alpha taps); the six warps that inverse-map a pixel to
+a fractional source position still rounded it to the nearest pixel.
+
+**Mechanism.** Each of `distort`, `perspective`, `perspective_warp`,
+`warp`, `cylindrical_warp`, and `puppet_warp` gains a `_with(…,
+interpolation)` form that hands its inverse-mapped source position to
+`sample_interpolated` as a fraction instead of rounding it; the plain
+forms delegate with Nearest, so their tests and every prior result
+stand. Puppet Warp keeps each pixel's barycentric source as a fraction
+in its source table for the same reason. The six commands take an
+optional `interpolation` that defaults to Bicubic (`Interpolation` now
+has a `Default`, Photoshop's own preference), and the six dialogs send
+the options bar's Interpolation choice — Bicubic unless the user
+changed it, Sequential meaning Bicubic for a single warp.
+
+**Verified.** `cargo test` (one new test, values hand-computed): on a
+4×2 ramp of 10, 20, 30, 40, the identity corners under Bicubic leave
+every byte alone; corners half a pixel to the left under Bilinear
+read 15, 25, 35 and leave the last column transparent (its source,
+3.5, lies past the last pixel's centre, which the sampler counts as off
+the canvas), while `distort`'s own Nearest reads 20 in the first column
+and leaves the last transparent as before; Perspective with no inset, the Custom warp mesh
+at rest, and a one-pin Puppet Warp at rest are byte-identical under
+Bicubic. The six checklist rows now say so.
+
+**1841 Rust tests total** (1840 → 1841: 1834 lib + 7 pipeline). Frontend tests unchanged at 20.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

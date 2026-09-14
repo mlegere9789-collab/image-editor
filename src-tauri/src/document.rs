@@ -350,7 +350,8 @@ pub struct Document {
 }
 
 /// One layer's recorded state inside a [`LayerComp`].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayerCompState {
     pub id: LayerId,
     pub visible: bool,
@@ -359,7 +360,8 @@ pub struct LayerCompState {
 }
 
 /// A Layer Comp: a named snapshot of the stack's visibility and appearance.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayerComp {
     pub name: String,
     pub states: Vec<LayerCompState>,
@@ -4745,6 +4747,15 @@ pub struct DocumentRecords {
     pub groups: Vec<LayerGroup>,
     #[serde(default)]
     pub generated: Vec<GeneratedLayer>,
+    /// Window > Layer Comps (project format version 3).
+    #[serde(default)]
+    pub layer_comps: Vec<LayerComp>,
+    /// Indexed Color's table (version 3); empty in other modes.
+    #[serde(default)]
+    pub color_table: Vec<[u8; 3]>,
+    /// Duotone's inks (version 3); empty in other modes.
+    #[serde(default)]
+    pub duotone: Vec<Ink>,
 }
 
 /// [`Document::layer_records`]' answer: the records, the mask bytes and
@@ -4847,6 +4858,9 @@ impl Document {
             bit_depth: self.bit_depth,
             groups: self.groups.clone(),
             generated: self.generated.clone(),
+            layer_comps: self.layer_comps.clone(),
+            color_table: self.color_table.clone(),
+            duotone: self.duotone.clone(),
         }
     }
 
@@ -4891,6 +4905,104 @@ impl Document {
                 Some(GeneratedLayer { id, reference, ..g })
             })
             .collect();
+        self.layer_comps = records
+            .layer_comps
+            .into_iter()
+            .map(|comp| LayerComp {
+                name: comp.name,
+                states: comp
+                    .states
+                    .into_iter()
+                    .filter_map(|state| {
+                        Some(LayerCompState {
+                            id: remap(state.id)?,
+                            ..state
+                        })
+                    })
+                    .collect(),
+            })
+            .filter(|comp| !comp.states.is_empty())
+            .collect();
+        self.color_table = records.color_table;
+        self.duotone = records.duotone;
+    }
+
+    /// Pattern Presets, by name, with their pixels — for the project format.
+    pub fn pattern_presets(&self) -> &[(String, Pattern)] {
+        &self.pattern_presets
+    }
+
+    /// Puts alpha channels read back from a project file in place; each
+    /// plane must be one byte per document pixel.
+    pub fn restore_channels(&mut self, channels: Vec<AlphaChannel>) -> Result<(), String> {
+        let expected = (self.width * self.height) as usize;
+        for channel in &channels {
+            if channel.pixels.len() != expected {
+                return Err(format!(
+                    "Alpha channel \"{}\" has {} pixels, not {expected}.",
+                    channel.name,
+                    channel.pixels.len()
+                ));
+            }
+        }
+        self.channels = channels;
+        Ok(())
+    }
+
+    /// Puts spot channels read back from a project file in place; each
+    /// ink plane must be one byte per document pixel.
+    pub fn restore_spots(&mut self, spots: Vec<SpotChannel>) -> Result<(), String> {
+        let expected = (self.width * self.height) as usize;
+        for spot in &spots {
+            if spot.pixels.len() != expected {
+                return Err(format!(
+                    "Spot channel \"{}\" has {} pixels, not {expected}.",
+                    spot.name,
+                    spot.pixels.len()
+                ));
+            }
+            if !(0.0..=100.0).contains(&spot.solidity) {
+                return Err(format!(
+                    "Spot channel \"{}\" has an impossible solidity.",
+                    spot.name
+                ));
+            }
+        }
+        self.spots = spots;
+        Ok(())
+    }
+
+    /// Puts a brush tip read back from a project file in place.
+    pub fn restore_brush_tip(&mut self, tip: BrushTip) -> Result<(), String> {
+        if tip.width == 0
+            || tip.height == 0
+            || tip.values.len() != (tip.width * tip.height) as usize
+            || tip.values.iter().any(|v| !(0.0..=1.0).contains(v))
+        {
+            return Err("The brush tip's size does not match its values.".to_string());
+        }
+        self.brush_tip = Some(tip);
+        Ok(())
+    }
+
+    /// Puts pattern presets read back from a project file in place.
+    pub fn restore_pattern_presets(
+        &mut self,
+        presets: Vec<(String, Pattern)>,
+    ) -> Result<(), String> {
+        for (name, pattern) in &presets {
+            if pattern.width == 0
+                || pattern.height == 0
+                || pattern.pixels.len()
+                    != pattern.width as usize * pattern.height as usize * CHANNELS
+            {
+                return Err(format!(
+                    "Pattern preset \"{name}\" does not match its size."
+                ));
+            }
+        }
+        self.pattern_presets = presets;
+        Ok(())
     }
 
     /// Puts a pattern read back from a project file in place.
@@ -25196,6 +25308,17 @@ impl Document {
     /// the Transform family makes. Not recorded for [`Self::transform_again`],
     /// which repeats [`FreeTransform`]s only.
     pub fn distort(&mut self, id: LayerId, corners: [[f32; 2]; 4]) -> Result<Option<Rect>, String> {
+        self.distort_with(id, corners, Interpolation::Nearest)
+    }
+
+    /// [`Self::distort`] resampling by `interpolation` — the Transform
+    /// family's Interpolation option (README Phase 359).
+    pub fn distort_with(
+        &mut self,
+        id: LayerId,
+        corners: [[f32; 2]; 4],
+        interpolation: Interpolation,
+    ) -> Result<Option<Rect>, String> {
         if corners.iter().flatten().any(|v| !v.is_finite()) {
             return Err("Distort corners must be finite coordinates.".to_string());
         }
@@ -25212,15 +25335,15 @@ impl Document {
             if den.abs() < 1e-9 {
                 return [0; CHANNELS];
             }
-            let sx = ((a * x + b * y + c) / den).round() as i64;
-            let sy = ((d * x + e * y + f) / den).round() as i64;
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
-            }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&pixels[base..base + CHANNELS]);
-            out
+            let sx = (a * x + b * y + c) / den;
+            let sy = (d * x + e * y + f) / den;
+            sample_interpolated(
+                pixels,
+                doc_width,
+                (width, height),
+                (sx as f32, sy as f32),
+                interpolation,
+            )
         })
     }
 
@@ -25240,6 +25363,16 @@ impl Document {
         &mut self,
         id: LayerId,
         planes: &[PerspectivePlane],
+    ) -> Result<Option<Rect>, String> {
+        self.perspective_warp_with(id, planes, Interpolation::Nearest)
+    }
+
+    /// [`Self::perspective_warp`] resampling by `interpolation` (README Phase 359).
+    pub fn perspective_warp_with(
+        &mut self,
+        id: LayerId,
+        planes: &[PerspectivePlane],
+        interpolation: Interpolation,
     ) -> Result<Option<Rect>, String> {
         if planes.is_empty() {
             return Err("Perspective Warp needs at least one plane.".to_string());
@@ -25286,15 +25419,15 @@ impl Document {
             if den.abs() < 1e-9 {
                 return [0; CHANNELS];
             }
-            let sx = ((a * x + b * y + c) / den).round() as i64;
-            let sy = ((d * x + e * y + f) / den).round() as i64;
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
-            }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&pixels[base..base + CHANNELS]);
-            out
+            let sx = (a * x + b * y + c) / den;
+            let sy = (d * x + e * y + f) / den;
+            sample_interpolated(
+                pixels,
+                doc_width,
+                (width, height),
+                (sx as f32, sy as f32),
+                interpolation,
+            )
         })
     }
 
@@ -25527,6 +25660,16 @@ impl Document {
     /// two pixels wide or tall, or a locked or unknown layer. Not
     /// recorded for Transform Again.
     pub fn warp(&mut self, id: LayerId, mesh: &WarpMesh) -> Result<Option<Rect>, String> {
+        self.warp_with(id, mesh, Interpolation::Nearest)
+    }
+
+    /// [`Self::warp`] resampling by `interpolation` (README Phase 359).
+    pub fn warp_with(
+        &mut self,
+        id: LayerId,
+        mesh: &WarpMesh,
+        interpolation: Interpolation,
+    ) -> Result<Option<Rect>, String> {
         if mesh.points.iter().flatten().any(|v| !v.is_finite()) {
             return Err("Warp's control points must be finite coordinates.".to_string());
         }
@@ -25551,15 +25694,13 @@ impl Document {
             let Some((u, v)) = mesh.invert(x, y, (x - x0) / w, (y - y0) / h) else {
                 return [0; CHANNELS];
             };
-            let sx = (x0 + u * w).round() as i64;
-            let sy = (y0 + v * h).round() as i64;
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
-            }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&pixels[base..base + CHANNELS]);
-            out
+            sample_interpolated(
+                pixels,
+                doc_width,
+                (width, height),
+                ((x0 + u * w) as f32, (y0 + v * h) as f32),
+                interpolation,
+            )
         })
     }
 
@@ -25587,6 +25728,17 @@ impl Document {
         id: LayerId,
         angle: f32,
         tilt: f32,
+    ) -> Result<Option<Rect>, String> {
+        self.cylindrical_warp_with(id, angle, tilt, Interpolation::Nearest)
+    }
+
+    /// [`Self::cylindrical_warp`] resampling by `interpolation` (README Phase 359).
+    pub fn cylindrical_warp_with(
+        &mut self,
+        id: LayerId,
+        angle: f32,
+        tilt: f32,
+        interpolation: Interpolation,
     ) -> Result<Option<Rect>, String> {
         if !(angle.is_finite() && angle > 0.0 && angle <= 180.0) {
             return Err("The cylinder's arc must be over 0 and at most 180 degrees.".to_string());
@@ -25620,16 +25772,16 @@ impl Document {
             }
             let theta = q.asin();
             let t = 0.5 + theta / arc;
-            let sx = (x0 + t * w).round() as i64;
+            let sx = x0 + t * w;
             let lift = radius * (1.0 - theta.cos()) * sin_tilt;
-            let sy = (cy + (row as f64 + lift - cy) / cos_tilt).round() as i64;
-            if sx < 0 || sy < 0 || sx >= width || sy >= height {
-                return [0; CHANNELS];
-            }
-            let base = (sy as usize * doc_width + sx as usize) * CHANNELS;
-            let mut out = [0u8; CHANNELS];
-            out.copy_from_slice(&pixels[base..base + CHANNELS]);
-            out
+            let sy = cy + (row as f64 + lift - cy) / cos_tilt;
+            sample_interpolated(
+                pixels,
+                doc_width,
+                (width, height),
+                (sx as f32, sy as f32),
+                interpolation,
+            )
         })
     }
 
@@ -26279,6 +26431,18 @@ impl Document {
         id: LayerId,
         options: &PuppetWarp,
     ) -> Result<Option<Rect>, String> {
+        self.puppet_warp_with(id, options, Interpolation::Nearest)
+    }
+
+    /// [`Self::puppet_warp`] resampling by `interpolation`: every deformed
+    /// triangle's pixels read their barycentric source position as a
+    /// fraction rather than rounded (README Phase 359).
+    pub fn puppet_warp_with(
+        &mut self,
+        id: LayerId,
+        options: &PuppetWarp,
+        interpolation: Interpolation,
+    ) -> Result<Option<Rect>, String> {
         if options.pins.is_empty() {
             return Err("Puppet Warp needs at least one pin.".to_string());
         }
@@ -26307,7 +26471,7 @@ impl Document {
         let mut order: Vec<usize> = (0..mesh.triangles.len()).collect();
         order.sort_by_key(|&k| (depth_of(&mesh.triangles[k]), k));
         let (width, height) = (self.width as usize, self.height as usize);
-        let mut sources: Vec<Option<(usize, usize)>> = vec![None; width * height];
+        let mut sources: Vec<Option<(f32, f32)>> = vec![None; width * height];
         for k in order {
             let [ia, ib, ic] = mesh.triangles[k];
             let [(ax, ay), (bx, by), (cx, cy)] =
@@ -26330,22 +26494,16 @@ impl Document {
                         continue;
                     }
                     let [sa, sb, sc] = [ia, ib, ic].map(|i| mesh.vertices[i]);
-                    let sx = (l1 * sa[0] as f64 + l2 * sb[0] as f64 + l3 * sc[0] as f64).round();
-                    let sy = (l1 * sa[1] as f64 + l2 * sb[1] as f64 + l3 * sc[1] as f64).round();
-                    sources[y * width + x] =
-                        (sx >= 0.0 && sy >= 0.0 && sx < width as f64 && sy < height as f64)
-                            .then_some((sx as usize, sy as usize));
+                    let sx = l1 * sa[0] as f64 + l2 * sb[0] as f64 + l3 * sc[0] as f64;
+                    let sy = l1 * sa[1] as f64 + l2 * sb[1] as f64 + l3 * sc[1] as f64;
+                    sources[y * width + x] = Some((sx as f32, sy as f32));
                 }
             }
         }
+        let (w64, h64) = (width as i64, height as i64);
         self.filter_pixels(id, move |pixels, row, col| {
             match sources[row as usize * width + col as usize] {
-                Some((sx, sy)) => {
-                    let base = (sy * width + sx) * CHANNELS;
-                    let mut out = [0u8; CHANNELS];
-                    out.copy_from_slice(&pixels[base..base + CHANNELS]);
-                    out
-                }
+                Some(at) => sample_interpolated(pixels, width, (w64, h64), at, interpolation),
                 None => [0; CHANNELS],
             }
         })
@@ -26370,6 +26528,17 @@ impl Document {
         horizontal: f32,
         vertical: f32,
     ) -> Result<Option<Rect>, String> {
+        self.perspective_with(id, horizontal, vertical, Interpolation::Nearest)
+    }
+
+    /// [`Self::perspective`] resampling by `interpolation` (README Phase 359).
+    pub fn perspective_with(
+        &mut self,
+        id: LayerId,
+        horizontal: f32,
+        vertical: f32,
+        interpolation: Interpolation,
+    ) -> Result<Option<Rect>, String> {
         if !(horizontal.is_finite() && vertical.is_finite()) {
             return Err("Perspective insets must be finite numbers of pixels.".to_string());
         }
@@ -26389,7 +26558,7 @@ impl Document {
             corners[1][1] -= vertical;
             corners[2][1] += vertical;
         }
-        self.distort(id, corners)
+        self.distort_with(id, corners, interpolation)
     }
 
     /// Camera Raw Filter > Geometry, Manual mode: the panel's sliders as
@@ -26581,6 +26750,13 @@ pub enum Interpolation {
     Nearest,
     Bilinear,
     Bicubic,
+}
+
+impl Default for Interpolation {
+    /// Photoshop's own Image Interpolation preference default.
+    fn default() -> Self {
+        Interpolation::Bicubic
+    }
 }
 
 impl Default for FreeTransform {
@@ -54958,6 +55134,75 @@ colorspaces:
             *point = [(n % 4) as f32, (n / 4) as f32];
         }
         WarpMesh { points }
+    }
+
+    #[test]
+    fn the_warp_family_resamples_by_interpolation() {
+        // A 4x2 ramp, opaque: 10, 20, 30, 40 in both rows. The identity
+        // corners under bicubic leave every byte alone: the Catmull-Rom
+        // kernel is exact at integer positions.
+        let mut doc = Document::new(4, 2).unwrap();
+        let mut ramp = Vec::new();
+        for _ in 0..2 {
+            ramp.extend_from_slice(&[
+                10, 10, 10, 255, 20, 20, 20, 255, 30, 30, 30, 255, 40, 40, 40, 255,
+            ]);
+        }
+        let id = doc.add_layer("ramp", &ramp, 4, 2).unwrap();
+        let before = ramp.clone();
+        doc.distort_with(
+            id,
+            [[0.0, 0.0], [3.0, 0.0], [3.0, 1.0], [0.0, 1.0]],
+            Interpolation::Bicubic,
+        )
+        .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        // Corners a half pixel to the left read the source half a pixel to
+        // the right of each destination: bilinear averages neighbours (15,
+        // 25, 35); the last column reads 3.5, past the last pixel's centre,
+        // which the sampler counts as off the canvas — transparent, as
+        // nearest (rounding up to a pixel that is not there) leaves it too.
+        let shifted = [[-0.5, 0.0], [2.5, 0.0], [2.5, 1.0], [-0.5, 1.0]];
+        let mut linear = Document::new(4, 2).unwrap();
+        let lid = linear.add_layer("ramp", &ramp, 4, 2).unwrap();
+        linear
+            .distort_with(lid, shifted, Interpolation::Bilinear)
+            .unwrap();
+        let p = &linear.layers()[0].pixels;
+        assert_eq!(&p[0..4], [15, 15, 15, 255]);
+        assert_eq!(&p[4..8], [25, 25, 25, 255]);
+        assert_eq!(&p[8..12], [35, 35, 35, 255]);
+        assert_eq!(&p[12..16], [0, 0, 0, 0]);
+        let mut nearest = Document::new(4, 2).unwrap();
+        let nid = nearest.add_layer("ramp", &ramp, 4, 2).unwrap();
+        nearest.distort(nid, shifted).unwrap();
+        let p = &nearest.layers()[0].pixels;
+        assert_eq!(&p[0..4], [20, 20, 20, 255]);
+        assert_eq!(&p[12..16], [0, 0, 0, 0]);
+        // Perspective with no inset, the identity warp mesh, a one-pin
+        // puppet warp at rest, and a wide cylinder all leave a bicubic
+        // resample byte-identical to the layer.
+        let mut doc = Document::new(4, 2).unwrap();
+        let id = doc.add_layer("ramp", &ramp, 4, 2).unwrap();
+        doc.perspective_with(id, 0.0, 0.0, Interpolation::Bicubic)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        let mesh = doc.warp_mesh(id, WarpStyle::Custom, 0.0, 0.0, 0.0).unwrap();
+        doc.warp_with(id, &mesh, Interpolation::Bicubic).unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
+        let pins = PuppetWarp {
+            mode: PuppetMode::Normal,
+            density: PuppetDensity::Normal,
+            expansion: 0,
+            pins: vec![PuppetPin {
+                source: [1.0, 0.5],
+                target: [1.0, 0.5],
+                depth: 0,
+            }],
+        };
+        doc.puppet_warp_with(id, &pins, Interpolation::Bicubic)
+            .unwrap();
+        assert_eq!(doc.layers()[0].pixels, before);
     }
 
     #[test]
