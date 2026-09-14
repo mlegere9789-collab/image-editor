@@ -12,6 +12,13 @@ import MenuBar, { toolbarEntries } from "./MenuBar";
 import Tour from "./Tour";
 import { documentPoint, percentOf, pixelDistance, ringStyle } from "./blurPins";
 import {
+  angleAt,
+  handleDragToPercent,
+  referencePivot,
+  rotateDragToDegrees,
+  scaledBounds,
+} from "./freeTransformHandles";
+import {
   BRUSH_TOOLS,
   optionsRule,
   PEOPLE_TOOLS,
@@ -1827,6 +1834,33 @@ export default function App() {
     clientY: number;
     scaleX: number;
     scaleY: number;
+  } | null>(null);
+  // Edit > Free Transform's own on-canvas handles: the layer's opaque
+  // bounds the moment the dialog opened (widthPercent/heightPercent always
+  // scale from this fixed original, never a running value), and the two
+  // drags -- corner/edge handles for scale, just outside a corner for
+  // rotate -- each tracked the same shape as Show Transform Controls' own
+  // `handleDrag`/`rotateDrag` above, but updating `freeTransform` directly
+  // instead of committing a command per pointermove.
+  const [ftBounds, setFtBounds] = useState<{
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+  } | null>(null);
+  const ftHandleDrag = useRef<{
+    handle: string;
+    start: { widthPercent: number; heightPercent: number };
+    clientX: number;
+    clientY: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
+  const ftRotateDrag = useRef<{
+    centerX: number;
+    centerY: number;
+    startAngle: number;
+    baseDegrees: number;
   } | null>(null);
   const [magneticWidth, setMagneticWidth] = useState(10);
   const [magneticContrast, setMagneticContrast] = useState(32);
@@ -9803,6 +9837,142 @@ export default function App() {
       cancelled = true;
     };
   }, [showTransformControls, tool, selectedId, document, generation]);
+
+  // Free Transform's own bounds: fetched once when the dialog opens (not
+  // re-fetched on every keystroke or drag) so widthPercent/heightPercent
+  // keep meaning "percent of what the layer was when I opened this dialog"
+  // even after several handle drags in a row.
+  useEffect(() => {
+    if (!showFreeTransformDialog || selectedId === null) {
+      setFtBounds(null);
+      return;
+    }
+    let cancelled = false;
+    void invoke<{ x0: number; y0: number; x1: number; y1: number } | null>(
+      "layer_bounds",
+      { id: selectedId },
+    )
+      .then((bounds) => {
+        if (!cancelled) setFtBounds(bounds);
+      })
+      .catch(() => {
+        if (!cancelled) setFtBounds(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showFreeTransformDialog, selectedId]);
+
+  const ftPivot = useCallback(() => {
+    if (!ftBounds || !document) return null;
+    return referencePivot(ftReference, ftBounds, document);
+  }, [ftBounds, ftReference, document]);
+
+  const startFtHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>, handle: string) => {
+      if (!document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      ftHandleDrag.current = {
+        handle,
+        start: {
+          widthPercent: freeTransform.widthPercent,
+          heightPercent: freeTransform.heightPercent,
+        },
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scaleX: document.width / rect.width,
+        scaleY: document.height / rect.height,
+      };
+    },
+    [document, freeTransform.widthPercent, freeTransform.heightPercent],
+  );
+
+  const moveFtHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = ftHandleDrag.current;
+      const pivot = ftPivot();
+      if (!drag || !pivot || !ftBounds) return;
+      const dx = (event.clientX - drag.clientX) * drag.scaleX;
+      const dy = (event.clientY - drag.clientY) * drag.scaleY;
+      const next = handleDragToPercent(
+        ftBounds,
+        pivot,
+        drag.handle,
+        drag.start,
+        dx,
+        dy,
+        ftMaintainAspect,
+      );
+      setFreeTransform((transform) => ({ ...transform, ...next }));
+    },
+    [ftPivot, ftBounds, ftMaintainAspect],
+  );
+
+  const endFtHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      ftHandleDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
+  const startFtRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const pivot = ftPivot();
+      if (!pivot || !document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const center = {
+        x: rect.left + (pivot.x / document.width) * rect.width,
+        y: rect.top + (pivot.y / document.height) * rect.height,
+      };
+      ftRotateDrag.current = {
+        centerX: center.x,
+        centerY: center.y,
+        startAngle: angleAt(event.clientX, event.clientY, center),
+        baseDegrees: freeTransform.degrees,
+      };
+    },
+    [ftPivot, document, freeTransform.degrees],
+  );
+
+  const moveFtRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = ftRotateDrag.current;
+      if (!drag) return;
+      const currentAngle = angleAt(event.clientX, event.clientY, {
+        x: drag.centerX,
+        y: drag.centerY,
+      });
+      const degrees = rotateDragToDegrees(
+        drag.baseDegrees,
+        drag.startAngle,
+        currentAngle,
+        event.shiftKey,
+      );
+      setFreeTransform((transform) => ({ ...transform, degrees }));
+    },
+    [],
+  );
+
+  const endFtRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      ftRotateDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
 
   /** A handle drag's new rectangle: the edges that handle owns follow the
    * pointer, rounded to whole pixels and kept at least one pixel wide. */
@@ -20385,7 +20555,9 @@ export default function App() {
             <p className="modal__hint">
               Applied in order — scale, rotate, skew, move — about the reference
               point (the canvas centre by default), as a single undoable edit.
-              Stages left at their defaults are skipped.
+              Stages left at their defaults are skipped. Drag the box's own
+              handles on the canvas to scale, or just outside a corner to rotate
+              — the fields below track along either way.
             </p>
             <label className="control control--row">
               <span className="control__label">Reference point</span>
@@ -36315,6 +36487,82 @@ export default function App() {
                   )}
                 </div>
               )}
+              {showFreeTransformDialog &&
+                ftBounds &&
+                document &&
+                (() => {
+                  const pivot = referencePivot(ftReference, ftBounds, document);
+                  const preview = scaledBounds(
+                    ftBounds,
+                    pivot,
+                    freeTransform.widthPercent,
+                    freeTransform.heightPercent,
+                  );
+                  // The reference point's own position on the preview box,
+                  // as a percentage of the box -- CSS `transform-origin`,
+                  // so rotating about anything other than the box's centre
+                  // (Top Left, Right, ...) previews correctly too. The
+                  // pivot is a fixed point of `scaledBounds` by
+                  // construction, so this ratio holds at any percent.
+                  const boxWidth = preview.x1 - preview.x0;
+                  const boxHeight = preview.y1 - preview.y0;
+                  const originX =
+                    boxWidth !== 0
+                      ? ((pivot.x - preview.x0) / boxWidth) * 100
+                      : 50;
+                  const originY =
+                    boxHeight !== 0
+                      ? ((pivot.y - preview.y0) / boxHeight) * 100
+                      : 50;
+                  return (
+                    <div
+                      className="transform-box"
+                      style={{
+                        ...overlayStyle(preview, document),
+                        transform:
+                          freeTransform.degrees !== 0
+                            ? `rotate(${freeTransform.degrees}deg)`
+                            : undefined,
+                        transformOrigin: `${originX}% ${originY}%`,
+                      }}
+                    >
+                      {["nw", "ne", "se", "sw"].map((corner) => (
+                        <div
+                          key={`ft-rotate-${corner}`}
+                          className={`transform-rotate transform-rotate--${corner}`}
+                          role="slider"
+                          aria-label={`Rotate from the ${corner} corner`}
+                          aria-valuenow={Math.round(freeTransform.degrees)}
+                          tabIndex={-1}
+                          title="Drag to rotate about the reference point (Shift snaps to 15°)"
+                          onPointerDown={startFtRotateDrag}
+                          onPointerMove={moveFtRotateDrag}
+                          onPointerUp={endFtRotateDrag}
+                          onPointerCancel={endFtRotateDrag}
+                        />
+                      ))}
+                      {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map(
+                        (handle) => (
+                          <div
+                            key={`ft-${handle}`}
+                            className={`transform-handle transform-handle--${handle}`}
+                            role="slider"
+                            aria-label={`Free Transform handle ${handle}`}
+                            aria-valuenow={0}
+                            tabIndex={-1}
+                            title="Drag to scale about the reference point"
+                            onPointerDown={(event) =>
+                              startFtHandleDrag(event, handle)
+                            }
+                            onPointerMove={moveFtHandleDrag}
+                            onPointerUp={endFtHandleDrag}
+                            onPointerCancel={endFtHandleDrag}
+                          />
+                        ),
+                      )}
+                    </div>
+                  );
+                })()}
               {(showFieldBlurDialog ||
                 showIrisBlurDialog ||
                 showTiltShiftDialog) &&

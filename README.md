@@ -22769,6 +22769,67 @@ without error; three screenshots checked by eye.
 
 Tests: 1894 Rust (1892 → 1894), 22 frontend.
 
+## Phase 385 — Free Transform's own on-canvas handles
+
+The plan's Phase D, largest-impact item first: transform handles on
+canvas. Move's own Show Transform Controls already dragged a box's
+handles to resize and rotate it; Edit &gt; Free Transform (Ctrl+T) — the
+one every other transform (Distort, Warp, Perspective, Skew) is
+compared against — still only had the dialog's own numeric Width %/
+Height %/Rotate fields, a documented scope cut on the Move Tool,
+Distort, and Warp rows alike. `src/freeTransformHandles.ts` is the
+pure geometry behind fixing that, shared with nothing move-tool-
+specific so it can sit on top of `freeTransform`'s own state instead of
+committing a command per drag: `referencePivot` resolves the dialog's
+own Reference Point option (Canvas Centre or one of the nine
+`ReferencePoint`s) to the exact document-pixel point
+`Document::free_transform`'s own `match transform.reference` resolves
+it to, so a handle drag's preview always lines up with what Apply will
+actually do; `scaledBounds` places the layer's original bounds once
+scaled about that pivot — the same inverse mapping `scale_about` applies
+per pixel, applied here to just the four corners since the pivot is a
+fixed point of it; `handleDragToPercent` solves, per edge or corner
+handle, for the new Width %/Height % that keeps the pivot fixed and
+moves only the edge(s) that handle owns by the dragged document-pixel
+delta (a locked aspect ratio takes the larger of a corner's two axis
+changes for both, same as the options bar's own checkbox already
+implied); `angleAt`/`rotateDragToDegrees` are Show Transform Controls'
+own rotate-handle arithmetic, pulled out pure. App.tsx wires this to
+the dialog: opening it fetches the layer's bounds once (so every
+percent stays relative to what the layer was when the dialog opened,
+however many drags follow), eight handles and four rotate corners are
+drawn on the canvas the same way Field Blur's own pins already are
+alongside their dialog, and CSS `transform-origin` is set to the
+pivot's own position on the box — not assumed to be its centre — so
+rotating about Top Left or Right previews exactly like it will apply.
+Every numeric field still works and stays in sync either way; this is
+an on-canvas alternative to them, not a replacement.
+
+**Verified.** Eight unit tests in `freeTransformHandles.test.ts`, hand-
+computed: `referencePivot` against a 100×200 layer at (100,100)-(200,300)
+on a 400×400 canvas — Canvas Centre (399/2, 399/2) = (199.5, 199.5),
+ignoring the layer entirely; Top Left the layer's own (100, 100); Bottom
+Right its own (199, 299) (bounds are exclusive, so the last real pixel
+is x1−1/y1−1); Center (149.5, 199.5). `scaledBounds` at 200% about that
+same (149.5, 199.5) centre: each edge exactly twice its original
+distance from the pivot. `handleDragToPercent` with the pivot pinned to
+Top Left (100, 100) — on the layer's own w/n edges: dragging "e" (which
+starts 100px from the pivot) by +50px gives exactly 150% width; dragging
+"w", whose edge sits on the pivot itself, is a no-op (no lever to pull);
+a corner drag "se" (+50, +40) combines both axes independently, 150%/
+120%; the same drag with Maintain Aspect on takes the larger, 150%/150%,
+while a single edge handle ("e" with a +999 y-delta) ignores the lock
+entirely, still 150%/100% — it never owned the y-axis to begin with. A
+fourth case floors the result at 1% rather than going negative on an
+extreme shrink. `angleAt`/`rotateDragToDegrees` cross-checked against
+Show Transform Controls' own values (0°/90°/180°/−90° at the four
+compass points; a 45° base plus a 15°-to-30° sweep is exactly 60°; Shift
+snaps 22°→15° and 23°→30°). `npm run build` and `npx tsc --noEmit`
+clean; all 30 frontend tests (the existing 22 plus these 8) pass.
+
+Tests: 1894 Rust (unchanged — no backend command changed shape), 30
+frontend (22 → 30).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
