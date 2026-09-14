@@ -22648,6 +22648,49 @@ the Pen tools' own path rendering; four screenshots checked by eye.
 
 Tests: 1888 Rust (1887 → 1888), 22 frontend.
 
+## Phase 382 — Match Color's Luminance, Color Intensity and Neutralize
+
+One dialog row of section D. `Document::match_color_with` takes
+Photoshop's three remaining Match Color controls, the original
+`match_color` now calling it with `100, 100, false`. Luminance
+(`0..=200` percent) scales the matched colour's overall brightness
+before Fade blends it in — Photoshop's own brightness knob on the
+transferred result, not the target's own untouched pixel. Color
+Intensity (`0..=200` percent) scales how far the matched colour sits
+from its own per-pixel grey — `channel = grey + (channel − grey) ·
+color_intensity / 100`, `grey` that pixel's own matched-channel
+average — pulling the match toward monochrome below `100` and past
+its own transfer above it. Neutralize offsets every confined pixel's
+channels so their means across the whole region equal one another —
+`offset[c] = grand_mean − channel_mean[c]` over the matched (Luminance-
+and Color-Intensity-adjusted) pixels before Fade — removing any overall
+colour cast the match itself introduced, the way Photoshop's own
+checkbox reads. The three knobs are computed in one pass before the
+final write, so Neutralize's own aggregate is over exactly the pixels
+Luminance and Color Intensity already touched. `color_transfer` and
+`harmonize` keep calling the plain three-argument path, their own
+already-documented scope cut unaffected.
+
+**Verified.** One Rust test,
+`match_color_luminance_color_intensity_and_neutralize`, on a 1×1
+target (10, 20, 30) — its own standard deviation is 0 over one sample,
+so the matched colour always lands exactly on the source's mean — and
+a 1×1 source (60, 90, 30): Luminance 50% gives (30, 45, 15); Color
+Intensity 50% at grey 60 gives (60, 75, 45); Color Intensity 200%
+gives (60, 120, 0) after clamping; Neutralize on the single confined
+pixel — whose own channel means are the matched colour itself, grand
+mean 60 — gives exactly (60, 60, 60), alpha untouched; out-of-range
+Luminance errors, and the plain `match_color` still gives (60, 90, 30).
+In Chromium against the built frontend: the dialog shows Luminance,
+Color Intensity and Neutralize alongside Fade, and Apply sends
+`match_color` with `luminance: 150, colorIntensity: 60, neutralize:
+true`. On the real app under Xvfb: a layer filled solid white matched
+against a solid black layer (Source Layer, Fade 100%) turned exactly
+black through the real IPC, confirming the command's real effect end
+to end; three screenshots checked by eye.
+
+Tests: 1889 Rust (1888 → 1889), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

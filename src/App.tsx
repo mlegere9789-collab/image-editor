@@ -2392,6 +2392,9 @@ export default function App() {
     number | null
   >(null);
   const [matchColorFade, setMatchColorFade] = useState(100);
+  const [matchColorLuminance, setMatchColorLuminance] = useState(100);
+  const [matchColorIntensity, setMatchColorIntensity] = useState(100);
+  const [matchColorNeutralize, setMatchColorNeutralize] = useState(false);
   const [showHarmonizeDialog, setShowHarmonizeDialog] = useState(false);
   const [harmonizeFade, setHarmonizeFade] = useState(100);
   const [showJpegArtifactsRemovalDialog, setShowJpegArtifactsRemovalDialog] =
@@ -7518,9 +7521,20 @@ export default function App() {
       id: selectedId,
       sourceLayerId: matchColorSourceLayerId,
       fade: matchColorFade,
+      luminance: matchColorLuminance,
+      colorIntensity: matchColorIntensity,
+      neutralize: matchColorNeutralize,
     });
     setShowMatchColorDialog(false);
-  }, [runCommand, selectedId, matchColorSourceLayerId, matchColorFade]);
+  }, [
+    runCommand,
+    selectedId,
+    matchColorSourceLayerId,
+    matchColorFade,
+    matchColorLuminance,
+    matchColorIntensity,
+    matchColorNeutralize,
+  ]);
 
   // Neural Filters > Harmonize: Match Color's own statistical transfer,
   // with the "source" computed as the flattened composite of every other
@@ -16166,6 +16180,46 @@ export default function App() {
                 value={matchColorFade}
                 onChange={(event) =>
                   setMatchColorFade(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Luminance
+                <span className="control__value">{matchColorLuminance}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={matchColorLuminance}
+                onChange={(event) =>
+                  setMatchColorLuminance(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Color Intensity
+                <span className="control__value">{matchColorIntensity}%</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={200}
+                value={matchColorIntensity}
+                onChange={(event) =>
+                  setMatchColorIntensity(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Neutralize</span>
+              <input
+                type="checkbox"
+                checked={matchColorNeutralize}
+                onChange={(event) =>
+                  setMatchColorNeutralize(event.target.checked)
                 }
               />
             </label>

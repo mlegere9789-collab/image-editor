@@ -2878,16 +2878,27 @@ fn auto_contrast(
 }
 
 /// Image > Adjustments > Match Color on layer `id`, transferring
-/// `source_layer_id`'s own per-channel statistics.
+/// `source_layer_id`'s own per-channel statistics, with Luminance, Color
+/// Intensity, and Neutralize.
 #[tauri::command]
 fn match_color(
     state: State<'_, AppState>,
     id: LayerId,
     source_layer_id: LayerId,
     fade: u32,
+    luminance: Option<u32>,
+    color_intensity: Option<u32>,
+    neutralize: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.match_color(id, source_layer_id, fade)
+        document.match_color_with(
+            id,
+            source_layer_id,
+            fade,
+            luminance.unwrap_or(100),
+            color_intensity.unwrap_or(100),
+            neutralize.unwrap_or(false),
+        )
     })
 }
 

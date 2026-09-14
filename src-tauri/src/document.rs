@@ -14763,10 +14763,9 @@ impl Document {
     /// selection (or the whole layer, with none). This is a real,
     /// well-established statistical technique (mean/standard-deviation
     /// transfer), not a guess at Photoshop's own proprietary algorithm —
-    /// Photoshop's own separate Luminance and Color Intensity sliders,
-    /// its Neutralize checkbox, and its Image Statistics panel (loading
-    /// saved source statistics rather than reading a live layer) are all
-    /// a documented scope cut, folded into this one `fade` control.
+    /// Its Image Statistics panel (loading saved source statistics rather
+    /// than reading a live layer) is a documented scope cut; Luminance,
+    /// Color Intensity, and Neutralize are [`Self::match_color_with`].
     /// `fade` is Photoshop's own `0..=100` dialog range. Alpha untouched.
     pub fn match_color(
         &mut self,
@@ -14774,22 +14773,68 @@ impl Document {
         source_layer_id: LayerId,
         fade: u32,
     ) -> Result<Option<Rect>, String> {
-        let source_pixels = self.layer(source_layer_id)?.pixels.clone();
-        self.match_color_to_pixels(id, &source_pixels, fade)
+        self.match_color_with(id, source_layer_id, fade, 100, 100, false)
     }
 
-    /// [`Self::match_color`]'s own statistical transfer, taking the
+    /// [`Self::match_color`] with Photoshop's Luminance, Color Intensity,
+    /// and Neutralize. `luminance` (`0..=200` percent, `100` the identity)
+    /// scales the matched colour's overall brightness before it is blended
+    /// in by `fade`, so Photoshop's own brightness knob on the transferred
+    /// result. `color_intensity` (`0..=200` percent, `100` the identity)
+    /// scales how far the matched colour sits from its own per-pixel grey
+    /// — `channel = grey + (channel − grey) * color_intensity / 100`,
+    /// where `grey` is that pixel's own matched-channel average — pulling
+    /// the match toward monochrome below `100` and past its own transfer
+    /// above it, Photoshop's own saturation knob on the result.
+    /// `neutralize` removes any overall colour cast the *matched* pixels
+    /// (over the confined region, before `fade`) carry: each channel is
+    /// offset so its own mean across those pixels equals the mean of all
+    /// three channels' means, a colour-neutral aggregate the way
+    /// Photoshop's checkbox reads. Errors as [`Self::match_color`] does,
+    /// plus `luminance` or `color_intensity` outside `0..=200`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn match_color_with(
+        &mut self,
+        id: LayerId,
+        source_layer_id: LayerId,
+        fade: u32,
+        luminance: u32,
+        color_intensity: u32,
+        neutralize: bool,
+    ) -> Result<Option<Rect>, String> {
+        let source_pixels = self.layer(source_layer_id)?.pixels.clone();
+        self.match_color_to_pixels(
+            id,
+            &source_pixels,
+            fade,
+            luminance,
+            color_intensity,
+            neutralize,
+        )
+    }
+
+    /// [`Self::match_color_with`]'s own statistical transfer, taking the
     /// source's pixels directly instead of looking up a named layer —
     /// shared with [`Self::harmonize`], whose "source" is a computed
     /// composite rather than any one layer.
+    #[allow(clippy::too_many_arguments)]
     fn match_color_to_pixels(
         &mut self,
         id: LayerId,
         source_pixels: &[u8],
         fade: u32,
+        luminance: u32,
+        color_intensity: u32,
+        neutralize: bool,
     ) -> Result<Option<Rect>, String> {
         if fade > 100 {
             return Err("Match Color fade must be between 0 and 100.".to_string());
+        }
+        if luminance > 200 || color_intensity > 200 {
+            return Err(
+                "Match Color's Luminance and Color Intensity must be between 0 and 200."
+                    .to_string(),
+            );
         }
         let source_stats = channel_mean_std(source_pixels);
         let selection = self.selection.clone();
@@ -14802,6 +14847,15 @@ impl Document {
         let target_stats = channel_mean_std(&layer.pixels);
         let source = layer.pixels.clone();
         let frac = fade as f32 / 100.0;
+        let lum_scale = luminance as f32 / 100.0;
+        let ci_scale = color_intensity as f32 / 100.0;
+        // The matched colour (Luminance and Color Intensity already
+        // applied) of every confined pixel, for Neutralize's own
+        // aggregate — and reused for the actual write below.
+        let mut matched_of: std::collections::HashMap<(u32, u32), [f32; 3]> =
+            std::collections::HashMap::new();
+        let mut channel_sum = [0f64; 3];
+        let mut count = 0u64;
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
                 let keep = selection
@@ -14811,15 +14865,37 @@ impl Document {
                     continue;
                 }
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
+                let mut matched = [0f32; 3];
                 for c in 0..3 {
                     let (tmean, tstd) = target_stats[c];
                     let (smean, sstd) = source_stats[c];
                     let v = source[base + c] as f32;
                     let normalized = if tstd == 0.0 { 0.0 } else { (v - tmean) / tstd };
-                    let matched = normalized * sstd + smean;
-                    let final_value = v * (1.0 - frac) + matched * frac;
-                    layer.pixels[base + c] = final_value.round().clamp(0.0, 255.0) as u8;
+                    matched[c] = (normalized * sstd + smean) * lum_scale;
                 }
+                let grey = (matched[0] + matched[1] + matched[2]) / 3.0;
+                for c in 0..3 {
+                    matched[c] = grey + (matched[c] - grey) * ci_scale;
+                    channel_sum[c] += matched[c] as f64;
+                }
+                count += 1;
+                matched_of.insert((row, col), matched);
+            }
+        }
+        let neutral_offset = if neutralize && count > 0 {
+            let channel_mean: [f64; 3] = std::array::from_fn(|c| channel_sum[c] / count as f64);
+            let grand_mean = (channel_mean[0] + channel_mean[1] + channel_mean[2]) / 3.0;
+            std::array::from_fn(|c| (grand_mean - channel_mean[c]) as f32)
+        } else {
+            [0.0; 3]
+        };
+        for (&(row, col), matched) in &matched_of {
+            let base = (row as usize * doc_width + col as usize) * CHANNELS;
+            for c in 0..3 {
+                let v = source[base + c] as f32;
+                let matched_c = matched[c] + neutral_offset[c];
+                let final_value = v * (1.0 - frac) + matched_c * frac;
+                self.layer_mut(id)?.pixels[base + c] = final_value.round().clamp(0.0, 255.0) as u8;
             }
         }
         Ok(Some(bounds))
@@ -14856,7 +14932,7 @@ impl Document {
             );
         }
         let source_pixels = crate::composite::flatten_subset(self, &other_indices).pixels;
-        self.match_color_to_pixels(id, &source_pixels, fade)
+        self.match_color_to_pixels(id, &source_pixels, fade, 100, 100, false)
     }
 
     /// Neural Filters > JPEG Artifacts Removal on layer `id`: a classic
@@ -32012,6 +32088,60 @@ mod tests {
         doc.match_color(target_id, source_id, 100).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&[p[0], p[4], p[8], p[12]], &[120, 120, 120, 120]);
+    }
+
+    #[test]
+    fn match_color_luminance_color_intensity_and_neutralize() {
+        // A 1x1 target (10, 20, 30) -- std 0 over one sample, so the
+        // matched colour always lands exactly on the source's own mean --
+        // and a 1x1 source (60, 90, 30), so matched (Luminance 100,
+        // Color Intensity 100) is exactly (60, 90, 30).
+        let mut doc = Document::new(1, 1).unwrap();
+        let target_id = doc.add_layer("t", &[10, 20, 30, 255], 1, 1).unwrap();
+        let source_id = doc.add_layer("s", &[60, 90, 30, 255], 1, 1).unwrap();
+
+        // Luminance 50%: the matched colour scales toward black before
+        // Color Intensity (100%, the identity) and Fade (100%) apply.
+        let mut d = doc.clone();
+        d.match_color_with(target_id, source_id, 100, 50, 100, false)
+            .unwrap();
+        assert_eq!(&d.layers()[0].pixels[..3], &[30, 45, 15]);
+
+        // Color Intensity 50% at Luminance 100%: grey = (60+90+30)/3 = 60,
+        // each channel pulled halfway toward it: R 60, G 75, B 45.
+        let mut d = doc.clone();
+        d.match_color_with(target_id, source_id, 100, 100, 50, false)
+            .unwrap();
+        assert_eq!(&d.layers()[0].pixels[..3], &[60, 75, 45]);
+
+        // Color Intensity 200%: doubles each channel's own distance from
+        // that same grey: R 60, G 120, B 0.
+        let mut d = doc.clone();
+        d.match_color_with(target_id, source_id, 100, 100, 200, false)
+            .unwrap();
+        assert_eq!(&d.layers()[0].pixels[..3], &[60, 120, 0]);
+
+        // Neutralize on a single confined pixel: its own channel means
+        // are the matched colour itself (60, 90, 30), grand mean 60, so
+        // the offsets (0, -30, 30) land the result exactly on grey (60,
+        // 60, 60) -- the alpha stays untouched.
+        let mut d = doc.clone();
+        d.match_color_with(target_id, source_id, 100, 100, 100, true)
+            .unwrap();
+        assert_eq!(d.layers()[0].pixels, vec![60, 60, 60, 255]);
+
+        // Out-of-range Luminance/Color Intensity error; the plain
+        // match_color keeps its own 100/100/false defaults.
+        assert!(doc
+            .match_color_with(target_id, source_id, 100, 201, 100, false)
+            .unwrap_err()
+            .contains("200"));
+        assert!(doc
+            .match_color_with(target_id, source_id, 100, 100, 0, false)
+            .is_ok());
+        let mut d = doc.clone();
+        d.match_color(target_id, source_id, 100).unwrap();
+        assert_eq!(&d.layers()[0].pixels[..3], &[60, 90, 30]);
     }
 
     #[test]
