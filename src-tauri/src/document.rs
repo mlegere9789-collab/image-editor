@@ -66,6 +66,33 @@ pub enum TexturizerTexture {
     Sandstone,
 }
 
+/// Filter > Distort > Spherize's Mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SpherizeMode {
+    Normal,
+    HorizontalOnly,
+    VerticalOnly,
+}
+
+/// Filter > Distort > Wave's Type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WaveType {
+    Sine,
+    Triangle,
+    Square,
+}
+
+/// Filter > Other > Offset's Undefined Areas.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OffsetFill {
+    WrapAround,
+    RepeatEdgePixels,
+    Transparent,
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -3808,6 +3835,43 @@ fn sample_nearest(
     let mut out = [0u8; CHANNELS];
     out.copy_from_slice(&source[base..base + CHANNELS]);
     out
+}
+
+/// [`sample_nearest`]'s Wrap Around twin: a coordinate off one edge
+/// comes back in on the opposite one (`rem_euclid`) instead of being
+/// clamped — Photoshop's Wrap Around undefined-area mode.
+fn sample_wrapped(
+    source: &[u8],
+    doc_width: usize,
+    (width, height): (i64, i64),
+    (sx, sy): (f32, f32),
+) -> [u8; CHANNELS] {
+    let x = (sx.round() as i64).rem_euclid(width) as usize;
+    let y = (sy.round() as i64).rem_euclid(height) as usize;
+    let base = (y * doc_width + x) * CHANNELS;
+    let mut out = [0u8; CHANNELS];
+    out.copy_from_slice(&source[base..base + CHANNELS]);
+    out
+}
+
+/// Wave's three waveforms at phase `theta`, each in `-1..=1`: Sine is
+/// `sin θ`; Triangle is `(2/π)·asin(sin θ)`, the straight-sided wave
+/// that peaks where the sine does; Square is the sine's sign.
+fn waveform(kind: WaveType, theta: f32) -> f32 {
+    let s = theta.sin();
+    match kind {
+        WaveType::Sine => s,
+        WaveType::Triangle => s.clamp(-1.0, 1.0).asin() * 2.0 / std::f32::consts::PI,
+        WaveType::Square => {
+            if s > 0.0 {
+                1.0
+            } else if s < 0.0 {
+                -1.0
+            } else {
+                0.0
+            }
+        }
+    }
 }
 
 /// Shared by [`Document::crystallize`] and [`Document::pointillize`]: scatters
@@ -14178,14 +14242,27 @@ impl Document {
     /// half the canvas and the old edges meet in the middle, where you
     /// can retouch the seam). Negative or oversized amounts are taken
     /// modulo the layer size, so `dx = -1` and `dx = width - 1` are the
-    /// same shift and `dx = width` is a no-op. Photoshop's other two
-    /// fill modes for the vacated area (Repeat Edge Pixels, Set to
-    /// Transparent) and its confine-to-selection behaviour are
-    /// deliberate scope cuts: this always moves the entire layer,
-    /// selection ignored, the same whole-layer stance
-    /// [`Self::flip_layer_horizontal`] takes. Errors on a locked/unknown
-    /// layer.
+    /// same shift and `dx = width` is a no-op. [`Self::offset_with`]
+    /// adds Photoshop's other two fill modes for the vacated area;
+    /// its confine-to-selection behaviour stays a deliberate scope
+    /// cut: this always moves the entire layer, selection ignored, the
+    /// same whole-layer stance [`Self::flip_layer_horizontal`] takes.
+    /// Errors on a locked/unknown layer.
     pub fn offset(&mut self, id: LayerId, dx: i32, dy: i32) -> Result<Option<Rect>, String> {
+        self.offset_with(id, dx, dy, OffsetFill::WrapAround)
+    }
+
+    /// [`Self::offset`] with Photoshop's Undefined Areas choice for the
+    /// strip the shift vacates: Wrap Around brings the opposite edge
+    /// round (the old behaviour), Repeat Edge Pixels repeats the last
+    /// row or column, Set to Transparent leaves it clear.
+    pub fn offset_with(
+        &mut self,
+        id: LayerId,
+        dx: i32,
+        dy: i32,
+        fill: OffsetFill,
+    ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let layer = self.layer_mut(id)?;
@@ -14193,13 +14270,25 @@ impl Document {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
         let source = layer.pixels.clone();
+        let place = |v: i64, extent: i64| -> Option<usize> {
+            match fill {
+                OffsetFill::WrapAround => Some(v.rem_euclid(extent) as usize),
+                OffsetFill::RepeatEdgePixels => Some(v.clamp(0, extent - 1) as usize),
+                OffsetFill::Transparent => (0..extent).contains(&v).then_some(v as usize),
+            }
+        };
         for y in 0..height {
-            let sy = (y - dy as i64).rem_euclid(height) as usize;
+            let sy = place(y - dy as i64, height);
             for x in 0..width {
-                let sx = (x - dx as i64).rem_euclid(width) as usize;
-                let src = (sy * doc_width + sx) * CHANNELS;
                 let dst = (y as usize * doc_width + x as usize) * CHANNELS;
-                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&source[src..src + CHANNELS]);
+                match (sy, place(x - dx as i64, width)) {
+                    (Some(sy), Some(sx)) => {
+                        let src = (sy * doc_width + sx) * CHANNELS;
+                        layer.pixels[dst..dst + CHANNELS]
+                            .copy_from_slice(&source[src..src + CHANNELS]);
+                    }
+                    _ => layer.pixels[dst..dst + CHANNELS].copy_from_slice(&[0; CHANNELS]),
+                }
             }
         }
         Ok(Some(Rect {
@@ -15026,14 +15115,53 @@ impl Document {
     /// Photoshop's −100..=100 %. [`Self::radial_remap`] with strength
     /// `0.75 · amount / 100`, so +100 % pulls each pixel from `ρ · (0.25 +
     /// 0.75ρ)` — magnifying the centre 4× like a lens — and 0 is the
-    /// identity. Photoshop's Horizontal Only and Vertical Only modes are a
-    /// deliberate scope cut. Errors on a non-finite amount or a
+    /// identity. [`Self::spherize_with`] adds Photoshop's Horizontal Only
+    /// and Vertical Only modes. Errors on a non-finite amount or a
     /// locked/unknown layer.
     pub fn spherize(&mut self, id: LayerId, amount: f32) -> Result<Option<Rect>, String> {
+        self.spherize_with(id, amount, SpherizeMode::Normal)
+    }
+
+    /// [`Self::spherize`] with its Mode: Normal is the sphere;
+    /// Horizontal Only and Vertical Only wrap the layer onto a cylinder
+    /// instead, applying the same `1 − strength · (1 − ρ)` remap to one
+    /// axis alone with `ρ` that axis's own normalised offset from the
+    /// centre, the other axis left where it is.
+    pub fn spherize_with(
+        &mut self,
+        id: LayerId,
+        amount: f32,
+        mode: SpherizeMode,
+    ) -> Result<Option<Rect>, String> {
         if !amount.is_finite() {
             return Err(format!("Spherize amount must be a number, got {amount}."));
         }
-        self.radial_remap(id, 0.75 * amount / 100.0)
+        let strength = 0.75 * amount / 100.0;
+        if mode == SpherizeMode::Normal {
+            return self.radial_remap(id, strength);
+        }
+        let (width, height) = (self.width as i64, self.height as i64);
+        let doc_width = self.width as usize;
+        let (cx, cy) = ((width - 1) as f32 / 2.0, (height - 1) as f32 / 2.0);
+        let (hx, hy) = (width as f32 / 2.0, height as f32 / 2.0);
+        self.filter_pixels(id, |source, row, col| {
+            let (centre, half, along) = match mode {
+                SpherizeMode::VerticalOnly => (cy, hy, row as f32),
+                _ => (cx, hx, col as f32),
+            };
+            let d = along - centre;
+            let rho = (d / half).abs();
+            let mapped = if rho > 0.0 && rho <= 1.0 {
+                centre + d * (1.0 - strength * (1.0 - rho))
+            } else {
+                along
+            };
+            let (sx, sy) = match mode {
+                SpherizeMode::VerticalOnly => (col as f32, mapped),
+                _ => (mapped, row as f32),
+            };
+            sample_nearest(source, doc_width, (width, height), (sx, sy))
+        })
     }
 
     /// Filter > Distort > ZigZag: concentric ripples spreading from the
@@ -15148,11 +15276,11 @@ impl Document {
     /// scaled by `vertical_scale / 100` — the same axis-swap `ripple` uses.
     /// Sampling is nearest-neighbour with edge repeat via
     /// [`sample_nearest`], the scope cut `ripple` and [`Self::twirl`]
-    /// already make; Photoshop's Triangle and Square wave types and its
-    /// Wrap Around undefined-area mode are further, documented scope cuts
-    /// — only Sine and Repeat Edge Pixels are implemented. Errors on zero
-    /// generators, an empty wavelength or amplitude range (a maximum below
-    /// its minimum), a zero minimum wavelength, or a locked/unknown layer.
+    /// already make; [`Self::wave_with`] adds Photoshop's Triangle and
+    /// Square wave types and its Wrap Around undefined-area mode — this
+    /// is Sine with Repeat Edge Pixels. Errors on zero generators, an
+    /// empty wavelength or amplitude range (a maximum below its
+    /// minimum), a zero minimum wavelength, or a locked/unknown layer.
     #[allow(clippy::too_many_arguments)]
     pub fn wave(
         &mut self,
@@ -15165,6 +15293,41 @@ impl Document {
         horizontal_scale: f32,
         vertical_scale: f32,
         seed: u32,
+    ) -> Result<Option<Rect>, String> {
+        self.wave_with(
+            id,
+            generators,
+            wavelength_min,
+            wavelength_max,
+            amplitude_min,
+            amplitude_max,
+            horizontal_scale,
+            vertical_scale,
+            seed,
+            WaveType::Sine,
+            false,
+        )
+    }
+
+    /// [`Self::wave`] with its Type and Undefined Areas: each generator's
+    /// term is `amplitude · waveform(2π · (y + phase) / wavelength)` with
+    /// [`waveform`] the sine, triangle or square wave, and `wrap_around`
+    /// samples through [`sample_wrapped`] instead of [`sample_nearest`],
+    /// so content displaced off one edge comes back in on the other.
+    #[allow(clippy::too_many_arguments)]
+    pub fn wave_with(
+        &mut self,
+        id: LayerId,
+        generators: u32,
+        wavelength_min: u32,
+        wavelength_max: u32,
+        amplitude_min: u32,
+        amplitude_max: u32,
+        horizontal_scale: f32,
+        vertical_scale: f32,
+        seed: u32,
+        wave_type: WaveType,
+        wrap_around: bool,
     ) -> Result<Option<Rect>, String> {
         if generators == 0 {
             return Err("Wave needs at least one generator.".to_string());
@@ -15190,17 +15353,22 @@ impl Document {
             let phase = rng.next_u32() % wavelength;
             waves.push((wavelength as f32, amplitude as f32, phase as f32));
         }
+        let sample = if wrap_around {
+            sample_wrapped
+        } else {
+            sample_nearest
+        };
         self.filter_pixels(id, |source, row, col| {
             let (x, y) = (col as f32, row as f32);
             let (mut dx, mut dy) = (0.0f32, 0.0f32);
             for &(wavelength, amplitude, phase) in &waves {
                 let k = std::f32::consts::TAU / wavelength;
-                dx += amplitude * (k * (y + phase)).sin();
-                dy += amplitude * (k * (x + phase)).sin();
+                dx += amplitude * waveform(wave_type, k * (y + phase));
+                dy += amplitude * waveform(wave_type, k * (x + phase));
             }
             let sx = x + horizontal_scale / 100.0 * dx;
             let sy = y + vertical_scale / 100.0 * dy;
-            sample_nearest(source, doc_width, (width, height), (sx, sy))
+            sample(source, doc_width, (width, height), (sx, sy))
         })
     }
 
@@ -15209,11 +15377,10 @@ impl Document {
     /// vertical strip; here the curve is `control_points.len()` anchors
     /// evenly spaced from the top row to the bottom row, each an
     /// independent horizontal offset in pixels, linearly interpolated
-    /// between neighbouring anchors — straight segments instead of
-    /// Photoshop's smooth spline is a documented scope cut, made because
-    /// straight segments between the same handful of slider values are
-    /// easier to hand-verify and easier to expose as plain sliders than a
-    /// spline. Every pixel in row `y` is pulled from `x − offset(y)` in
+    /// between neighbouring anchors — [`Self::shear_with`] adds
+    /// Photoshop's smooth spline through the same anchors; straight
+    /// segments stay here because they are easier to hand-verify and
+    /// are what saved Actions recorded. Every pixel in row `y` is pulled from `x − offset(y)` in
     /// that same row, so a positive offset drags the row's content to the
     /// right; offsets are rounded to the nearest whole pixel first, so
     /// this filter moves whole rows rather than resampling them.
@@ -15231,6 +15398,21 @@ impl Document {
         id: LayerId,
         control_points: Vec<f32>,
         wrap_around: bool,
+    ) -> Result<Option<Rect>, String> {
+        self.shear_with(id, control_points, wrap_around, false)
+    }
+
+    /// [`Self::shear`] with the curve's shape: `smooth` runs a
+    /// Catmull-Rom spline through the anchors (the end anchors repeated
+    /// as their own neighbours, so the curve starts and ends exactly on
+    /// them), the smooth bow Photoshop's own dialog draws; `false` is the
+    /// straight-segment curve.
+    pub fn shear_with(
+        &mut self,
+        id: LayerId,
+        control_points: Vec<f32>,
+        wrap_around: bool,
+        smooth: bool,
     ) -> Result<Option<Rect>, String> {
         if control_points.len() < 2 {
             return Err("Shear needs at least two control points.".to_string());
@@ -15252,7 +15434,23 @@ impl Document {
                 let pos = t * segments as f32;
                 let i = (pos as usize).min(segments - 1);
                 let frac = pos - i as f32;
-                let offset = control_points[i] + frac * (control_points[i + 1] - control_points[i]);
+                let offset = if smooth {
+                    let last = control_points.len() as isize - 1;
+                    let p = |k: isize| control_points[k.clamp(0, last) as usize];
+                    let (p0, p1, p2, p3) = (
+                        p(i as isize - 1),
+                        p(i as isize),
+                        p(i as isize + 1),
+                        p(i as isize + 2),
+                    );
+                    let (t2, t3) = (frac * frac, frac * frac * frac);
+                    0.5 * (2.0 * p1
+                        + (p2 - p0) * frac
+                        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                        + (3.0 * p1 - p0 - 3.0 * p2 + p3) * t3)
+                } else {
+                    control_points[i] + frac * (control_points[i + 1] - control_points[i])
+                };
                 offset.round() as i64
             })
             .collect();
@@ -44219,6 +44417,171 @@ mod tests {
         assert_eq!(sand, run(TexturizerTexture::Sandstone, 4, false));
         assert_ne!(sand, canvas);
         assert!(sand.iter().all(|&v| v == 118 || v == 128 || v == 138));
+    }
+
+    fn red_ramp(w: u32, h: u32, step: u32) -> Vec<u8> {
+        let mut ramp = Vec::new();
+        for _ in 0..h {
+            for x in 0..w {
+                ramp.extend_from_slice(&[(x * step) as u8, 0, 0, 255]);
+            }
+        }
+        ramp
+    }
+
+    #[test]
+    fn spherize_modes_bend_one_axis() {
+        let (w, h) = (8u32, 8u32);
+        let ramp = red_ramp(w, h, 32);
+        let run = |mode: SpherizeMode| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.spherize_with(id, 100.0, mode).unwrap();
+            red_plane(&doc)
+        };
+        // Normal is spherize itself.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.spherize(id, 100.0).unwrap();
+        assert_eq!(run(SpherizeMode::Normal), red_plane(&doc));
+        // Horizontal Only at +100 %: centre 3.5, half-width 4. Column 2
+        // (offset −1.5, ρ 0.375, factor 0.53125) reads 2.70 → 3 → 96;
+        // column 1 (ρ 0.625, factor 0.71875) reads 1.70 → 2 → 64; column
+        // 3 reads 3.33 → 3 → 96; column 0 (ρ 0.875) reads 0.33 → 0 → 0;
+        // the right half mirrors (column 4 reads 3.67 → 4 → 128, column 6
+        // 5.30 → 5 → 160, column 7 6.67 → 7 → 224). Every row alike.
+        let horizontal = run(SpherizeMode::HorizontalOnly);
+        assert_eq!(&horizontal[0..8], &[0, 64, 96, 96, 128, 128, 160, 224]);
+        for y in 1..h as usize {
+            assert_eq!(&horizontal[y * 8..y * 8 + 8], &horizontal[0..8], "row {y}");
+        }
+        // Vertical Only leaves a horizontal ramp exactly as it is.
+        let vertical = run(SpherizeMode::VerticalOnly);
+        assert_eq!(
+            vertical,
+            ramp.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>()
+        );
+        assert!(doc
+            .spherize_with(id, f32::NAN, SpherizeMode::HorizontalOnly)
+            .is_err());
+    }
+
+    #[test]
+    fn wave_types_and_wrap_around() {
+        let (w, h) = (16u32, 8u32);
+        let ramp = red_ramp(w, h, 8);
+        // One generator, wavelength 8, amplitude 2, and a seed whose phase
+        // draw is 2, so row 0 sits a quarter wave in (θ = π/2), row 1 at
+        // 3π/4 and row 3 at 5π/4.
+        let seed = (1u32..500)
+            .find(|&s| {
+                let mut r = XorShift32::new(s);
+                r.next_u32();
+                r.next_u32();
+                r.next_u32() % 8 == 2
+            })
+            .unwrap();
+        let run = |kind: WaveType, wrap: bool| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.wave_with(id, 1, 8, 8, 2, 2, 100.0, 0.0, seed, kind, wrap)
+                .unwrap();
+            red_plane(&doc)
+        };
+        let sine = run(WaveType::Sine, false);
+        let triangle = run(WaveType::Triangle, false);
+        let square = run(WaveType::Square, false);
+        // Row 0: every type peaks at +2, so pixel 4 reads 6 → 48.
+        for plane in [&sine, &triangle, &square] {
+            assert_eq!(plane[4], 48);
+        }
+        // Row 1 (θ = 3π/4): sine displaces 1.41 → x + 1; triangle
+        // (2/π)·asin(0.707) = 0.5, times 2 → x + 1; square the full 2.
+        assert_eq!(sine[16 + 4], 40);
+        assert_eq!(triangle[16 + 4], 40);
+        assert_eq!(square[16 + 4], 48);
+        // Row 3 (θ = 5π/4): the mirror, −1 / −1 / −2.
+        assert_eq!(sine[3 * 16 + 4], 24);
+        assert_eq!(triangle[3 * 16 + 4], 24);
+        assert_eq!(square[3 * 16 + 4], 16);
+        // Undefined areas: pixel 0 of row 3 reads −2 — Repeat Edge Pixels
+        // clamps to column 0, Wrap Around reads column 14 → 112.
+        assert_eq!(square[3 * 16], 0);
+        let wrapped = run(WaveType::Square, true);
+        assert_eq!(wrapped[3 * 16], 112);
+        assert_eq!(wrapped[3 * 16 + 4], 16);
+        // Sine with Repeat Edge Pixels is the old wave.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.wave(id, 1, 8, 8, 2, 2, 100.0, 0.0, seed).unwrap();
+        assert_eq!(red_plane(&doc), sine);
+    }
+
+    #[test]
+    fn shear_smooth_curve_bows_between_anchors() {
+        let (w, h) = (16u32, 5u32);
+        let ramp = red_ramp(w, h, 16);
+        let run = |smooth: bool, wrap: bool| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.shear_with(id, vec![0.0, 10.0, 0.0], wrap, smooth)
+                .unwrap();
+            red_plane(&doc)
+        };
+        // Anchors 0, 10, 0 over five rows: the straight curve offsets row 1
+        // by 5, the Catmull-Rom spline by 5.625 → 6 (and row 3 the same by
+        // symmetry); row 2 by 10 either way; rows 0 and 4 not at all.
+        let straight = run(false, false);
+        let smooth = run(true, false);
+        assert_eq!(straight[16 + 8], 48);
+        assert_eq!(smooth[16 + 8], 32);
+        assert_eq!(straight[3 * 16 + 8], 48);
+        assert_eq!(smooth[3 * 16 + 8], 32);
+        assert_eq!(smooth[2 * 16 + 8], 0);
+        assert_eq!(smooth[8], 128);
+        assert_eq!(smooth[4 * 16 + 8], 128);
+        // Straight is the old shear; Wrap Around still wraps under the
+        // spline (row 2, column 8 reads column 14 → 224).
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.shear(id, vec![0.0, 10.0, 0.0], false).unwrap();
+        assert_eq!(red_plane(&doc), straight);
+        assert_eq!(run(true, true)[2 * 16 + 8], 224);
+    }
+
+    #[test]
+    fn offset_fill_modes_decide_the_vacated_edge() {
+        let (w, h) = (4u32, 4u32);
+        let ramp = red_ramp(w, h, 64);
+        let run = |dx: i32, dy: i32, fill: OffsetFill| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.offset_with(id, dx, dy, fill).unwrap();
+            doc.layers()[0].pixels.clone()
+        };
+        // dx 1 vacates column 0: Wrap Around brings column 3 round (192),
+        // Repeat Edge Pixels repeats column 0 (0, opaque), Set to
+        // Transparent leaves it clear; column 1 reads column 0 in all three.
+        let wrap = run(1, 0, OffsetFill::WrapAround);
+        assert_eq!(&wrap[0..4], &[192, 0, 0, 255]);
+        assert_eq!(&wrap[4..8], &[0, 0, 0, 255]);
+        let repeat = run(1, 0, OffsetFill::RepeatEdgePixels);
+        assert_eq!(&repeat[0..4], &[0, 0, 0, 255]);
+        assert_eq!(&repeat[4..8], &[0, 0, 0, 255]);
+        assert_eq!(&repeat[8..12], &[64, 0, 0, 255]);
+        let clear = run(1, 0, OffsetFill::Transparent);
+        assert_eq!(&clear[0..4], &[0, 0, 0, 0]);
+        assert_eq!(&clear[4..8], &[0, 0, 0, 255]);
+        // dy −1 with Set to Transparent vacates the bottom row.
+        let up = run(0, -1, OffsetFill::Transparent);
+        assert!(up[3 * 16..].iter().all(|&v| v == 0));
+        assert_eq!(&up[0..4], &[0, 0, 0, 255]);
+        assert_eq!(&up[8..12], &[128, 0, 0, 255]);
+        // Wrap Around is the old offset.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.offset(id, 1, 0).unwrap();
+        assert_eq!(doc.layers()[0].pixels, wrap);
     }
 
     #[test]

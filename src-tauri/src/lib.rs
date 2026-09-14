@@ -2915,6 +2915,18 @@ fn high_pass(state: State<'_, AppState>, id: LayerId, radius: u32) -> Result<Sna
     edit_checkpointed(&state, |document| document.high_pass(id, radius))
 }
 
+/// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
+#[tauri::command]
+fn offset_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    dx: i32,
+    dy: i32,
+    fill: document::OffsetFill,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.offset_with(id, dx, dy, fill))
+}
+
 /// Filter > Other > Offset (wrap around) on layer `id`.
 #[tauri::command]
 fn offset(state: State<'_, AppState>, id: LayerId, dx: i32, dy: i32) -> Result<Snapshot, String> {
@@ -3057,6 +3069,17 @@ fn pinch(state: State<'_, AppState>, id: LayerId, amount: f32) -> Result<Snapsho
     edit_checkpointed(&state, |document| document.pinch(id, amount))
 }
 
+/// Filter > Distort > Spherize on layer `id` with its Mode.
+#[tauri::command]
+fn spherize_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: f32,
+    mode: document::SpherizeMode,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| document.spherize_with(id, amount, mode))
+}
+
 /// Filter > Distort > Spherize on layer `id`: `amount` in percent, −100..=100.
 #[tauri::command]
 fn spherize(state: State<'_, AppState>, id: LayerId, amount: f32) -> Result<Snapshot, String> {
@@ -3116,6 +3139,56 @@ fn wave(
             vertical_scale,
             seed,
         )
+    })
+}
+
+/// Filter > Distort > Wave on layer `id` with its Type and Undefined
+/// Areas (`wrap_around`).
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+fn wave_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    generators: u32,
+    wavelength_min: u32,
+    wavelength_max: u32,
+    amplitude_min: u32,
+    amplitude_max: u32,
+    horizontal_scale: f32,
+    vertical_scale: f32,
+    seed: u32,
+    wave_type: document::WaveType,
+    wrap_around: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.wave_with(
+            id,
+            generators,
+            wavelength_min,
+            wavelength_max,
+            amplitude_min,
+            amplitude_max,
+            horizontal_scale,
+            vertical_scale,
+            seed,
+            wave_type,
+            wrap_around,
+        )
+    })
+}
+
+/// Filter > Distort > Shear on layer `id` with the curve's shape:
+/// `smooth` runs a spline through the anchors, `false` straight segments.
+#[tauri::command]
+fn shear_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    control_points: Vec<f32>,
+    wrap_around: bool,
+    smooth: bool,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.shear_with(id, control_points, wrap_around, smooth)
     })
 }
 
@@ -7742,6 +7815,10 @@ pub fn run() {
             grain_with,
             glass_with,
             texturizer_with,
+            spherize_with,
+            wave_with,
+            shear_with,
+            offset_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

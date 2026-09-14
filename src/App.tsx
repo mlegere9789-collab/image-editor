@@ -2311,6 +2311,7 @@ export default function App() {
   const [pinchAmount, setPinchAmount] = useState(50);
   const [showSpherizeDialog, setShowSpherizeDialog] = useState(false);
   const [spherizeAmount, setSpherizeAmount] = useState(50);
+  const [spherizeMode, setSpherizeMode] = useState("normal");
   const [showZigZagDialog, setShowZigZagDialog] = useState(false);
   const [zigZagAmount, setZigZagAmount] = useState(10);
   const [zigZagRidges, setZigZagRidges] = useState(5);
@@ -2325,9 +2326,12 @@ export default function App() {
   const [waveAmplitudeMax, setWaveAmplitudeMax] = useState(20);
   const [waveHorizontalScale, setWaveHorizontalScale] = useState(100);
   const [waveVerticalScale, setWaveVerticalScale] = useState(100);
+  const [waveType, setWaveType] = useState("sine");
+  const [waveWrapAround, setWaveWrapAround] = useState(false);
   const [showShearDialog, setShowShearDialog] = useState(false);
   const [shearControlPoints, setShearControlPoints] = useState([0, 0, 0, 0, 0]);
   const [shearWrapAround, setShearWrapAround] = useState(false);
+  const [shearSmooth, setShearSmooth] = useState(true);
   const [showDisplaceDialog, setShowDisplaceDialog] = useState(false);
   const [displaceMapLayerId, setDisplaceMapLayerId] = useState<number | null>(
     null,
@@ -2629,6 +2633,7 @@ export default function App() {
   const [traceUpper, setTraceUpper] = useState(false);
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
+  const [offsetFill, setOffsetFill] = useState("wrapAround");
 
   const [tool, setTool] = useState<Tool>("brush");
   // Edit > Toolbar (Customize Toolbar): tools hidden from the toolbar, a
@@ -7249,9 +7254,13 @@ export default function App() {
 
   const applySpherize = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("spherize", { id: selectedId, amount: spherizeAmount });
+    await runCommand("spherize_with", {
+      id: selectedId,
+      amount: spherizeAmount,
+      mode: spherizeMode,
+    });
     setShowSpherizeDialog(false);
-  }, [runCommand, selectedId, spherizeAmount]);
+  }, [runCommand, selectedId, spherizeAmount, spherizeMode]);
 
   const applyZigZag = useCallback(async () => {
     if (selectedId === null) return;
@@ -7277,7 +7286,7 @@ export default function App() {
     if (selectedId === null) return;
     // A fresh seed per apply, as with Add Noise/Crystallize.
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0;
-    await runCommand("wave", {
+    await runCommand("wave_with", {
       id: selectedId,
       generators: waveGenerators,
       wavelengthMin: waveWavelengthMin,
@@ -7287,6 +7296,8 @@ export default function App() {
       horizontalScale: waveHorizontalScale,
       verticalScale: waveVerticalScale,
       seed,
+      waveType,
+      wrapAround: waveWrapAround,
     });
     setShowWaveDialog(false);
   }, [
@@ -7299,17 +7310,26 @@ export default function App() {
     waveAmplitudeMax,
     waveHorizontalScale,
     waveVerticalScale,
+    waveType,
+    waveWrapAround,
   ]);
 
   const applyShear = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("shear", {
+    await runCommand("shear_with", {
       id: selectedId,
       controlPoints: shearControlPoints,
       wrapAround: shearWrapAround,
+      smooth: shearSmooth,
     });
     setShowShearDialog(false);
-  }, [runCommand, selectedId, shearControlPoints, shearWrapAround]);
+  }, [
+    runCommand,
+    selectedId,
+    shearControlPoints,
+    shearWrapAround,
+    shearSmooth,
+  ]);
 
   const openDisplaceDialog = useCallback(() => {
     const layers = document?.layers ?? [];
@@ -8572,9 +8592,14 @@ export default function App() {
 
   const applyOffset = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("offset", { id: selectedId, dx: offsetX, dy: offsetY });
+    await runCommand("offset_with", {
+      id: selectedId,
+      dx: offsetX,
+      dy: offsetY,
+      fill: offsetFill,
+    });
     setShowOffsetDialog(false);
-  }, [runCommand, selectedId, offsetX, offsetY]);
+  }, [runCommand, selectedId, offsetX, offsetY, offsetFill]);
 
   const applyCustom = useCallback(async () => {
     if (selectedId === null) return;
@@ -27942,6 +27967,17 @@ export default function App() {
                 onChange={(event) => setOffsetY(Number(event.target.value))}
               />
             </label>
+            <label className="control control--row">
+              <span className="control__label">Undefined Areas</span>
+              <select
+                value={offsetFill}
+                onChange={(event) => setOffsetFill(event.target.value)}
+              >
+                <option value="wrapAround">Wrap Around</option>
+                <option value="repeatEdgePixels">Repeat Edge Pixels</option>
+                <option value="transparent">Set to Transparent</option>
+              </select>
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -31989,6 +32025,17 @@ export default function App() {
             <h2 className="modal__heading">
               Filter &gt; Distort &gt; Spherize
             </h2>
+            <label className="control control--row">
+              <span className="control__label">Mode</span>
+              <select
+                value={spherizeMode}
+                onChange={(event) => setSpherizeMode(event.target.value)}
+              >
+                <option value="normal">Normal</option>
+                <option value="horizontalOnly">Horizontal Only</option>
+                <option value="verticalOnly">Vertical Only</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Amount
@@ -32271,6 +32318,29 @@ export default function App() {
                 }
               />
             </label>
+            <label className="control control--row">
+              <span className="control__label">Type</span>
+              <select
+                value={waveType}
+                onChange={(event) => setWaveType(event.target.value)}
+              >
+                <option value="sine">Sine</option>
+                <option value="triangle">Triangle</option>
+                <option value="square">Square</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Undefined Areas</span>
+              <select
+                value={waveWrapAround ? "wrap" : "repeat"}
+                onChange={(event) =>
+                  setWaveWrapAround(event.target.value === "wrap")
+                }
+              >
+                <option value="repeat">Repeat Edge Pixels</option>
+                <option value="wrap">Wrap Around</option>
+              </select>
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -32299,6 +32369,18 @@ export default function App() {
             onClick={(event) => event.stopPropagation()}
           >
             <h2 className="modal__heading">Filter &gt; Distort &gt; Shear</h2>
+            <label className="control control--row">
+              <span className="control__label">Curve</span>
+              <select
+                value={shearSmooth ? "smooth" : "straight"}
+                onChange={(event) =>
+                  setShearSmooth(event.target.value === "smooth")
+                }
+              >
+                <option value="smooth">Smooth spline</option>
+                <option value="straight">Straight segments</option>
+              </select>
+            </label>
             {shearControlPoints.map((point, index) => (
               <label className="control" key={index}>
                 <span className="control__label">

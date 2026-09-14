@@ -21691,6 +21691,73 @@ were checked by eye.
 
 Tests: 1847 Rust (1844 → 1847), 22 frontend.
 
+## Phase 364 — Distort and Offset options: Spherize modes, Wave types and Wrap Around, Shear spline, Offset fills
+
+Four more section D scope cuts reopened, all on the earliest Distort
+filters. As in Phase 363 each is a `*_with` command beside the old one,
+which now delegates to it with the old choices.
+
+**Spherize** (`spherize_with`, a Mode select): Horizontal Only and
+Vertical Only wrap the layer onto a cylinder instead of a sphere — the
+same `1 − 0.75 · amount/100 · (1 − ρ)` remap applied to one axis alone,
+`ρ` that axis's own normalised offset from the centre, the other axis
+left where it is.
+
+**Wave** (`wave_with`, Type and Undefined Areas selects): each
+generator's term is `amplitude · waveform(2π (y + phase) / wavelength)`
+with the waveform Sine, Triangle (`(2/π)·asin(sin θ)`, the
+straight-sided wave that peaks where the sine does) or Square (the
+sine's sign); Wrap Around samples through a new `sample_wrapped`, the
+`rem_euclid` twin of `sample_nearest`, so content displaced off one
+edge comes back in on the other.
+
+**Shear** (`shear_with`, a Curve select, Smooth spline by default): a
+Catmull-Rom spline through the same evenly spaced anchors, the end
+anchors repeated as their own neighbours so the curve starts and ends
+on them — the smooth bow Photoshop's own dialog draws — or the old
+straight segments.
+
+**Offset** (`offset_with`, an Undefined Areas select): Wrap Around as
+before, Repeat Edge Pixels repeating the last row or column into the
+vacated strip, Set to Transparent leaving it clear.
+
+**Verified.** Four Rust tests on red ramps (pixel x reads a multiple of
+x). `spherize_modes_bend_one_axis`: Normal equals `spherize`;
+Horizontal Only at +100 % on an 8-wide ramp reads 0, 64, 96, 96, 128,
+128, 160, 224 (column 2, offset −1.5 and ρ 0.375, reads 2.70 → 3 → 96;
+column 1 reads 1.70 → 2 → 64), every row alike; Vertical Only leaves a
+horizontal ramp exactly as it is; NaN errors.
+`wave_types_and_wrap_around` with one generator of wavelength 8 and
+amplitude 2 and a seed whose phase draw is 2: row 0 (θ = π/2) peaks at
++2 for all three types; row 1 (3π/4) displaces 1.41 → 1 for Sine, 0.5 ·
+2 = 1 for Triangle and 2 for Square; row 3 (5π/4) the mirror; pixel 0
+of row 3 reads −2, which Repeat Edge Pixels clamps to column 0 and
+Wrap Around reads as column 14; Sine without wrap equals `wave`.
+`shear_smooth_curve_bows_between_anchors`: anchors 0, 10, 0 over five
+rows offset row 1 by 5 straight and 5.625 → 6 smooth (row 3 the same
+by symmetry, row 2 by 10, rows 0 and 4 not at all), straight equals
+`shear`, and Wrap Around still wraps under the spline.
+`offset_fill_modes_decide_the_vacated_edge`: dx 1 on a 4-wide ramp
+brings column 3 round under Wrap Around (192), repeats column 0 under
+Repeat Edge Pixels (0, opaque) and clears it under Set to Transparent;
+dy −1 clears the bottom row; Wrap Around equals `offset`. In Chromium
+against the built frontend: Filter > Distort > Spherize… shows Mode
+and Amount, and Horizontal Only sends `spherize_with` with `mode:
+"horizontalOnly"`; Wave… shows its seven sliders plus Type (Sine) and
+Undefined Areas (Repeat Edge Pixels), and Square with Wrap Around
+sends `wave_with` with `waveType: "square", wrapAround: true`; Shear…
+shows Curve (Smooth spline) before its anchors, and Straight segments
+sends `shear_with` with `smooth: false`; Filter > Other > Offset…
+shows Undefined Areas (Wrap Around), and Set to Transparent sends
+`offset_with` with `fill: "transparent"`; every dialog closes on
+Apply. On the real app under Xvfb, on the recovered brush-stroke document:
+Filter > Other > Offset… with Horizontal 323 px and Set to Transparent,
+applied through the real IPC, moved the stroke right so that its end
+runs off the canvas edge and nothing comes back in on the left; four
+screenshots checked by eye.
+
+Tests: 1851 Rust (1847 → 1851), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
