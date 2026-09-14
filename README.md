@@ -20435,6 +20435,73 @@ into the binary like every other model here.
 Generate Image, Generative Layers and AI Model Picker flip to shipped
 (608/618).
 
+## Phase 342 — Reference Images, Prompt to Edit, Generative Upscale
+
+Three more Phase C1 rows on one new primitive: SDEdit (Meng et al.,
+"SDEdit: Guided Image Synthesis and Editing with Stochastic
+Differential Equations", ICLR 2022). `generate::sdedit_rgb` takes a
+64×64 reference, noises it to timestep `strength · (T − 1)` with the
+seed's noise, and runs the same DDIM loop as a generation from there
+under the prompt — so the result keeps the reference's layout and
+colour in proportion to how little noise was added and takes the
+prompt's character in proportion to how much; strength 0 returns the
+reference unchanged, an empty prompt denoises unconditionally, and
+`generate_rgb` now shares the loop (`ddim`). Everything else is what
+each row needs around that.
+
+**Reference Images** is the Generate Image dialog's *Reference* select
+and strength slider: `Document::reference_image` resizes the chosen
+layer's colour to the model's size, edits it, Super Zooms the result
+to 192×192 as a new layer, and records the reference and strength on
+the `GeneratedLayer`, so *Regenerate* redoes it from the same layer at
+the next seed — and says so if that layer is gone. **Prompt to Edit**
+is `Document::prompt_to_edit`: the context window around the
+selection (Generative Fill's own margin, `crop_window`) is taken to
+64×64, edited under the prompt at the dialog's strength, resized back,
+and blended inside the selection with Generative Fill's feathered edge
+(`feather_alpha`) over the original; nothing outside the selection
+changes, alpha included, and a locked layer is refused. **Generative
+Upscale** is `Document::generative_upscale`: Super Zoom's ×3 result,
+then SDEdit at a low strength over every 64×64 tile of it — 48-pixel
+stride, the 16-pixel overlaps blended by linear ramps, an image
+smaller than a tile edge-padded to one, a seed per tile — so the model
+adds plausible fine detail where a classical upscaler could only
+interpolate, under an optional prompt; at strength 0 the tiling is an
+identity and the result is exactly Super Zoom's. The three dialogs
+share the Generate Image dialog's seed, steps and guidance.
+
+**Verified two ways.** `cargo test`: 1813 total (1806 lib + 7
+pipeline, up from 1811) — `generate.rs`: strength 0 returns the
+reference byte-for-byte, a low strength stays closer to the reference
+than a high one (L1), the same seed repeats, the step schedule, the
+size, strength and step refusals, and the empty prompt accepted;
+`document.rs`: a reference generation is a 192×192 opaque region with
+its record carrying the reference and strength, regenerates
+differently at the next seed and refuses once the reference is gone;
+Prompt to Edit on a 40×40 gradient with a 20×20 selection changes
+over 100 pixels inside and not one byte outside, keeps alpha, needs a
+selection and refuses a locked layer; Generative Upscale of a 20×20
+document is 60×60 in one opaque layer, byte-identical to Super Zoom at
+strength 0 and different at 0.2, and refuses an empty document. `cargo
+fmt --check`, `cargo clippy --all-targets -- -D warnings` and `npm run
+build` clean. Live Xvfb verification: the same documented gap; these
+paths end in Tauri commands the browser route cannot reach.
+
+Honest limitations: every one of these runs at the model's 64×64 —
+Prompt to Edit's window and each upscale tile are edited at that size
+and resized, so what the model adds is coarse detail and colour, not
+fine texture; Prompt to Edit understands a prompt the way the model
+understands any prompt (seven scene kinds and the training titles'
+words), not open-ended instructions like "make it night"; and
+Generative Upscale costs one model run per step per tile, so a large
+image is minutes on a CPU. Generative Layers' record now carries a
+reference; the project format still does not (the same transient
+status as every layer-type record).
+
+Generative Upscale, Reference Images and Prompt to Edit flip to
+shipped (611/618). One generative row remains — AI Assisted Editor —
+and then only the tabled pair and its four gated headers.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

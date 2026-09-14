@@ -1142,6 +1142,77 @@ fn generate_image(
     })
 }
 
+/// Reference Images: a generation that starts from layer `reference`
+/// (SDEdit at `strength`) -- see `Document::reference_image`.
+#[tauri::command]
+fn reference_image(
+    state: State<'_, AppState>,
+    reference: LayerId,
+    prompt: String,
+    seed: u64,
+    strength: f32,
+    steps: Option<usize>,
+    guidance: Option<f32>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.reference_image(
+            reference,
+            &prompt,
+            seed,
+            strength,
+            steps.unwrap_or(generate::DEFAULT_STEPS),
+            guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+        )?;
+        Ok(None)
+    })
+}
+
+/// Prompt to Edit: the selection on layer `id` redrawn under `prompt`
+/// by SDEdit at `strength` -- see `Document::prompt_to_edit`.
+#[tauri::command]
+fn prompt_to_edit(
+    state: State<'_, AppState>,
+    id: LayerId,
+    prompt: String,
+    seed: u64,
+    strength: f32,
+    steps: Option<usize>,
+    guidance: Option<f32>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.prompt_to_edit(
+            id,
+            &prompt,
+            seed,
+            strength,
+            steps.unwrap_or(generate::DEFAULT_STEPS),
+            guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+        )
+    })
+}
+
+/// Generative Upscale: Super Zoom, then SDEdit over every tile at a low
+/// strength -- see `Document::generative_upscale`.
+#[tauri::command]
+fn generative_upscale(
+    state: State<'_, AppState>,
+    prompt: String,
+    seed: u64,
+    strength: f32,
+    steps: Option<usize>,
+    guidance: Option<f32>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.generative_upscale(
+            &prompt,
+            seed,
+            strength,
+            steps.unwrap_or(10),
+            guidance.unwrap_or(generate::DEFAULT_GUIDANCE),
+        )
+    })
+}
+
 /// Generative Layers: draw generated layer `id` again at `seed`, or the
 /// seed after its last one.
 #[tauri::command]
@@ -7260,6 +7331,9 @@ pub fn run() {
             generate_similar,
             generate_image,
             regenerate_layer,
+            reference_image,
+            prompt_to_edit,
+            generative_upscale,
             understand_prompt,
             transform_selection,
             save_selection,

@@ -65,7 +65,16 @@ export type ApplyBlend =
   | { kind: "subtract"; scale: number; offset: number };
 
 /** Mirrors `GeneratedLayer` in src-tauri/src/document.rs. */
-export type GeneratedLayer = { id: number; prompt: string; seed: number; steps: number; guidance: number };
+export type GeneratedLayer = {
+  id: number;
+  prompt: string;
+  seed: number;
+  steps: number;
+  guidance: number;
+  /** Reference Images: the layer it started from and SDEdit's strength; `null` from noise alone. */
+  reference: number | null;
+  strength: number;
+};
 
 /** Mirrors `TextLayer` in src-tauri/src/document.rs: a text layer's type. */
 export type TextLayer = {

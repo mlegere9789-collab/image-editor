@@ -236,6 +236,130 @@ pub fn ddim_timesteps(steps: usize) -> Vec<usize> {
         .collect()
 }
 
+/// The DDIM loop from `x` (CHW, batch of one) down `ts` to a clean
+/// image in [-1, 1]: one batched model run per step, guidance mixing the
+/// conditioned and unconditioned predictions, the DDIM update between.
+fn ddim(
+    mut x: Vec<f32>,
+    ts: &[usize],
+    category: usize,
+    caption: &[f32],
+    guidance: f32,
+) -> Result<Vec<f32>, String> {
+    let alphas = cosine_alphas_cumprod(TIMESTEPS);
+    let n = 3 * IMAGE_SIZE * IMAGE_SIZE;
+    for (i, &t) in ts.iter().enumerate() {
+        let mut batch = x.clone();
+        batch.extend_from_slice(&x);
+        let eps = predict_noise(&batch, t, category, caption)?;
+        let a_t = alphas[t];
+        let next = if i + 1 < ts.len() {
+            Some(alphas[ts[i + 1]])
+        } else {
+            None
+        };
+        for j in 0..n {
+            let e = eps[n + j] + guidance * (eps[j] - eps[n + j]);
+            let x0 = ((x[j] - (1.0 - a_t).sqrt() * e) / a_t.sqrt()).clamp(-1.0, 1.0);
+            x[j] = match next {
+                Some(a_prev) => a_prev.sqrt() * x0 + (1.0 - a_prev).sqrt() * e,
+                None => x0,
+            };
+        }
+    }
+    Ok(x)
+}
+
+/// CHW in [-1, 1] to interleaved RGB bytes.
+fn rgb_from_chw(x: &[f32]) -> Vec<u8> {
+    let plane = IMAGE_SIZE * IMAGE_SIZE;
+    let mut rgb = Vec::with_capacity(plane * 3);
+    for i in 0..plane {
+        for c in 0..3 {
+            rgb.push(((x[c * plane + i] + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8);
+        }
+    }
+    rgb
+}
+
+/// Interleaved RGB bytes to CHW in [-1, 1].
+fn chw_from_rgb(rgb: &[u8]) -> Vec<f32> {
+    let plane = IMAGE_SIZE * IMAGE_SIZE;
+    let mut x = vec![0.0f32; plane * 3];
+    for i in 0..plane {
+        for c in 0..3 {
+            x[c * plane + i] = rgb[i * 3 + c] as f32 / 127.5 - 1.0;
+        }
+    }
+    x
+}
+
+/// SDEdit's step schedule: `steps` timesteps from `start` down to `0`.
+pub fn sdedit_timesteps(start: usize, steps: usize) -> Vec<usize> {
+    (0..steps)
+        .map(|i| (start as f64 * (1.0 - i as f64 / (steps - 1).max(1) as f64)).round() as usize)
+        .collect()
+}
+
+/// SDEdit (Meng et al., "SDEdit: Guided Image Synthesis and Editing with
+/// Stochastic Differential Equations", ICLR 2022): a 64×64 RGB
+/// `reference` is noised to timestep `strength · (T − 1)` and denoised
+/// from there under `prompt`, so the result keeps the reference's
+/// layout and colour in proportion to how little noise was added and
+/// takes the prompt's character in proportion to how much. `strength`
+/// 0 returns the reference; 1 is nearly a fresh generation. An empty
+/// prompt denoises unconditionally. Errors for a reference of the
+/// wrong size, a strength outside 0..=1, or as `generate_rgb` does.
+pub fn sdedit_rgb(
+    reference: &[u8],
+    prompt: &str,
+    seed: u64,
+    strength: f32,
+    steps: usize,
+    guidance: f32,
+) -> Result<Vec<u8>, String> {
+    if reference.len() != IMAGE_SIZE * IMAGE_SIZE * 3 {
+        return Err(format!(
+            "SDEdit takes a {IMAGE_SIZE}x{IMAGE_SIZE} RGB reference, not {} bytes.",
+            reference.len()
+        ));
+    }
+    if !(0.0..=1.0).contains(&strength) {
+        return Err("Strength is between 0 and 1.".to_string());
+    }
+    if !(2..=TIMESTEPS).contains(&steps) {
+        return Err(format!("Generate Image runs 2 to {TIMESTEPS} steps."));
+    }
+    if !guidance.is_finite() || guidance < 0.0 {
+        return Err("Guidance must be a non-negative number.".to_string());
+    }
+    let start = (strength * (TIMESTEPS - 1) as f32).round() as usize;
+    if start == 0 {
+        return Ok(reference.to_vec());
+    }
+    let (category, caption) = if prompt.trim().is_empty() {
+        (NULL_CATEGORY, vec![0.0f32; vocab().len()])
+    } else {
+        (category_of_prompt(prompt), caption_vector(prompt))
+    };
+    let alphas = cosine_alphas_cumprod(TIMESTEPS);
+    let a = alphas[start];
+    let noise = gaussian_noise(seed, 3 * IMAGE_SIZE * IMAGE_SIZE);
+    let x: Vec<f32> = chw_from_rgb(reference)
+        .iter()
+        .zip(&noise)
+        .map(|(r, n)| a.sqrt() * r + (1.0 - a).sqrt() * n)
+        .collect();
+    let x0 = ddim(
+        x,
+        &sdedit_timesteps(start, steps),
+        category,
+        &caption,
+        guidance,
+    )?;
+    Ok(rgb_from_chw(&x0))
+}
+
 /// Generates a 64×64 RGB image for `prompt` from `seed`: DDIM over
 /// `steps` steps with classifier-free guidance `guidance` (1 = the
 /// conditioned prediction alone; 2 = the trainer's own sample grids).
@@ -258,38 +382,9 @@ pub fn generate_rgb(
     }
     let category = category_of_prompt(prompt);
     let caption = caption_vector(prompt);
-    let alphas = cosine_alphas_cumprod(TIMESTEPS);
-    let n = 3 * IMAGE_SIZE * IMAGE_SIZE;
-    let mut x = gaussian_noise(seed, n);
-    let ts = ddim_timesteps(steps);
-    for (i, &t) in ts.iter().enumerate() {
-        let mut batch = x.clone();
-        batch.extend_from_slice(&x);
-        let eps = predict_noise(&batch, t, category, &caption)?;
-        let a_t = alphas[t];
-        let next = if i + 1 < ts.len() {
-            Some(alphas[ts[i + 1]])
-        } else {
-            None
-        };
-        for j in 0..n {
-            let e = eps[n + j] + guidance * (eps[j] - eps[n + j]);
-            let x0 = ((x[j] - (1.0 - a_t).sqrt() * e) / a_t.sqrt()).clamp(-1.0, 1.0);
-            x[j] = match next {
-                Some(a_prev) => a_prev.sqrt() * x0 + (1.0 - a_prev).sqrt() * e,
-                None => x0,
-            };
-        }
-    }
-    // CHW in [-1, 1] to interleaved RGB bytes.
-    let plane = IMAGE_SIZE * IMAGE_SIZE;
-    let mut rgb = Vec::with_capacity(plane * 3);
-    for i in 0..plane {
-        for c in 0..3 {
-            rgb.push(((x[c * plane + i] + 1.0) * 127.5).round().clamp(0.0, 255.0) as u8);
-        }
-    }
-    Ok(rgb)
+    let x = gaussian_noise(seed, 3 * IMAGE_SIZE * IMAGE_SIZE);
+    let x0 = ddim(x, &ddim_timesteps(steps), category, &caption, guidance)?;
+    Ok(rgb_from_chw(&x0))
 }
 
 #[cfg(test)]
@@ -355,6 +450,40 @@ mod tests {
         for (i, (a, b)) in eps.iter().zip(&check.first).enumerate() {
             assert!((a - b).abs() < 2e-3, "eps[{i}] {a} vs {b}");
         }
+    }
+
+    #[test]
+    fn sdedit_keeps_the_reference_in_proportion_to_its_strength() {
+        // A reference: a vertical gradient, dark top to light bottom.
+        let reference: Vec<u8> = (0..IMAGE_SIZE * IMAGE_SIZE)
+            .flat_map(|i| {
+                let v = (i / IMAGE_SIZE * 4) as u8;
+                [v, v, v]
+            })
+            .collect();
+        assert_eq!(
+            sdedit_rgb(&reference, "lake", 1, 0.0, 2, 2.0).unwrap(),
+            reference
+        );
+        let l1 = |a: &[u8], b: &[u8]| {
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| (*x as i32 - *y as i32).abs())
+                .sum::<i32>()
+        };
+        let low = sdedit_rgb(&reference, "lake", 1, 0.2, 2, 2.0).unwrap();
+        let high = sdedit_rgb(&reference, "lake", 1, 0.9, 2, 2.0).unwrap();
+        assert!(
+            l1(&low, &reference) < l1(&high, &reference),
+            "more noise, further from the reference"
+        );
+        assert_eq!(low, sdedit_rgb(&reference, "lake", 1, 0.2, 2, 2.0).unwrap());
+        assert_eq!(sdedit_timesteps(500, 3), vec![500, 250, 0]);
+        assert!(sdedit_rgb(&reference[..30], "lake", 1, 0.5, 2, 2.0).is_err());
+        assert!(sdedit_rgb(&reference, "lake", 1, 1.5, 2, 2.0).is_err());
+        assert!(sdedit_rgb(&reference, "", 1, 0.2, 1, 2.0).is_err());
+        // An empty prompt is allowed: the unconditional model.
+        assert!(sdedit_rgb(&reference, "", 1, 0.2, 2, 2.0).is_ok());
     }
 
     #[test]

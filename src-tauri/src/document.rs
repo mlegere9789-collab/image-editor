@@ -4244,6 +4244,13 @@ pub struct GeneratedLayer {
     pub seed: u64,
     pub steps: usize,
     pub guidance: f32,
+    /// Reference Images: the layer the generation started from, and how
+    /// far it was noised (SDEdit's strength); `None` for a generation
+    /// from noise alone.
+    #[serde(default)]
+    pub reference: Option<LayerId>,
+    #[serde(default)]
+    pub strength: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -8001,8 +8008,246 @@ impl Document {
             seed,
             steps,
             guidance,
+            reference: None,
+            strength: 1.0,
         });
         Ok(id)
+    }
+
+    /// Layer `id`'s colour at the model's own size: its RGB planes
+    /// (alpha ignored) resized to 64×64, as interleaved bytes.
+    fn layer_rgb_at_model_size(&self, id: LayerId) -> Result<Vec<u8>, String> {
+        let layer = self.layer(id)?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let side = crate::generate::IMAGE_SIZE;
+        let mut rgb = vec![0u8; side * side * 3];
+        for c in 0..3 {
+            let plane: Vec<f32> = (0..w * h)
+                .map(|i| layer.pixels[i * CHANNELS + c] as f32 / 255.0)
+                .collect();
+            let small = crate::generative_fill::resize_plane(&plane, w, h, side, side);
+            for (i, v) in small.iter().enumerate() {
+                rgb[i * 3 + c] = (v * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        Ok(rgb)
+    }
+
+    /// Reference Images: a generation that starts from layer `reference`
+    /// rather than from noise -- SDEdit at `strength` under `prompt` (see
+    /// [`crate::generate::sdedit_rgb`]), Super Zoomed to 192×192, added
+    /// as a new top layer and recorded so Regenerate can redo it. Returns
+    /// the new layer's id.
+    pub fn reference_image(
+        &mut self,
+        reference: LayerId,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<LayerId, String> {
+        let small = self.layer_rgb_at_model_size(reference)?;
+        let upscaled = Self::upscaled_rgba(&crate::generate::sdedit_rgb(
+            &small, prompt, seed, strength, steps, guidance,
+        )?)?;
+        let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
+        let name: String = if prompt.trim().is_empty() {
+            "Reference".to_string()
+        } else {
+            prompt.trim().chars().take(24).collect()
+        };
+        let id = self.add_layer(name, &upscaled, side, side)?;
+        self.generated.push(GeneratedLayer {
+            id,
+            prompt: prompt.trim().to_string(),
+            seed,
+            steps,
+            guidance,
+            reference: Some(reference),
+            strength,
+        });
+        Ok(id)
+    }
+
+    /// Prompt to Edit: the selection redrawn under `prompt` by SDEdit at
+    /// `strength`. The context window around the selection (Generative
+    /// Fill's own margin) is taken to the model's size, edited, resized
+    /// back, and its selected pixels blended in with Generative Fill's
+    /// feathered edge over the original; nothing outside the selection
+    /// changes, alpha included. Returns the selection's bounds. Errors
+    /// for no selection, a locked or unknown layer, or as SDEdit does.
+    pub fn prompt_to_edit(
+        &mut self,
+        id: LayerId,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<Option<Rect>, String> {
+        let bits = self.selected_bits()?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let (bx0, by0, bx1, by1) = crate::generative_fill::mask_bounds(&bits, w, h)
+            .ok_or_else(|| "Prompt to Edit needs a selection.".to_string())?;
+        let (cx0, cy0, cx1, cy1) = crate::generative_fill::crop_window((bx0, by0, bx1, by1), w, h);
+        let (cw, ch) = (cx1 - cx0, cy1 - cy0);
+        let layer = self.layer(id)?;
+        if layer.locked {
+            return Err(format!("Layer \"{}\" is locked.", layer.name));
+        }
+        let side = crate::generate::IMAGE_SIZE;
+        let mut small = vec![0u8; side * side * 3];
+        for c in 0..3 {
+            let plane: Vec<f32> = (0..cw * ch)
+                .map(|i| {
+                    let (x, y) = (cx0 + i % cw, cy0 + i / cw);
+                    layer.pixels[(y * w + x) * CHANNELS + c] as f32 / 255.0
+                })
+                .collect();
+            let resized = crate::generative_fill::resize_plane(&plane, cw, ch, side, side);
+            for (i, v) in resized.iter().enumerate() {
+                small[i * 3 + c] = (v * 255.0).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+        let edited = crate::generate::sdedit_rgb(&small, prompt, seed, strength, steps, guidance)?;
+        let back: Vec<Vec<f32>> = (0..3)
+            .map(|c| {
+                let plane: Vec<f32> = (0..side * side)
+                    .map(|i| edited[i * 3 + c] as f32 / 255.0)
+                    .collect();
+                crate::generative_fill::resize_plane(&plane, side, side, cw, ch)
+            })
+            .collect();
+        let layer = self.layer_mut(id)?;
+        for y in cy0..cy1 {
+            for x in cx0..cx1 {
+                let idx = y * w + x;
+                if !bits[idx] {
+                    continue;
+                }
+                let alpha = crate::generative_fill::feather_alpha(&bits, w, h, x, y);
+                let local = (y - cy0) * cw + (x - cx0);
+                for (c, plane) in back.iter().enumerate() {
+                    let original = layer.pixels[idx * CHANNELS + c] as f32;
+                    let v = alpha * plane[local] * 255.0 + (1.0 - alpha) * original;
+                    layer.pixels[idx * CHANNELS + c] = v.round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(Some(Rect {
+            x0: bx0 as u32,
+            y0: by0 as u32,
+            x1: bx1 as u32,
+            y1: by1 as u32,
+        }))
+    }
+
+    /// Generative Upscale: Super Zoom's ×3 result, then SDEdit at a low
+    /// `strength` over every 64×64 tile of it (48-pixel stride, the
+    /// 16-pixel overlaps blended by linear ramps; an image smaller than a
+    /// tile is edge-padded to one), so the model adds plausible fine
+    /// detail where a classical upscaler could only interpolate. An empty
+    /// prompt edits unconditionally. Replaces the document as Super Zoom
+    /// does. Errors as Super Zoom and SDEdit do.
+    pub fn generative_upscale(
+        &mut self,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<Option<Rect>, String> {
+        let rect = self.ai_super_resolution()?;
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut pixels = std::mem::take(&mut self.layers[0].pixels);
+        let result = Self::sdedit_tiles(&mut pixels, w, h, prompt, seed, strength, steps, guidance);
+        self.layers[0].pixels = pixels;
+        result?;
+        Ok(rect)
+    }
+
+    /// [`Self::generative_upscale`]'s tiling over an RGBA buffer.
+    #[allow(clippy::too_many_arguments)]
+    fn sdedit_tiles(
+        pixels: &mut [u8],
+        w: usize,
+        h: usize,
+        prompt: &str,
+        seed: u64,
+        strength: f32,
+        steps: usize,
+        guidance: f32,
+    ) -> Result<(), String> {
+        const TILE: usize = crate::generate::IMAGE_SIZE;
+        const STRIDE: usize = 48;
+        let starts = |extent: usize| -> Vec<isize> {
+            if extent <= TILE {
+                return vec![((extent as isize) - TILE as isize) / 2];
+            }
+            let mut v: Vec<isize> = (0..extent - TILE)
+                .step_by(STRIDE)
+                .map(|s| s as isize)
+                .collect();
+            if *v.last().unwrap_or(&0) != (extent - TILE) as isize {
+                v.push((extent - TILE) as isize);
+            }
+            v
+        };
+        let ramp = |i: usize| -> f32 {
+            ((i + 1) as f32 / 17.0)
+                .min((TILE - i) as f32 / 17.0)
+                .min(1.0)
+        };
+        let mut sum = vec![0.0f32; w * h * 3];
+        let mut weight = vec![0.0f32; w * h];
+        let mut tile_index = 0u64;
+        for &ty in &starts(h) {
+            for &tx in &starts(w) {
+                let mut tile = vec![0u8; TILE * TILE * 3];
+                for y in 0..TILE {
+                    for x in 0..TILE {
+                        let sx = (tx + x as isize).clamp(0, w as isize - 1) as usize;
+                        let sy = (ty + y as isize).clamp(0, h as isize - 1) as usize;
+                        let src = (sy * w + sx) * CHANNELS;
+                        tile[(y * TILE + x) * 3..(y * TILE + x) * 3 + 3]
+                            .copy_from_slice(&pixels[src..src + 3]);
+                    }
+                }
+                let edited = crate::generate::sdedit_rgb(
+                    &tile,
+                    prompt,
+                    seed.wrapping_add(tile_index),
+                    strength,
+                    steps,
+                    guidance,
+                )?;
+                tile_index += 1;
+                for y in 0..TILE {
+                    for x in 0..TILE {
+                        let (gx, gy) = (tx + x as isize, ty + y as isize);
+                        if gx < 0 || gy < 0 || gx >= w as isize || gy >= h as isize {
+                            continue;
+                        }
+                        let g = gy as usize * w + gx as usize;
+                        let wgt = ramp(x) * ramp(y);
+                        for c in 0..3 {
+                            sum[g * 3 + c] += wgt * edited[(y * TILE + x) * 3 + c] as f32;
+                        }
+                        weight[g] += wgt;
+                    }
+                }
+            }
+        }
+        for g in 0..w * h {
+            if weight[g] > 0.0 {
+                for c in 0..3 {
+                    pixels[g * CHANNELS + c] =
+                        (sum[g * 3 + c] / weight[g]).round().clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The 192×192 RGBA a generation produces: the model's 64×64 RGB,
@@ -8013,7 +8258,12 @@ impl Document {
         steps: usize,
         guidance: f32,
     ) -> Result<Vec<u8>, String> {
-        let rgb = crate::generate::generate_rgb(prompt, seed, steps, guidance)?;
+        Self::upscaled_rgba(&crate::generate::generate_rgb(
+            prompt, seed, steps, guidance,
+        )?)
+    }
+
+    fn upscaled_rgba(rgb: &[u8]) -> Result<Vec<u8>, String> {
         let mut rgba = Vec::with_capacity(rgb.len() / 3 * 4);
         for p in rgb.chunks_exact(3) {
             rgba.extend_from_slice(&[p[0], p[1], p[2], 255]);
@@ -8038,7 +8288,23 @@ impl Document {
         }
         let record = self.generated[position].clone();
         let seed = seed.unwrap_or(record.seed.wrapping_add(1));
-        let upscaled = Self::generated_pixels(&record.prompt, seed, record.steps, record.guidance)?;
+        let upscaled = match record.reference {
+            Some(reference) if self.layer(reference).is_ok() => {
+                let small = self.layer_rgb_at_model_size(reference)?;
+                Self::upscaled_rgba(&crate::generate::sdedit_rgb(
+                    &small,
+                    &record.prompt,
+                    seed,
+                    record.strength,
+                    record.steps,
+                    record.guidance,
+                )?)?
+            }
+            Some(_) => {
+                return Err("The reference layer this was made from no longer exists.".to_string())
+            }
+            None => Self::generated_pixels(&record.prompt, seed, record.steps, record.guidance)?,
+        };
         let side = crate::generate::IMAGE_SIZE as u32 * crate::super_resolution::SCALE as u32;
         let pixels = self.placed_on_canvas(&upscaled, side, side)?;
         self.layer_mut(id)?.pixels = pixels;
@@ -35752,6 +36018,108 @@ mod tests {
         doc.set_locked(id, false).unwrap();
         doc.remove_layer(id).unwrap();
         assert!(doc.view().generated_layers.is_empty());
+    }
+
+    #[test]
+    fn reference_image_prompt_to_edit_and_generative_upscale() {
+        // Reference Images: a generation from a layer, recorded as such.
+        let mut doc = Document::new(200, 200).unwrap();
+        let mut gradient = vec![0u8; 200 * 200 * CHANNELS];
+        for (i, p) in gradient.chunks_exact_mut(CHANNELS).enumerate() {
+            let v = (i / 200) as u8;
+            p.copy_from_slice(&[v, v, 255 - v, 255]);
+        }
+        let reference = doc.add_layer("photo", &gradient, 200, 200).unwrap();
+        let id = doc
+            .reference_image(reference, "lake", 3, 0.3, 2, 2.0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 100, 100)[3], 255);
+        assert_eq!(pixel(&doc, id, 195, 100), [0, 0, 0, 0]);
+        let record = doc
+            .view()
+            .generated_layers
+            .into_iter()
+            .find(|g| g.id == id)
+            .unwrap();
+        assert_eq!((record.reference, record.strength), (Some(reference), 0.3));
+        let before = doc.layer(id).unwrap().pixels.clone();
+        doc.regenerate_layer(id, None).unwrap();
+        assert_ne!(doc.layer(id).unwrap().pixels, before);
+        doc.remove_layer(reference).unwrap();
+        assert!(doc
+            .regenerate_layer(id, None)
+            .unwrap_err()
+            .contains("no longer exists"));
+        assert!(doc.reference_image(999, "lake", 3, 0.3, 2, 2.0).is_err());
+
+        // Prompt to Edit: only the selection changes, alpha included.
+        let mut doc = Document::new(40, 40).unwrap();
+        let id = doc
+            .add_layer("photo", &gradient[..40 * 40 * CHANNELS], 40, 40)
+            .unwrap();
+        assert!(
+            doc.prompt_to_edit(id, "forest", 1, 0.5, 2, 2.0).is_err(),
+            "needs a selection"
+        );
+        doc.select_rectangle(10.0, 10.0, 30.0, 30.0).unwrap();
+        let before = doc.layer(id).unwrap().pixels.clone();
+        let rect = doc
+            .prompt_to_edit(id, "forest", 1, 0.5, 2, 2.0)
+            .unwrap()
+            .unwrap();
+        assert_eq!((rect.x0, rect.y0, rect.x1, rect.y1), (10, 10, 30, 30));
+        let after = &doc.layer(id).unwrap().pixels;
+        let mut changed = 0;
+        for y in 0..40u32 {
+            for x in 0..40u32 {
+                let i = (y * 40 + x) as usize * CHANNELS;
+                let inside = (10..30).contains(&x) && (10..30).contains(&y);
+                if !inside {
+                    assert_eq!(&after[i..i + 4], &before[i..i + 4], "outside ({x}, {y})");
+                } else {
+                    assert_eq!(after[i + 3], before[i + 3], "alpha kept at ({x}, {y})");
+                    if after[i..i + 3] != before[i..i + 3] {
+                        changed += 1;
+                    }
+                }
+            }
+        }
+        assert!(
+            changed > 100,
+            "the selection was redrawn ({changed} pixels)"
+        );
+        doc.set_locked(id, true).unwrap();
+        assert!(doc
+            .prompt_to_edit(id, "forest", 1, 0.5, 2, 2.0)
+            .unwrap_err()
+            .contains("locked"));
+
+        // Generative Upscale: Super Zoom's size; at strength 0 exactly
+        // Super Zoom's pixels (the tiling is an identity then).
+        let mut plain = Document::new(20, 20).unwrap();
+        plain
+            .add_layer("photo", &gradient[..20 * 20 * CHANNELS], 20, 20)
+            .unwrap();
+        let mut zoomed = plain.clone();
+        zoomed.ai_super_resolution().unwrap();
+        plain.generative_upscale("", 1, 0.0, 2, 2.0).unwrap();
+        assert_eq!((plain.width(), plain.height()), (60, 60));
+        assert_eq!(plain.layers().len(), 1);
+        assert_eq!(plain.layers()[0].pixels, zoomed.layers()[0].pixels);
+        let mut detailed = Document::new(20, 20).unwrap();
+        detailed
+            .add_layer("photo", &gradient[..20 * 20 * CHANNELS], 20, 20)
+            .unwrap();
+        detailed.generative_upscale("", 1, 0.2, 2, 2.0).unwrap();
+        assert_ne!(detailed.layers()[0].pixels, zoomed.layers()[0].pixels);
+        assert!(detailed.layers()[0]
+            .pixels
+            .chunks_exact(4)
+            .all(|p| p[3] == 255));
+        assert!(Document::new(20, 20)
+            .unwrap()
+            .generative_upscale("", 1, 0.2, 2, 2.0)
+            .is_err());
     }
 
     #[test]

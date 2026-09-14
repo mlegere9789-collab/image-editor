@@ -102,7 +102,7 @@ fn nearby_unmasked_mean(
 /// selection smaller than `FEATHER_PX` across never reaches full
 /// strength anywhere in it, which is intentional: a tiny selection is
 /// mostly boundary.
-fn feather_alpha(mask: &[bool], width: usize, height: usize, x: usize, y: usize) -> f32 {
+pub(crate) fn feather_alpha(mask: &[bool], width: usize, height: usize, x: usize, y: usize) -> f32 {
     let (xi, yi) = (x as i64, y as i64);
     for r in 1..=FEATHER_PX {
         for dy in -r..=r {
@@ -126,7 +126,11 @@ fn feather_alpha(mask: &[bool], width: usize, height: usize, x: usize, y: usize)
 /// The selected pixels' bounding box, in canvas coordinates,
 /// `(x0, y0, x1, y1)` with `x1`/`y1` exclusive — `None` if nothing in
 /// `mask` is `true`.
-fn mask_bounds(mask: &[bool], width: usize, height: usize) -> Option<(usize, usize, usize, usize)> {
+pub(crate) fn mask_bounds(
+    mask: &[bool],
+    width: usize,
+    height: usize,
+) -> Option<(usize, usize, usize, usize)> {
     let mut x0 = width;
     let mut y0 = height;
     let mut x1 = 0usize;
@@ -148,7 +152,7 @@ fn mask_bounds(mask: &[bool], width: usize, height: usize) -> Option<(usize, usi
 
 /// A context window around `bounds`, expanded by [`CONTEXT_MARGIN`] and
 /// clamped to the canvas — the region actually run through the model.
-fn crop_window(
+pub(crate) fn crop_window(
     bounds: (usize, usize, usize, usize),
     width: usize,
     height: usize,
@@ -165,7 +169,13 @@ fn crop_window(
 /// Bilinear resize of one `src_w × src_h` plane to `dst_w × dst_h`,
 /// each output sample reading source coordinate
 /// `(i + 0.5) · src / dst - 0.5`, clamped to the source's own edges.
-fn resize_plane(plane: &[f32], src_w: usize, src_h: usize, dst_w: usize, dst_h: usize) -> Vec<f32> {
+pub(crate) fn resize_plane(
+    plane: &[f32],
+    src_w: usize,
+    src_h: usize,
+    dst_w: usize,
+    dst_h: usize,
+) -> Vec<f32> {
     if src_w == dst_w && src_h == dst_h {
         return plane.to_vec();
     }

@@ -1246,6 +1246,18 @@ export default function App() {
     null,
   );
   const [generateBusy, setGenerateBusy] = useState(false);
+  // Reference Images: the layer a generation starts from (SDEdit), and
+  // how far it is noised first; Prompt to Edit and Generative Upscale
+  // share the same sampler settings with their own strengths.
+  const [generateReference, setGenerateReference] = useState<number | null>(null);
+  const [generateStrength, setGenerateStrength] = useState(0.6);
+  const [showPromptToEditDialog, setShowPromptToEditDialog] = useState(false);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [editStrength, setEditStrength] = useState(0.5);
+  const [showGenerativeUpscaleDialog, setShowGenerativeUpscaleDialog] = useState(false);
+  const [upscalePrompt, setUpscalePrompt] = useState("");
+  const [upscaleStrength, setUpscaleStrength] = useState(0.25);
+  const [upscaleSteps, setUpscaleSteps] = useState(10);
   const [generativeFillPrompt, setGenerativeFillPrompt] = useState("");
   const [generativeFillBusy, setGenerativeFillBusy] = useState(false);
   const [cloudDocumentName, setCloudDocumentName] = useState("untitled");
@@ -3734,11 +3746,26 @@ export default function App() {
   const generateImage = useCallback(async () => {
     if (!generatePrompt.trim()) return;
     if (generativeModel === "device") {
-      await runCommand(
-        "generate_image",
-        { prompt: generatePrompt, seed: generateSeed, steps: generateSteps, guidance: generateGuidance },
-        "top",
-      );
+      if (generateReference !== null) {
+        await runCommand(
+          "reference_image",
+          {
+            reference: generateReference,
+            prompt: generatePrompt,
+            seed: generateSeed,
+            strength: generateStrength,
+            steps: generateSteps,
+            guidance: generateGuidance,
+          },
+          "top",
+        );
+      } else {
+        await runCommand(
+          "generate_image",
+          { prompt: generatePrompt, seed: generateSeed, steps: generateSteps, guidance: generateGuidance },
+          "top",
+        );
+      }
       setShowGenerateImageDialog(false);
       return;
     }
@@ -3769,7 +3796,33 @@ export default function App() {
     } finally {
       setGenerateBusy(false);
     }
-  }, [generatePrompt, generativeModel, generateSeed, generateSteps, generateGuidance, generativeAiEndpoint, generativeAiApiKey, runCommand]);
+  }, [generatePrompt, generativeModel, generateSeed, generateSteps, generateGuidance, generateReference, generateStrength, generativeAiEndpoint, generativeAiApiKey, runCommand]);
+
+  // Prompt to Edit: the selection redrawn under a prompt, on the device.
+  const promptToEdit = useCallback(async () => {
+    if (selectedId === null) return;
+    await runCommand("prompt_to_edit", {
+      id: selectedId,
+      prompt: editPrompt,
+      seed: generateSeed,
+      strength: editStrength,
+      steps: generateSteps,
+      guidance: generateGuidance,
+    });
+    setShowPromptToEditDialog(false);
+  }, [runCommand, selectedId, editPrompt, generateSeed, editStrength, generateSteps, generateGuidance]);
+
+  // Generative Upscale: Super Zoom, then the model adds detail tile by tile.
+  const generativeUpscale = useCallback(async () => {
+    await runCommand("generative_upscale", {
+      prompt: upscalePrompt,
+      seed: generateSeed,
+      strength: upscaleStrength,
+      steps: upscaleSteps,
+      guidance: generateGuidance,
+    });
+    setShowGenerativeUpscaleDialog(false);
+  }, [runCommand, upscalePrompt, generateSeed, upscaleStrength, upscaleSteps, generateGuidance]);
 
   // Generative Layers: the selected generated layer drawn again at the
   // next seed, its prompt and settings remembered by the document.
@@ -9593,6 +9646,22 @@ export default function App() {
             title="Generate Image: a text prompt drawn by this project's own on-device diffusion model (or the Generative AI Endpoint) as a new layer"
           >
             Generate Image…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowPromptToEditDialog(true)}
+            disabled={busy || !canPaint || !hasSelection}
+            title="Prompt to Edit: redraw the selection under a text prompt with this project's own on-device diffusion model (SDEdit)"
+          >
+            Prompt to Edit…
+          </button>
+          <button
+            className="button button--quiet"
+            onClick={() => setShowGenerativeUpscaleDialog(true)}
+            disabled={busy || !hasDocument}
+            title="Generative Upscale: Super Zoom x3, then the on-device diffusion model adds plausible detail tile by tile (SDEdit at a low strength)"
+          >
+            Generative Upscale…
           </button>
           <button
             className="button button--quiet"
@@ -17518,6 +17587,40 @@ export default function App() {
                 </select>
               </label>
             </label>
+            {generativeModel === "device" && document && (
+              <label className="control control--row">
+                <span className="control__label">Reference</span>
+                <select
+                  value={generateReference ?? ""}
+                  onChange={(event) => setGenerateReference(event.target.value === "" ? null : Number(event.target.value))}
+                  style={{ flex: 1 }}
+                  title="Reference Images: start from a layer's own picture rather than from noise"
+                >
+                  <option value="">None — from noise</option>
+                  {document.layers.map((layer) => (
+                    <option key={layer.id} value={layer.id}>
+                      {layer.name}
+                    </option>
+                  ))}
+                </select>
+                {generateReference !== null && (
+                  <>
+                    <span className="control__label">
+                      Strength <span className="control__value">{generateStrength.toFixed(2)}</span>
+                    </span>
+                    <input
+                      type="range"
+                      min={0.05}
+                      max={1}
+                      step={0.05}
+                      value={generateStrength}
+                      onChange={(event) => setGenerateStrength(Number(event.target.value))}
+                      title="How far the reference is noised before denoising under the prompt: low keeps it, high departs from it"
+                    />
+                  </>
+                )}
+              </label>
+            )}
             {generativeModel === "device" && (
               <label className="control control--row">
                 <span className="control__label">
@@ -17557,6 +17660,104 @@ export default function App() {
                 title={generativeModel === "device" ? "Generate on this device (about a step per second)" : "Generate through the endpoint"}
               >
                 Generate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPromptToEditDialog && (
+        <div className="modal-overlay" onClick={() => setShowPromptToEditDialog(false)} role="presentation">
+          <div className="modal modal--wide" role="dialog" aria-label="Prompt to Edit" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Prompt to Edit</h2>
+            <p className="modal__hint">
+              Redraws the selection under the prompt with this project&apos;s own on-device
+              diffusion model: the area around the selection is noised to the strength and
+              denoised under the prompt, then blended back inside the selection with a
+              feathered edge. Nothing outside the selection changes. Seed, steps and
+              guidance are the Generate Image dialog&apos;s.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Prompt</span>
+              <input
+                type="text"
+                value={editPrompt}
+                onChange={(event) => setEditPrompt(event.target.value)}
+                placeholder="leave empty to redraw without a prompt"
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength <span className="control__value">{editStrength.toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={0.05}
+                max={1}
+                step={0.05}
+                value={editStrength}
+                onChange={(event) => setEditStrength(Number(event.target.value))}
+              />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowPromptToEditDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={() => void promptToEdit()} disabled={busy || selectedId === null}>
+                Edit
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showGenerativeUpscaleDialog && (
+        <div className="modal-overlay" onClick={() => setShowGenerativeUpscaleDialog(false)} role="presentation">
+          <div className="modal modal--wide" role="dialog" aria-label="Generative Upscale" onClick={(event) => event.stopPropagation()}>
+            <h2 className="modal__heading">Generative Upscale</h2>
+            <p className="modal__hint">
+              Super Zoom&apos;s ×3 upscale, then this project&apos;s own diffusion model adds
+              plausible fine detail over every 64×64 tile of it (overlaps blended), rather
+              than only interpolating — a low strength keeps the picture, a higher one
+              invents more. Replaces the document with one layer, as Super Zoom does. One
+              model run per step per tile: a large image takes a while.
+            </p>
+            <label className="control control--row">
+              <span className="control__label">Prompt</span>
+              <input
+                type="text"
+                value={upscalePrompt}
+                onChange={(event) => setUpscalePrompt(event.target.value)}
+                placeholder="optional: what the picture shows"
+                style={{ flex: 1 }}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Strength <span className="control__value">{upscaleStrength.toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={0.05}
+                max={0.6}
+                step={0.05}
+                value={upscaleStrength}
+                onChange={(event) => setUpscaleStrength(Number(event.target.value))}
+              />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Steps <span className="control__value">{upscaleSteps}</span>
+              </span>
+              <input type="range" min={2} max={30} value={upscaleSteps} onChange={(event) => setUpscaleSteps(Number(event.target.value))} />
+            </label>
+            <div className="modal__actions">
+              <button className="button button--quiet" onClick={() => setShowGenerativeUpscaleDialog(false)}>
+                Cancel
+              </button>
+              <button className="button" onClick={() => void generativeUpscale()} disabled={busy || !hasDocument}>
+                Upscale
               </button>
             </div>
           </div>
