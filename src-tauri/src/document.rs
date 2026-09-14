@@ -131,6 +131,34 @@ pub enum PaintDaubsBrush {
     Sparkle,
 }
 
+/// Filter > Blur > Radial Blur's Blur Method.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RadialBlurMethod {
+    Spin,
+    Zoom,
+}
+
+/// Filter > Blur > Radial Blur's Quality: how many samples each pixel
+/// averages — 3, 5 or 9.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RadialBlurQuality {
+    Draft,
+    Good,
+    Best,
+}
+
+impl RadialBlurQuality {
+    fn samples(self) -> usize {
+        match self {
+            RadialBlurQuality::Draft => 3,
+            RadialBlurQuality::Good => 5,
+            RadialBlurQuality::Best => 9,
+        }
+    }
+}
+
 /// Layer > Layer Style > Bevel & Emboss's Style.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -13180,8 +13208,8 @@ impl Document {
     /// given `radius` rather than a square — a diamond (`|dx| + |dy| ≤
     /// r`) or a disc (`dx² + dy² ≤ r²`) — so the blur's "bokeh" takes that
     /// shape. `Square` is exactly the box blur, which now delegates here.
-    /// Photoshop draws the kernel from any custom-shape preset; the three
-    /// built-in shapes are a documented scope cut. Every sample counts
+    /// Photoshop draws the kernel from any custom-shape preset, which
+    /// [`Self::shape_blur_with`] does too. Every sample counts
     /// equally and the average truncates, as `average_samples` does. Alpha
     /// is averaged with the colour, as in the box blur. Errors for a zero
     /// radius or a locked or unknown layer.
@@ -13191,9 +13219,67 @@ impl Document {
         kernel: ShapeBlurKernel,
         radius: u32,
     ) -> Result<Option<Rect>, String> {
+        self.shape_blur_with(id, kernel, radius, None)
+    }
+
+    /// [`Self::shape_blur`] with the kernel drawn from a saved custom
+    /// shape preset (`custom`, by name) instead of a built-in shape: the
+    /// preset's path is flattened as the Custom Shape tool flattens it,
+    /// scaled about its own centre so its longer side spans the kernel's
+    /// `2·radius + 1` pixels (its aspect kept), and a kernel pixel counts
+    /// when its centre lies inside that outline. Errors on an unknown
+    /// preset name.
+    pub fn shape_blur_with(
+        &mut self,
+        id: LayerId,
+        kernel: ShapeBlurKernel,
+        radius: u32,
+        custom: Option<String>,
+    ) -> Result<Option<Rect>, String> {
         if radius == 0 {
             return Err("Blur radius must be at least 1 pixel.".to_string());
         }
+        let r = radius as i64;
+        let side = (2 * r + 1) as usize;
+        let custom_mask: Option<Vec<bool>> = match custom {
+            None => None,
+            Some(name) => {
+                let preset = self
+                    .custom_shape_presets
+                    .iter()
+                    .find(|p| p.name == name)
+                    .ok_or_else(|| format!("No custom shape preset named \"{name}\"."))?;
+                let raw = flatten_path_to_polygon(&preset.path);
+                if raw.len() < 3 {
+                    return Err(format!("Custom shape preset \"{name}\" has no area."));
+                }
+                let (min_x, max_x) = raw
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(x, _)| {
+                        (lo.min(x), hi.max(x))
+                    });
+                let (min_y, max_y) = raw
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, y)| {
+                        (lo.min(y), hi.max(y))
+                    });
+                let span = (max_x - min_x).max(max_y - min_y).max(f32::EPSILON);
+                let scale = side as f32 / span;
+                let (cx, cy) = ((min_x + max_x) / 2.0, (min_y + max_y) / 2.0);
+                let fitted: Vec<(f32, f32)> = raw
+                    .iter()
+                    .map(|&(x, y)| ((x - cx) * scale, (y - cy) * scale))
+                    .collect();
+                Some(
+                    (-r..=r)
+                        .flat_map(|dy| {
+                            let fitted = &fitted;
+                            (-r..=r).map(move |dx| point_in_polygon(dx as f32, dy as f32, fitted))
+                        })
+                        .collect(),
+                )
+            }
+        };
         let bounds = self.copy_bounds();
         let selection = self.selection.clone();
         let (width, height) = (self.width as i64, self.height as i64);
@@ -13212,17 +13298,22 @@ impl Document {
                 if !keep {
                     continue;
                 }
-                let averaged = match kernel {
-                    ShapeBlurKernel::Square => {
+                let averaged = match (kernel, &custom_mask) {
+                    (ShapeBlurKernel::Square, None) => {
                         box_blur_at(&source, doc_width, width, height, row, col, r)
                     }
-                    _ => {
+                    (_, mask) => {
                         let samples = (-r..=r).flat_map(|dy| {
                             let sy = (row as i64 + dy).clamp(0, height - 1) as usize;
                             (-r..=r).filter_map(move |dx| {
-                                let inside = match kernel {
-                                    ShapeBlurKernel::Diamond => dx.abs() + dy.abs() <= r,
-                                    _ => dx * dx + dy * dy <= r * r,
+                                let inside = match mask {
+                                    Some(mask) => {
+                                        mask[(dy + r) as usize * side + (dx + r) as usize]
+                                    }
+                                    None => match kernel {
+                                        ShapeBlurKernel::Diamond => dx.abs() + dy.abs() <= r,
+                                        _ => dx * dx + dy * dy <= r * r,
+                                    },
                                 };
                                 let sx = (col as i64 + dx).clamp(0, width - 1) as usize;
                                 inside.then_some((sx, sy))
@@ -15027,10 +15118,9 @@ impl Document {
     /// [`Self::ripple`] and [`Self::twirl`] already give displaced
     /// samples, and the same per-channel averaging [`box_blur_at`] and
     /// [`motion_blur_at`] already give blurred ones. `amount` is
-    /// Photoshop's own `0..=100` Amount range. Photoshop's own Spin
-    /// method, its Draft/Good/Best sample-count Quality dial (this
-    /// project always takes exactly three samples, a documented scope
-    /// cut), and its interactive on-canvas blur-center dial are all a
+    /// Photoshop's own `0..=100` Amount range. [`Self::radial_blur_with`]
+    /// adds Photoshop's Spin method and its Draft/Good/Best Quality; this
+    /// is Zoom at Draft. The interactive on-canvas blur-center dial is a
     /// documented scope cut — `center_x`/`center_y` are typed-in pixel
     /// coordinates here rather than dragged.
     pub fn radial_blur(
@@ -15039,6 +15129,34 @@ impl Document {
         amount: u32,
         center_x: f32,
         center_y: f32,
+    ) -> Result<Option<Rect>, String> {
+        self.radial_blur_with(
+            id,
+            amount,
+            center_x,
+            center_y,
+            RadialBlurMethod::Zoom,
+            RadialBlurQuality::Draft,
+        )
+    }
+
+    /// [`Self::radial_blur`] with its Blur Method and Quality. Quality
+    /// sets how many samples each pixel averages — Draft 3, Good 5, Best
+    /// 9 — spread evenly over the blur's range. Zoom spreads them over
+    /// scale factors `1 − blur ..= 1 + blur` along the line from the
+    /// centre through the pixel, as before; Spin spreads them over
+    /// rotations of the pixel's offset about the centre, `−sweep/2 ..=
+    /// +sweep/2` with `sweep = amount / 100 · 90°`, so 100 turns a
+    /// quarter turn's worth of arc into the streak. Alpha averages with
+    /// the colour, as before.
+    pub fn radial_blur_with(
+        &mut self,
+        id: LayerId,
+        amount: u32,
+        center_x: f32,
+        center_y: f32,
+        method: RadialBlurMethod,
+        quality: RadialBlurQuality,
     ) -> Result<Option<Rect>, String> {
         if amount > 100 {
             return Err("Radial Blur amount must be between 0 and 100.".to_string());
@@ -15051,25 +15169,37 @@ impl Document {
         let (width, height) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
         let blur = amount as f32 / 100.0;
-        let scales = [1.0 - blur, 1.0, 1.0 + blur];
+        let n = quality.samples();
+        let steps: Vec<f32> = (0..n)
+            .map(|i| -1.0 + 2.0 * i as f32 / (n - 1) as f32)
+            .collect();
+        let sweep = blur * std::f32::consts::FRAC_PI_2;
         self.filter_pixels(id, move |source, row, col| {
             let (x, y) = (col as f32, row as f32);
             let (dx, dy) = (x - center_x, y - center_y);
             let mut sums = [0u32; CHANNELS];
-            for &scale in &scales {
-                let sample = sample_nearest(
-                    source,
-                    doc_width,
-                    (width, height),
-                    (center_x + dx * scale, center_y + dy * scale),
-                );
+            for &t in &steps {
+                let at = match method {
+                    RadialBlurMethod::Zoom => {
+                        let scale = 1.0 + blur * t;
+                        (center_x + dx * scale, center_y + dy * scale)
+                    }
+                    RadialBlurMethod::Spin => {
+                        let (sin, cos) = (t * sweep / 2.0).sin_cos();
+                        (
+                            center_x + dx * cos - dy * sin,
+                            center_y + dx * sin + dy * cos,
+                        )
+                    }
+                };
+                let sample = sample_nearest(source, doc_width, (width, height), at);
                 for (sum, &v) in sums.iter_mut().zip(sample.iter()) {
                     *sum += v as u32;
                 }
             }
             let mut out = [0u8; CHANNELS];
             for (slot, &sum) in out.iter_mut().zip(sums.iter()) {
-                *slot = (sum as f32 / 3.0).round().clamp(0.0, 255.0) as u8;
+                *slot = (sum as f32 / n as f32).round().clamp(0.0, 255.0) as u8;
             }
             out
         })
@@ -45209,6 +45339,165 @@ mod tests {
 
     fn grey_row(values: &[u8]) -> Vec<u8> {
         values.iter().flat_map(|&v| [v, v, v, 255]).collect()
+    }
+
+    #[test]
+    fn radial_blur_spin_and_quality() {
+        let (w, h) = (8u32, 8u32);
+        let ramp = red_ramp(w, h, 32);
+        let run = |amount: u32,
+                   cx: f32,
+                   cy: f32,
+                   method: RadialBlurMethod,
+                   quality: RadialBlurQuality| {
+            let mut doc = Document::new(w, h).unwrap();
+            let id = doc.add_layer("r", &ramp, w, h).unwrap();
+            doc.radial_blur_with(id, amount, cx, cy, method, quality)
+                .unwrap();
+            red_plane(&doc)
+        };
+        // Zoom from the origin at 100 %: pixel (4, 0) averages samples at
+        // x = 0, 4, 8 (clamped to 7) for Draft → 117; at 0, 2, 4, 6, 7 for
+        // Good → 122; at 0..=7 and 7 again for Best → 124.
+        assert_eq!(
+            run(
+                100,
+                0.0,
+                0.0,
+                RadialBlurMethod::Zoom,
+                RadialBlurQuality::Draft
+            )[4],
+            117
+        );
+        assert_eq!(
+            run(
+                100,
+                0.0,
+                0.0,
+                RadialBlurMethod::Zoom,
+                RadialBlurQuality::Good
+            )[4],
+            122
+        );
+        assert_eq!(
+            run(
+                100,
+                0.0,
+                0.0,
+                RadialBlurMethod::Zoom,
+                RadialBlurQuality::Best
+            )[4],
+            124
+        );
+        // Zoom at Draft is radial_blur.
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &ramp, w, h).unwrap();
+        doc.radial_blur(id, 100, 0.0, 0.0).unwrap();
+        assert_eq!(
+            red_plane(&doc),
+            run(
+                100,
+                0.0,
+                0.0,
+                RadialBlurMethod::Zoom,
+                RadialBlurQuality::Draft
+            )
+        );
+        // Spin about (3.5, 3.5) at 100 % (a 90° sweep), Draft: pixel (7, 1)
+        // — offset (3.5, −2.5) — is sampled unrotated (224), turned +45°
+        // (x 7.74 → clamped 7 → 224) and −45° (x 4.21 → 4 → 128): 192.
+        // Amount 0 is the identity.
+        let spin = run(
+            100,
+            3.5,
+            3.5,
+            RadialBlurMethod::Spin,
+            RadialBlurQuality::Draft,
+        );
+        assert_eq!(spin[8 + 7], 192);
+        let still = run(0, 3.5, 3.5, RadialBlurMethod::Spin, RadialBlurQuality::Best);
+        assert_eq!(
+            still,
+            ramp.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>()
+        );
+        // A flat layer is unmoved by any spin.
+        let (mut doc, id) = flat_grey(8, 8);
+        doc.radial_blur_with(
+            id,
+            100,
+            3.5,
+            3.5,
+            RadialBlurMethod::Spin,
+            RadialBlurQuality::Best,
+        )
+        .unwrap();
+        assert!(red_plane(&doc).iter().all(|&v| v == 128));
+    }
+
+    #[test]
+    fn shape_blur_draws_its_kernel_from_a_custom_shape() {
+        // A saved bar 4.4 wide and 1.2 tall, fitted to a radius-2 kernel
+        // (5 pixels across): only the middle row's five pixels count, so
+        // the blur is a horizontal five-pixel mean.
+        let (w, h) = (8u32, 4u32);
+        let mut doc = Document::new(w, h).unwrap();
+        let id = doc.add_layer("r", &red_ramp(w, h, 16), w, h).unwrap();
+        doc.current_path = Some(Path {
+            anchors: [(0.0, 0.0), (4.4, 0.0), (4.4, 1.2), (0.0, 1.2)]
+                .iter()
+                .map(|&point| PathAnchor {
+                    point,
+                    in_handle: None,
+                    out_handle: None,
+                })
+                .collect(),
+            closed: true,
+        });
+        doc.save_custom_shape_preset("bar").unwrap();
+        doc.shape_blur_with(id, ShapeBlurKernel::Circle, 2, Some("bar".to_string()))
+            .unwrap();
+        let out = red_plane(&doc);
+        // Pixel 4 averages columns 2..=6 → 64 exactly; pixel 0 averages
+        // 0, 0, 0, 16, 32 → 9 (truncating); every row alike.
+        assert_eq!(out[4], 64);
+        assert_eq!(out[0], 9);
+        // Pixel 7 averages columns 5, 6, 7, 7, 7 → 512 / 5 → 102.
+        assert_eq!(out[7], 102);
+        for y in 1..h as usize {
+            assert_eq!(&out[y * 8..y * 8 + 8], &out[0..8]);
+        }
+        // A vertical ramp is untouched by a horizontal-only kernel.
+        let mut vertical = Vec::new();
+        for y in 0..h {
+            for _ in 0..w {
+                vertical.extend_from_slice(&[(y * 40) as u8, 0, 0, 255]);
+            }
+        }
+        let vid = doc.add_layer("v", &vertical, w, h).unwrap();
+        doc.shape_blur_with(vid, ShapeBlurKernel::Square, 2, Some("bar".to_string()))
+            .unwrap();
+        let plane: Vec<u8> = doc.layers()[1]
+            .pixels
+            .chunks_exact(4)
+            .map(|p| p[0])
+            .collect();
+        assert_eq!(
+            plane,
+            vertical.chunks_exact(4).map(|p| p[0]).collect::<Vec<_>>()
+        );
+        // None is the built-in kernel; an unknown preset errors.
+        let mut plain = Document::new(w, h).unwrap();
+        let pid = plain.add_layer("r", &red_ramp(w, h, 16), w, h).unwrap();
+        plain.shape_blur(pid, ShapeBlurKernel::Diamond, 2).unwrap();
+        let mut again = Document::new(w, h).unwrap();
+        let aid = again.add_layer("r", &red_ramp(w, h, 16), w, h).unwrap();
+        again
+            .shape_blur_with(aid, ShapeBlurKernel::Diamond, 2, None)
+            .unwrap();
+        assert_eq!(red_plane(&plain), red_plane(&again));
+        assert!(doc
+            .shape_blur_with(id, ShapeBlurKernel::Circle, 2, Some("nope".to_string()))
+            .is_err());
     }
 
     #[test]

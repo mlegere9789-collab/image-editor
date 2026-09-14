@@ -3079,6 +3079,37 @@ fn rough_pastels_with(
     })
 }
 
+/// Filter > Blur > Radial Blur on layer `id` with its Blur Method and Quality.
+#[tauri::command]
+fn radial_blur_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    amount: u32,
+    center_x: f32,
+    center_y: f32,
+    method: document::RadialBlurMethod,
+    quality: document::RadialBlurQuality,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.radial_blur_with(id, amount, center_x, center_y, method, quality)
+    })
+}
+
+/// Filter > Blur > Shape Blur on layer `id`, the kernel a built-in shape
+/// or (`custom`) a saved custom shape preset by name.
+#[tauri::command]
+fn shape_blur_with(
+    state: State<'_, AppState>,
+    id: LayerId,
+    kernel: document::ShapeBlurKernel,
+    radius: u32,
+    custom: Option<String>,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.shape_blur_with(id, kernel, radius, custom)
+    })
+}
+
 /// Filter > Other > Offset on layer `id` with its Undefined Areas fill.
 #[tauri::command]
 fn offset_with(
@@ -7993,6 +8024,8 @@ pub fn run() {
             sponge_with,
             watercolor_with,
             rough_pastels_with,
+            radial_blur_with,
+            shape_blur_with,
             gradient_overlay_with,
             bevel_emboss_with,
             save_action,

@@ -2229,6 +2229,7 @@ export default function App() {
   const [boxBlurRadius, setBoxBlurRadius] = useState(4);
   const [showShapeBlurDialog, setShowShapeBlurDialog] = useState(false);
   const [shapeBlurRadius, setShapeBlurRadius] = useState(4);
+  const [shapeBlurCustom, setShapeBlurCustom] = useState("");
   const [shapeBlurKernel, setShapeBlurKernel] =
     useState<ShapeBlurKernel>("circle");
   const [showGaussianBlurDialog, setShowGaussianBlurDialog] = useState(false);
@@ -2259,6 +2260,8 @@ export default function App() {
   const [radialBlurAmount, setRadialBlurAmount] = useState(50);
   const [radialBlurCenterX, setRadialBlurCenterX] = useState(0);
   const [radialBlurCenterY, setRadialBlurCenterY] = useState(0);
+  const [radialBlurMethod, setRadialBlurMethod] = useState("zoom");
+  const [radialBlurQuality, setRadialBlurQuality] = useState("good");
   const [showTiltShiftDialog, setShowTiltShiftDialog] = useState(false);
   // The Blur Gallery's on-canvas controls (README Phase 361): which pin a
   // drag holds, and the canvas box it is measured against.
@@ -7058,13 +7061,20 @@ export default function App() {
 
   const applyShapeBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("shape_blur", {
+    await runCommand("shape_blur_with", {
       id: selectedId,
       kernel: shapeBlurKernel,
       radius: shapeBlurRadius,
+      custom: shapeBlurCustom === "" ? null : shapeBlurCustom,
     });
     setShowShapeBlurDialog(false);
-  }, [runCommand, selectedId, shapeBlurKernel, shapeBlurRadius]);
+  }, [
+    runCommand,
+    selectedId,
+    shapeBlurKernel,
+    shapeBlurRadius,
+    shapeBlurCustom,
+  ]);
 
   const applyBoxBlur = useCallback(async () => {
     if (selectedId === null) return;
@@ -8353,11 +8363,13 @@ export default function App() {
 
   const applyRadialBlur = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("radial_blur", {
+    await runCommand("radial_blur_with", {
       id: selectedId,
       amount: radialBlurAmount,
       centerX: radialBlurCenterX,
       centerY: radialBlurCenterY,
+      method: radialBlurMethod,
+      quality: radialBlurQuality,
     });
     setShowRadialBlurDialog(false);
   }, [
@@ -8366,6 +8378,8 @@ export default function App() {
     radialBlurAmount,
     radialBlurCenterX,
     radialBlurCenterY,
+    radialBlurMethod,
+    radialBlurQuality,
   ]);
 
   const openTiltShiftDialog = useCallback(() => {
@@ -27376,6 +27390,20 @@ export default function App() {
                 <option value="square">Square</option>
               </select>
             </label>
+            <label className="control control--row">
+              <span className="control__label">Custom Shape</span>
+              <select
+                value={shapeBlurCustom}
+                onChange={(event) => setShapeBlurCustom(event.target.value)}
+              >
+                <option value="">None (built-in shape)</option>
+                {(document?.customShapePresets ?? []).map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Radius
@@ -33568,6 +33596,27 @@ export default function App() {
                   setRadialBlurCenterY(Number(event.target.value))
                 }
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blur Method</span>
+              <select
+                value={radialBlurMethod}
+                onChange={(event) => setRadialBlurMethod(event.target.value)}
+              >
+                <option value="spin">Spin</option>
+                <option value="zoom">Zoom</option>
+              </select>
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Quality</span>
+              <select
+                value={radialBlurQuality}
+                onChange={(event) => setRadialBlurQuality(event.target.value)}
+              >
+                <option value="draft">Draft</option>
+                <option value="good">Good</option>
+                <option value="best">Best</option>
+              </select>
             </label>
             <div className="modal__actions">
               <button

@@ -21903,6 +21903,54 @@ eye.
 
 Tests: 1860 Rust (1855 → 1860), 22 frontend.
 
+## Phase 367 — Blur options: Radial Blur's Spin method and Quality, Shape Blur from a custom shape
+
+Two Blur-menu scope cuts of section D.
+
+**Radial Blur** (`radial_blur_with`, Blur Method and Quality selects):
+Quality sets how many samples each pixel averages — Draft 3, Good 5,
+Best 9 — spread evenly over the blur's range. Zoom spreads them over
+scale factors `1 − blur ..= 1 + blur` along the line from the centre
+through the pixel, as before; Spin spreads them over rotations of the
+pixel's offset about the centre, `−sweep/2 ..= +sweep/2` with `sweep
+= amount / 100 · 90°`, so 100 turns a quarter turn of arc into the
+streak. The old command is Zoom at Draft; the dialog now defaults to
+Good, as Photoshop does.
+
+**Shape Blur** (`shape_blur_with`, a Custom Shape select listing the
+document's saved custom shape presets): the preset's path is
+flattened as the Custom Shape tool flattens it, scaled about its own
+centre so its longer side spans the kernel's `2·radius + 1` pixels
+with its aspect kept, and a kernel pixel counts when its centre lies
+inside that outline — so any shape drawn with the Pen and saved as a
+preset becomes the blur's bokeh.
+
+**Verified.** Two Rust tests. `radial_blur_spin_and_quality` on an
+8-wide ramp: Zoom from the origin at 100 % reads 117 at pixel (4, 0)
+with Draft (samples at x 0, 4, 7), 122 with Good (0, 2, 4, 6, 7) and
+124 with Best (0..=7 and 7 again); Zoom at Draft equals `radial_blur`;
+Spin about (3.5, 3.5) at 100 % reads 192 at pixel (7, 1) (unrotated
+224, +45° clamped to 224, −45° at x 4.21 → 128); amount 0 is the
+identity and a flat layer is unmoved by any spin.
+`shape_blur_draws_its_kernel_from_a_custom_shape`: a saved bar 4.4 ×
+1.2 fitted to a radius-2 kernel makes a horizontal five-pixel mean —
+pixel 4 of a step-16 ramp reads 64, pixel 0 reads 9 (truncating),
+pixel 7 reads 102, every row alike — leaves a vertical ramp untouched,
+None equals the built-in Diamond kernel, and an unknown preset errors.
+In Chromium against the built frontend with two presets stubbed:
+Filter > Blur > Radial Blur… shows Blur Method (Zoom) and Quality
+(Good) after Amount and the centre, and Spin with Best sends
+`radial_blur_with` with `method: "spin", quality: "best"`; Shape Blur
+shows Custom Shape (None, then the presets) and sends `custom: null`
+or `custom: "heart"`; every dialog closes on Apply. On the real app
+under Xvfb, on the recovered brush-stroke document: Filter > Blur >
+Radial Blur… with Spin at Best and amount 100 applied through the real
+IPC smeared the stroke into a faint fan of arcs about the typed centre
+(400, 300), bright only near the centre where a rotation moves little;
+four screenshots checked by eye.
+
+Tests: 1862 Rust (1860 → 1862), 22 frontend.
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
