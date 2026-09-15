@@ -6713,6 +6713,7 @@ fn satin(
 /// Layer > Layer Style > Pattern Overlay on layer `id`, baked in
 /// destructively.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn pattern_overlay(
     state: State<'_, AppState>,
     id: LayerId,
@@ -6720,9 +6721,10 @@ fn pattern_overlay(
     color1: [u8; 3],
     color2: [u8; 3],
     opacity: u32,
+    blend_mode: BlendMode,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.pattern_overlay(id, scale, color1, color2, opacity)
+        document.pattern_overlay_with(id, scale, color1, color2, opacity, blend_mode)
     })
 }
 

@@ -2070,6 +2070,8 @@ export default function App() {
   const [patternOverlayColor1, setPatternOverlayColor1] = useState("#000000");
   const [patternOverlayColor2, setPatternOverlayColor2] = useState("#ffffff");
   const [patternOverlayOpacity, setPatternOverlayOpacity] = useState(100);
+  const [patternOverlayBlendMode, setPatternOverlayBlendMode] =
+    useState<BlendMode>("normal");
   const [showBevelEmbossDialog, setShowBevelEmbossDialog] = useState(false);
   const [bevelEmbossSize, setBevelEmbossSize] = useState(5);
   // Bevel & Emboss's Structure and Shading options (README Phase 353).
@@ -6377,6 +6379,7 @@ export default function App() {
       color1: [r1, g1, b1],
       color2: [r2, g2, b2],
       opacity: patternOverlayOpacity,
+      blendMode: patternOverlayBlendMode,
     });
     setShowPatternOverlayDialog(false);
   }, [
@@ -6386,6 +6389,7 @@ export default function App() {
     patternOverlayColor1,
     patternOverlayColor2,
     patternOverlayOpacity,
+    patternOverlayBlendMode,
   ]);
 
   const applyBevelEmboss = useCallback(async () => {
@@ -26192,6 +26196,21 @@ export default function App() {
                   setPatternOverlayColor2(event.target.value)
                 }
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Blend Mode</span>
+              <select
+                value={patternOverlayBlendMode}
+                onChange={(event) =>
+                  setPatternOverlayBlendMode(event.target.value as BlendMode)
+                }
+              >
+                {blendModes.map((info) => (
+                  <option key={info.mode} value={info.mode}>
+                    {info.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="control">
               <span className="control__label">

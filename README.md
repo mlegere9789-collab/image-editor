@@ -23117,6 +23117,36 @@ warnings`/`test` and `npm run build`/`test` all clean.
 Tests: 1904 Rust (1903 → 1904), 33 frontend (unchanged — one dropdown,
 same pattern as Phase 391's).
 
+## Phase 393 — Pattern Overlay's Blend Mode
+
+The third layer-style effect to gain the Blend Mode narrowing Phases 391
+and 392 introduced. `Document::pattern_overlay` (unchanged, still
+Normal-only) delegates to the new `pattern_overlay_with(..., blend_mode:
+BlendMode)`, the same plain-function-plus-`_with`-sibling shape Phase 391
+used (Pattern Overlay had no options struct to extend the way Phase 392's
+Gradient Overlay did). The checkerboard's own target colour — `color1` or
+`color2`, picked by the `((row / scale) + (col / scale)) % 2` cell — now
+runs through `blend_mode.blend(Cb, Cs)` before Opacity mixes toward that
+result, exactly the same shape as Color Overlay's and Gradient Overlay's
+own. `pattern_overlay`'s Tauri command widened to take `blendMode`
+directly; the dialog gained a Blend Mode dropdown between the two colour
+swatches and the Opacity slider.
+
+**Verified.** One new Rust test, hand-computed, plus all 6 pre-existing
+Pattern Overlay tests (unmodified) still pass. On `column_stripes_fixture`
+(R=G=B = 10, 20, 30, 40 across four columns) under the same scale-2
+red/blue checkerboard `pattern_overlay_paints_a_checkerboard` already
+uses, Multiply at full opacity: column 0 (cell 0, target red — `Cs = (1,
+0, 0)`) leaves R completely unchanged at 10 while G and B both collapse to
+0 — a real, contrasting result against that same test's own full-opacity
+Normal reading at this column (255, 0, 0); column 2 (cell 1, target blue —
+`Cs = (0, 0, 1)`) is the mirror case, B unchanged at 30, R and G both 0.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test` all clean.
+
+Tests: 1905 Rust (1904 → 1905), 33 frontend (unchanged — one dropdown,
+same pattern as Phases 391 and 392's).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

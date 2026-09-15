@@ -23695,6 +23695,26 @@ impl Document {
         color2: [u8; 3],
         opacity: u32,
     ) -> Result<Option<Rect>, String> {
+        self.pattern_overlay_with(id, scale, color1, color2, opacity, BlendMode::Normal)
+    }
+
+    /// [`Self::pattern_overlay`] with a choice of [`BlendMode`], the same
+    /// narrowing [`Self::color_overlay_with`] and
+    /// [`Self::gradient_overlay_with`] already make: each channel runs
+    /// through `blend_mode.blend(Cb, Cs)` against the checkerboard's own
+    /// target colour before Opacity mixes toward that result.
+    /// `BlendMode::Normal` collapses this back to `pattern_overlay`'s
+    /// exact original formula.
+    #[allow(clippy::too_many_arguments)]
+    pub fn pattern_overlay_with(
+        &mut self,
+        id: LayerId,
+        scale: u32,
+        color1: [u8; 3],
+        color2: [u8; 3],
+        opacity: u32,
+        blend_mode: BlendMode,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=250).contains(&scale) {
             return Err("Pattern Overlay scale must be between 1 and 250.".to_string());
         }
@@ -23713,10 +23733,9 @@ impl Document {
             let target = if cell == 0 { color1 } else { color2 };
             let mut out = [0u8; CHANNELS];
             for c in 0..3 {
-                let v = src[base + c] as f32;
-                out[c] = (v * (1.0 - frac) + target[c] as f32 * frac)
-                    .round()
-                    .clamp(0.0, 255.0) as u8;
+                let cb = to_unit(src[base + c]);
+                let blended = blend_mode.blend(cb, to_unit(target[c]));
+                out[c] = to_byte(cb * (1.0 - frac) + blended * frac);
             }
             out[3] = a;
             out
@@ -47153,6 +47172,27 @@ mod tests {
             .unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [133, 5, 5, 255]);
+    }
+
+    #[test]
+    fn pattern_overlay_with_multiply_blends_the_checkerboard_colour_first() {
+        // Same scale-2 checkerboard fixture as pattern_overlay's own
+        // tests (columns 0-3 at R=G=B = 10, 20, 30, 40), red/blue at
+        // opacity 100 -- but through Multiply instead of Normal. Column 0
+        // (cell 0, target red -- Cs = (1, 0, 0)): R's own Cs = 1.0 leaves
+        // R completely unchanged at 10 (Cb * 1.0 = Cb), while G and B's
+        // Cs = 0 collapse both to 0 -- a real, contrasting result against
+        // Normal's own full-opacity reading at this column
+        // (pattern_overlay_paints_a_checkerboard's own (255, 0, 0)).
+        // Column 2 (cell 1, target blue -- Cs = (0, 0, 1)): the mirror
+        // case, B unchanged at 30, R and G both 0.
+        let idx = |x: usize, y: usize| (y * 4 + x) * 4;
+        let (mut doc, id) = column_stripes_fixture();
+        doc.pattern_overlay_with(id, 2, [255, 0, 0], [0, 0, 255], 100, BlendMode::Multiply)
+            .unwrap();
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(0, 0)..idx(0, 0) + 4], [10, 0, 0, 255]);
+        assert_eq!(&p[idx(2, 0)..idx(2, 0) + 4], [0, 0, 30, 255]);
     }
 
     #[test]
