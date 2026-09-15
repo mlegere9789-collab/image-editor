@@ -6742,15 +6742,17 @@ fn bevel_emboss(
 
 /// Layer > Layer Style > Contour on layer `id`, baked in destructively.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn contour(
     state: State<'_, AppState>,
     id: LayerId,
     size: u32,
     light_direction: u32,
     strength: u32,
+    preset: document::ContourPreset,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.contour(id, size, light_direction, strength)
+        document.contour_with(id, size, light_direction, strength, preset)
     })
 }
 

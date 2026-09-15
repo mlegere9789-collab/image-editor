@@ -3733,6 +3733,17 @@ pub enum GuideOrientation {
     Vertical,
 }
 
+/// Layer > Layer Style > Contour's choice of curve — see
+/// [`Document::contour_with`] for what each one does to the bevel's own
+/// height field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContourPreset {
+    Ring,
+    Linear,
+    RingDouble,
+}
+
 /// A ruler guide: a horizontal line at `position` pixels down from the
 /// top, or a vertical one at `position` pixels in from the left, sitting
 /// on the pixel boundary so `0` is the canvas edge and `width` (or
@@ -24090,6 +24101,28 @@ impl Document {
         light_direction: u32,
         strength: u32,
     ) -> Result<Option<Rect>, String> {
+        self.contour_with(id, size, light_direction, strength, ContourPreset::Ring)
+    }
+
+    /// [`Self::contour`] with a choice of preset curve, standing in for a
+    /// few more of Photoshop's own dozen-plus Contour panel presets
+    /// alongside the one this project already had (`Ring`, unchanged, and
+    /// still what `contour` itself always uses). `Linear` is Photoshop's
+    /// own default and literal identity remap — `curve(h) = h` — so it
+    /// adds no ring/shading artifact at all beyond `bevel_emboss`'s own
+    /// plain linear falloff, letting a caller reach that plain look
+    /// through this same command rather than a separate code path.
+    /// `RingDouble` is `Ring`'s own triangular remap at twice the spatial
+    /// frequency across the same `size`, producing two bright/dark rings
+    /// where `Ring` produces one — Photoshop's own "Ring - Double" preset.
+    pub fn contour_with(
+        &mut self,
+        id: LayerId,
+        size: u32,
+        light_direction: u32,
+        strength: u32,
+        preset: ContourPreset,
+    ) -> Result<Option<Rect>, String> {
         if !(1..=250).contains(&size) {
             return Err("Contour size must be between 1 and 250.".to_string());
         }
@@ -24116,7 +24149,14 @@ impl Document {
         let dx = cos.round() as i64;
         let dy = -(sin.round() as i64);
         let amount = strength as f32 / 100.0;
-        let ring = move |h: i64| radius - (2 * h - radius).abs();
+        let ring = move |h: i64| match preset {
+            ContourPreset::Ring => radius - (2 * h - radius).abs(),
+            ContourPreset::Linear => h,
+            ContourPreset::RingDouble => {
+                let half = (radius / 2).max(1);
+                half - (2 * (h % half) - half).abs()
+            }
+        };
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * doc_width + col as usize) * CHANNELS;
             if src[base + 3] == 0 {
@@ -49666,6 +49706,58 @@ mod tests {
         doc.contour(id, 2, 2, 50).unwrap();
         let p = &doc.layers()[0].pixels;
         assert_eq!(&p[idx(2, 2)..idx(2, 2) + 4], [101, 151, 201, 255]);
+    }
+
+    #[test]
+    fn contour_with_linear_reproduces_plain_bevel_emboss_exactly() {
+        // Linear's curve is the identity, so it must add no ring artifact
+        // beyond bevel_emboss's own plain relief -- byte for byte, at
+        // every pixel, not just the ones the other contour tests sample.
+        let (mut bevel, bevel_id) = inner_glow_fixture();
+        bevel.bevel_emboss(bevel_id, 2, 2, 100).unwrap();
+        let (mut linear, linear_id) = inner_glow_fixture();
+        linear
+            .contour_with(linear_id, 2, 2, 100, ContourPreset::Linear)
+            .unwrap();
+        assert_eq!(bevel.layers()[0].pixels, linear.layers()[0].pixels);
+    }
+
+    #[test]
+    fn contour_with_ring_double_rings_twice_across_the_same_size() {
+        // A wide opaque strip (columns 5-24 of a 40-wide, 3-tall layer) so
+        // bevel_height_at's own capped Chebyshev distance is purely
+        // horizontal and predictable. Size 8 (half = 4) so the toward/away
+        // sample stride of 2 columns doesn't alias with the ring's own
+        // period, unlike size 4 would (half = 2 would make every
+        // same-parity pair collide). Direction 2 (dx=1, dy=0), pixel
+        // (9, 1): toward = height(1, 10) = min(8, 10-4) = 6, curve(6) =
+        // 4 - |2*(6%4) - 4| = 4 - |4-4| = 4; away = height(1, 8) =
+        // min(8, 8-4) = 4, curve(4) = 4 - |2*(4%4) - 4| = 4 - 4 = 0.
+        // relief = curve(away) - curve(toward) = 0 - 4 = -4, shade = -4
+        // at strength 100, giving (96, 146, 196) from a (100, 150, 200)
+        // base -- a real, nonzero, sign-matters result Ring's own single
+        // cycle would not produce at this same size and pixel (Ring's
+        // curve is monotonic-then-monotonic, not periodic, so it never
+        // aliases with the sampling stride the way an unluckily-sized
+        // double ring can).
+        let width = 40u32;
+        let mut pixels = Vec::with_capacity(width as usize * 3 * 4);
+        for _row in 0..3u32 {
+            for col in 0..width {
+                if (5..=24).contains(&col) {
+                    pixels.extend_from_slice(&[100, 150, 200, 255]);
+                } else {
+                    pixels.extend_from_slice(&[0, 0, 0, 0]);
+                }
+            }
+        }
+        let mut doc = Document::new(width, 3).unwrap();
+        let id = doc.add_layer("strip", &pixels, width, 3).unwrap();
+        doc.contour_with(id, 8, 2, 100, ContourPreset::RingDouble)
+            .unwrap();
+        let idx = |x: usize, y: usize| (y * width as usize + x) * 4;
+        let p = &doc.layers()[0].pixels;
+        assert_eq!(&p[idx(9, 1)..idx(9, 1) + 4], [96, 146, 196, 255]);
     }
 
     #[test]

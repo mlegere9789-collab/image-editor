@@ -2088,6 +2088,9 @@ export default function App() {
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
   const [contourStrength, setContourStrength] = useState(50);
+  const [contourPreset, setContourPreset] = useState<
+    "ring" | "linear" | "ringDouble"
+  >("ring");
   const [showTextureDialog, setShowTextureDialog] = useState(false);
   const [textureSize, setTextureSize] = useState(5);
   const [textureLightDirection, setTextureLightDirection] = useState(7);
@@ -6418,6 +6421,7 @@ export default function App() {
       size: contourSize,
       lightDirection: contourLightDirection,
       strength: contourStrength,
+      preset: contourPreset,
     });
     setShowContourDialog(false);
   }, [
@@ -6426,6 +6430,7 @@ export default function App() {
     contourSize,
     contourLightDirection,
     contourStrength,
+    contourPreset,
   ]);
 
   const applyTexture = useCallback(async () => {
@@ -26372,6 +26377,21 @@ export default function App() {
             <h2 className="modal__heading">
               Layer &gt; Layer Style &gt; Contour
             </h2>
+            <label className="control control--row">
+              <span className="control__label">Contour</span>
+              <select
+                value={contourPreset}
+                onChange={(event) =>
+                  setContourPreset(
+                    event.target.value as "ring" | "linear" | "ringDouble",
+                  )
+                }
+              >
+                <option value="linear">Linear</option>
+                <option value="ring">Ring</option>
+                <option value="ringDouble">Ring - Double</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Size

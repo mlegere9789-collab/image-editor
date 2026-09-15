@@ -22994,6 +22994,48 @@ and `npm run build`/`test` all clean.
 Tests: 1899 Rust (1898 → 1899), 33 frontend (unchanged — one checkbox
 wired the same way every other Brush Settings toggle already is).
 
+## Phase 390 — two more Contour presets: Linear and Ring - Double
+
+The CONTOUR row's own scope cut, narrowed: this project's one Ring preset
+now has company. `Document::contour` (the plain 4-argument entry point
+every existing caller and test already used) is unchanged — it delegates
+to the new `contour_with(..., preset: ContourPreset)`, still defaulting to
+`Ring`, so nothing that shipped before this phase changed behaviour.
+`ContourPreset::Linear` is Photoshop's own actual default: the curve is
+the identity (`curve(h) = h`), so it adds no ring artifact at all beyond
+`bevel_emboss`'s own plain relief — reachable through this same command
+now, rather than only through a separate one. `ContourPreset::RingDouble`
+is the existing Ring curve compressed to run twice across the same `size`:
+`half = size / 2`, `curve(h) = half − |2·(h mod half) − half|` — the same
+triangular shape `Ring` already uses, just folded to repeat. The Tauri
+`contour` command's own shape widened to take `preset` directly (the
+established pattern for every command that has grown a new parameter this
+way); the dialog gained a Contour dropdown (Linear/Ring/Ring - Double)
+above its existing Size/Light Direction/Strength controls.
+
+**Verified.** Two new Rust tests, hand-computed. Linear: run against the
+existing Ring fixture (a 4×4 opaque block on transparent, size 2, light
+direction 2, strength 100) and compared, pixel for pixel, against a fresh
+`bevel_emboss` call at the same parameters — byte-for-byte identical, not
+approximately. Ring - Double: needed its own fixture, since size 2 (the
+existing tests' own size) makes `half = 1`, under which `h mod 1` is
+always `0` for any integer height — the curve degenerates to a flat
+constant and every pixel goes untouched, telling nothing. A wide opaque
+strip and size 8 (`half = 4`) avoid that: at the chosen pixel, hand-traced
+heights of 6 and 4 on the two sample sides map through the curve to 4 and
+0 respectively — a real, nonzero, sign-matters −4 shade, landing at
+exactly (96, 146, 196) from a (100, 150, 200) base. The comment also
+documents _why_ size 4 specifically would have failed here too: the
+toward/away samples sit a 2-column stride apart, which aliases exactly
+against a period-2 curve (half = 2), silently cancelling to zero
+everywhere — a real trap worth writing down, not just avoiding by luck.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test`, `npm run
+build`/`test`, and all 12 pre-existing Contour tests (unmodified, still
+calling the plain 4-argument `contour`) all clean.
+
+Tests: 1901 Rust (1899 → 1901), 33 frontend (unchanged — one dropdown,
+no new frontend logic).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
