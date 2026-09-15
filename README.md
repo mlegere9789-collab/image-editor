@@ -24337,6 +24337,64 @@ Tests: 1946 Rust (1941 → 1946), 36 frontend (unchanged — the new
 checkboxes and sliders reuse the existing options-bar pattern and need no
 new test file).
 
+## Phase 417 — Filters and Adjustments Honour a Feathered Selection
+
+MODIFY > FEATHER's own row had one clause left: Feather already softened
+what the Brush, Fill, Cut, and Gradient tools painted, but every filter
+and adjustment still tested the selection with a hard yes/no — a
+feathered, soft-masked, or anti-aliased edge got clipped to a hard
+boundary the moment Invert, Threshold, Find Edges, or any other Image >
+Adjustments or Filter entry ran.
+
+Every filter and adjustment in this project already funnels through one
+of two shared, private pixel-iteration helpers — `adjust_layer_pixels`
+(Invert, Threshold, Color Lookup, OCIO, and the rest of the
+per-pixel-independent adjustments) and `filter_pixels` (Find Edges,
+Solarize, and every filter that reads a pre-filter snapshot of the whole
+layer) — so this phase touches exactly those two choke points rather
+than each of the dozens of callers built on them. Both already took a
+`Selection` and used its `contains` — a hard boolean — to decide whether
+to touch a pixel at all; both now call the selection's own `coverage`
+instead — the same `0.0..=1.0` figure `Self::gradient_fill` and the paint
+tools already scale by, `1.0`/`0.0` at a hard, unfeathered edge or with
+no selection at all, and a proportional figure wherever Feather, Select
+and Mask's own soft mask, or Anti-alias leaves the edge soft — and blend
+each pixel's new value toward its untouched old one by that fraction
+(`lerp` in unit space, `to_byte` back), skipping the lerp outright at
+`coverage >= 1.0` so the hard-edge case stays the exact same bytes as
+before. Nothing about `f`/`pick` themselves — the actual adjustment or
+filter logic every caller supplies — changes at all.
+
+**Verified two ways.** Two new hand-computed tests, both reusing the
+exact selection and Feather setup
+`paste_into_and_outside_masked_keep_the_clipboard_under_a_live_mask`
+already hand-verified its own coverage for — a 3×3 canvas, the
+bottom-right 2×2 selected and feathered by 1, giving (0,0) 1/9 coverage,
+(1,1)/(2,2) 4/9, and (1,0) 2/9 — rather than re-deriving those fractions
+from scratch:
+`invert_colors_blends_toward_the_original_under_a_feathered_selection` —
+solid white inverts to black, so the blend is exactly `1 - coverage` in
+unit space: `to_byte(8/9) = 227` at (0,0), `to_byte(5/9) = 142` at
+(1,1)/(2,2) (227 and 142 match that same existing test's own
+Paste-Outside mask bytes at those pixels exactly, an independent
+cross-check), and `to_byte(7/9) = 198` at (1,0).
+`solarize_blends_toward_the_original_under_a_feathered_selection` — the
+mirror test through `filter_pixels` instead: solid 200 solarizes to
+`min(200, 55) = 55`, blending to 184, 136, and 168 at the same three
+points, cross-checked against an independent Python port of the same
+`lerp`/`to_byte` arithmetic. All pre-existing `invert_colors_*`,
+`solarize_*`, and `find_edges_*` tests — every one built on a hard,
+unfeathered selection — still pass unmodified, confirming the
+`coverage >= 1.0` fast path is byte-for-byte the old behavior. No
+frontend change: Feather was already fully wired (README Phase 238), so
+every adjustment and filter picks this up automatically through the
+selection already active when its own dialog runs. `cargo
+fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1948 Rust (1946 → 1948), 36 frontend (unchanged — a backend-only
+fix with no new UI).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

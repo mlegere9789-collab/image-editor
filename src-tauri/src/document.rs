@@ -16195,6 +16195,19 @@ impl Document {
     /// value from that untouched snapshot, so a filter never reads its own
     /// output. Confined to the selection, returns the dirty rect, and
     /// errors on a locked or unknown layer.
+    /// Every filter's shared pixel-iteration: visits every pixel in
+    /// `bounds`, lets `pick` compute that pixel's own new value from a
+    /// pre-filter snapshot of the whole layer (`source`, so a filter that
+    /// samples its neighbours — blurs, edge detection, anything
+    /// convolution-shaped — always reads the original picture, never a
+    /// value another iteration of this same pass already overwrote), and
+    /// writes the result blended toward the original by the active
+    /// selection's own [`Selection::coverage`] at that pixel — `1.0`
+    /// (the new value outright) inside a hard, unfeathered selection or
+    /// with none active, `0.0` (untouched) fully outside, and a
+    /// proportional mix wherever Feather, Select and Mask's soft mask, or
+    /// Anti-alias leaves the edge soft, the same coverage-scaling
+    /// `Self::gradient_fill` and the paint tools already give those.
     fn filter_pixels(
         &mut self,
         id: LayerId,
@@ -16210,15 +16223,22 @@ impl Document {
         let source = layer.pixels.clone();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
-                let keep = selection
+                let coverage = selection
                     .as_ref()
-                    .map_or(true, |s| s.contains(col as f32 + 0.5, row as f32 + 0.5));
-                if !keep {
+                    .map_or(1.0, |s| s.coverage(col as f32 + 0.5, row as f32 + 0.5));
+                if coverage <= 0.0 {
                     continue;
                 }
                 let picked = pick(&source, row, col);
                 let dst = (row as usize * doc_width + col as usize) * CHANNELS;
-                layer.pixels[dst..dst + CHANNELS].copy_from_slice(&picked);
+                if coverage >= 1.0 {
+                    layer.pixels[dst..dst + CHANNELS].copy_from_slice(&picked);
+                } else {
+                    for c in 0..CHANNELS {
+                        layer.pixels[dst + c] =
+                            to_byte(lerp(to_unit(source[dst + c]), to_unit(picked[c]), coverage));
+                    }
+                }
             }
         }
         Ok(Some(bounds))
@@ -21235,11 +21255,16 @@ impl Document {
     /// Shared pixel-iteration for whole-layer, per-pixel adjustments
     /// (Invert, Threshold, and any future Image > Adjustments entry that
     /// transforms each pixel independently of its neighbours): visits every
-    /// pixel the active selection includes, lets `f` rewrite that pixel's
-    /// 4 bytes in place, and reports the touched region the same way
-    /// `flood_fill`/`gradient_fill` do. Confines to the selection and
-    /// blocks a locked layer — the two guards every other in-place pixel
-    /// edit already respects — so a caller never needs to repeat either.
+    /// pixel the active selection's own [`Selection::coverage`] reaches at
+    /// all, lets `f` compute that pixel's new 4 bytes from its old ones,
+    /// writes the result blended toward the original by that coverage —
+    /// outright inside a hard, unfeathered selection or with none active,
+    /// proportionally wherever Feather, Select and Mask's soft mask, or
+    /// Anti-alias leaves the edge soft, the same scaling
+    /// [`Self::gradient_fill`] and the paint tools already give those — and
+    /// reports the touched region the same way `flood_fill`/`gradient_fill`
+    /// do. Blocks a locked layer, the guard every other in-place pixel edit
+    /// already respects, so a caller never needs to repeat it.
     fn adjust_layer_pixels(
         &mut self,
         id: LayerId,
@@ -21255,10 +21280,11 @@ impl Document {
         let mut touched: Option<(u32, u32, u32, u32)> = None;
         for py in 0..height {
             for px in 0..width {
-                if let Some(selection) = &selection {
-                    if !selection.contains(px as f32 + 0.5, py as f32 + 0.5) {
-                        continue;
-                    }
+                let coverage = selection
+                    .as_ref()
+                    .map_or(1.0, |s| s.coverage(px as f32 + 0.5, py as f32 + 0.5));
+                if coverage <= 0.0 {
+                    continue;
                 }
                 let base = (py as usize * width as usize + px as usize) * CHANNELS;
                 let pixel = [
@@ -21267,7 +21293,15 @@ impl Document {
                     layer.pixels[base + 2],
                     layer.pixels[base + 3],
                 ];
-                layer.pixels[base..base + CHANNELS].copy_from_slice(&f(pixel));
+                let out = f(pixel);
+                if coverage >= 1.0 {
+                    layer.pixels[base..base + CHANNELS].copy_from_slice(&out);
+                } else {
+                    for c in 0..CHANNELS {
+                        layer.pixels[base + c] =
+                            to_byte(lerp(to_unit(pixel[c]), to_unit(out[c]), coverage));
+                    }
+                }
 
                 touched = Some(match touched {
                     None => (px, py, px, py),
@@ -33997,6 +34031,29 @@ mod tests {
     }
 
     #[test]
+    fn solarize_blends_toward_the_original_under_a_feathered_selection() {
+        // filter_pixels's own half of Modify > Feather's scope cut, mirror
+        // of invert_colors_blends_toward_the_original_under_a_feathered_selection:
+        // the same bottom-right-2x2-of-3x3, Feather 1 setup, now through
+        // the source-snapshot filter path rather than the plain adjustment
+        // one. Solid 200 solarizes to min(200, 55) = 55; blending unit
+        // 200/255 toward 55/255 by coverage 1/9, 4/9, and 2/9 gives 184,
+        // 136, and 168 — hand-computed and cross-checked against an
+        // independent Python port of the same lerp/to_byte arithmetic.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [200, 200, 200, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.feather_selection(1).unwrap();
+        doc.solarize(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [184, 184, 184, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [136, 136, 136, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [136, 136, 136, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [168, 168, 168, 255]);
+    }
+
+    #[test]
     fn find_edges_is_white_where_flat_and_dark_where_the_gradient_is_steep() {
         let idx = |x: usize, y: usize| (y * 3 + x) * 4;
         let (mut doc, id) = ramped_3x3();
@@ -44797,6 +44854,32 @@ mod tests {
         // Outside the selection: untouched.
         assert_eq!(pixel(&doc, id, 2, 0), [10, 20, 30, 255]);
         assert_eq!(pixel(&doc, id, 3, 0), [10, 20, 30, 255]);
+    }
+
+    #[test]
+    fn invert_colors_blends_toward_the_original_under_a_feathered_selection() {
+        // Modify > Feather's own scope cut: adjustments used to see only a
+        // hard selection edge. The bottom-right 2x2 of a 3x3 canvas
+        // selected and feathered by 1 is the exact setup
+        // paste_into_and_outside_masked_keep_the_clipboard_under_a_live_mask
+        // already hand-verifies its own coverage for — (0,0) at 1/9,
+        // (1,1)/(2,2) at 4/9 — reused here rather than re-derived, plus
+        // (1,0) at 2/9 for a third point. On solid white, invert's new
+        // value is black, so the blend toward it is exactly `1 - coverage`
+        // in unit space: to_byte(8/9) = 227, to_byte(5/9) = 142,
+        // to_byte(7/9) = 198 — cross-checked against an independent Python
+        // port of the same lerp/to_byte arithmetic.
+        let mut doc = Document::new(3, 3).unwrap();
+        let id = doc
+            .add_layer("l", &solid(3, 3, [255, 255, 255, 255]), 3, 3)
+            .unwrap();
+        doc.select_rectangle(1.0, 1.0, 3.0, 3.0).unwrap();
+        doc.feather_selection(1).unwrap();
+        doc.invert_colors(id).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [227, 227, 227, 255]);
+        assert_eq!(pixel(&doc, id, 1, 1), [142, 142, 142, 255]);
+        assert_eq!(pixel(&doc, id, 2, 2), [142, 142, 142, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [198, 198, 198, 255]);
     }
 
     #[test]
