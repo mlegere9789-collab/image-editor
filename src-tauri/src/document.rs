@@ -410,6 +410,14 @@ pub struct BevelEmbossOptions {
     pub shadow_opacity: u32,
     /// Shadow Mode. Photoshop's own default is Multiply.
     pub shadow_blend_mode: BlendMode,
+    /// Gloss Contour: a curve remapping the shading strength before it
+    /// scales the highlight/shadow opacity, this project's own
+    /// three-preset stand-in (the same family [`Self::contour_with`]
+    /// already offers for the standalone Contour style) for Photoshop's
+    /// own dozen-plus Gloss Contour presets. `Linear`, Photoshop's own
+    /// default, is the identity and reproduces the plain shading fade
+    /// exactly.
+    pub gloss_contour: ContourPreset,
 }
 
 /// Layer > Layer Style > Stroke's Position.
@@ -24949,16 +24957,16 @@ impl Document {
     /// altitude's cosine (light from straight overhead shades nothing),
     /// clamped to ±1 and turned over for Direction Down, is box-blurred
     /// by Soften. A positive relief blends the pixel toward the highlight
-    /// colour by relief × highlight opacity, a negative one toward the
-    /// shadow colour — each running the colour through its own
+    /// colour by [`gloss_curve`]`(gloss_contour, relief.abs())` ×
+    /// highlight opacity, a negative one toward the shadow colour the
+    /// same way — each running the colour through its own
     /// `blend_mode.blend(Cb, Cs)` first, the same narrowing every other
     /// layer style's Blend Mode already makes, `BlendMode::Normal`
     /// collapsing back to the original flat mix; a transparent pixel with
-    /// relief becomes that colour at relief × opacity alpha regardless of
-    /// blend mode — Screen or Multiply have nothing existing to blend
-    /// against there, so the outer styles paint the surround exactly as
-    /// before. Gloss Contour remains a documented scope cut. See README
-    /// Phases 353 and 397.
+    /// relief becomes that colour at that same strength × opacity alpha
+    /// regardless of blend mode — Screen or Multiply have nothing
+    /// existing to blend against there, so the outer styles paint the
+    /// surround exactly as before. See README Phases 353, 397 and 427.
     pub fn bevel_emboss_with(
         &mut self,
         id: LayerId,
@@ -25049,15 +25057,17 @@ impl Document {
         let style = o.style;
         let highlight_blend_mode = o.highlight_blend_mode;
         let shadow_blend_mode = o.shadow_blend_mode;
+        let gloss_contour = o.gloss_contour;
         self.filter_pixels(id, move |src, row, col| {
             let idx = row as usize * w + col as usize;
             let base = idx * CHANNELS;
             let n = relief[idx];
             let px = [src[base], src[base + 1], src[base + 2], src[base + 3]];
+            let strength = gloss_curve(gloss_contour, n.abs());
             let (colour, t, blend_mode) = if n > 0.0 {
-                (highlight, n * hl, highlight_blend_mode)
+                (highlight, strength * hl, highlight_blend_mode)
             } else {
-                (shadow, -n * sh, shadow_blend_mode)
+                (shadow, strength * sh, shadow_blend_mode)
             };
             if px[3] == 0 {
                 if style == BevelStyle::InnerBevel || t <= 0.0 {
@@ -31213,6 +31223,31 @@ fn tone_mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
         lerp(a[1] as f32, b[1] as f32, t).round() as u8,
         lerp(a[2] as f32, b[2] as f32, t).round() as u8,
     ]
+}
+
+/// Layer > Layer Style > Bevel & Emboss's own Gloss Contour: remaps a
+/// shading strength `x` (`0.0..=1.0`, the bevel's own signed relief
+/// after taking its absolute value) through one of the same three
+/// preset curves [`Document::contour_with`] already offers the
+/// standalone Contour style, refitted to a normalized `0.0..=1.0`
+/// domain so every preset spans the same full output range rather than
+/// `contour_with`'s own raw-height amplitudes. `Linear`, Photoshop's
+/// own default, is the identity — `gloss_curve(Linear, x) == x` for
+/// every `x` — so it reproduces Bevel & Emboss's plain shading fade
+/// exactly. `Ring` is a single triangular peak at `x = 0.5`, `0` at
+/// both ends, the bright ring right at a bevel's own mid-slope Gloss
+/// Contour's "Ring" preset is named for. `RingDouble` folds the same
+/// triangle into each half of the domain, peaking at `x = 0.25` and `x
+/// = 0.75`.
+fn gloss_curve(preset: ContourPreset, x: f32) -> f32 {
+    match preset {
+        ContourPreset::Linear => x,
+        ContourPreset::Ring => 1.0 - (2.0 * x - 1.0).abs(),
+        ContourPreset::RingDouble => {
+            let h = if x < 0.5 { x } else { x - 0.5 };
+            1.0 - (4.0 * h - 1.0).abs()
+        }
+    }
 }
 
 /// Paint Symmetry's axes: every stroke is repeated mirrored about the
@@ -49728,6 +49763,7 @@ mod tests {
             shadow: [0, 0, 0],
             shadow_opacity: 75,
             shadow_blend_mode: BlendMode::Normal,
+            gloss_contour: ContourPreset::Linear,
         }
     }
 
@@ -51828,6 +51864,71 @@ mod tests {
                 [158, 189, 221, 255]
             );
         }
+    }
+
+    #[test]
+    fn gloss_curve_ring_and_ring_double_peak_and_zero_where_expected() {
+        // Linear is the identity everywhere.
+        for x in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            assert_eq!(gloss_curve(ContourPreset::Linear, x), x);
+        }
+        // Ring: zero at both ends, one peak of 1.0 at the midpoint --
+        // 1 - |2*0.25 - 1| = 1 - 0.5 = 0.5 hand-checks the slope either
+        // side of that peak.
+        assert_eq!(gloss_curve(ContourPreset::Ring, 0.0), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::Ring, 1.0), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::Ring, 0.5), 1.0);
+        assert_eq!(gloss_curve(ContourPreset::Ring, 0.25), 0.5);
+        assert_eq!(gloss_curve(ContourPreset::Ring, 0.75), 0.5);
+        // RingDouble: zero at 0, 0.5 and 1, peaks of 1.0 at 0.25 and 0.75.
+        assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.0), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.5), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::RingDouble, 1.0), 0.0);
+        assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.25), 1.0);
+        assert_eq!(gloss_curve(ContourPreset::RingDouble, 0.75), 1.0);
+    }
+
+    #[test]
+    fn bevel_emboss_gloss_contour_remaps_the_shading_strength() {
+        // Same inner_glow_fixture and left-edge geometry as the plain
+        // Linear test above: pixel (1, 2) sits at relief n = +1.0
+        // exactly (fully toward the highlight). At Ring,
+        // gloss_curve(1.0) = 0, so the highlight strength collapses to
+        // zero and the pixel's own colour passes through unblended --
+        // the opposite of Linear's own full-strength [216, 229, 241].
+        let idx = |x: usize, y: usize| (y * 6 + x) * 4;
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                gloss_contour: ContourPreset::Ring,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [100, 150, 200, 255]
+        );
+        // Altitude 60 halves relief to n = 0.5 exactly (the Linear
+        // test's own derivation, [158, 189, 221] there). At Ring,
+        // gloss_curve(0.5) = 1.0, the curve's own peak -- the same full
+        // strength the plain n = 1.0 Linear case reaches -- landing on
+        // those exact same numbers instead.
+        let (mut doc, id) = inner_glow_fixture();
+        doc.bevel_emboss_with(
+            id,
+            &BevelEmbossOptions {
+                altitude: 60.0,
+                gloss_contour: ContourPreset::Ring,
+                ..bevel_options()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            &doc.layers()[0].pixels[idx(1, 2)..idx(1, 2) + 4],
+            [216, 229, 241, 255]
+        );
     }
 
     #[test]

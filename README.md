@@ -24929,6 +24929,64 @@ build`/`npm test` all clean.
 
 Tests: 1962 Rust (1961 → 1962: one new test), 39 frontend (unchanged).
 
+## Phase 427 — Bevel & Emboss's Gloss Contour
+
+Phase D's fifth named priority, "layer styles' remaining options,"
+closes half of Bevel & Emboss's own last scope cut: Gloss Contour
+(Stroke Emboss, a different style entirely, stays open). Bevel &
+Emboss's shading was a plain linear ramp — `t = |n| · opacity`, `n`
+the signed relief in `-1.0..=1.0` — with no way to shape it, unlike the
+standalone Contour layer style (Phase 108), which already remaps a
+bevel's own height field through one of three preset curves before
+differencing.
+
+Gloss Contour remaps a different value at a different point in the
+pipeline: not a raw height before `away − toward`, but the *already
+normalized* shading strength `|n|` right before it scales the
+highlight/shadow opacity. A new free function, `gloss_curve(preset,
+x)`, reuses `ContourPreset` (`Ring`, `Linear`, `RingDouble`) but
+refits each curve to a clean `0.0..=1.0` domain so every preset spans
+the full output range rather than `contour_with`'s own raw-height
+amplitudes: `Linear` is the identity, so it reproduces the existing
+plain fade exactly; `Ring` is one triangular peak at `x = 0.5`, zero
+at both ends — the bright ring right at a bevel's own mid-slope Gloss
+Contour's "Ring" preset is named for; `RingDouble` folds the same
+triangle into each half of the domain, peaking at `x = 0.25` and `x =
+0.75`. `BevelEmbossOptions` gained one new field, `gloss_contour:
+ContourPreset`, and `bevel_emboss_with`'s own shading branch calls
+`gloss_curve(gloss_contour, n.abs())` in place of the bare `n.abs()`
+it used before scaling by opacity.
+
+Two new hand-computed tests. `gloss_curve` itself, checked at five
+points across all three presets — Ring's `x = 0.25`/`0.75` at the
+curve's own half-height (`1 - |2·0.25 - 1| = 0.5`) confirms the slope
+either side of its peak, not just the peak and the zeros. The
+integration test reuses `inner_glow_fixture`'s own already-verified
+geometry from the plain shading test above it: pixel (1, 2) sits at
+relief `n = +1.0` exactly, where `gloss_curve(Ring, 1.0) = 0` — the
+highlight strength collapses to zero and the pixel's own colour passes
+through completely unblended, the polar opposite of Linear's own
+full-strength `[216, 229, 241]` at that same pixel. Altitude 60°
+halves the relief to `n = 0.5` exactly (the existing test's own
+derivation): `gloss_curve(Ring, 0.5) = 1.0`, the curve's own peak, so
+that pixel reaches the *same* full strength the plain `n = 1.0` Linear
+case does, landing on those exact same `[216, 229, 241]` numbers
+instead of the altitude-halved `[158, 189, 221]` Linear itself
+produces there. All 13 pre-existing Bevel & Emboss/Contour tests pass
+unmodified — the shared `bevel_options()` test helper defaults to
+`Linear`, so every one of them keeps its already-verified numbers
+byte for byte.
+
+Frontend: the Bevel & Emboss dialog gained a Gloss Contour selector —
+Linear/Ring/Ring - Double, the same three options and copy the
+standalone Contour dialog already offers — positioned in the Shading
+section right after Altitude, Photoshop's own panel order. No new pure
+logic, so the frontend test count is unchanged. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npx tsc --noEmit`/`npm run
+build`/`npm test` all clean.
+
+Tests: 1964 Rust (1962 → 1964: two new tests), 39 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

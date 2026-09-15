@@ -2145,6 +2145,9 @@ export default function App() {
   const [bevelShadowOpacity, setBevelShadowOpacity] = useState(50);
   const [bevelShadowBlendMode, setBevelShadowBlendMode] =
     useState<BlendMode>("multiply");
+  const [bevelGlossContour, setBevelGlossContour] = useState<
+    "ring" | "linear" | "ringDouble"
+  >("linear");
   const [showContourDialog, setShowContourDialog] = useState(false);
   const [contourSize, setContourSize] = useState(5);
   const [contourLightDirection, setContourLightDirection] = useState(7);
@@ -6520,6 +6523,7 @@ export default function App() {
         shadow: [sr, sg, sb],
         shadowOpacity: bevelShadowOpacity,
         shadowBlendMode: bevelShadowBlendMode,
+        glossContour: bevelGlossContour,
       },
     });
     setShowBevelEmbossDialog(false);
@@ -6540,6 +6544,7 @@ export default function App() {
     bevelShadow,
     bevelShadowOpacity,
     bevelShadowBlendMode,
+    bevelGlossContour,
   ]);
 
   const applyContour = useCallback(async () => {
@@ -27120,6 +27125,21 @@ export default function App() {
                   setBevelAltitude(Number(event.target.value))
                 }
               />
+            </label>
+            <label className="control control--row">
+              <span className="control__label">Gloss Contour</span>
+              <select
+                value={bevelGlossContour}
+                onChange={(event) =>
+                  setBevelGlossContour(
+                    event.target.value as "ring" | "linear" | "ringDouble",
+                  )
+                }
+              >
+                <option value="linear">Linear</option>
+                <option value="ring">Ring</option>
+                <option value="ringDouble">Ring - Double</option>
+              </select>
             </label>
             <label className="control control--row">
               <span className="control__label">Highlight</span>
