@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   angleAt,
   handleDragToPercent,
+  movedPivotBox,
   referencePivot,
   rotateDragToDegrees,
   scaledBounds,
@@ -118,4 +119,65 @@ test("rotateDragToDegrees snaps to the nearest 15 degrees when Shift is held", (
   assert.equal(rotateDragToDegrees(0, 0, 22, true), 15);
   assert.equal(rotateDragToDegrees(0, 0, 23, true), 30);
   assert.equal(rotateDragToDegrees(7, 0, 8, true), 15);
+});
+
+test("movedPivotBox: no move is exactly scaledBounds, and the origin ratio matches the pivot's own position in the unscaled box", () => {
+  const pivot = { x: 149.5, y: 199.5 }; // BOUNDS' own centre
+  const { box, originXPercent, originYPercent } = movedPivotBox(
+    BOUNDS,
+    pivot,
+    100,
+    100,
+    0,
+    0,
+  );
+  assert.deepEqual(box, BOUNDS);
+  // (pivot.x - x0) / width * 100 = (149.5 - 100) / 100 * 100
+  assert.equal(originXPercent, 49.5);
+  // (pivot.y - y0) / height * 100 = (199.5 - 100) / 200 * 100
+  assert.equal(originYPercent, 49.75);
+});
+
+test("movedPivotBox: scale and move compose -- scaledBounds' own box, then offset by (dx, dy)", () => {
+  const pivot = { x: 149.5, y: 199.5 };
+  // Hand-computed from scaledBounds(BOUNDS, pivot, 200, 150):
+  // x0 = 149.5 + (100 - 149.5)*2 = 50.5, x1 = 149.5 + (200 - 149.5)*2 = 250.5
+  // y0 = 199.5 + (100 - 199.5)*1.5 = 50.25, y1 = 199.5 + (300 - 199.5)*1.5 = 350.25
+  const scaledOnly = movedPivotBox(BOUNDS, pivot, 200, 150, 0, 0);
+  assert.deepEqual(scaledOnly.box, {
+    x0: 50.5,
+    y0: 50.25,
+    x1: 250.5,
+    y1: 350.25,
+  });
+  const moved = movedPivotBox(BOUNDS, pivot, 200, 150, 20, -10);
+  assert.deepEqual(moved.box, {
+    x0: 70.5,
+    y0: 40.25,
+    x1: 270.5,
+    y1: 340.25,
+  });
+  // The move offsets the whole box uniformly, so the pivot's own position
+  // inside it -- and therefore the CSS transform-origin the rotate handles
+  // turn about -- is unchanged by scale, by move, or by the two together.
+  assert.equal(moved.originXPercent, scaledOnly.originXPercent);
+  assert.equal(moved.originYPercent, scaledOnly.originYPercent);
+  assert.equal(moved.originXPercent, 49.5);
+  assert.equal(moved.originYPercent, 49.75);
+});
+
+test("movedPivotBox falls back to a 50% origin only for the axis that is actually zero-size", () => {
+  const degenerate = { x0: 10, y0: 10, x1: 10, y1: 20 }; // zero width, real height
+  const { originXPercent, originYPercent } = movedPivotBox(
+    degenerate,
+    { x: 10, y: 12 }, // not the vertical midpoint, so the two paths read differently
+    100,
+    100,
+    0,
+    0,
+  );
+  // Zero-width axis: the divide-by-zero guard's own 50% default.
+  assert.equal(originXPercent, 50);
+  // Non-zero-height axis: the real ratio, (12 - 10) / 10 * 100.
+  assert.equal(originYPercent, 20);
 });

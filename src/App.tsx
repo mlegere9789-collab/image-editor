@@ -15,6 +15,7 @@ import { nextCloneOffset } from "./cloneStamp";
 import {
   angleAt,
   handleDragToPercent,
+  movedPivotBox,
   referencePivot,
   rotateDragToDegrees,
   scaledBounds,
@@ -1372,6 +1373,25 @@ export default function App() {
     dx: 0,
     dy: 0,
   });
+  // Transform Selection's own on-canvas handles: the same scale/rotate
+  // geometry Free Transform's handles use (`freeTransformHandles.ts`),
+  // pivoting always about the selection's own bounding-box centre --
+  // Transform Selection has no Reference Point picker of its own, unlike
+  // Free Transform.
+  const tsHandleDrag = useRef<{
+    handle: string;
+    start: { widthPercent: number; heightPercent: number };
+    clientX: number;
+    clientY: number;
+    scaleX: number;
+    scaleY: number;
+  } | null>(null);
+  const tsRotateDrag = useRef<{
+    centerX: number;
+    centerY: number;
+    startAngle: number;
+    baseDegrees: number;
+  } | null>(null);
   const [showSaveSelectionDialog, setShowSaveSelectionDialog] = useState(false);
   const [saveSelectionName, setSaveSelectionName] = useState("Selection 1");
   const [showLoadSelectionDialog, setShowLoadSelectionDialog] = useState(false);
@@ -10165,6 +10185,126 @@ export default function App() {
   const endFtRotateDrag = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       ftRotateDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
+  /** Transform Selection's own pivot: always the selection's own bounds
+   * centre -- `referencePivot("center", ...)`, since unlike Free Transform
+   * there is no Reference Point picker to choose another point. */
+  const tsPivot = useCallback(() => {
+    const bounds = document?.selection?.bounds;
+    if (!bounds || !document) return null;
+    return referencePivot("center", bounds, document);
+  }, [document]);
+
+  const startTsHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>, handle: string) => {
+      if (!document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      tsHandleDrag.current = {
+        handle,
+        start: {
+          widthPercent: transformSelection.widthPercent,
+          heightPercent: transformSelection.heightPercent,
+        },
+        clientX: event.clientX,
+        clientY: event.clientY,
+        scaleX: document.width / rect.width,
+        scaleY: document.height / rect.height,
+      };
+    },
+    [
+      document,
+      transformSelection.widthPercent,
+      transformSelection.heightPercent,
+    ],
+  );
+
+  const moveTsHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = tsHandleDrag.current;
+      const pivot = tsPivot();
+      const bounds = document?.selection?.bounds;
+      if (!drag || !pivot || !bounds) return;
+      const dx = (event.clientX - drag.clientX) * drag.scaleX;
+      const dy = (event.clientY - drag.clientY) * drag.scaleY;
+      const next = handleDragToPercent(
+        bounds,
+        pivot,
+        drag.handle,
+        drag.start,
+        dx,
+        dy,
+        false,
+      );
+      setTransformSelection((transform) => ({ ...transform, ...next }));
+    },
+    [tsPivot, document],
+  );
+
+  const endTsHandleDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      tsHandleDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
+  const startTsRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const pivot = tsPivot();
+      if (!pivot || !document) return;
+      const wrap = (event.currentTarget as HTMLElement).closest(".canvas-wrap");
+      if (!wrap) return;
+      const rect = wrap.getBoundingClientRect();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      const center = {
+        x: rect.left + (pivot.x / document.width) * rect.width,
+        y: rect.top + (pivot.y / document.height) * rect.height,
+      };
+      tsRotateDrag.current = {
+        centerX: center.x,
+        centerY: center.y,
+        startAngle: angleAt(event.clientX, event.clientY, center),
+        baseDegrees: transformSelection.degrees,
+      };
+    },
+    [tsPivot, document, transformSelection.degrees],
+  );
+
+  const moveTsRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      const drag = tsRotateDrag.current;
+      if (!drag) return;
+      const currentAngle = angleAt(event.clientX, event.clientY, {
+        x: drag.centerX,
+        y: drag.centerY,
+      });
+      const degrees = rotateDragToDegrees(
+        drag.baseDegrees,
+        drag.startAngle,
+        currentAngle,
+        event.shiftKey,
+      );
+      setTransformSelection((transform) => ({ ...transform, degrees }));
+    },
+    [],
+  );
+
+  const endTsRotateDrag = useCallback(
+    (event: React.PointerEvent<HTMLElement>) => {
+      tsRotateDrag.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -37546,6 +37686,73 @@ export default function App() {
                             onPointerMove={moveFtHandleDrag}
                             onPointerUp={endFtHandleDrag}
                             onPointerCancel={endFtHandleDrag}
+                          />
+                        ),
+                      )}
+                    </div>
+                  );
+                })()}
+              {showTransformSelectionDialog &&
+                document?.selection &&
+                document &&
+                (() => {
+                  const bounds = document.selection!.bounds;
+                  const pivot = referencePivot("center", bounds, document);
+                  const {
+                    box: preview,
+                    originXPercent,
+                    originYPercent,
+                  } = movedPivotBox(
+                    bounds,
+                    pivot,
+                    transformSelection.widthPercent,
+                    transformSelection.heightPercent,
+                    transformSelection.dx,
+                    transformSelection.dy,
+                  );
+                  return (
+                    <div
+                      className="transform-box"
+                      style={{
+                        ...overlayStyle(preview, document),
+                        transform:
+                          transformSelection.degrees !== 0
+                            ? `rotate(${transformSelection.degrees}deg)`
+                            : undefined,
+                        transformOrigin: `${originXPercent}% ${originYPercent}%`,
+                      }}
+                    >
+                      {["nw", "ne", "se", "sw"].map((corner) => (
+                        <div
+                          key={`ts-rotate-${corner}`}
+                          className={`transform-rotate transform-rotate--${corner}`}
+                          role="slider"
+                          aria-label={`Rotate the selection from the ${corner} corner`}
+                          aria-valuenow={Math.round(transformSelection.degrees)}
+                          tabIndex={-1}
+                          title="Drag to rotate the selection about its own centre (Shift snaps to 15°)"
+                          onPointerDown={startTsRotateDrag}
+                          onPointerMove={moveTsRotateDrag}
+                          onPointerUp={endTsRotateDrag}
+                          onPointerCancel={endTsRotateDrag}
+                        />
+                      ))}
+                      {["nw", "n", "ne", "e", "se", "s", "sw", "w"].map(
+                        (handle) => (
+                          <div
+                            key={`ts-${handle}`}
+                            className={`transform-handle transform-handle--${handle}`}
+                            role="slider"
+                            aria-label={`Transform Selection handle ${handle}`}
+                            aria-valuenow={0}
+                            tabIndex={-1}
+                            title="Drag to scale the selection about its own centre"
+                            onPointerDown={(event) =>
+                              startTsHandleDrag(event, handle)
+                            }
+                            onPointerMove={moveTsHandleDrag}
+                            onPointerUp={endTsHandleDrag}
+                            onPointerCancel={endTsHandleDrag}
                           />
                         ),
                       )}

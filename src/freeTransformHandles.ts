@@ -142,6 +142,43 @@ export function handleDragToPercent(
   return { widthPercent, heightPercent };
 }
 
+/** The on-canvas preview box for a transform that scales and rotates about
+ * `pivot` and only then translates by `(dx, dy)` -- the order
+ * `Document::transform_selection` itself applies (scale, then rotate,
+ * then move), and Transform Selection's own on-canvas handles' own case:
+ * unlike Free Transform, whose move is a separate on-canvas drag of the
+ * whole layer rather than a value in the transform itself, Transform
+ * Selection's dialog carries `dx`/`dy` as part of the one transform its
+ * Apply button sends. `scaledBounds` alone only places the scaled box;
+ * this offsets it by the move and returns the CSS `transform-origin`
+ * percentages that keep the rotate handles turning about the right point
+ * once the box has moved -- unaffected by the move, since translating a
+ * box uniformly does not change a fixed point's own position inside it,
+ * only where the box itself sits. */
+export function movedPivotBox(
+  bounds: Bounds,
+  pivot: Point,
+  widthPercent: number,
+  heightPercent: number,
+  dx: number,
+  dy: number,
+): { box: Bounds; originXPercent: number; originYPercent: number } {
+  const scaled = scaledBounds(bounds, pivot, widthPercent, heightPercent);
+  const box: Bounds = {
+    x0: scaled.x0 + dx,
+    y0: scaled.y0 + dy,
+    x1: scaled.x1 + dx,
+    y1: scaled.y1 + dy,
+  };
+  const boxWidth = box.x1 - box.x0;
+  const boxHeight = box.y1 - box.y0;
+  const originXPercent =
+    boxWidth !== 0 ? ((pivot.x + dx - box.x0) / boxWidth) * 100 : 50;
+  const originYPercent =
+    boxHeight !== 0 ? ((pivot.y + dy - box.y0) / boxHeight) * 100 : 50;
+  return { box, originXPercent, originYPercent };
+}
+
 /** The pointer's angle about a screen-space centre, in degrees -- the same
  * arithmetic Show Transform Controls' own rotate handle already uses,
  * pulled out here so Free Transform's rotate handle is testable without

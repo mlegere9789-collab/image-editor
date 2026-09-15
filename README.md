@@ -24643,6 +24643,63 @@ Tests: 1957 Rust (1950 lib + 7 pipeline; the suite itself is unchanged —
 every case here re-verifies against the new model rather than adding a
 new one), 36 frontend (unchanged).
 
+## Phase 422 — Transform Selection's On-Canvas Handles
+
+Phase D's own execution order in `docs/PLAN_TO_100.md` names "transform
+handles on canvas" first among the scope cuts to reopen, largest-impact
+first. Free Transform already has its own handles (Phases 139, 344 and
+385); this phase gives Transform Selection the same gesture over the
+active selection's own bounds, reusing Free Transform's own tested
+geometry rather than inventing a second copy of it.
+
+`Document::transform_selection` already took exactly `widthPercent`,
+`heightPercent`, `degrees`, `dx` and `dy`, scaling and rotating about the
+selection's own bounding-box centre before moving it — no Rust changed
+this phase. What was missing was only the on-canvas gesture: eight scale
+handles (`nw`/`n`/`ne`/`e`/`se`/`s`/`sw`/`w`) and four rotate corners,
+drawn over the selection's own bounds and wired to the same
+`transformSelection` state the dialog's Width/Height/Angle fields
+already write. Free Transform's pivot is a chosen Reference Point; this
+tool has no such picker, so its pivot is always
+`referencePivot("center", bounds, document)` — the selection's own
+centre, matching what `transform_selection` itself always scales and
+rotates about.
+
+The one piece Free Transform's own handles never needed: Transform
+Selection's `dx`/`dy` move is part of the same transform the handles
+preview, not a separate on-canvas drag, so the preview box has to be
+scaled *and* then offset by the move — `Document::transform_selection`'s
+own order (scale, then rotate, then translate). A new pure function,
+`movedPivotBox` in `freeTransformHandles.ts` (shared with Free
+Transform's own `scaledBounds`, `referencePivot`, `handleDragToPercent`,
+`rotateDragToDegrees` and `angleAt`), does exactly that and returns the
+CSS `transform-origin` percentages the rotate handles turn about — a
+value that turns out to be invariant under the move entirely, since
+translating a box uniformly never changes a fixed point's own relative
+position inside it, proved by three hand-computed cases: scale alone
+matches `scaledBounds` exactly; scale plus move offsets that same box
+by `(dx, dy)` with the origin percentages unchanged either way (49.5%/
+49.75%, both computed by hand from the selection bounds and pivot used
+in every other test in this file); and a degenerate zero-width case
+exercises the divide-by-zero guard on exactly the axis that needs it
+while the other, real-sized axis still computes its true ratio.
+
+Dragging the marquee itself to move the selection, rather than typing
+into the dialog's own Horizontal/Vertical fields, stays a documented
+scope cut — Photoshop's own gesture, but the `.transform-box` element
+Free Transform's handles sit on is deliberately `pointer-events: none`
+so the canvas underneath keeps receiving clicks, and giving Transform
+Selection's own box a click-to-move affordance without disturbing that
+was a larger change than this phase's own "transform handles on canvas"
+scope cut actually names.
+
+`cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` and
+`cargo test` are all unaffected (no Rust file changed) and stay green.
+`npx tsc --noEmit`, `npm run build` and `npm test` all clean.
+
+Tests: 1957 Rust (unchanged — no Rust file touched), 39 frontend (36 →
+39: three new `movedPivotBox` cases in `freeTransformHandles.test.ts`).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
