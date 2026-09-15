@@ -2,7 +2,7 @@
 
 Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability-audit.md` in this same directory for the full source text). This is the master backlog for bringing image-editor to full tool parity with Photoshop, one verified increment at a time — this is a multi-month project, not a single-session one. Check an item only once it is actually built, tested (`cargo test`), and live-verified under Xvfb or on a real install, matching every other phase in this project's history.
 
-**618 distinct capabilities tracked. Currently shipped: 617.**
+**618 distinct capabilities tracked. Currently shipped: 618.**
 
 ## PART I — EVERY TOOL
 
@@ -144,7 +144,7 @@ Extracted from a ~500-item Photoshop capability audit (see `photoshop-capability
 - [x] POSTERIZE
 - [x] THRESHOLD
 - [x] GRADIENT MAP
-- [x] SELECTIVE COLOR (nudges each channel toward or away from its own subtractive complement — Cyan/Red, Magenta/Green, Yellow/Blue — scaled by a pixel's own Neutrals-range membership weight (`1 - |luma-128|/128`), Photoshop's own Relative method; the other eight colour ranges and the Absolute method are a documented scope cut, the same kind of partial-coverage narrowing `grain`'s own "Regular"-type-only cut already makes — see README Phase 98)
+- [x] SELECTIVE COLOR (`selective_color_with`, nudges each channel toward or away from its own subtractive complement — Cyan/Red, Magenta/Green, Yellow/Blue — scaled by a pixel's own membership weight in any of Photoshop's nine colour ranges (`SelectiveColorRange`; `selective_color_weight`), Photoshop's own Relative method: Whites/Neutrals/Blacks are three overlapping triangular functions over BT.601 luma (each summing to exactly 1.0), Reds/Yellows/Greens/Cyans/Blues/Magentas the same triangular shape over hue, 60° apart around the wheel and scaled by saturation so a desaturated grey belongs to no hue range; the Absolute method remains a documented scope cut — see README Phases 98 and 410)
 
 ## PART VI — FILL LAYERS
 

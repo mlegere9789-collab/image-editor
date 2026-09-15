@@ -61,6 +61,19 @@ export type ApplyChannel = "rgb" | "red" | "green" | "blue" | "transparency";
  * of the target layer. */
 export type ApplyTarget = "rgb" | "red" | "green" | "blue" | "alpha";
 
+/** Mirrors `SelectiveColorRange` in src-tauri/src/document.rs: Selective
+ * Color's colour-range picker, all nine of Photoshop's own ranges. */
+export type SelectiveColorRange =
+  | "reds"
+  | "yellows"
+  | "greens"
+  | "cyans"
+  | "blues"
+  | "magentas"
+  | "whites"
+  | "neutrals"
+  | "blacks";
+
 /** Mirrors `ApplyMask` in src-tauri/src/document.rs: Apply Image's Mask
  * group — a mask image (`null` = merged) read through one channel (RGB =
  * luma), optionally inverted. */

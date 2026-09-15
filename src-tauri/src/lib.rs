@@ -6544,7 +6544,8 @@ fn craquelure(
     })
 }
 
-/// Image > Adjustments > Selective Color on layer `id`.
+/// Image > Adjustments > Selective Color on layer `id`. `range` defaults
+/// to Neutrals, the one range this command always supported.
 #[tauri::command]
 fn selective_color(
     state: State<'_, AppState>,
@@ -6553,9 +6554,17 @@ fn selective_color(
     magenta: i32,
     yellow: i32,
     black: i32,
+    range: Option<document::SelectiveColorRange>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
-        document.selective_color(id, cyan, magenta, yellow, black)
+        document.selective_color_with(
+            id,
+            range.unwrap_or(document::SelectiveColorRange::Neutrals),
+            cyan,
+            magenta,
+            yellow,
+            black,
+        )
     })
 }
 

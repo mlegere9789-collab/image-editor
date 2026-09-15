@@ -906,6 +906,71 @@ pub enum ApplyTarget {
     Alpha,
 }
 
+/// Selective Color's own colour-range picker: which pixels
+/// [`Document::selective_color_with`] treats as adjustable, each with its
+/// own membership weight — see [`selective_color_weight`]. Photoshop's
+/// full set of nine: the six hue sextants (Reds, Yellows, Greens, Cyans,
+/// Blues, Magentas), Whites and Blacks at the luma extremes, and Neutrals
+/// at the luma midtone, [`Document::selective_color`]'s own hard-coded
+/// range from before this variant existed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SelectiveColorRange {
+    Reds,
+    Yellows,
+    Greens,
+    Cyans,
+    Blues,
+    Magentas,
+    Whites,
+    Neutrals,
+    Blacks,
+}
+
+/// A pixel's membership, `0.0..=1.0`, in Selective Color's `range` —
+/// this project's own explainable stand-in for Photoshop's exact
+/// (undocumented) per-range weighting, the same kind of classic,
+/// explicit rule Select People's skin-tone finder already uses in place
+/// of a trained model. The three luma-based ranges (Whites, Neutrals,
+/// Blacks) are triangular membership functions over BT.601 luma, each
+/// peaking at its own centre and reaching zero exactly at the next
+/// range's centre, 128 luma levels away — Whites peaks at 255 falling to
+/// 0 by 127, Neutrals peaks at 128 falling to 0 at either 0 or 255,
+/// Blacks peaks at 0 falling to 0 by 128 — so every pixel's three
+/// weights sum to exactly 1.0 (Neutrals' own pre-existing formula,
+/// unchanged, is the middle one of the three). The six hue-based ranges
+/// are the same triangular shape over [`rgb_to_hsl`]'s own hue, each
+/// centred 60° apart around the wheel (Reds 0°, Yellows 60°, Greens
+/// 120°, Cyans 180°, Blues 240°, Magentas 300°) and additionally scaled
+/// by the pixel's own saturation, so a desaturated grey — hue is
+/// arbitrary at zero saturation — belongs to no hue range at all rather
+/// than being misread as pure Red.
+fn selective_color_weight(range: SelectiveColorRange, r: u8, g: u8, b: u8) -> f32 {
+    let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
+    match range {
+        SelectiveColorRange::Whites => (1.0 - (255.0 - luma) / 128.0).max(0.0),
+        SelectiveColorRange::Neutrals => 1.0 - (luma - 128.0).abs() / 128.0,
+        SelectiveColorRange::Blacks => (1.0 - luma / 128.0).max(0.0),
+        hue_range => {
+            let centre = match hue_range {
+                SelectiveColorRange::Reds => 0.0,
+                SelectiveColorRange::Yellows => 60.0,
+                SelectiveColorRange::Greens => 120.0,
+                SelectiveColorRange::Cyans => 180.0,
+                SelectiveColorRange::Blues => 240.0,
+                SelectiveColorRange::Magentas => 300.0,
+                _ => unreachable!("luma ranges handled above"),
+            };
+            let (hue, saturation, _lightness) = rgb_to_hsl(r, g, b);
+            let distance = {
+                let d = (hue - centre).abs();
+                d.min(360.0 - d)
+            };
+            (1.0 - distance / 60.0).max(0.0) * saturation
+        }
+    }
+}
+
 /// Apply Image's Mask group: a mask image — a layer, or with `None` the
 /// merged composite — read through one channel and optionally inverted,
 /// scaling the source's effective opacity pixel by pixel. Through RGB the
@@ -23424,29 +23489,46 @@ impl Document {
     /// Image > Adjustments > Selective Color: nudges each channel toward
     /// or away from its own subtractive complement — Cyan against Red,
     /// Magenta against Green, Yellow against Blue — scaled by how much a
-    /// pixel belongs to the "Neutrals" colour range, using Photoshop's
-    /// own Relative method. `Document::selective_color(id, cyan, magenta,
-    /// yellow, black)`: a pixel's own Neutrals membership weight is `1 -
-    /// |luma - 128| / 128` (peaking at the neutral midtone, falling to
-    /// `0` at pure black or white); each of `cyan`/`magenta`/`yellow`
-    /// (Photoshop's own `-100..=100` range) is applied to its own channel
-    /// as `v - weight * (slider / 100) * v` when positive (removing that
-    /// much of the channel, i.e. adding more of its complementary ink) or
-    /// `v - weight * (slider / 100) * (255 - v)` when negative (adding
-    /// back toward the channel's own headroom); `black` is then applied
-    /// identically to all three already-adjusted channels, darkening or
-    /// lightening them together. This project implements only the
-    /// Neutrals colour range and the Relative method; Photoshop's other
-    /// eight ranges (Reds, Yellows, Greens, Cyans, Blues, Magentas,
-    /// Whites, Blacks) each need their own distinct per-channel-dominance
-    /// weighting formula, and the Absolute method a different slider
-    /// interpretation entirely — both are a documented scope cut, the
-    /// same kind of partial-coverage narrowing [`Self::grain`]'s own
-    /// "Regular" -type-only cut and [`Self::halftone_pattern`]'s own
-    /// Line/Dot-only cut already make. Alpha untouched.
+    /// pixel belongs to `range`, using Photoshop's own Relative method.
+    /// `Document::selective_color(id, cyan, magenta, yellow, black)`
+    /// keeps the "Neutrals" range this project always implemented,
+    /// [`Self::selective_color_with`] any of Photoshop's other eight.
+    /// Each of `cyan`/`magenta`/`yellow` (Photoshop's own `-100..=100`
+    /// range) is applied to its own channel as `v - weight * (slider /
+    /// 100) * v` when positive (removing that much of the channel, i.e.
+    /// adding more of its complementary ink) or `v - weight * (slider /
+    /// 100) * (255 - v)` when negative (adding back toward the channel's
+    /// own headroom); `black` is then applied identically to all three
+    /// already-adjusted channels, darkening or lightening them together.
+    /// Photoshop's Absolute method, a different slider interpretation
+    /// entirely, remains a documented scope cut. Alpha untouched.
     pub fn selective_color(
         &mut self,
         id: LayerId,
+        cyan: i32,
+        magenta: i32,
+        yellow: i32,
+        black: i32,
+    ) -> Result<Option<Rect>, String> {
+        self.selective_color_with(
+            id,
+            SelectiveColorRange::Neutrals,
+            cyan,
+            magenta,
+            yellow,
+            black,
+        )
+    }
+
+    /// [`Self::selective_color`] over any of Photoshop's nine colour
+    /// ranges: `range`'s own membership weight (`selective_color_weight`)
+    /// replaces the Neutrals-only weight the plain command always used.
+    /// Every other slider validates, mixes, and applies exactly as
+    /// [`Self::selective_color`] documents.
+    pub fn selective_color_with(
+        &mut self,
+        id: LayerId,
+        range: SelectiveColorRange,
         cyan: i32,
         magenta: i32,
         yellow: i32,
@@ -23472,8 +23554,7 @@ impl Document {
             }
         };
         self.adjust_layer_pixels(id, move |[r, g, b, a]| {
-            let luma = 0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32;
-            let weight = 1.0 - (luma - 128.0).abs() / 128.0;
+            let weight = selective_color_weight(range, r, g, b);
             let mut rf = apply_slider(r as f32, cyan, weight);
             let mut gf = apply_slider(g as f32, magenta, weight);
             let mut bf = apply_slider(b as f32, yellow, weight);
@@ -47088,6 +47169,55 @@ mod tests {
         let before = doc.layers()[0].pixels.clone();
         doc.selective_color(id, 0, 0, 0, 0).unwrap();
         assert_eq!(doc.layers()[0].pixels, before);
+    }
+
+    #[test]
+    fn selective_color_with_reds_only_touches_the_reddish_pixel() {
+        // Python f32 model of rgb_to_hsl: pure red (255, 0, 0) is exactly
+        // Reds' own centre hue (0°, saturation 1.0) -- weight 1.0; pure
+        // green (0, 255, 0) sits at 120°, twice the 60° falloff radius
+        // away -- weight 0.0 (the wraparound-aware distance is
+        // min(120, 240) = 120 either way here). Cyan +100 at weight 1.0
+        // zeroes red outright: 255 - 1.0*1.0*255 = 0; at weight 0.0
+        // nothing moves regardless of the slider.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[255, 0, 0, 255, 0, 255, 0, 255], 2, 1)
+            .unwrap();
+        doc.selective_color_with(id, SelectiveColorRange::Reds, 100, 0, 0, 0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [0, 255, 0, 255]);
+    }
+
+    #[test]
+    fn selective_color_with_whites_and_blacks_use_the_luma_extremes() {
+        // Whites' weight max(0, 1 - (255-luma)/128) is exactly 0 at luma
+        // 127 and 1.0 at luma 255; Blacks' max(0, 1 - luma/128) is the
+        // mirror, exactly 0 at luma 128 and 1.0 at luma 0. Pure white
+        // (255, 255, 255) at Cyan/Magenta/Yellow +100 under Whites zeroes
+        // every channel (255 - 1.0*1.0*255 = 0); (127, 127, 127), Whites'
+        // own exact zero point, is untouched. Pure black (0, 0, 0) at the
+        // same sliders set to -100 under Blacks fills every channel
+        // instead (0 - 1.0*(-1.0)*(255-0) = 255); (128, 128, 128),
+        // Blacks' own exact zero point, is untouched.
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[255, 255, 255, 255, 127, 127, 127, 255], 2, 1)
+            .unwrap();
+        doc.selective_color_with(id, SelectiveColorRange::Whites, 100, 100, 100, 0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 0, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [127, 127, 127, 255]);
+
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc
+            .add_layer("l", &[0, 0, 0, 255, 128, 128, 128, 255], 2, 1)
+            .unwrap();
+        doc.selective_color_with(id, SelectiveColorRange::Blacks, -100, -100, -100, 0)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [255, 255, 255, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [128, 128, 128, 255]);
     }
 
     #[test]

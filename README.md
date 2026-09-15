@@ -23919,6 +23919,62 @@ Tests: 1923 Rust (1922 → 1923), 36 frontend (unchanged — a checkbox
 reusing the existing Gradient Overlay dialog's own shape needs no new
 test file).
 
+## Phase 410 — Selective Color's Other Eight Colour Ranges
+
+SELECTIVE COLOR's own "the other eight colour ranges... are a documented
+scope cut" line was next in `docs/PLAN_TO_100.md`'s Phase D backlog — the
+largest-impact item still open there, completing this whole adjustment:
+Photoshop's own nine colour ranges (Reds, Yellows, Greens, Cyans, Blues,
+Magentas, Whites, Neutrals, Blacks), all now selectable, against the one
+this project always supported (Neutrals).
+
+A new `SelectiveColorRange` enum and free function
+`selective_color_weight(range, r, g, b) -> f32` — this project's own
+explainable stand-in for Photoshop's exact, undocumented per-range
+membership math, the same kind of classic, explicit rule Select People's
+skin-tone finder already uses in place of a trained model. The three
+luma-based ranges are triangular membership functions over BT.601 luma:
+Whites peaks at 255 falling to 0 by luma 127, Neutrals (unchanged, still
+`1 - |luma-128|/128`) peaks at 128 falling to 0 at either extreme, Blacks
+peaks at 0 falling to 0 by luma 128 — spaced so every pixel's three
+weights sum to exactly 1.0. The six hue-based ranges share one triangular
+shape over `rgb_to_hsl`'s own hue, each centred 60° apart around the
+wheel (Reds 0°, Yellows 60°, Greens 120°, Cyans 180°, Blues 240°,
+Magentas 300°), falling to zero exactly at the next range's own centre,
+and additionally scaled by the pixel's own saturation — without that
+scale a desaturated grey (`rgb_to_hsl` returns an arbitrary hue of 0° at
+zero saturation) would misread as pure Red.
+
+`Document::selective_color(id, cyan, magenta, yellow, black)` keeps its
+exact prior signature and behaviour, now a one-line delegation to a new
+`selective_color_with(id, range, cyan, magenta, yellow, black)` fixed at
+`SelectiveColorRange::Neutrals` — the established plain-function-
+delegates-to-its-richer-sibling shape, proving zero regression by
+construction. `selective_color`'s Tauri command gained an optional
+`range` (defaulting to Neutrals). The Selective Color dialog gained a
+Colors dropdown above the four CMYK sliders, replacing the dialog's own
+hardcoded "(Neutrals)" heading.
+
+**Verified.** All 6 pre-existing `selective_color`-named tests pass
+unmodified, confirming the `selective_color_with` refactor changed
+nothing at the Neutrals default every one of them runs at. Two new
+hand-computed tests: `selective_color_with_reds_only_touches_the_reddish_pixel`
+(pure red's hue sits exactly at Reds' own 0° centre — weight 1.0, Cyan
++100 zeroes it outright, `255 − 1.0×1.0×255 = 0`; pure green sits 120°
+away, twice the 60° falloff radius — weight `0.0`, untouched regardless
+of the slider) and `selective_color_with_whites_and_blacks_use_the_luma_extremes`
+(pure white at Whites' own weight-1.0 peak zeroes every channel at
+Cyan/Magenta/Yellow +100; `(127, 127, 127)`, Whites' own exact
+zero-weight luma, stays untouched; pure black at Blacks' own weight-1.0
+peak fills every channel at the same sliders set to −100 instead — `0 −
+1.0×(−1.0)×(255−0) = 255`; `(128, 128, 128)`, Blacks' own exact
+zero-weight luma, stays untouched). `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1925 Rust (1923 → 1925), 36 frontend (unchanged — a dropdown
+reusing the existing Selective Color dialog's own shape needs no new
+test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

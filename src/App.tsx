@@ -114,6 +114,7 @@ import type {
   SelectAndMaskOutput,
   SelectionMode,
   SelectionShape,
+  SelectiveColorRange,
   ShapeBlurKernel,
   Snapshot,
   Symmetry,
@@ -2028,6 +2029,8 @@ export default function App() {
   const [selectiveColorMagenta, setSelectiveColorMagenta] = useState(0);
   const [selectiveColorYellow, setSelectiveColorYellow] = useState(0);
   const [selectiveColorBlack, setSelectiveColorBlack] = useState(0);
+  const [selectiveColorRange, setSelectiveColorRange] =
+    useState<SelectiveColorRange>("neutrals");
   const [showStrokeOutlineDialog, setShowStrokeOutlineDialog] = useState(false);
   const [strokeOutlineSize, setStrokeOutlineSize] = useState(3);
   const [strokeOutlineColor, setStrokeOutlineColor] = useState("#000000");
@@ -6237,6 +6240,7 @@ export default function App() {
       magenta: selectiveColorMagenta,
       yellow: selectiveColorYellow,
       black: selectiveColorBlack,
+      range: selectiveColorRange,
     });
     setShowSelectiveColorDialog(false);
   }, [
@@ -6246,6 +6250,7 @@ export default function App() {
     selectiveColorMagenta,
     selectiveColorYellow,
     selectiveColorBlack,
+    selectiveColorRange,
   ]);
 
   const applyStrokeOutline = useCallback(async () => {
@@ -25284,7 +25289,28 @@ export default function App() {
             aria-label="Selective Color"
             onClick={(event) => event.stopPropagation()}
           >
-            <h2 className="modal__heading">Selective Color (Neutrals)</h2>
+            <h2 className="modal__heading">Selective Color</h2>
+            <label className="control">
+              <span className="control__label">Colors</span>
+              <select
+                value={selectiveColorRange}
+                onChange={(event) =>
+                  setSelectiveColorRange(
+                    event.target.value as SelectiveColorRange,
+                  )
+                }
+              >
+                <option value="reds">Reds</option>
+                <option value="yellows">Yellows</option>
+                <option value="greens">Greens</option>
+                <option value="cyans">Cyans</option>
+                <option value="blues">Blues</option>
+                <option value="magentas">Magentas</option>
+                <option value="whites">Whites</option>
+                <option value="neutrals">Neutrals</option>
+                <option value="blacks">Blacks</option>
+              </select>
+            </label>
             <label className="control">
               <span className="control__label">
                 Cyan
