@@ -20283,27 +20283,37 @@ impl Document {
                         }
                         continue;
                     }
-                    Stroke::Smudge { strength } => {
-                        if smudge_offset == (0, 0) {
-                            continue;
-                        }
-                        let source: &[u8] = if sample_all_layers {
-                            composite_snapshot.as_deref().expect("taken above")
+                    Stroke::Smudge {
+                        strength,
+                        finger_painting,
+                    } => {
+                        let target: [u8; CHANNELS] = if smudge_offset == (0, 0) {
+                            match finger_painting {
+                                Some(color) => color,
+                                None => continue,
+                            }
                         } else {
-                            snapshot.as_ref().expect("taken above")
+                            let source: &[u8] = if sample_all_layers {
+                                composite_snapshot.as_deref().expect("taken above")
+                            } else {
+                                snapshot.as_ref().expect("taken above")
+                            };
+                            let sx = (x0 + col as u32) as i64 + smudge_offset.0 as i64;
+                            let sy = (y0 + row as u32) as i64 + smudge_offset.1 as i64;
+                            if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
+                                continue;
+                            }
+                            let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
+                            source[src..src + CHANNELS]
+                                .try_into()
+                                .expect("CHANNELS wide")
                         };
-                        let sx = (x0 + col as u32) as i64 + smudge_offset.0 as i64;
-                        let sy = (y0 + row as u32) as i64 + smudge_offset.1 as i64;
-                        if sx < 0 || sy < 0 || sx >= width as i64 || sy >= height as i64 {
-                            continue;
-                        }
-                        let src = (sy as usize * width as usize + sx as usize) * CHANNELS;
                         let amount = f32::from(strength) / 100.0 * c;
-                        for (slot, &target) in layer.pixels[base..base + CHANNELS]
+                        for (slot, &t) in layer.pixels[base..base + CHANNELS]
                             .iter_mut()
-                            .zip(source[src..src + CHANNELS].iter())
+                            .zip(target.iter())
                         {
-                            *slot = to_byte(lerp(to_unit(*slot), to_unit(target), amount));
+                            *slot = to_byte(lerp(to_unit(*slot), to_unit(t), amount));
                         }
                         continue;
                     }
@@ -30506,10 +30516,18 @@ pub enum Stroke<'a> {
     /// the pixel at `p − (b − a)`, rounded, for the stroke's last segment
     /// `a → b` — by `strength` percent scaled by the brush's coverage, all
     /// four channels, so the colour under the brush's trailing edge is
-    /// carried forward. A single point (no direction) smudges nothing, and
-    /// a pixel whose source lies off the canvas is left alone. Photoshop's
-    /// Finger Painting and Sample All Layers are documented scope cuts.
-    Smudge { strength: u8 },
+    /// carried forward. A pixel whose source lies off the canvas is left
+    /// alone. A single point (no direction yet) ordinarily smudges
+    /// nothing — there is no "behind" pixel for the stroke's very first
+    /// touch — unless `finger_painting` carries Photoshop's own Finger
+    /// Painting colour (always the foreground colour in practice, though
+    /// nothing here requires that): then that one directionless touch
+    /// blends toward it instead, the same way every other pixel blends
+    /// toward its own source.
+    Smudge {
+        strength: u8,
+        finger_painting: Option<[u8; CHANNELS]>,
+    },
     /// The Color Replacement tool: each covered pixel whose RGB is within
     /// `tolerance` (per channel) of the sampled colour takes the part of
     /// the brush `color` its `mode` names — Color, the default, its hue
@@ -38398,7 +38416,10 @@ mod tests {
     }
 
     fn smudge(strength: u8) -> Stroke<'static> {
-        Stroke::Smudge { strength }
+        Stroke::Smudge {
+            strength,
+            finger_painting: None,
+        }
     }
 
     #[test]
@@ -38450,6 +38471,35 @@ mod tests {
         doc.stroke(id, &[(0.5, 1.5), (2.5, 1.5), (3.5, 1.5)], 0.5, smudge(100))
             .unwrap();
         assert_eq!(red_channel_grid(&doc)[1], vec![40, 40, 50]);
+    }
+
+    #[test]
+    fn finger_painting_blends_the_directionless_touch_toward_its_own_colour() {
+        // The same single, directionless click as
+        // `smudge_needs_a_direction_and_reads_the_pre_stroke_layer` --
+        // ordinarily a no-op -- now carries a Finger Painting colour.
+        // Centre pixel (1, 1) starts (50, 0, 0, 255); at Strength 50% (c =
+        // 1.0, the same small-radius full-coverage precedent
+        // `smudge_strength_scales_the_pull` uses) it lerps halfway toward
+        // (200, 150, 100, 255): R 50+150*0.5=125, G 0+150*0.5=75,
+        // B 0+100*0.5=50, A unchanged at 255.
+        let (mut doc, id) = ramped_3x3();
+        doc.stroke(
+            id,
+            &[(1.5, 1.5)],
+            0.5,
+            Stroke::Smudge {
+                strength: 50,
+                finger_painting: Some([200, 150, 100, 255]),
+            },
+        )
+        .unwrap();
+        assert_eq!(pixel(&doc, id, 1, 1), [125, 75, 50, 255]);
+        // Every other pixel, outside the small radius, is untouched.
+        let mut expected = ramped_3x3().0.layers()[0].pixels.clone();
+        let base = 4 * CHANNELS; // pixel (1, 1) on a 3-wide canvas.
+        expected[base..base + CHANNELS].copy_from_slice(&[125, 75, 50, 255]);
+        assert_eq!(doc.layers()[0].pixels, expected);
     }
 
     #[test]

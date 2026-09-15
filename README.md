@@ -23821,6 +23821,54 @@ Tests: 1921 Rust (unchanged — a new case inside the existing
 sliders reusing the existing Adjustment Layer dialog's own shape need no
 new test file).
 
+## Phase 408 — Smudge Tool's Finger Painting
+
+SMUDGE TOOL's own "Finger Painting is a documented scope cut" line was
+next in `docs/PLAN_TO_100.md`'s Phase D backlog. This project's own
+Smudge tool already documents its one existing simplification precisely:
+"a directionless dot smudges nothing" — the very first, directionless
+touch of any stroke has no "behind" pixel to pull from yet, so it's
+always a no-op. That is exactly the one moment Photoshop's own Finger
+Painting changes: instead of sampling the colour already under the
+pointer (a no-op the instant it starts), it uses the foreground colour
+instead. The rest of a Photoshop stroke, with or without Finger Painting,
+behaves identically — matching this project's own single-fixed-direction
+simplification (one `smudge_offset` for the whole stroke, sampled from
+the pre-stroke snapshot rather than a genuinely wet, accumulating
+buffer) exactly: Finger Painting only ever has a real effect at the one
+moment this project already special-cases.
+
+`Stroke::Smudge { strength: u8 }` widened to `Stroke::Smudge { strength:
+u8, finger_painting: Option<[u8; CHANNELS]> }` — `None` the exact prior
+behaviour, `Some(colour)` the directionless case blending toward
+`colour` by the same `strength × coverage` amount every other pixel
+already blends by, instead of being skipped. Structured as an `Option`
+rather than a separate bool, so there's no way to have Finger Painting
+"on" with no colour to paint — the same `Option<T>`-for-an-optional-mode
+shape this project's Tauri layer already uses elsewhere. `smudge_stroke`
+gained an optional `finger_painting_color: Option<[u8; 4]>` parameter,
+threaded straight through. The frontend's Smudge tool options gained a
+Finger Painting checkbox next to the existing Sample All Layers one,
+reusing the brush colour swatch (re-enabled for Smudge only while it's
+checked — Smudge otherwise has no use for a colour, so the swatch stays
+disabled the rest of the time, same as before this phase).
+
+**Verified.** All 9 pre-existing `smudge`-named tests pass unmodified,
+confirming `finger_painting: None` never changes anything. One new
+hand-computed test, `finger_painting_blends_the_directionless_touch_toward_its_own_colour`:
+the same single, directionless click
+`smudge_needs_a_direction_and_reads_the_pre_stroke_layer` already proves
+is a no-op without Finger Painting, now with `finger_painting:
+Some([200, 150, 100, 255])` at Strength 50% — centre pixel `(50, 0, 0,
+255)` lerps halfway toward it (`R 50+150×0.5=125`, `G 0+150×0.5=75`,
+`B 0+100×0.5=50`, alpha unchanged at 255) while every other pixel, outside
+the small brush radius, stays untouched. `cargo fmt`/`clippy
+--all-targets -D warnings`/`test` and `npm run build`/`test`/`tsc
+--noEmit` all clean.
+
+Tests: 1922 Rust (1921 → 1922), 36 frontend (unchanged — a checkbox
+reusing the existing Smudge options row needs no new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

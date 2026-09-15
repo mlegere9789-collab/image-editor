@@ -1891,6 +1891,10 @@ export default function App() {
   // Sample All Layers for the other neighbourhood tools: Blur, Smudge,
   // Clone Stamp, Healing Brush, Spot Healing Brush and Mixer Brush.
   const [sampleAllLayers, setSampleAllLayers] = useState(false);
+  // Smudge tool: Photoshop's Finger Painting -- the stroke's own
+  // directionless first touch blends toward the brush colour instead of
+  // doing nothing.
+  const [smudgeFingerPainting, setSmudgeFingerPainting] = useState(false);
   const [blurBlendMode, setBlurBlendMode] = useState<BlendMode>("normal");
   const [magicWandContiguous, setMagicWandContiguous] = useState(true);
   const [magicWandAntiAlias, setMagicWandAntiAlias] = useState(true);
@@ -9783,12 +9787,16 @@ export default function App() {
           antiAlias: colorReplaceAntiAlias,
         });
       } else if (tool === "smudge") {
+        const [r, g, b] = hexToRgb(brushColor);
         void runCommand("smudge_stroke", {
           id: selectedId,
           points,
           radius: brushSize,
           strength: Math.round(brushOpacity * 100),
           sampleAllLayers,
+          fingerPaintingColor: smudgeFingerPainting
+            ? [r, g, b, 255]
+            : undefined,
         });
       } else if (tool === "blur" || tool === "sharpen") {
         void runCommand(tool === "blur" ? "blur_stroke" : "sharpen_stroke", {
@@ -9939,6 +9947,7 @@ export default function App() {
       sharpenProtectDetail,
       sharpenSampleAll,
       sampleAllLayers,
+      smudgeFingerPainting,
       blurBlendMode,
       toneRange,
       protectTones,
@@ -15159,7 +15168,7 @@ export default function App() {
               tool === "sponge" ||
               tool === "blur" ||
               tool === "sharpen" ||
-              tool === "smudge" ||
+              (tool === "smudge" && !smudgeFingerPainting) ||
               tool === "redEye" ||
               tool === "cloneStamp" ||
               tool === "healingBrush" ||
@@ -15417,6 +15426,22 @@ export default function App() {
                 onChange={(event) => setSampleAllLayers(event.target.checked)}
               />
               Sample All Layers
+            </label>
+          )}
+          {tool === "smudge" && (
+            <label
+              className="tools__slider"
+              title="Smudge: the stroke's own directionless first touch (a click with no drag yet) blends toward the brush colour instead of doing nothing"
+            >
+              <input
+                type="checkbox"
+                checked={smudgeFingerPainting}
+                disabled={!canPaint}
+                onChange={(event) =>
+                  setSmudgeFingerPainting(event.target.checked)
+                }
+              />
+              Finger Painting
             </label>
           )}
           {tool === "blur" && (

@@ -4492,7 +4492,11 @@ fn clone_stroke(
 }
 
 /// Smudge tool: drag colour along `points` on layer `id` by `strength`
-/// percent. See [`paint_stroke`] for `points` and checkpointing.
+/// percent. `finger_painting_color`, when given, is Photoshop's Finger
+/// Painting: the stroke's own very first, directionless touch (which
+/// otherwise smudges nothing — there's no "behind" pixel yet) blends
+/// toward that colour instead. See [`paint_stroke`] for `points` and
+/// checkpointing.
 #[tauri::command]
 fn smudge_stroke(
     state: State<'_, AppState>,
@@ -4501,13 +4505,17 @@ fn smudge_stroke(
     radius: f32,
     strength: u8,
     sample_all_layers: Option<bool>,
+    finger_painting_color: Option<[u8; 4]>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
         document.stroke_sampling(
             id,
             &points,
             radius,
-            Stroke::Smudge { strength },
+            Stroke::Smudge {
+                strength,
+                finger_painting: finger_painting_color,
+            },
             sample_all_layers.unwrap_or(false),
         )
     })
