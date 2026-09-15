@@ -10714,7 +10714,7 @@ impl Document {
         {
             return Err("Custom shape points must be finite coordinates.".to_string());
         }
-        self.paint_polygon(id, points, color)
+        self.paint_polygon_with(id, points, Some(color), None, StrokePosition::Inside)
     }
 
     /// Draws `shape` onto layer `id` with the shape tools' own painters —
@@ -13990,13 +13990,13 @@ impl Document {
     /// even-odd rule ([`point_in_polygon`], the Polygonal Lasso's own
     /// test), the same hard pixel-centre rule the other shape tools use;
     /// Photoshop's Anti-alias option, its star ratio and smooth corners
-    /// (the Star tool's territory), its stroke, and its Shape and Path
-    /// modes are documented scope cuts. Pixels are overwritten outright
-    /// and the active selection confines the paint. Returns the
-    /// vertices' bounding box clipped to the canvas, or `None` — painting
-    /// nothing — for a zero-length drag or a polygon entirely off the
-    /// canvas. Errors for `sides` outside `3..=100`, non-finite
-    /// coordinates, or a locked or unknown layer.
+    /// (the Star tool's territory), and its Shape and Path modes are
+    /// documented scope cuts — see [`Self::draw_polygon_with`] for its
+    /// stroke. Pixels are overwritten outright and the active selection
+    /// confines the paint. Returns the vertices' bounding box clipped to
+    /// the canvas, or `None` — painting nothing — for a zero-length drag
+    /// or a polygon entirely off the canvas. Errors for `sides` outside
+    /// `3..=100`, non-finite coordinates, or a locked or unknown layer.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_polygon(
         &mut self,
@@ -14007,6 +14007,38 @@ impl Document {
         y: f32,
         sides: u32,
         color: [u8; 4],
+    ) -> Result<Option<Rect>, String> {
+        self.draw_polygon_with(
+            id,
+            cx,
+            cy,
+            x,
+            y,
+            sides,
+            Some(color),
+            None,
+            StrokePosition::Inside,
+        )
+    }
+
+    /// [`Self::draw_polygon`] with an optional stroke of `(colour, width)`
+    /// at Photoshop's own Inside, Center, or Outside `position`, and an
+    /// optional `fill` in place of the plain mandatory `color` — see
+    /// [`Self::paint_polygon_with`] for the shared geometry. At
+    /// `StrokePosition::Inside` with `fill: Some(color)` and
+    /// `stroke: None` this is pixel-identical to [`Self::draw_polygon`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_polygon_with(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        sides: u32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
     ) -> Result<Option<Rect>, String> {
         if !(3..=100).contains(&sides) {
             return Err("A polygon needs between 3 and 100 sides.".to_string());
@@ -14025,7 +14057,7 @@ impl Document {
                 (cx + radius * angle.cos(), cy + radius * angle.sin())
             })
             .collect();
-        self.paint_polygon(id, &vertices, color)
+        self.paint_polygon_with(id, &vertices, fill, stroke, position)
     }
 
     /// The Star tool in its Pixels mode: [`Self::draw_polygon`] with
@@ -14051,6 +14083,40 @@ impl Document {
         ratio: u32,
         color: [u8; 4],
     ) -> Result<Option<Rect>, String> {
+        self.draw_star_with(
+            id,
+            cx,
+            cy,
+            x,
+            y,
+            points,
+            ratio,
+            Some(color),
+            None,
+            StrokePosition::Inside,
+        )
+    }
+
+    /// [`Self::draw_star`] with an optional stroke of `(colour, width)` at
+    /// Photoshop's own Inside, Center, or Outside `position`, and an
+    /// optional `fill` in place of the plain mandatory `color` — see
+    /// [`Self::paint_polygon_with`] for the shared geometry. At
+    /// `StrokePosition::Inside` with `fill: Some(color)` and
+    /// `stroke: None` this is pixel-identical to [`Self::draw_star`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_star_with(
+        &mut self,
+        id: LayerId,
+        cx: f32,
+        cy: f32,
+        x: f32,
+        y: f32,
+        points: u32,
+        ratio: u32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
+    ) -> Result<Option<Rect>, String> {
         if !(3..=100).contains(&points) {
             return Err("A star needs between 3 and 100 points.".to_string());
         }
@@ -14073,7 +14139,7 @@ impl Document {
                 (cx + r * angle.cos(), cy + r * angle.sin())
             })
             .collect();
-        self.paint_polygon(id, &vertices, color)
+        self.paint_polygon_with(id, &vertices, fill, stroke, position)
     }
 
     /// The Triangle tool in its Pixels mode: paints the isosceles triangle
@@ -14095,6 +14161,36 @@ impl Document {
         y1: f32,
         color: [u8; 4],
     ) -> Result<Option<Rect>, String> {
+        self.draw_triangle_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            Some(color),
+            None,
+            StrokePosition::Inside,
+        )
+    }
+
+    /// [`Self::draw_triangle`] with an optional stroke of `(colour,
+    /// width)` at Photoshop's own Inside, Center, or Outside `position`,
+    /// and an optional `fill` in place of the plain mandatory `color` —
+    /// see [`Self::paint_polygon_with`] for the shared geometry. At
+    /// `StrokePosition::Inside` with `fill: Some(color)` and
+    /// `stroke: None` this is pixel-identical to [`Self::draw_triangle`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_triangle_with(
+        &mut self,
+        id: LayerId,
+        x0: f32,
+        y0: f32,
+        x1: f32,
+        y1: f32,
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
+    ) -> Result<Option<Rect>, String> {
         if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
             return Err("Triangle coordinates must be finite numbers.".to_string());
         }
@@ -14104,21 +14200,57 @@ impl Document {
             return Ok(None);
         }
         let vertices = [((left + right) / 2.0, top), (right, bottom), (left, bottom)];
-        self.paint_polygon(id, &vertices, color)
+        self.paint_polygon_with(id, &vertices, fill, stroke, position)
     }
 
-    /// [`Self::draw_polygon`], [`Self::draw_star`], and
-    /// [`Self::draw_triangle`]'s shared painter:
-    /// overwrites every pixel of layer `id` whose centre is inside
-    /// `vertices` by the even-odd rule and inside the active selection,
-    /// returning the vertices' bounding box clipped to the canvas, or
-    /// `None` when that box misses the canvas entirely.
-    fn paint_polygon(
+    /// [`Self::draw_polygon_with`], [`Self::draw_star_with`], and
+    /// [`Self::draw_triangle_with`]'s shared painter: an optional flat
+    /// `fill` and an optional `stroke` of `(colour, width)` at
+    /// Photoshop's own Inside, Center, or Outside `position`, painted
+    /// onto the closed polygon described by `vertices` (the last vertex
+    /// joins the first). A pixel is inside the shape when its centre is,
+    /// by the even-odd rule ([`point_in_polygon`]); its distance to the
+    /// nearest edge ([`point_segment_distance`], the smallest across
+    /// every edge) stands in for [`Self::draw_shape`]'s own
+    /// `shrink_rect`/`grow_rect` banding, since an arbitrary polygon has
+    /// no single inward or outward offset the way an axis-aligned box
+    /// does: Inside stroke covers every inside pixel within `width` of
+    /// the boundary, Outside covers every outside pixel within `width`,
+    /// and Center splits `width` across the boundary the same way
+    /// [`Self::draw_shape`] does (`width / 2` in, the rest out, Rust's
+    /// own truncating division). Fill (if given) covers the inside
+    /// pixels the stroke doesn't reach; the stroke wins on overlap.
+    /// Errors for a stroke width outside `1..=250`, no fill and no
+    /// stroke, non-finite vertices, or a locked or unknown layer; a
+    /// bounding box — grown by the stroke's own outward reach — that
+    /// misses the canvas paints nothing and returns `None`.
+    fn paint_polygon_with(
         &mut self,
         id: LayerId,
         vertices: &[(f32, f32)],
-        color: [u8; 4],
+        fill: Option<[u8; 4]>,
+        stroke: Option<([u8; 4], u32)>,
+        position: StrokePosition,
     ) -> Result<Option<Rect>, String> {
+        if fill.is_none() && stroke.is_none() {
+            return Err("A shape needs a fill, a stroke, or both.".to_string());
+        }
+        if let Some((_, width)) = stroke {
+            if !(1..=250).contains(&width) {
+                return Err("Stroke width must be between 1 and 250.".to_string());
+            }
+        }
+        let (in_reach, out_reach) = match stroke {
+            None => (0.0_f32, 0.0_f32),
+            Some((_, width)) => match position {
+                StrokePosition::Inside => (width as f32, 0.0),
+                StrokePosition::Outside => (0.0, width as f32),
+                StrokePosition::Center => {
+                    let half_in = width / 2;
+                    (half_in as f32, (width - half_in) as f32)
+                }
+            },
+        };
         let (min_x, max_x) = vertices
             .iter()
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(vx, _)| {
@@ -14129,9 +14261,14 @@ impl Document {
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &(_, vy)| {
                 (lo.min(vy), hi.max(vy))
             });
-        let Ok(bounds) =
-            normalize_selection_bounds(min_x, min_y, max_x, max_y, self.width, self.height)
-        else {
+        let Ok(bounds) = normalize_selection_bounds(
+            min_x - out_reach,
+            min_y - out_reach,
+            max_x + out_reach,
+            max_y + out_reach,
+            self.width,
+            self.height,
+        ) else {
             return Ok(None);
         };
         let selection = self.selection.clone();
@@ -14140,39 +14277,39 @@ impl Document {
         if layer.locked {
             return Err(format!("Layer \"{}\" is locked.", layer.name));
         }
+        let n = vertices.len();
         for row in bounds.y0..bounds.y1 {
             for col in bounds.x0..bounds.x1 {
                 let (px, py) = (col as f32 + 0.5, row as f32 + 0.5);
-                if !point_in_polygon(px, py, vertices)
-                    || selection.as_ref().is_some_and(|s| !s.contains(px, py))
-                {
+                if selection.as_ref().is_some_and(|s| !s.contains(px, py)) {
                     continue;
                 }
+                let inside = point_in_polygon(px, py, vertices);
+                let reach = if inside { in_reach } else { out_reach };
                 let base = (row as usize * doc_width + col as usize) * CHANNELS;
-                layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+                if let Some((color, _)) = stroke {
+                    if reach > 0.0 {
+                        let dist = (0..n)
+                            .map(|i| {
+                                point_segment_distance(px, py, vertices[i], vertices[(i + 1) % n])
+                            })
+                            .fold(f32::INFINITY, f32::min);
+                        if dist <= reach {
+                            layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+                            continue;
+                        }
+                    }
+                }
+                if inside {
+                    if let Some(color) = fill {
+                        layer.pixels[base..base + CHANNELS].copy_from_slice(&color);
+                    }
+                }
             }
         }
         Ok(Some(bounds))
     }
 
-    /// The pixel-mode shape tools' shared painter. The box is normalised
-    /// and clipped to the canvas exactly as the marquee tools' is, and a
-    /// pixel is inside `shape` when its centre is — the same `+0.5`
-    /// pixel-centre rule the selection shapes use, via [`shape_contains`]
-    /// — so edges are hard; Photoshop's Anti-alias option is a documented
-    /// scope cut. The stroke band is the shape minus the same shape drawn
-    /// in the box shrunk by `width` on every side (exactly how Select >
-    /// Modify > Border is built — Photoshop's "Inside" stroke alignment;
-    /// Center and Outside are a documented scope cut), so a width that
-    /// swallows the whole box strokes the whole shape. The stroke wins
-    /// where the two overlap; pixels are overwritten outright (100%
-    /// opacity, Normal), and the active selection confines the paint.
-    /// Photoshop's Shape and Path modes — a live vector layer — are a
-    /// documented scope cut; this app's layers are pixels only. Errors
-    /// when neither fill nor stroke is given, for a stroke width outside
-    /// `1..=250`, for non-finite corners, or a locked or unknown layer; a
-    /// box that rounds to no pixels paints nothing and returns `None`,
-    /// like a click with no drag.
     #[allow(clippy::too_many_arguments)]
     /// The Rectangle and Ellipse tools' shared painter: `shape` over the
     /// box `(x0, y0)`..`(x1, y1)`, with an optional flat `fill` and an
@@ -40718,6 +40855,160 @@ mod tests {
         doc.set_locked(id, true).unwrap();
         assert!(doc.draw_triangle(id, 0.0, 0.0, 5.0, 5.0, FILL).is_err());
         assert_eq!(shape_grid(&doc, id), ["....."; 5]);
+    }
+
+    #[test]
+    fn draw_triangle_with_inside_stroke_bands_the_edge() {
+        // The same apex-(2.5,0)/base-(0,5)-(5,5) triangle as
+        // triangle_tool_fits_the_box_in_either_drag_direction, now with a
+        // 1px Inside stroke: every inside pixel within 1 of the nearest
+        // edge (by point-to-segment distance) turns stroke, the rest keep
+        // the fill. Hand-computed and cross-checked against an
+        // independent Python port of point_in_polygon/
+        // point_segment_distance.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_triangle_with(
+            id,
+            5.0,
+            5.0,
+            0.0,
+            0.0,
+            Some(FILL),
+            Some((STROKE, 1)),
+            StrokePosition::Inside,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            ["..S..", "..S..", ".SFS.", ".SFS.", "SSSSS"]
+        );
+    }
+
+    #[test]
+    fn draw_triangle_with_outside_stroke_grows_beyond_the_box() {
+        // The same triangle with a 1px Outside stroke: the fill keeps the
+        // triangle's own full extent and the stroke band sits just
+        // outside it instead.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_triangle_with(
+            id,
+            5.0,
+            5.0,
+            0.0,
+            0.0,
+            Some(FILL),
+            Some((STROKE, 1)),
+            StrokePosition::Outside,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".SFS.", ".SFS.", "SFFFS", "SFFFS", "FFFFF"]
+        );
+    }
+
+    #[test]
+    fn draw_triangle_with_center_stroke_straddles_the_edge() {
+        // A 2px Center stroke splits 1px in, 1px out (Rust's own
+        // truncating width / 2), straddling the same edge the Inside and
+        // Outside cases band on either side of.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_triangle_with(
+            id,
+            5.0,
+            5.0,
+            0.0,
+            0.0,
+            Some(FILL),
+            Some((STROKE, 2)),
+            StrokePosition::Center,
+        )
+        .unwrap();
+        assert_eq!(
+            shape_grid(&doc, id),
+            [".SSS.", ".SSS.", "SSFSS", "SSFSS", "SSSSS"]
+        );
+    }
+
+    #[test]
+    fn draw_star_with_position_defaults_to_inside_and_is_pixel_identical() {
+        // draw_star_with(..., Some(color), None, Inside) must reproduce
+        // draw_star byte-for-byte, the same superset guarantee
+        // draw_rectangle_with and draw_ellipse_with already carry.
+        let (mut doc, id) = blank_5x5();
+        doc.draw_star(id, 2.5, 2.5, 2.5, 0.3, 4, 100, FILL).unwrap();
+        let (mut doc2, id2) = blank_5x5();
+        doc2.draw_star_with(
+            id2,
+            2.5,
+            2.5,
+            2.5,
+            0.3,
+            4,
+            100,
+            Some(FILL),
+            None,
+            StrokePosition::Inside,
+        )
+        .unwrap();
+        assert_eq!(shape_grid(&doc, id), shape_grid(&doc2, id2));
+    }
+
+    #[test]
+    fn draw_polygon_with_validates_fill_stroke_and_width() {
+        let (mut doc, id) = blank_5x5();
+        assert!(doc
+            .draw_polygon_with(
+                id,
+                2.5,
+                2.5,
+                2.5,
+                0.3,
+                4,
+                None,
+                None,
+                StrokePosition::Inside
+            )
+            .is_err());
+        assert!(doc
+            .draw_polygon_with(
+                id,
+                2.5,
+                2.5,
+                2.5,
+                0.3,
+                4,
+                None,
+                Some((STROKE, 0)),
+                StrokePosition::Inside
+            )
+            .is_err());
+        assert!(doc
+            .draw_polygon_with(
+                id,
+                2.5,
+                2.5,
+                2.5,
+                0.3,
+                4,
+                None,
+                Some((STROKE, 251)),
+                StrokePosition::Inside
+            )
+            .is_err());
+        assert!(doc
+            .draw_polygon_with(
+                id,
+                2.5,
+                2.5,
+                2.5,
+                0.3,
+                4,
+                None,
+                Some((STROKE, 1)),
+                StrokePosition::Outside
+            )
+            .is_ok());
     }
 
     /// The Levels formula, cross-checked in Python with f32 emulation:

@@ -24210,6 +24210,77 @@ build`/`test`/`tsc --noEmit` all clean.
 Tests: 1936 Rust (1931 → 1936), 36 frontend (unchanged — a dropdown wired
 into the existing shape-tool options bar needs no new test file).
 
+## Phase 415 — Triangle, Polygon, and Star Tools' Stroke
+
+TRIANGLE TOOL, POLYGON TOOL, and STAR TOOL all named the same documented
+scope cut — no stroke at all in Pixels mode, only ever a mandatory flat
+fill — for the same reason: they'd never gotten Rectangle's and Ellipse's
+own fill/stroke split in the first place, let alone Phase 414's Center and
+Outside stroke position on top of it. This phase gives all three the
+same shape at once, since they already share one private painter.
+
+An axis-aligned box has an obvious inward or outward offset
+(`shrink_rect`/`grow_rect`, Phase 414's own tools), but an arbitrary
+polygon doesn't — so this phase reaches for a different, still exact,
+technique: a pixel's distance to the nearest polygon edge
+([`point_segment_distance`], already used by the Magnetic Lasso's own
+edge-snapping) stands in for the banding a box gets from shrinking or
+growing its bounds. `paint_polygon` — the Polygon/Star/Triangle/Custom
+Shape tools' shared even-odd fill painter — becomes `paint_polygon_with`:
+every pixel already known to be inside or outside the shape (by
+[`point_in_polygon`]) additionally measures its distance to the closest
+of the polygon's own edges, and a stroke is present, paints stroke
+instead of fill/nothing when that distance is within the position's own
+reach — Inside reaches inward from the boundary, Outside reaches outward,
+Center splits the width across it with the same truncating `width / 2`
+division Phase 414 established. The polygon's own bounding box grows by
+the stroke's outward reach before iterating, the same way Phase 414's
+`grow_rect` grows a rectangle's.
+
+`draw_polygon_with`/`draw_star_with`/`draw_triangle_with` carry the new
+`fill`/`stroke`/`position` parameters; the original `draw_polygon`/
+`draw_star`/`draw_triangle` are unchanged and now delegate with
+`fill: Some(color), stroke: None, position: StrokePosition::Inside` baked
+in, the same plain-function-delegates-to-`_with`-sibling pattern Phase
+414 used for Rectangle and Ellipse. `draw_custom_shape` — the fourth
+caller of the old shared painter — moves to the new one with an
+unchanged `Some(color)`/`None` call, so its own behavior (still no
+stroke, not a named scope cut for it) is untouched. The three Tauri
+commands gained `fill`/`stroke`/`position` parameters in place of the old
+mandatory `color`; the frontend's existing Fill/Stroke/Position controls
+(built for Rectangle and Ellipse in Phase 414) now show for the Triangle,
+Star, and Polygon tools too, driving the same three `runCommand` calls.
+
+**Verified two ways.** Five new hand-computed tests, the first three on
+`triangle_tool_fits_the_box_in_either_drag_direction`'s own triangle
+(apex `(2.5, 0)`, base `(0, 5)`–`(5, 5)` on a 5×5 canvas), every expected
+grid cross-checked against an independent Python port of
+`point_in_polygon`/`point_segment_distance`:
+`draw_triangle_with_inside_stroke_bands_the_edge` — a 1px Inside stroke
+turns every inside pixel within 1 of an edge to stroke, leaving one fill
+pixel at the triangle's own centre.
+`draw_triangle_with_outside_stroke_grows_beyond_the_box` — a 1px Outside
+stroke keeps the fill at the triangle's full extent and bands the stroke
+just outside it.
+`draw_triangle_with_center_stroke_straddles_the_edge` — a 2px Center
+stroke splits 1px in, 1px out, straddling the same edge the Inside and
+Outside cases band on either side of.
+`draw_star_with_position_defaults_to_inside_and_is_pixel_identical` —
+`draw_star_with(..., Some(color), None, StrokePosition::Inside)`
+reproduces `draw_star` byte-for-byte on
+`star_tool_at_full_ratio_is_the_polygon`'s own inputs, the same superset
+guarantee Phase 414's own `_with` siblings carry.
+`draw_polygon_with_validates_fill_stroke_and_width` — no fill and no
+stroke, a zero-width stroke, and a 251px stroke all error; a valid 1px
+Outside stroke does not. All 23 pre-existing `triangle_tool_*`/
+`polygon_tool_*`/`star_tool_*`/`custom_shape_*` tests still pass
+unmodified, confirming zero regression. `cargo fmt`/`clippy --all-targets
+-D warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1941 Rust (1936 → 1941), 36 frontend (unchanged — the new controls
+reuse Phase 414's own Fill/Stroke/Position state and need no new test
+file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

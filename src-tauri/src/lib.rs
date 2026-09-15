@@ -4744,7 +4744,8 @@ fn draw_line(
 }
 
 /// Polygon tool (Pixels mode): paint a regular polygon dragged out from
-/// its centre.
+/// its centre, with an optional fill and/or stroke at Photoshop's own
+/// Inside, Center, or Outside stroke position (defaulting to Inside).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_polygon(
@@ -4755,15 +4756,29 @@ fn draw_polygon(
     x: f32,
     y: f32,
     sides: u32,
-    color: [u8; 4],
+    fill: Option<[u8; 4]>,
+    stroke: Option<([u8; 4], u32)>,
+    position: Option<document::StrokePosition>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_polygon(id, cx, cy, x, y, sides, color)
+        document.draw_polygon_with(
+            id,
+            cx,
+            cy,
+            x,
+            y,
+            sides,
+            fill,
+            stroke,
+            position.unwrap_or(document::StrokePosition::Inside),
+        )
     })
 }
 
 /// Star tool (Pixels mode): paint a star dragged out from its centre,
-/// with `ratio` percent inner points.
+/// with `ratio` percent inner points, an optional fill and/or stroke, and
+/// Photoshop's own Inside, Center, or Outside stroke position (defaulting
+/// to Inside).
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 fn draw_star(
@@ -4775,16 +4790,31 @@ fn draw_star(
     y: f32,
     points: u32,
     ratio: u32,
-    color: [u8; 4],
+    fill: Option<[u8; 4]>,
+    stroke: Option<([u8; 4], u32)>,
+    position: Option<document::StrokePosition>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_star(id, cx, cy, x, y, points, ratio, color)
+        document.draw_star_with(
+            id,
+            cx,
+            cy,
+            x,
+            y,
+            points,
+            ratio,
+            fill,
+            stroke,
+            position.unwrap_or(document::StrokePosition::Inside),
+        )
     })
 }
 
 /// Triangle tool (Pixels mode): paint the isosceles triangle fitted to a
-/// dragged box.
+/// dragged box, with an optional fill and/or stroke at Photoshop's own
+/// Inside, Center, or Outside stroke position (defaulting to Inside).
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn draw_triangle(
     state: State<'_, AppState>,
     id: LayerId,
@@ -4792,10 +4822,21 @@ fn draw_triangle(
     y0: f32,
     x1: f32,
     y1: f32,
-    color: [u8; 4],
+    fill: Option<[u8; 4]>,
+    stroke: Option<([u8; 4], u32)>,
+    position: Option<document::StrokePosition>,
 ) -> Result<Snapshot, String> {
     edit(&state, |document| {
-        document.draw_triangle(id, x0, y0, x1, y1, color)
+        document.draw_triangle_with(
+            id,
+            x0,
+            y0,
+            x1,
+            y1,
+            fill,
+            stroke,
+            position.unwrap_or(document::StrokePosition::Inside),
+        )
     })
 }
 

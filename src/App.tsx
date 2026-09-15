@@ -11420,7 +11420,9 @@ export default function App() {
                 y0,
                 x1,
                 y1,
-                color: [r, g, b, 255],
+                fill,
+                stroke,
+                position: shapeStrokePosition,
               });
             } else if (tool === "star") {
               void runCommand("draw_star", {
@@ -11431,7 +11433,9 @@ export default function App() {
                 y: y1,
                 points: polygonSides,
                 ratio: starRatio,
-                color: [r, g, b, 255],
+                fill,
+                stroke,
+                position: shapeStrokePosition,
               });
             } else if (tool === "polygon") {
               void runCommand("draw_polygon", {
@@ -11441,7 +11445,9 @@ export default function App() {
                 x: x1,
                 y: y1,
                 sides: polygonSides,
-                color: [r, g, b, 255],
+                fill,
+                stroke,
+                position: shapeStrokePosition,
               });
             } else if (tool === "line") {
               void runCommand("draw_line", {
@@ -15309,7 +15315,11 @@ export default function App() {
               {lineWeight}px
             </label>
           )}
-          {(tool === "rectangle" || tool === "ellipse") && (
+          {(tool === "rectangle" ||
+            tool === "ellipse" ||
+            tool === "triangle" ||
+            tool === "star" ||
+            tool === "polygon") && (
             <>
               <label className="tools__slider">
                 <input
