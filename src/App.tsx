@@ -1809,6 +1809,10 @@ export default function App() {
     purity: 0,
     textureDepth: 0,
     wetEdges: false,
+    dualBrushSizePercent: 0,
+    dualBrushSpacingPercent: 25,
+    dualBrushScatter: 0,
+    dualBrushCount: 1,
   });
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
@@ -24088,6 +24092,25 @@ export default function App() {
                 ],
                 ["purity", "Color Dynamics: Purity", -100, 100],
                 ["textureDepth", "Texture: Depth (%)", 0, 100],
+                [
+                  "dualBrushSizePercent",
+                  "Dual Brush: Size (% of this brush, 0 off)",
+                  0,
+                  100,
+                ],
+                [
+                  "dualBrushSpacingPercent",
+                  "Dual Brush: Spacing (% of diameter)",
+                  1,
+                  200,
+                ],
+                [
+                  "dualBrushScatter",
+                  "Dual Brush: Scatter (% of diameter)",
+                  0,
+                  500,
+                ],
+                ["dualBrushCount", "Dual Brush: Count", 1, 16],
               ] as [keyof BrushDynamics, string, number, number][]
             ).map(([key, label, min, max]) => (
               <label key={key} className="control">
@@ -24185,6 +24208,10 @@ export default function App() {
                     purity: 0,
                     textureDepth: 0,
                     wetEdges: false,
+                    dualBrushSizePercent: 0,
+                    dualBrushSpacingPercent: 25,
+                    dualBrushScatter: 0,
+                    dualBrushCount: 1,
                   }))
                 }
                 title="Back to the plain round brush"

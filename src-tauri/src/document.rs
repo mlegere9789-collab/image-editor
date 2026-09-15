@@ -2825,6 +2825,21 @@ pub struct BrushDynamics {
     /// Wet Edges (the Brush tool only): see [`dab_coverage`]'s own doc
     /// comment for the shape this turns each dab into.
     pub wet_edges: bool,
+    /// Dual Brush: a second, independent round-dab scatter over the same
+    /// stroke path, its own coverage field multiplying the primary
+    /// stroke's -- Photoshop's own Multiply default, the only Dual Brush
+    /// Mode this project offers. This project's own stand-in for
+    /// choosing a second tip shape from Photoshop's own built-in tip
+    /// library, which this app has no catalogue of: every dab this
+    /// project ever paints is already this same round (or squashed,
+    /// turned) shape, so the "second tip" is just another draw from
+    /// [`dab_plan`] at its own size, spacing, scatter and count. Zero
+    /// `dual_brush_size_percent` (the default) skips it entirely,
+    /// exactly as `texture_depth` does for Texture.
+    pub dual_brush_size_percent: u8,
+    pub dual_brush_spacing_percent: u32,
+    pub dual_brush_scatter: u16,
+    pub dual_brush_count: u8,
 }
 
 impl Default for BrushDynamics {
@@ -2851,6 +2866,10 @@ impl Default for BrushDynamics {
             purity: 0,
             texture_depth: 0,
             wet_edges: false,
+            dual_brush_size_percent: 0,
+            dual_brush_spacing_percent: 25,
+            dual_brush_scatter: 0,
+            dual_brush_count: 1,
         }
     }
 }
@@ -2873,6 +2892,7 @@ impl BrushDynamics {
             ("Saturation Jitter", self.saturation_jitter),
             ("Brightness Jitter", self.brightness_jitter),
             ("Texture Depth", self.texture_depth),
+            ("Dual Brush Size", self.dual_brush_size_percent),
         ] {
             if value > 100 {
                 return Err(format!("{name} must be between 0 and 100 percent."));
@@ -2889,6 +2909,15 @@ impl BrushDynamics {
         }
         if !(-100..=100).contains(&self.purity) {
             return Err("Purity must be between -100 and 100 percent.".to_string());
+        }
+        if self.dual_brush_spacing_percent == 0 || self.dual_brush_spacing_percent > 1000 {
+            return Err("Dual Brush Spacing must be between 1 and 1000 percent.".to_string());
+        }
+        if self.dual_brush_scatter > 1000 {
+            return Err("Dual Brush Scatter must be between 0 and 1000 percent.".to_string());
+        }
+        if self.dual_brush_count == 0 || self.dual_brush_count > 16 {
+            return Err("Dual Brush Count must be between 1 and 16.".to_string());
         }
         Ok(())
     }
@@ -20458,6 +20487,52 @@ impl Document {
                         + 0.114 * pattern.pixels[src + 2] as f32)
                         / 255.0;
                     coverage[idx] *= 1.0 - depth * (1.0 - luminance);
+                }
+            }
+        }
+
+        // Dual Brush: a second, independent round-dab scatter over the
+        // same stroke path, its own coverage multiplying the primary
+        // stroke's -- applied post-hoc over the whole settled coverage
+        // field for the same reason Texture is above: which secondary
+        // dab covers a pixel never depends on which primary dab won it.
+        // A secondary dab scattered outside the primary's own bounding
+        // box needs no special handling: it would only ever modulate
+        // pixels the primary stroke never reached, where `coverage` is
+        // already zero and multiplying leaves it exactly zero.
+        if let Some(dynamics) = dynamics {
+            if dynamics.dual_brush_size_percent > 0 {
+                let secondary_radius = radius * dynamics.dual_brush_size_percent as f32 / 100.0;
+                let secondary = BrushDynamics {
+                    spacing_percent: dynamics.dual_brush_spacing_percent,
+                    scatter: dynamics.dual_brush_scatter,
+                    count: dynamics.dual_brush_count,
+                    seed: dynamics.seed ^ 0x27d4_eb2f,
+                    ..BrushDynamics::default()
+                };
+                let mut secondary_coverage = vec![0.0f32; box_width * box_height];
+                for dab in dab_plan(points, secondary_radius, &secondary) {
+                    let r = dab.radius + 1.0;
+                    let row_range = ((dab.y - r).floor().max(y0 as f32) as usize)
+                        ..(((dab.y + r).ceil().max(0.0) as usize).min(y1 as usize));
+                    let col_range = ((dab.x - r).floor().max(x0 as f32) as usize)
+                        ..(((dab.x + r).ceil().max(0.0) as usize).min(x1 as usize));
+                    for py in row_range {
+                        for px in col_range.clone() {
+                            let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                            let c = dab_coverage(&dab, secondary.hardness, false, cx, cy);
+                            if c <= 0.0 {
+                                continue;
+                            }
+                            let idx = (py - y0 as usize) * box_width + (px - x0 as usize);
+                            if c > secondary_coverage[idx] {
+                                secondary_coverage[idx] = c;
+                            }
+                        }
+                    }
+                }
+                for (slot, secondary) in coverage.iter_mut().zip(&secondary_coverage) {
+                    *slot *= secondary;
                 }
             }
         }
@@ -56070,6 +56145,30 @@ mod tests {
                 purity: -128,
                 ..BrushDynamics::default()
             },
+            BrushDynamics {
+                dual_brush_size_percent: 101,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                dual_brush_spacing_percent: 0,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                dual_brush_spacing_percent: 1001,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                dual_brush_scatter: 1001,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                dual_brush_count: 0,
+                ..BrushDynamics::default()
+            },
+            BrushDynamics {
+                dual_brush_count: 17,
+                ..BrushDynamics::default()
+            },
         ] {
             assert!(d
                 .stroke_dynamic(id, &points, 4.0, Stroke::Brush { color: fg }, &bad)
@@ -56165,6 +56264,99 @@ mod tests {
             alpha_at_half(10) < alpha_at_half(11),
             "black column still dimmer than white"
         );
+    }
+
+    #[test]
+    fn dual_brush_multiplies_coverage_by_a_second_independent_scatter() {
+        let red = [255, 0, 0, 255];
+        let fresh = || {
+            let mut doc = Document::new(60, 60).unwrap();
+            let id = doc
+                .add_layer("x", &[0; 60 * 60 * CHANNELS], 60, 60)
+                .unwrap();
+            (doc, id)
+        };
+        // A single stroke point, pixel-centre-aligned (30.5, 30.5) so pixel
+        // (40, 30) -- sampled at (40.5, 30.5) -- sits exactly 10px away and
+        // pixel (32, 30) -- sampled at (32.5, 30.5) -- sits exactly 2px
+        // away. A single point means `dab_plan` places exactly one dab
+        // (its own unconditional first push, before the empty
+        // `points.windows(2)` loop ever runs) for both the primary stroke
+        // and Dual Brush's own secondary scatter, at that same point, with
+        // the default count 1 and no jitter of any kind -- so both are one
+        // dab each, deterministically, at hardness 100 (coverage exactly 1
+        // inside the radius, exactly 0 a half pixel past it).
+        let point = [(30.5, 30.5)];
+        let alpha_far = |doc: &Document| doc.layers()[0].pixels[(30 * 60 + 40) * CHANNELS + 3];
+        let alpha_near = |doc: &Document| doc.layers()[0].pixels[(30 * 60 + 32) * CHANNELS + 3];
+
+        // Baseline: primary radius 20 alone reaches both pixels (distance
+        // 10 and 2 are both well inside 20), so both are painted solidly.
+        let (mut baseline, id) = fresh();
+        baseline
+            .stroke_dynamic(
+                id,
+                &point,
+                20.0,
+                Stroke::Brush { color: red },
+                &BrushDynamics::default(),
+            )
+            .unwrap();
+        assert!(alpha_far(&baseline) > 200, "unblocked at distance 10");
+        assert!(alpha_near(&baseline) > 200, "unblocked at distance 2");
+
+        // Dual Brush at size 25% of the primary's own radius (20 * 0.25 =
+        // 5): the secondary's single dab only reaches out to radius 5, so
+        // it multiplies coverage to exactly 0 at distance 10 -- outside
+        // its own radius plus the half-pixel anti-aliasing band -- while
+        // leaving distance 2, well inside 5, untouched (coverage 1 * 1).
+        let (mut dual, id) = fresh();
+        dual.stroke_dynamic(
+            id,
+            &point,
+            20.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                dual_brush_size_percent: 25,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            alpha_far(&dual),
+            0,
+            "blocked entirely past the secondary's own radius"
+        );
+        assert!(
+            alpha_near(&dual) > 200,
+            "left alone well inside the secondary's own radius"
+        );
+        assert_eq!(
+            alpha_near(&dual),
+            alpha_near(&baseline),
+            "coverage 1 times coverage 1 is unchanged"
+        );
+
+        // Zero (the default) skips Dual Brush entirely -- byte-identical
+        // to the plain baseline even with the other dual_brush_* fields
+        // left at nonsense-looking values, since none of them are ever
+        // read when the size is zero.
+        let (mut off, id) = fresh();
+        off.stroke_dynamic(
+            id,
+            &point,
+            20.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                dual_brush_size_percent: 0,
+                dual_brush_spacing_percent: 999,
+                dual_brush_scatter: 999,
+                dual_brush_count: 16,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(off.layers()[0].pixels, baseline.layers()[0].pixels);
     }
 
     #[test]

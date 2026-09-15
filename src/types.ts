@@ -534,6 +534,10 @@ export type BrushDynamics = {
   purity: number;
   textureDepth: number;
   wetEdges: boolean;
+  dualBrushSizePercent: number;
+  dualBrushSpacingPercent: number;
+  dualBrushScatter: number;
+  dualBrushCount: number;
 };
 
 /** Mirrors `Interpolation` in src-tauri/src/document.rs: a transform's resampling. */

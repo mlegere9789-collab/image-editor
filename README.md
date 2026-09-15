@@ -24746,6 +24746,85 @@ changed). `npx tsc --noEmit`, `npm run build` and `npm test` all clean.
 Tests: 1957 Rust (unchanged), 39 frontend (unchanged — no new pure
 logic, only wiring over an already-tested primitive).
 
+## Phase 424 — Brush Settings' Dual Brush
+
+Phase D's third named priority in `docs/PLAN_TO_100.md`, "brush
+dynamics," closes its second-to-last open row: BRUSH TOOL's own Dual
+Brush, the only Brush Settings option still missing since Phases 346
+and 387-389 built the rest (Shape/Scattering/Transfer Dynamics, Color
+Dynamics, Texture, Wet Edges). Only Airbrush build-up — a genuinely
+different problem, needing paint to accumulate the longer the pointer
+holds still rather than anything this project's per-stroke, point-list
+commands can express — remains open on that row.
+
+Photoshop's real Dual Brush lets a stroke combine its primary tip with
+a second tip chosen from the built-in tip library, blended by a Mode
+(Multiply by default). This project has no tip library to choose a
+second shape from — every dab it ever paints, brush or defined tip, is
+already the one round (optionally squashed, turned) shape `Dab`
+describes — so Dual Brush here is explicitly this project's own stand-in
+for that choice: a second, independent draw from the same `dab_plan`
+this project's Shape Dynamics/Scattering already use, at its own Size
+(percent of the primary stroke's radius), Spacing, Scatter and Count,
+its own coverage field multiplying the primary stroke's. Multiply is
+the only Dual Brush Mode offered, matching Photoshop's own default and
+the shape a coverage-times-coverage multiply naturally produces.
+
+Four new `BrushDynamics` fields — `dual_brush_size_percent` (0, the
+default, disabling it entirely, exactly as `texture_depth` already does
+for Texture), `dual_brush_spacing_percent`, `dual_brush_scatter`,
+`dual_brush_count` — and one new block in `stroke_inner`, placed right
+after Texture's own post-processing for the identical reason Texture's
+own comment already gives: which secondary dab covers a pixel never
+depends on which primary dab won it, so it can be settled once, after
+the whole primary coverage field already is, rather than per dab. The
+secondary's own `dab_plan` run is seeded independently
+(`dynamics.seed ^ 0x27d4_eb2f`, the same XOR-a-constant trick
+`stroke_dynamic`'s own Color Dynamics random stream already uses to
+stay reproducible without sharing a sequence with anything else), and
+every one of its own jitters defaults to zero — only Size, Spacing,
+Scatter and Count are exposed, keeping the secondary a plain round
+scatter rather than a second full Brush Settings panel. No new Tauri
+command: `BrushDynamics` already crosses the FFI boundary as one
+struct (`#[serde(default)]` on every field), so the four new ones just
+ride along, and `paint_stroke_dynamic` needed no change at all.
+
+One new hand-computed test, `dual_brush_multiplies_coverage_by_a_second_
+independent_scatter`: a single-point stroke places exactly one dab for
+both the primary stroke and the secondary scatter (`dab_plan`'s own
+first push runs unconditionally, before the `points.windows(2)` loop
+that needs at least two points ever executes), so at hardness 100 the
+coverage math is exact, not probabilistic. A primary radius of 20 alone
+covers a pixel 10px away and one 2px away solidly; Dual Brush at Size
+25% (a secondary radius of 5) leaves the 2px pixel exactly unchanged
+(coverage 1 times coverage 1) while driving the 10px pixel to alpha
+exactly 0 — past the secondary's own radius plus its half-pixel
+anti-aliasing band, so multiplying by its zero coverage there zeroes
+the primary's own regardless of how solid it was. A third case at Size
+0 with the other three fields left at deliberately out-of-range-looking
+values (999%/999%/16) is byte-identical to the plain baseline, proving
+none of them are ever read while Dual Brush is off. Seven more
+out-of-range `BrushDynamics` values (Size 101, Spacing 0 and 1001,
+Scatter 1001, Count 0 and 17) were added to the existing
+`color_dynamics_jitters_colour_reproducibly_and_purity_desaturates`
+test's own bad-value list rather than a new test function, the
+established distinction this project has tracked test counts by since
+Phase 407. All pre-existing Brush Settings tests — Shape Dynamics,
+Scattering, Color Dynamics, Texture, Wet Edges — still pass unmodified,
+confirming Dual Brush at its default (off) changes nothing about any of
+them.
+
+Frontend: four new sliders (Dual Brush Size/Spacing/Scatter/Count) in
+the Brush Settings dialog and the Reset button's defaults, both
+following the exact pattern every other Brush Settings control already
+uses — no new pure logic, so the frontend test count is unchanged.
+`cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npx tsc
+--noEmit`/`npm run build`/`npm test` all clean.
+
+Tests: 1958 Rust (1957 → 1958: one new test, `tip_stroke_dynamic`'s own
+captured-tip path deliberately out of this phase's scope — see the
+parity row), 39 frontend (unchanged).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
