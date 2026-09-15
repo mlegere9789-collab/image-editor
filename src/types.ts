@@ -494,6 +494,7 @@ export type BrushDynamics = {
   brightnessJitter: number;
   purity: number;
   textureDepth: number;
+  wetEdges: boolean;
 };
 
 /** Mirrors `Interpolation` in src-tauri/src/document.rs: a transform's resampling. */

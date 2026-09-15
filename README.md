@@ -22960,6 +22960,40 @@ in-between case, not just the two extremes. `cargo fmt`/`clippy
 Tests: 1898 Rust (1896 → 1898), 33 frontend (unchanged — one more slider
 wired the same way, no new frontend logic).
 
+## Phase 389 — the Brush tool's Wet Edges
+
+The Brush Tool row's penultimate scope cut: Wet Edges, Photoshop's
+watercolour-ish checkbox that builds paint up along a stroke's own edges
+and leaves its middle thin. Real Photoshop tracks this across a whole
+stroke's history; reached here instead through `dab_coverage`'s own
+per-dab shape, since dabs already overlap continuously along a stroke and
+a shape that is itself thin in the middle compounds into the same look
+without needing new bookkeeping. `wet_edges` (bool, Brush tool only) turns
+the ordinary dab — solid inside `hardness` percent of the radius, fading
+to 0 at the edge — inside out: 0 at the dab's own centre, rising to 1 by
+that same `hardness` fraction of the radius (the "core" now reads as the
+ring's own inner edge), held at 1 out toward the radius, then falling to 0
+there exactly as the ordinary dab's edge already does — computed as
+`min(rise, fall)` of the two ramps, so it is still one continuous
+function, still zero at and past the true radius, still needing no new
+bounding-box math. Overlapping dabs along a stroke's boundary compound
+where their rings' outer bands cluster and cancel out along the
+centreline, where every ring is near its own hollow middle. Applies only
+to the plain `Stroke::Brush`; every other stroke kind's dabs are the
+ordinary shape regardless of `wet_edges`.
+
+**Verified.** One new Rust test, hand-computed against a Radius 20,
+Hardness 50 dab (core = 10) centred at (30, 30) on a 60×60 layer: the
+ordinary dab is solid (alpha > 240) at its own centre, inside its core;
+the wet dab is nearly hollow there instead (alpha < 40); at distance 10
+from centre — the ring's own inner edge — the wet dab is near-maximum
+(alpha > 200); at distance 25, past the radius, nothing paints either way
+(alpha exactly 0). `cargo fmt`/`clippy --all-targets -D warnings`/`test`
+and `npm run build`/`test` all clean.
+
+Tests: 1899 Rust (1898 → 1899), 33 frontend (unchanged — one checkbox
+wired the same way every other Brush Settings toggle already is).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

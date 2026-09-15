@@ -1774,6 +1774,7 @@ export default function App() {
     brightnessJitter: 0,
     purity: 0,
     textureDepth: 0,
+    wetEdges: false,
   });
   const strokeSeed = useRef(1);
   const [tipSpacing, setTipSpacing] = useState(4);
@@ -23376,9 +23377,11 @@ export default function App() {
               pushed toward or away from grey. Texture (the Brush tool only)
               scales coverage by the pattern defined in Edit &gt; Define
               Pattern, tiled the same way Pattern Stamp tiles it — a dark texel
-              blocks paint at full Depth, a light one lets it through. Every
-              jitter at zero, Count 1, Hardness 100, Purity 0 and Texture Depth
-              0 is the plain stroke laid as dabs in the brush colour.
+              blocks paint at full Depth, a light one lets it through. Wet Edges
+              (the Brush tool only) turns each dab into a ring instead of a
+              disc, thin in the middle and thick at its own edge. Every jitter
+              at zero, Count 1, Hardness 100, Purity 0, Texture Depth 0 and Wet
+              Edges off is the plain stroke laid as dabs in the brush colour.
             </p>
             {(
               [
@@ -23451,6 +23454,18 @@ export default function App() {
               <span className="control__label">Scatter on both axes</span>
               <input
                 type="checkbox"
+                checked={brushDynamics.wetEdges}
+                onChange={(event) =>
+                  setBrushDynamics((d) => ({
+                    ...d,
+                    wetEdges: event.target.checked,
+                  }))
+                }
+                style={{ marginLeft: 12 }}
+              />
+              <span className="control__label">Wet Edges</span>
+              <input
+                type="checkbox"
                 checked={brushDynamicsOn}
                 onChange={(event) => setBrushDynamicsOn(event.target.checked)}
                 style={{ marginLeft: 12 }}
@@ -23498,6 +23513,7 @@ export default function App() {
                     brightnessJitter: 0,
                     purity: 0,
                     textureDepth: 0,
+                    wetEdges: false,
                   }))
                 }
                 title="Back to the plain round brush"

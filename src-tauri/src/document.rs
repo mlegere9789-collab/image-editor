@@ -2687,6 +2687,9 @@ pub struct BrushDynamics {
     /// look. Zero (the default) skips reading a pattern at all, so a
     /// stroke with no Texture never needs one defined.
     pub texture_depth: u8,
+    /// Wet Edges (the Brush tool only): see [`dab_coverage`]'s own doc
+    /// comment for the shape this turns each dab into.
+    pub wet_edges: bool,
 }
 
 impl Default for BrushDynamics {
@@ -2712,6 +2715,7 @@ impl Default for BrushDynamics {
             brightness_jitter: 0,
             purity: 0,
             texture_depth: 0,
+            wet_edges: false,
         }
     }
 }
@@ -2841,8 +2845,17 @@ fn dab_plan(points: &[(f32, f32)], radius: f32, dynamics: &BrushDynamics) -> Vec
 /// A round (or squashed, turned) dab's coverage of the point `(px, py)`:
 /// `1` inside the hard core (`hardness` percent of the radius), falling
 /// off linearly to `0` at the radius, with the capsule stroke's own
-/// half-pixel anti-aliasing at a fully hard edge.
-fn dab_coverage(dab: &Dab, hardness: u8, px: f32, py: f32) -> f32 {
+/// half-pixel anti-aliasing at a fully hard edge. `wet_edges` (the Brush
+/// tool only) turns that shape inside out -- `0` at the dab's own centre,
+/// rising to `1` by `hardness` percent of the radius, held out to the
+/// radius, then falling to `0` there exactly as the ordinary edge already
+/// does. A lone wet dab looks like a ring; overlapping dabs along a
+/// stroke compound where those rings cluster near the stroke's own
+/// boundary and cancel out along its centreline, the same "edges build up,
+/// the middle stays thin" look Photoshop's own watercolour-ish Wet Edges
+/// has, reached here through a per-dab shape rather than tracking the
+/// whole stroke's history.
+fn dab_coverage(dab: &Dab, hardness: u8, wet_edges: bool, px: f32, py: f32) -> f32 {
     let (dx, dy) = (px - dab.x, py - dab.y);
     let (sin, cos) = dab.angle.to_radians().sin_cos();
     let xr = dx * cos + dy * sin;
@@ -2850,12 +2863,22 @@ fn dab_coverage(dab: &Dab, hardness: u8, px: f32, py: f32) -> f32 {
     let d = xr.hypot(yr);
     let r = dab.radius;
     let core = r * hardness as f32 / 100.0;
-    let c = if d <= core {
-        1.0
-    } else if r - core > 0.5 {
+    let fall = if r - core > 0.5 {
         ((r - d) / (r - core)).clamp(0.0, 1.0)
     } else {
         (r - d + 0.5).clamp(0.0, 1.0)
+    };
+    let c = if wet_edges {
+        let rise = if core > 0.5 {
+            (d / core).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        rise.min(fall)
+    } else if d <= core {
+        1.0
+    } else {
+        fall
     };
     c * dab.opacity
 }
@@ -19407,6 +19430,8 @@ impl Document {
         };
         let mut dab_colors: Option<Vec<[u8; 3]>> =
             brush_foreground.map(|_| vec![[0u8; 3]; box_width * box_height]);
+        let wet_edges_active =
+            matches!(stroke, Stroke::Brush { .. }) && dynamics.is_some_and(|d| d.wet_edges);
         if let Some(dynamics) = dynamics {
             // A separate stream from `dab_plan`'s own internal generator
             // (which is seeded and consumed entirely inside that call) --
@@ -19423,7 +19448,7 @@ impl Document {
                 for py in row_range {
                     for px in col_range.clone() {
                         let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
-                        let mut c = dab_coverage(&dab, dynamics.hardness, cx, cy);
+                        let mut c = dab_coverage(&dab, dynamics.hardness, wet_edges_active, cx, cy);
                         if c <= 0.0 {
                             continue;
                         }
@@ -53275,6 +53300,57 @@ mod tests {
             alpha_at_half(10) < alpha_at_half(11),
             "black column still dimmer than white"
         );
+    }
+
+    #[test]
+    fn wet_edges_turns_a_dab_into_a_ring_thin_in_the_middle_thick_at_the_edge() {
+        let red = [255, 0, 0, 255];
+        let fresh = || {
+            let mut doc = Document::new(60, 60).unwrap();
+            let id = doc
+                .add_layer("x", &[0; 60 * 60 * CHANNELS], 60, 60)
+                .unwrap();
+            (doc, id)
+        };
+        // Radius 20, Hardness 50 -> the ring's inner edge sits at core = 10.
+        let (mut wet, id) = fresh();
+        wet.stroke_dynamic(
+            id,
+            &[(30.0, 30.0)],
+            20.0,
+            Stroke::Brush { color: red },
+            &BrushDynamics {
+                hardness: 50,
+                wet_edges: true,
+                ..BrushDynamics::default()
+            },
+        )
+        .unwrap();
+        let (mut plain, id2) = fresh();
+        plain
+            .stroke_dynamic(
+                id2,
+                &[(30.0, 30.0)],
+                20.0,
+                Stroke::Brush { color: red },
+                &BrushDynamics {
+                    hardness: 50,
+                    ..BrushDynamics::default()
+                },
+            )
+            .unwrap();
+        let center_wet = pixel(&wet, id, 30, 30)[3];
+        let center_plain = pixel(&plain, id2, 30, 30)[3];
+        let ring_wet = pixel(&wet, id, 40, 30)[3]; // distance 10 == core
+        let outside_wet = pixel(&wet, id, 55, 30)[3]; // distance 25 > radius 20
+                                                      // The ordinary dab is solid at its own centre (inside its core);
+                                                      // the wet dab is nearly hollow there instead.
+        assert!(center_plain > 240, "plain centre solid: {center_plain}");
+        assert!(center_wet < 40, "wet centre nearly hollow: {center_wet}");
+        // At the ring's own inner edge (core) the wet dab is near-maximum.
+        assert!(ring_wet > 200, "wet ring near-solid at core: {ring_wet}");
+        // Past the dab's radius, nothing paints either way.
+        assert_eq!(outside_wet, 0);
     }
 
     #[test]
