@@ -24700,6 +24700,52 @@ scope cut actually names.
 Tests: 1957 Rust (unchanged — no Rust file touched), 39 frontend (36 →
 39: three new `movedPivotBox` cases in `freeTransformHandles.test.ts`).
 
+## Phase 423 — Distort's On-Canvas Handles
+
+The second "transform handles on canvas" item in Phase D's own
+largest-impact-first order: Distort's row named `Handles` as a
+documented scope cut since Phase 141, the tool usable only through its
+dialog's eight typed Top-left/Top-right/Bottom-right/Bottom-left X/Y
+fields with no live preview of the quad they describe.
+
+Distort's own geometry is a different shape of problem than Free
+Transform's or Transform Selection's: those scale and rotate about one
+pivot, so a drag anywhere on their bounding box moves the whole box in
+a way `scaledBounds`/`movedPivotBox` can express as a single width/
+height/angle change. Distort's four corners move independently — the
+dialog's own `Document::distort` already takes four unrelated `[x, y]`
+positions, not a pivot-relative transform at all — so each on-canvas
+handle just needs to become wherever the pointer is, not compute a
+percent or an angle. That is exactly `documentPoint`, the Blur
+Gallery's own client-to-document-pixel mapping already built for Field
+Blur's pins and Iris Blur's centre (`blurPins.ts`, Phases 162 and 163):
+clamped to the canvas, rounded to a whole pixel. Dragging a corner
+handle calls it once and writes the result straight into that corner's
+`[x, y]` — the same array the dialog's own numeric fields already read
+and write, so the two stay in sync with no new state of their own.
+
+The overlay itself is a new `<svg>` (`.distort-overlay`), `viewBox="0 0
+{width} {height}"` with `preserveAspectRatio="none"` — the same
+document-pixel-coordinate convention the lasso and marching-ants
+overlays already use (`.lasso-preview`) — holding a dashed `<polygon>`
+tracing the current quad and four `<circle>` handles, one per corner,
+sized to a fraction of the canvas so they stay a sensible size at any
+zoom. The `<svg>` itself is `pointer-events: none` so the canvas keeps
+receiving clicks everywhere but on a handle, exactly `.transform-box`'s
+own convention for Free Transform and Transform Selection.
+
+No new pure function was needed: every piece here is either
+`documentPoint`, already hand-verified in `blurPins.test.ts` for
+exactly this client-to-document mapping and clamping, or a one-line
+array replace (`corners.map((c, i) => i === corner ? [point.x,
+point.y] : c)`) too trivial to warrant its own test beyond what
+`distort`'s own existing Rust tests already cover for the resulting
+quad. `cargo fmt`/`clippy`/`test` are unaffected (no Rust file
+changed). `npx tsc --noEmit`, `npm run build` and `npm test` all clean.
+
+Tests: 1957 Rust (unchanged), 39 frontend (unchanged — no new pure
+logic, only wiring over an already-tested primitive).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

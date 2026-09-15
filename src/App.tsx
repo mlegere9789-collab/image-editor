@@ -10312,6 +10312,47 @@ export default function App() {
     [],
   );
 
+  // Distort's own on-canvas handles: unlike Free Transform's and Transform
+  // Selection's scale-about-a-pivot handles, each of Distort's four corners
+  // moves independently to wherever the pointer is -- so dragging one is
+  // just documentPoint's own client-to-document-pixel mapping (the same
+  // primitive the Blur Gallery's pins already use), not a delta or a
+  // pivot-relative percent.
+  const distortDrag = useRef<number | null>(null);
+
+  const startDistortDrag = useCallback(
+    (event: React.PointerEvent<SVGCircleElement>, corner: number) => {
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      distortDrag.current = corner;
+    },
+    [],
+  );
+
+  const moveDistortDrag = useCallback(
+    (event: React.PointerEvent<SVGCircleElement>) => {
+      const corner = distortDrag.current;
+      if (corner === null || !document) return;
+      const rect = canvasWrapRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const point = documentPoint(rect, event.clientX, event.clientY, document);
+      setDistortCorners((corners) =>
+        corners.map((c, i) => (i === corner ? [point.x, point.y] : c)),
+      );
+    },
+    [document],
+  );
+
+  const endDistortDrag = useCallback(
+    (event: React.PointerEvent<SVGCircleElement>) => {
+      distortDrag.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    },
+    [],
+  );
+
   /** A handle drag's new rectangle: the edges that handle owns follow the
    * pointer, rounded to whole pixels and kept at least one pixel wide. */
   const draggedRect = useCallback(
@@ -37759,6 +37800,45 @@ export default function App() {
                     </div>
                   );
                 })()}
+              {showDistortDialog && document && (
+                <svg
+                  className="distort-overlay"
+                  viewBox={`0 0 ${document.width} ${document.height}`}
+                  preserveAspectRatio="none"
+                  aria-hidden="true"
+                >
+                  <polygon
+                    className="distort-overlay__quad"
+                    points={distortCorners
+                      .map(([x, y]) => `${x},${y}`)
+                      .join(" ")}
+                  />
+                  {distortCorners.map(([x, y], corner) => (
+                    <circle
+                      key={corner}
+                      className="distort-overlay__handle"
+                      cx={x}
+                      cy={y}
+                      r={Math.max(document.width, document.height) / 60}
+                      role="slider"
+                      aria-label={`Distort handle ${
+                        [
+                          "top-left",
+                          "top-right",
+                          "bottom-right",
+                          "bottom-left",
+                        ][corner]
+                      }`}
+                      aria-valuenow={0}
+                      tabIndex={-1}
+                      onPointerDown={(event) => startDistortDrag(event, corner)}
+                      onPointerMove={moveDistortDrag}
+                      onPointerUp={endDistortDrag}
+                      onPointerCancel={endDistortDrag}
+                    />
+                  ))}
+                </svg>
+              )}
               {typeEditing && document && (
                 <textarea
                   autoFocus
