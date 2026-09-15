@@ -24469,6 +24469,72 @@ Tests: 1953 Rust (1948 → 1953), 36 frontend (unchanged — the new
 checkboxes reuse the existing shape-tool options-bar pattern and need no
 new test file).
 
+## Phase 419 — Levels Gray Point and Auto Color's Luminosity-Preserving Snap
+
+Both the Levels/Curves Gray Point Eyedropper's and Auto Color's own rows
+named the same last scope cut: Photoshop's luminosity-preserving Snap
+Neutral Midtones. Both already route through one shared private helper,
+`neutralize_channels_to`, which gives each channel the gamma that puts a
+sampled value on a target — the missing piece was only ever how that
+target itself gets computed when no explicit colour is given.
+
+The existing default flattens all three channels to their own plain
+unweighted mean (`(r + g + b) / 3`), which can shift the neutralized
+result's overall brightness away from the original — a saturated colour
+whose channels differ a lot moves further than one already close to
+grey, and the shift has nothing to do with how bright the colour actually
+read. `neutralize_channels_luminosity` — a straight sibling to the
+existing `neutralize_channels`, differing only in that one line — targets
+the BT.601 luma instead: `0.299·r + 0.587·g + 0.114·b`. Since those three
+weights already sum to exactly `1.0`, flattening every channel to that
+one value reproduces the *same* luma the original colour had, so the
+neutralized layer reads the same overall brightness even though its
+colour cast is gone — Photoshop's own "luminosity-preserving" behaviour,
+named plainly.
+
+`Document::levels_gray_point_luminosity(id, x, y)` sits alongside the
+existing `levels_gray_point`/`levels_gray_point_with` as a third, fully
+independent eyedropper mode — target-colour and luminosity-weighting are
+two separate axes, so this avoids overloading either existing function's
+own parameters. `auto_color_with` gained one trailing `luminosity: bool`:
+with `midtones: None` and `luminosity: true` it snaps to the sampled
+pixels' own luma instead of their plain mean; an explicit `midtones`
+target still always wins, `luminosity` simply ignored, exactly as the
+existing "`None` keeps the old snap" precedence already worked. The
+plain `auto_color`/`levels_gray_point` are untouched, still delegating
+with `luminosity: false`. The frontend's Levels and Curves dialogs both
+gained a "Preserve Luminosity" checkbox next to the existing Gray/Auto
+Color target swatches: checked, the Gray Point eyedropper calls the new
+command and Auto Color sends `midtones: null, luminosity: true` instead
+of its usual target colour.
+
+**Verified two ways.** Five new hand-computed tests, all cross-checked
+against an independent Python port of the exact `f32` exponent/`to_byte`
+arithmetic `neutralize_channels_to` already uses:
+`levels_gray_point_luminosity_targets_the_clicked_pixels_own_bt601_luma`
+— the existing gray-point fixture's clicked pixel `(100, 150, 200)` has
+BT.601 luma `140.75`, not the `150` its own unweighted mean already
+targets, landing the neutralized pixel on `141` instead of `150`.
+`levels_gray_point_luminosity_applies_each_channels_gamma_to_the_whole_layer`
+— the same luma target's three per-channel gammas applied to the rest of
+that fixture's layer.
+`auto_color_with_luminosity_snaps_the_means_to_their_own_bt601_luma` — a
+three-pixel layer whose R, G, and B channels each already span the full
+`0..=255` range (so Auto Tone's own stretch is a no-op) but whose
+per-channel means differ (`118.333` vs `101.667` twice), snapping to
+their luma (`106.65`) rather than their plain mean (`107.222`).
+`auto_color_with_ignores_luminosity_when_midtones_is_given` — the
+existing explicit-midtones test case, unchanged with `luminosity: true`
+added, proving the precedence.
+`levels_gray_point_luminosity_propagates_errors` — the mirror of the
+existing error test. All pre-existing `levels_gray_point_*`/
+`auto_color_*` tests still pass unmodified. `cargo
+fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1958 Rust (1953 → 1958), 36 frontend (unchanged — one checkbox
+reused in two existing dialogs needs no new test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

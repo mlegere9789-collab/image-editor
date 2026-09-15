@@ -2158,6 +2158,10 @@ export default function App() {
   const [levelsBlackTarget, setLevelsBlackTarget] = useState("#000000");
   const [levelsGrayTarget, setLevelsGrayTarget] = useState("#808080");
   const [levelsWhiteTarget, setLevelsWhiteTarget] = useState("#ffffff");
+  // Photoshop's own luminosity-preserving Snap Neutral Midtones: when on, the
+  // Gray Point eyedropper and Auto Color ignore the Gray target above and snap
+  // to the sampled pixels' own BT.601 luma instead.
+  const [levelsGrayLuminosity, setLevelsGrayLuminosity] = useState(false);
   // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
   // makes the clicked pixel black or white and disarms.
   // Guides dialog: New Guide's orientation and position, Guide Layout's grid.
@@ -10660,24 +10664,32 @@ export default function App() {
       if (levelsEyedropper !== null) {
         if (selectedId !== null) {
           const [x, y] = toDocPoint(event, document);
-          const command =
-            levelsEyedropper === "black"
-              ? "levels_black_point_with"
-              : levelsEyedropper === "gray"
-                ? "levels_gray_point_with"
-                : "levels_white_point_with";
-          const target =
-            levelsEyedropper === "black"
-              ? levelsBlackTarget
-              : levelsEyedropper === "gray"
-                ? levelsGrayTarget
-                : levelsWhiteTarget;
-          void runCommand(command, {
-            id: selectedId,
-            x: Math.floor(x),
-            y: Math.floor(y),
-            target: hexToRgb(target),
-          });
+          if (levelsEyedropper === "gray" && levelsGrayLuminosity) {
+            void runCommand("levels_gray_point_luminosity", {
+              id: selectedId,
+              x: Math.floor(x),
+              y: Math.floor(y),
+            });
+          } else {
+            const command =
+              levelsEyedropper === "black"
+                ? "levels_black_point_with"
+                : levelsEyedropper === "gray"
+                  ? "levels_gray_point_with"
+                  : "levels_white_point_with";
+            const target =
+              levelsEyedropper === "black"
+                ? levelsBlackTarget
+                : levelsEyedropper === "gray"
+                  ? levelsGrayTarget
+                  : levelsWhiteTarget;
+            void runCommand(command, {
+              id: selectedId,
+              x: Math.floor(x),
+              y: Math.floor(y),
+              target: hexToRgb(target),
+            });
+          }
         }
         setLevelsEyedropper(null);
         return;
@@ -14422,8 +14434,11 @@ export default function App() {
                 shadowClip: levelsClipShadows,
                 highlightClip: levelsClipHighlights,
                 shadows: hexToRgb(levelsBlackTarget),
-                midtones: hexToRgb(levelsGrayTarget),
+                midtones: levelsGrayLuminosity
+                  ? null
+                  : hexToRgb(levelsGrayTarget),
                 highlights: hexToRgb(levelsWhiteTarget),
+                luminosity: levelsGrayLuminosity,
               })
             }
             disabled={busy || !canPaint}
@@ -28458,6 +28473,19 @@ export default function App() {
                 onChange={(event) => setLevelsWhiteTarget(event.target.value)}
               />
             </label>
+            <label
+              className="control control--row"
+              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Auto Color ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
+            >
+              <input
+                type="checkbox"
+                checked={levelsGrayLuminosity}
+                onChange={(event) =>
+                  setLevelsGrayLuminosity(event.target.checked)
+                }
+              />
+              Preserve Luminosity
+            </label>
             <div className="modal__actions">
               <button
                 className="button button--quiet"
@@ -28832,6 +28860,19 @@ export default function App() {
                 value={levelsWhiteTarget}
                 onChange={(event) => setLevelsWhiteTarget(event.target.value)}
               />
+            </label>
+            <label
+              className="control control--row"
+              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Auto Color ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
+            >
+              <input
+                type="checkbox"
+                checked={levelsGrayLuminosity}
+                onChange={(event) =>
+                  setLevelsGrayLuminosity(event.target.checked)
+                }
+              />
+              Preserve Luminosity
             </label>
             <div className="modal__actions">
               <button

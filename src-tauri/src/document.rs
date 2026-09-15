@@ -26007,9 +26007,9 @@ impl Document {
     /// from the whole layer while its brightness is roughly kept. A
     /// channel already at the target, or at `0` or `255` (where no gamma
     /// can move it), is left alone. Photoshop keeps luminosity with its
-    /// own weighting and lets the target grey be configured; both are
-    /// documented scope cuts. Errors for a point off the canvas or an
-    /// unknown or locked layer.
+    /// own weighting ([`Self::levels_gray_point_luminosity`]) and lets
+    /// the target grey be configured ([`Self::levels_gray_point_with`]).
+    /// Errors for a point off the canvas or an unknown or locked layer.
     pub fn levels_gray_point(
         &mut self,
         id: LayerId,
@@ -26018,6 +26018,25 @@ impl Document {
     ) -> Result<Option<Rect>, String> {
         let [r, g, b, _] = self.layer_pixel(id, x, y)?;
         self.neutralize_channels(id, [r as f32, g as f32, b as f32])
+    }
+
+    /// [`Self::levels_gray_point`], but Photoshop's own
+    /// luminosity-preserving snap: the target every channel is given the
+    /// gamma to reach is the clicked pixel's own BT.601 luma
+    /// (`0.299·r + 0.587·g + 0.114·b`) rather than the unweighted mean of
+    /// its three channels — since the BT.601 weights already sum to
+    /// exactly `1.0`, flattening all three channels to that luma value
+    /// reproduces the pixel's own original luma exactly, so the
+    /// neutralized layer's overall brightness reads the same as before
+    /// even though its colour cast is gone.
+    pub fn levels_gray_point_luminosity(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+    ) -> Result<Option<Rect>, String> {
+        let [r, g, b, _] = self.layer_pixel(id, x, y)?;
+        self.neutralize_channels_luminosity(id, [r as f32, g as f32, b as f32])
     }
 
     /// Image > Adjustments > Auto Color: Photoshop's "Find Dark & Light
@@ -26039,7 +26058,15 @@ impl Document {
         shadow_clip: u32,
         highlight_clip: u32,
     ) -> Result<Option<Rect>, String> {
-        self.auto_color_with(id, shadow_clip, highlight_clip, [0; 3], None, [255; 3])
+        self.auto_color_with(
+            id,
+            shadow_clip,
+            highlight_clip,
+            [0; 3],
+            None,
+            [255; 3],
+            false,
+        )
     }
 
     /// [`Self::auto_color`] with Photoshop's Auto Color Correction target
@@ -26047,7 +26074,15 @@ impl Document {
     /// `shadows[c]..=highlights[c]` (the Shadows and Highlights targets;
     /// pure black and white leave it as it was), and the mean colour is
     /// snapped to the `midtones` target instead of to the mean of the
-    /// three channels — `None` keeps the old snap.
+    /// three channels — `None` keeps the old snap — plus Photoshop's own
+    /// luminosity-preserving Snap Neutral Midtones: with `midtones: None`
+    /// and `luminosity: true`, the flat target is the sampled pixels' own
+    /// BT.601 luma instead of the unweighted mean of the three channels,
+    /// so the neutralized result lands on the same luma the cast pixels
+    /// averaged, rather than drifting toward whichever channel-average
+    /// value happened to be flattest. `luminosity` is ignored once
+    /// `midtones` gives an explicit target.
+    #[allow(clippy::too_many_arguments)]
     pub fn auto_color_with(
         &mut self,
         id: LayerId,
@@ -26056,6 +26091,7 @@ impl Document {
         shadows: [u8; 3],
         midtones: Option<[u8; 3]>,
         highlights: [u8; 3],
+        luminosity: bool,
     ) -> Result<Option<Rect>, String> {
         let Some(bounds) = self.auto_stretch(id, false, shadow_clip, highlight_clip)? else {
             return Ok(None);
@@ -26093,6 +26129,7 @@ impl Document {
         ];
         match midtones {
             Some(target) => self.neutralize_channels_to(id, means, target.map(|t| t as f32))?,
+            None if luminosity => self.neutralize_channels_luminosity(id, means)?,
             None => self.neutralize_channels(id, means)?,
         };
         Ok(Some(bounds))
@@ -26111,6 +26148,19 @@ impl Document {
         values: [f32; 3],
     ) -> Result<Option<Rect>, String> {
         let target = (values[0] + values[1] + values[2]) / 3.0;
+        self.neutralize_channels_to(id, values, [target; 3])
+    }
+
+    /// [`Self::neutralize_channels`], but with the target every channel
+    /// is flattened to `values`' own BT.601 luma (`0.299·r + 0.587·g +
+    /// 0.114·b`) instead of the unweighted mean — Photoshop's own
+    /// luminosity-preserving Snap Neutral Midtones.
+    fn neutralize_channels_luminosity(
+        &mut self,
+        id: LayerId,
+        values: [f32; 3],
+    ) -> Result<Option<Rect>, String> {
+        let target = 0.299 * values[0] + 0.587 * values[1] + 0.114 * values[2];
         self.neutralize_channels_to(id, values, [target; 3])
     }
 
@@ -41918,6 +41968,34 @@ mod tests {
         assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
     }
 
+    #[test]
+    fn levels_gray_point_luminosity_targets_the_clicked_pixels_own_bt601_luma() {
+        // The clicked pixel (100, 150, 200) has BT.601 luma
+        // 0.299*100 + 0.587*150 + 0.114*200 = 140.75, not the unweighted
+        // mean of 150 the plain levels_gray_point targets — so the
+        // neutralized pixel lands on 141 (rounded), not 150. Hand-computed
+        // (f32 exponent/to_byte arithmetic) and cross-checked against an
+        // independent Python port.
+        let (mut doc, id) = gray_point_fixture();
+        doc.levels_gray_point_luminosity(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [141, 141, 141, 255]);
+    }
+
+    #[test]
+    fn levels_gray_point_luminosity_applies_each_channels_gamma_to_the_whole_layer() {
+        // Same fixture and luma target (140.75) as the test above, the
+        // per-channel gammas applied to the rest of the layer: (50, 50,
+        // 50) -> (91, 41, 5); (200, 200, 200) -> (219, 194, 141); (150,
+        // 150, 150) -> (182, 141, 70). Cross-checked against an
+        // independent Python port of the same exponent/to_byte
+        // arithmetic.
+        let (mut doc, id) = gray_point_fixture();
+        doc.levels_gray_point_luminosity(id, 0, 0).unwrap();
+        assert_eq!(pixel(&doc, id, 1, 0), [91, 41, 5, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [219, 194, 141, 128]);
+        assert_eq!(pixel(&doc, id, 3, 0), [182, 141, 70, 255]);
+    }
+
     fn cast_fixture() -> (Document, LayerId) {
         let mut doc = Document::new(3, 1).unwrap();
         let id = doc
@@ -51053,7 +51131,7 @@ mod tests {
         let pixels = grey_row(&[0, 255]);
         let mut doc = Document::new(2, 1).unwrap();
         let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
-        doc.auto_color_with(id, 0, 0, [10, 10, 10], None, [200, 200, 200])
+        doc.auto_color_with(id, 0, 0, [10, 10, 10], None, [200, 200, 200], false)
             .unwrap();
         assert_eq!(red_plane(&doc), vec![10, 200]);
         let mut doc = Document::new(2, 1).unwrap();
@@ -51065,6 +51143,7 @@ mod tests {
             [10, 10, 10],
             Some([128, 128, 128]),
             [200, 200, 200],
+            false,
         )
         .unwrap();
         assert_eq!(red_plane(&doc), vec![21, 211]);
@@ -51072,12 +51151,70 @@ mod tests {
         let cast = vec![60, 40, 20, 255, 200, 160, 120, 255];
         let mut doc = Document::new(2, 1).unwrap();
         let id = doc.add_layer("c", &cast, 2, 1).unwrap();
-        doc.auto_color_with(id, 0, 0, [0; 3], None, [255; 3])
+        doc.auto_color_with(id, 0, 0, [0; 3], None, [255; 3], false)
             .unwrap();
         let mut old = Document::new(2, 1).unwrap();
         let old_id = old.add_layer("c", &cast, 2, 1).unwrap();
         old.auto_color(old_id, 0, 0).unwrap();
         assert_eq!(doc.layers()[0].pixels, old.layers()[0].pixels);
+    }
+
+    #[test]
+    fn auto_color_with_luminosity_snaps_the_means_to_their_own_bt601_luma() {
+        // Three pixels whose R, G, and B channels each already span the
+        // full 0..=255 range (no stretch happens), with distinct
+        // per-channel means: R 118.333, G/B 101.667. The unweighted-mean
+        // snap (luminosity: false) would target their own plain average
+        // (107.222) for every channel; luminosity: true targets their
+        // BT.601 luma instead (0.299*118.333 + 0.587*101.667 +
+        // 0.114*101.667 = 106.65), giving each channel its own gamma
+        // toward that luma value rather than toward the plain mean.
+        // Hand-computed and cross-checked against an independent Python
+        // port of the same exponent/to_byte arithmetic.
+        let pixels = [
+            0u8, 0, 50, 255, // pixel 0
+            255, 255, 0, 255, // pixel 1
+            100, 50, 255, 255, // pixel 2
+        ];
+        let mut doc = Document::new(3, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 3, 1).unwrap();
+        doc.auto_color_with(id, 0, 0, [0; 3], None, [255; 3], true)
+            .unwrap();
+        assert_eq!(pixel(&doc, id, 0, 0), [0, 0, 54, 255]);
+        assert_eq!(pixel(&doc, id, 1, 0), [255, 255, 0, 255]);
+        assert_eq!(pixel(&doc, id, 2, 0), [88, 54, 255, 255]);
+    }
+
+    #[test]
+    fn auto_color_with_ignores_luminosity_when_midtones_is_given() {
+        // auto_color_targets_shape_the_result's own explicit-midtones
+        // case (target 128, giving 21/211): asking for luminosity too
+        // must not change it, since an explicit midtones target always
+        // wins over the luma-vs-mean choice.
+        let pixels = grey_row(&[0, 255]);
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("g", &pixels, 2, 1).unwrap();
+        doc.auto_color_with(
+            id,
+            0,
+            0,
+            [10, 10, 10],
+            Some([128, 128, 128]),
+            [200, 200, 200],
+            true,
+        )
+        .unwrap();
+        assert_eq!(red_plane(&doc), vec![21, 211]);
+    }
+
+    #[test]
+    fn levels_gray_point_luminosity_propagates_errors() {
+        let (mut doc, id) = gray_point_fixture();
+        assert!(doc.levels_gray_point_luminosity(id, 4, 0).is_err());
+        assert!(doc.levels_gray_point_luminosity(id + 1, 0, 0).is_err());
+        doc.set_locked(id, true).unwrap();
+        assert!(doc.levels_gray_point_luminosity(id, 0, 0).is_err());
+        assert_eq!(pixel(&doc, id, 1, 0), [50, 50, 50, 255]);
     }
 
     #[test]

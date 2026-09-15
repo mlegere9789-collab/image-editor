@@ -7292,9 +7292,26 @@ fn levels_gray_point_with(
     })
 }
 
-/// Image > Adjustments > Auto Color with its Shadows, Midtones and
-/// Highlights target colours.
+/// Levels/Curves Gray Point eyedropper, Photoshop's own
+/// luminosity-preserving snap.
 #[tauri::command]
+fn levels_gray_point_luminosity(
+    state: State<'_, AppState>,
+    id: LayerId,
+    x: u32,
+    y: u32,
+) -> Result<Snapshot, String> {
+    edit_checkpointed(&state, |document| {
+        document.levels_gray_point_luminosity(id, x, y)
+    })
+}
+
+/// Image > Adjustments > Auto Color with its Shadows, Midtones and
+/// Highlights target colours, and Photoshop's own luminosity-preserving
+/// Snap Neutral Midtones (ignored once `midtones` gives an explicit
+/// target).
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn auto_color_with(
     state: State<'_, AppState>,
     id: LayerId,
@@ -7303,6 +7320,7 @@ fn auto_color_with(
     shadows: [u8; 3],
     midtones: Option<[u8; 3]>,
     highlights: [u8; 3],
+    luminosity: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.auto_color_with(
@@ -7312,6 +7330,7 @@ fn auto_color_with(
             shadows,
             midtones,
             highlights,
+            luminosity.unwrap_or(false),
         )
     })
 }
@@ -8743,6 +8762,7 @@ pub fn run() {
             levels_black_point_with,
             levels_white_point_with,
             levels_gray_point_with,
+            levels_gray_point_luminosity,
             auto_color_with,
             lens_flare_with,
             lighting_effects_with,
