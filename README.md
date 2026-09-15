@@ -25145,6 +25145,52 @@ all clean (frontend genuinely untouched).
 
 Tests: 1970 Rust (1968 → 1970: two new tests), 39 frontend (unchanged).
 
+## Phase 431 — Levels/Curves Auto Options' Algorithm Choice
+
+Resolved a stale scope cut on Levels Auto Options' own row: it named "the
+algorithm choices beyond Enhance Per Channel Contrast" as a cut, but all
+three of Photoshop's own Auto Color Correction algorithms already existed
+as separate commands — `auto_tone` (Enhance Per Channel Contrast),
+`auto_contrast` (Enhance Monochromatic Contrast), and `auto_color_with`
+(Find Dark & Light Colors, itself already carrying Snap Neutral Midtones
+and the target colours, from Phases 197, 368 and 419). What was missing
+wasn't a new algorithm — it was a way to pick one from inside the Levels
+or Curves dialog's own Auto button, which had always been hardcoded to
+`auto_tone`. Along the way, checked the Curves dialog's existing Auto
+handler against its own `auto_tone` Tauri command wrapper in `lib.rs`:
+the wrapper already accepts and forwards `shadow_clip`/`highlight_clip`
+straight into `auto_tone_clipped`, so the frontend's call was correct as
+written — not the dead-parameter bug it looked like at a glance.
+
+Frontend-only, since the three backend commands already existed: a new
+pure module, `autoColorCorrection.ts`, holds `planAutoColorCorrection`,
+which maps a chosen algorithm (`"perChannel"`, `"monochromatic"`, or
+`"findDarkLight"`) plus the dialog's own Clip percentages and (for Find
+Dark & Light Colors) its Targets/Preserve Luminosity state to the exact
+command name and argument object to run — `auto_tone`/`auto_contrast`
+just forward the clips; `auto_color_with` forwards the shadow/midtone/
+highlight targets too, substituting `null` for the midtone target and
+`luminosity: true` when Preserve Luminosity is on, exactly as the
+existing Auto Color menu command already does. A new `Algorithm` select,
+labelled with Photoshop's own three algorithm names, was added to both
+the Levels and the Curves dialog, next to their existing Clip/Targets/
+Preserve Luminosity controls; both dialogs' Auto buttons now run a
+single shared `runAutoColorCorrection` callback built on
+`planAutoColorCorrection`, replacing their two separate hardcoded
+`auto_tone` calls. The Auto button's own tooltip names whichever
+algorithm is currently selected, so the button's own behaviour is never
+a surprise.
+
+Five new hand-computed tests in `autoColorCorrection.test.ts` pin down
+`planAutoColorCorrection`'s output exactly for all three algorithms,
+including the `midtones: null`/`luminosity: true` substitution Preserve
+Luminosity makes for Find Dark & Light Colors, plus a test that the
+three Photoshop-facing labels are exactly right. `npx tsc --noEmit`,
+`npm run build`, and `npm test` all clean; no Rust file touched, so the
+existing 1970/1970 Rust suite is unaffected.
+
+Tests: 1970 Rust (unchanged), 44 frontend (39 → 44: five new tests).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

@@ -30,6 +30,11 @@ import {
 import { markTourSeen, tourSeen } from "./tour";
 import { buildMenuTree, commandKey, flattenMenuTree } from "./menuBar";
 import {
+  AUTO_CORRECTION_ALGORITHM_LABELS,
+  planAutoColorCorrection,
+  type AutoCorrectionAlgorithm,
+} from "./autoColorCorrection";
+import {
   applyInterface,
   HIGHLIGHTS,
   INTERFACE_DEFAULTS,
@@ -2189,6 +2194,10 @@ export default function App() {
   // Gray Point eyedropper and Auto Color ignore the Gray target above and snap
   // to the sampled pixels' own BT.601 luma instead.
   const [levelsGrayLuminosity, setLevelsGrayLuminosity] = useState(false);
+  // Levels/Curves Auto Options: which of Photoshop's three algorithms the
+  // Auto button in either dialog runs.
+  const [autoCorrectionAlgorithm, setAutoCorrectionAlgorithm] =
+    useState<AutoCorrectionAlgorithm>("perChannel");
   // Levels/Curves eyedroppers: armed by the dialogs, the next canvas click
   // makes the clicked pixel black or white and disarms.
   // Guides dialog: New Guide's orientation and position, Guide Layout's grid.
@@ -6614,17 +6623,42 @@ export default function App() {
     texturizerInvert,
   ]);
 
-  /** The Levels dialog's Auto button: Auto Tone with the dialog's Clip
-   * percentages, in place of the sliders. */
-  const applyLevelsAuto = useCallback(async () => {
+  /** The Levels and Curves dialogs' shared Auto button: runs whichever of
+   * Photoshop's three Auto Color Correction algorithms is currently chosen,
+   * with the dialogs' own Clip percentages and (for Find Dark & Light
+   * Colors) their own target colours and Preserve Luminosity toggle. */
+  const runAutoColorCorrection = useCallback(async () => {
     if (selectedId === null) return;
-    await runCommand("auto_tone", {
-      id: selectedId,
-      shadowClip: levelsClipShadows,
-      highlightClip: levelsClipHighlights,
-    });
+    const plan = planAutoColorCorrection(
+      autoCorrectionAlgorithm,
+      selectedId,
+      levelsClipShadows,
+      levelsClipHighlights,
+      {
+        shadows: hexToRgb(levelsBlackTarget),
+        midtones: hexToRgb(levelsGrayTarget),
+        highlights: hexToRgb(levelsWhiteTarget),
+        preserveLuminosity: levelsGrayLuminosity,
+      },
+    );
+    await runCommand(plan.command, plan.params);
+  }, [
+    runCommand,
+    selectedId,
+    autoCorrectionAlgorithm,
+    levelsClipShadows,
+    levelsClipHighlights,
+    levelsBlackTarget,
+    levelsGrayTarget,
+    levelsWhiteTarget,
+    levelsGrayLuminosity,
+  ]);
+
+  /** The Levels dialog's own Auto button: run it, then close the dialog. */
+  const applyLevelsAuto = useCallback(async () => {
+    await runAutoColorCorrection();
     setShowLevelsDialog(false);
-  }, [runCommand, selectedId, levelsClipShadows, levelsClipHighlights]);
+  }, [runAutoColorCorrection]);
 
   /** The adjustment the dialog currently describes. */
   const currentAdjustment = useCallback((): Adjustment => {
@@ -28728,6 +28762,28 @@ export default function App() {
             </div>
             <label
               className="control control--row"
+              title="Photoshop's Auto Color Correction Options: which algorithm the Auto button below runs"
+            >
+              <span className="control__label">Algorithm</span>
+              <select
+                value={autoCorrectionAlgorithm}
+                onChange={(event) =>
+                  setAutoCorrectionAlgorithm(
+                    event.target.value as AutoCorrectionAlgorithm,
+                  )
+                }
+              >
+                {Object.entries(AUTO_CORRECTION_ALGORITHM_LABELS).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+            <label
+              className="control control--row"
               title="Target colours for the Black, Gray and White Point eyedroppers (and Auto Color's shadows, midtones and highlights)"
             >
               <span className="control__label">Targets</span>
@@ -28752,7 +28808,7 @@ export default function App() {
             </label>
             <label
               className="control control--row"
-              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Auto Color ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
+              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Find Dark & Light Colors ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
             >
               <input
                 type="checkbox"
@@ -28807,7 +28863,7 @@ export default function App() {
                 className="button button--quiet"
                 onClick={applyLevelsAuto}
                 disabled={busy}
-                title="Auto: stretch each channel to full range, ignoring the clipped percentages at each end"
+                title={`Auto: ${AUTO_CORRECTION_ALGORITHM_LABELS[autoCorrectionAlgorithm]}`}
               >
                 Auto
               </button>
@@ -29140,7 +29196,7 @@ export default function App() {
             </label>
             <label
               className="control control--row"
-              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Auto Color ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
+              title="Photoshop's own luminosity-preserving Snap Neutral Midtones: the Gray Point eyedropper and Find Dark & Light Colors ignore the Gray target above and snap to the sampled pixels' own BT.601 luma instead"
             >
               <input
                 type="checkbox"
@@ -29150,6 +29206,28 @@ export default function App() {
                 }
               />
               Preserve Luminosity
+            </label>
+            <label
+              className="control control--row"
+              title="Photoshop's Auto Color Correction Options: which algorithm the Auto button below runs"
+            >
+              <span className="control__label">Algorithm</span>
+              <select
+                value={autoCorrectionAlgorithm}
+                onChange={(event) =>
+                  setAutoCorrectionAlgorithm(
+                    event.target.value as AutoCorrectionAlgorithm,
+                  )
+                }
+              >
+                {Object.entries(AUTO_CORRECTION_ALGORITHM_LABELS).map(
+                  ([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ),
+                )}
+              </select>
             </label>
             <div className="modal__actions">
               <button
@@ -29204,16 +29282,11 @@ export default function App() {
               <button
                 className="button button--quiet"
                 onClick={async () => {
-                  if (selectedId === null) return;
-                  await runCommand("auto_tone", {
-                    id: selectedId,
-                    shadowClip: levelsClipShadows,
-                    highlightClip: levelsClipHighlights,
-                  });
+                  await runAutoColorCorrection();
                   setShowCurvesDialog(false);
                 }}
                 disabled={busy}
-                title="Auto: stretch each channel to full range with the Levels dialog's clip percentages"
+                title={`Auto: ${AUTO_CORRECTION_ALGORITHM_LABELS[autoCorrectionAlgorithm]}, with the Levels dialog's clip percentages`}
               >
                 Auto
               </button>
