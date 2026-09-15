@@ -5951,8 +5951,9 @@ fn magic_erase(
 }
 
 /// Red Eye tool: neutralise the red-dominant region around a click at
-/// `(x, y)` on layer `id`, darkening it by `darken` percent. A whole,
-/// discrete action, so it checkpoints itself.
+/// `(x, y)` on layer `id`, darkening it by `darken` percent and confining
+/// the correction to Pupil Size percent of the region's own extent from
+/// the click. A whole, discrete action, so it checkpoints itself.
 #[tauri::command]
 fn red_eye(
     state: State<'_, AppState>,
@@ -5960,8 +5961,11 @@ fn red_eye(
     x: u32,
     y: u32,
     darken: u8,
+    pupil_size: Option<u32>,
 ) -> Result<Snapshot, String> {
-    edit_checkpointed(&state, |document| document.red_eye(id, x, y, darken))
+    edit_checkpointed(&state, |document| {
+        document.red_eye_with(id, x, y, darken, pupil_size.unwrap_or(100))
+    })
 }
 
 /// Ruler tool: the width, height, distance, and angle of a drag from

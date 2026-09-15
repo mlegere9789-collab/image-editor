@@ -8034,14 +8034,33 @@ impl Document {
     /// click on an unselected pixel does nothing and returns `None`.
     /// Returns the region's bounding box otherwise. Errors when the
     /// clicked pixel is not red-dominant (nothing to fix), on a locked or
-    /// unknown layer, or off the canvas. Photoshop's Pupil Size option is a
-    /// documented scope cut.
+    /// unknown layer, or off the canvas.
     pub fn red_eye(
         &mut self,
         id: LayerId,
         x: u32,
         y: u32,
         darken: u8,
+    ) -> Result<Option<Rect>, String> {
+        self.red_eye_with(id, x, y, darken, 100)
+    }
+
+    /// [`Self::red_eye`] with Photoshop's own Pupil Size option
+    /// (`1..=100` percent): the flood-filled red-dominant region is found
+    /// exactly as `red_eye` finds it, but only the pixels within
+    /// `pupil_size` percent of the region's own farthest member's
+    /// Euclidean distance from the click are actually corrected — the
+    /// rest stay red, same as a smaller pupil leaving the iris's own red
+    /// glow untouched in Photoshop. At `pupil_size: 100` every region
+    /// pixel is within its own region's farthest distance by definition,
+    /// so this is pixel-identical to `red_eye`.
+    pub fn red_eye_with(
+        &mut self,
+        id: LayerId,
+        x: u32,
+        y: u32,
+        darken: u8,
+        pupil_size: u32,
     ) -> Result<Option<Rect>, String> {
         let (width, height) = (self.width, self.height);
         if x >= width || y >= height {
@@ -8052,6 +8071,11 @@ impl Document {
         if darken > 100 {
             return Err(format!(
                 "Darken Amount must be 0..=100 percent, not {darken}."
+            ));
+        }
+        if !(1..=100).contains(&pupil_size) {
+            return Err(format!(
+                "Pupil Size must be 1..=100 percent, not {pupil_size}."
             ));
         }
         let selection = self.selection.clone();
@@ -8094,11 +8118,26 @@ impl Document {
                 }
             }
         }
+        let max_dist_sq = region
+            .iter()
+            .enumerate()
+            .filter(|(_, &r)| r)
+            .map(|(idx, _)| {
+                let (px, py) = (idx as u32 % width, idx as u32 / width);
+                let (dx, dy) = (px as f32 - x as f32, py as f32 - y as f32);
+                dx * dx + dy * dy
+            })
+            .fold(0.0f32, f32::max);
+        let threshold = max_dist_sq.sqrt() * pupil_size as f32 / 100.0;
         let keep = u32::from(100 - darken);
         let mut fixed: Option<Rect> = None;
         for (idx, _) in region.iter().enumerate().filter(|(_, &r)| r) {
             let (px, py) = (idx as u32 % width, idx as u32 / width);
             if !in_selection(px, py) {
+                continue;
+            }
+            let (dx, dy) = (px as f32 - x as f32, py as f32 - y as f32);
+            if (dx * dx + dy * dy).sqrt() > threshold {
                 continue;
             }
             let base = idx * CHANNELS;
@@ -60854,6 +60893,43 @@ colorspaces:
         for (x, y) in [(0, 0), (2, 0), (0, 2), (2, 2)] {
             assert_eq!(pixel(&doc, id, x, y), [220, 180, 160, 255], "({x}, {y})");
         }
+    }
+
+    #[test]
+    fn red_eye_with_pupil_size_shrinks_the_corrected_area() {
+        // red_eye_3x3's own plus-shaped region: click at the centre
+        // (1, 1), the four arms (1, 0)/(0, 1)/(2, 1)/(1, 2) each one
+        // pixel away, so the region's own farthest member is exactly
+        // distance 1 from the click. At Pupil Size 50, the threshold is
+        // 1 * 0.5 = 0.5: only the centre (distance 0) is within it, so
+        // the four arms stay red (200, 40, 40) while the centre is
+        // neutralised and darkened by 50%, exactly as
+        // red_eye_darken_amount_scales_the_result's own darken-50 case
+        // computes it (grey 40, halved to 20).
+        let (mut doc, id) = red_eye_3x3();
+        let rect = doc.red_eye_with(id, 1, 1, 50, 50).unwrap();
+        assert_eq!(
+            rect,
+            Some(Rect {
+                x0: 1,
+                y0: 1,
+                x1: 2,
+                y1: 2,
+            })
+        );
+        assert_eq!(pixel(&doc, id, 1, 1), [20, 20, 20, 255]);
+        for (x, y) in [(1, 0), (0, 1), (2, 1), (1, 2)] {
+            assert_eq!(pixel(&doc, id, x, y), [200, 40, 40, 255], "({x}, {y})");
+        }
+        // At 100% every region pixel is within its own farthest distance
+        // by definition, so this is pixel-identical to plain red_eye.
+        let (mut expected, id2) = red_eye_3x3();
+        expected.red_eye(id2, 1, 1, 50).unwrap();
+        let (mut doc100, id3) = red_eye_3x3();
+        doc100.red_eye_with(id3, 1, 1, 50, 100).unwrap();
+        assert_eq!(doc100.layers()[0].pixels, expected.layers()[0].pixels);
+        assert!(doc.red_eye_with(id, 1, 1, 50, 0).is_err());
+        assert!(doc.red_eye_with(id, 1, 1, 50, 101).is_err());
     }
 
     #[test]

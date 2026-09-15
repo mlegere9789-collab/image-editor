@@ -23420,6 +23420,50 @@ designed. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
 Tests: 1913 Rust (1912 → 1913), 33 frontend (unchanged — one dropdown,
 same pattern as the prior six phases').
 
+## Phase 400 — Red Eye Tool's Pupil Size
+
+RED EYE TOOL's own "Pupil Size is a documented scope cut" line closes
+out this project's run through the Blend Mode series and moves to the
+next largest-impact item in `docs/PLAN_TO_100.md`'s Phase D backlog.
+`red_eye` (unchanged, still corrects the whole flood-filled region)
+delegates to a new `red_eye_with(id, x, y, darken, pupil_size)`, the
+same plain-function-plus-`_with`-sibling shape this project's very first
+blend-mode phases used. Photoshop's real Pupil Size doesn't map onto
+this project's own flood-fill red-region finder in any literal way — it
+has no radius parameter to begin with — so this narrows the *correction*
+instead: the flood fill still finds the exact same red-dominant region
+`red_eye` always found, but only pixels within `pupil_size` percent of
+that region's own farthest member's Euclidean distance from the click
+are actually neutralised; the rest stay red, the same "a smaller pupil
+leaves the iris's own red glow untouched" effect Photoshop's own option
+has. At `pupil_size: 100` every region pixel is within its own region's
+farthest distance by definition, so `red_eye_with` is pixel-identical to
+`red_eye` — proven directly, since `red_eye` itself is now defined as
+`red_eye_with(..., 100)` rather than a separate implementation. The
+`red_eye` Tauri command widened to take an optional `pupilSize`
+(defaulting to 100). The frontend's Red Eye tool options bar — which has
+no dedicated dialog, reusing the shared Flow slider as Darken Amount —
+gained a Pupil Size slider next to Flow.
+
+**Verified.** All 5 pre-existing Red Eye tests pass completely
+unmodified, since they all call the still-unchanged `red_eye` function,
+which now merely forwards to `red_eye_with(..., 100)`. One new
+hand-computed test, `red_eye_with_pupil_size_shrinks_the_corrected_area`,
+reuses the existing plus-shaped test fixture (click at the centre of a
+red cross, each of the four arms exactly distance 1 away, the region's
+own farthest extent): at Pupil Size 50 the threshold is `1 × 0.5 = 0.5`,
+so only the centre (distance 0) falls within it and gets neutralised and
+darkened (grey 40, halved to 20, matching
+`red_eye_darken_amount_scales_the_result`'s own darken-50 arithmetic)
+while all four arms stay exactly `(200, 40, 40)` — a real, visible
+difference from the plain function's own whole-region correction — plus
+a dedicated 100%-matches-`red_eye`-exactly case and two range-validation
+cases. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
+`npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1914 Rust (1913 → 1914), 33 frontend (unchanged — one slider, no
+dedicated frontend test suite for the options bar's plain controls).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org

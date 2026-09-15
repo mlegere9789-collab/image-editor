@@ -3228,6 +3228,7 @@ export default function App() {
   const [brushColor, setBrushColor] = useState("#ffffff");
   const [brushSize, setBrushSize] = useState(16);
   const [brushOpacity, setBrushOpacity] = useState(1);
+  const [redEyePupilSize, setRedEyePupilSize] = useState(100);
   const [gradientEndColor, setGradientEndColor] = useState("#000000");
   // Rectangle tool options: whether to fill with the brush colour, the
   // inside-stroke width (0 for none) and colour, and the corner radius.
@@ -10447,9 +10448,10 @@ export default function App() {
         x: Math.floor(x),
         y: Math.floor(y),
         darken: Math.round(brushOpacity * 100),
+        pupilSize: redEyePupilSize,
       });
     },
-    [document, selectedId, runCommand, brushOpacity],
+    [document, selectedId, runCommand, brushOpacity, redEyePupilSize],
   );
 
   const selectLineAt = useCallback(
@@ -15970,6 +15972,21 @@ export default function App() {
               }
             />
           </label>
+          {tool === "redEye" && (
+            <label className="tools__slider">
+              Pupil Size
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={redEyePupilSize}
+                disabled={!canPaint}
+                onChange={(event) =>
+                  setRedEyePupilSize(Number(event.target.value))
+                }
+              />
+            </label>
+          )}
         </div>
       </header>
 
