@@ -2260,6 +2260,8 @@ export default function App() {
   const [showFocusDialog, setShowFocusDialog] = useState(false);
   const [focusRange, setFocusRange] = useState(50);
   const [focusSpread, setFocusSpread] = useState(2);
+  const [focusNoiseLevel, setFocusNoiseLevel] = useState(0);
+  const [focusSoften, setFocusSoften] = useState(false);
   const [customPoints, setCustomPoints] = useState("0,0\n1,0\n0.5,1");
   const [guideOrientation, setGuideOrientation] =
     useState<GuideOrientation>("horizontal");
@@ -7058,9 +7060,19 @@ export default function App() {
       range: focusRange,
       spread: focusSpread,
       mode: selectionMode,
+      noiseLevel: focusNoiseLevel,
+      soften: focusSoften,
     });
     setShowFocusDialog(false);
-  }, [runCommand, selectedId, focusRange, focusSpread, selectionMode]);
+  }, [
+    runCommand,
+    selectedId,
+    focusRange,
+    focusSpread,
+    selectionMode,
+    focusNoiseLevel,
+    focusSoften,
+  ]);
 
   const applyLevels = useCallback(async () => {
     if (selectedId === null) return;
@@ -27418,6 +27430,31 @@ export default function App() {
                 value={focusSpread}
                 onChange={(event) => setFocusSpread(Number(event.target.value))}
               />
+            </label>
+            <label className="control">
+              <span className="control__label">
+                Image Noise Level
+                <span className="control__value">{focusNoiseLevel}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={focusNoiseLevel}
+                onChange={(event) =>
+                  setFocusNoiseLevel(Number(event.target.value))
+                }
+              />
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={focusSoften}
+                onChange={(event) => setFocusSoften(event.target.checked)}
+              />
+              <span className="control__label">
+                Soften Edge (installs a soft mask; ignores the selection mode)
+              </span>
             </label>
             <div className="modal__actions">
               <button

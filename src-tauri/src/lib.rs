@@ -5554,7 +5554,8 @@ fn place_into_frame(
     })
 }
 
-/// Select > Focus Area on layer `id`.
+/// Select > Focus Area on layer `id`. `noise_level` defaults to 0,
+/// `soften` to false.
 #[tauri::command]
 fn select_focus_area(
     state: State<'_, AppState>,
@@ -5562,6 +5563,8 @@ fn select_focus_area(
     range: u8,
     spread: u32,
     mode: Option<document::SelectionMode>,
+    noise_level: Option<u32>,
+    soften: Option<bool>,
 ) -> Result<Snapshot, String> {
     edit_checkpointed(&state, |document| {
         document.select_focus_area_with(
@@ -5569,6 +5572,8 @@ fn select_focus_area(
             id,
             range,
             spread,
+            noise_level.unwrap_or(0),
+            soften.unwrap_or(false),
         )?;
         Ok(None)
     })

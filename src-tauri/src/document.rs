@@ -11337,20 +11337,47 @@ impl Document {
     /// least `255 · (100 − range) / 100` — so In-Focus Range `100` takes
     /// everything and `0` only the hardest edges. Errors for a range over
     /// `100`, a spread over `10`, or an unknown layer.
-    pub fn focus_bits(&self, id: LayerId, range: u8, spread: u32) -> Result<Vec<bool>, String> {
+    pub fn focus_bits(
+        &self,
+        id: LayerId,
+        range: u8,
+        spread: u32,
+        noise_level: u32,
+    ) -> Result<Vec<bool>, String> {
         if range > 100 {
             return Err("Focus Area's In-Focus Range must be between 0 and 100.".to_string());
         }
         if spread > 10 {
             return Err("Focus Area's Spread must be between 0 and 10 pixels.".to_string());
         }
+        if noise_level > 100 {
+            return Err("Focus Area's Image Noise Level must be between 0 and 100.".to_string());
+        }
         let layer = self.layer(id)?;
         let (w, h) = (self.width as i64, self.height as i64);
         let doc_width = self.width as usize;
+        // Image Noise Level pre-smooths the picture before Sobel reads it,
+        // so grain doesn't register as a false edge -- the higher the
+        // level, the wider the blur washes weak, noise-sized gradients out
+        // while leaving genuine focus edges (which survive averaging over
+        // a few pixels) intact. `noise_level: 0` skips the blur outright,
+        // reading the layer's own pixels exactly as before this option
+        // existed.
+        let blur_radius = (noise_level as i64 * 3) / 100;
+        let blurred: Vec<u8>;
+        let source: &[u8] = if blur_radius == 0 {
+            &layer.pixels
+        } else {
+            blurred = (0..self.height)
+                .flat_map(|y| (0..self.width).map(move |x| (x, y)))
+                .flat_map(|(x, y)| box_blur_at(&layer.pixels, doc_width, w, h, y, x, blur_radius))
+                .collect();
+            &blurred
+        };
         let sharpness: Vec<u8> = (0..self.height)
             .flat_map(|y| (0..self.width).map(move |x| (x, y)))
             .map(|(x, y)| {
-                let s = sobel_at(&layer.pixels, doc_width, (w, h), (y, x));
+                let s = sobel_at(source, doc_width, (w, h), (y, x));
                 s[0].max(s[1]).max(s[2])
             })
             .collect();
@@ -11376,19 +11403,53 @@ impl Document {
     }
 
     /// Select > Focus Area: [`Self::focus_bits`] combined with the current
-    /// selection per `mode`. Errors when nothing is in focus.
+    /// selection per `mode`, or — with `soften` — installed outright as a
+    /// soft mask (Photoshop's own Soften Edge checkbox), `mode` unused:
+    /// each pixel's coverage is the share of true bits in its own 5×5
+    /// neighbourhood (radius 2, clamped to the canvas edge — the same
+    /// clamp-to-edge shape [`box_blur_at`] uses), so a pixel deep inside
+    /// the in-focus region reads fully selected, one deep outside fully
+    /// clear, and the boundary itself blends smoothly between — the same
+    /// hard-selection-in, soft-mask-out shape [`Self::edge_detect_selection`]'s
+    /// own Smart Radius already uses for the same reason (a soft mask has
+    /// no combine-mode concept of its own here). Errors when nothing is in
+    /// focus.
     pub fn select_focus_area_with(
         &mut self,
         mode: SelectionMode,
         id: LayerId,
         range: u8,
         spread: u32,
+        noise_level: u32,
+        soften: bool,
     ) -> Result<(), String> {
-        let bits = self.focus_bits(id, range, spread)?;
+        let bits = self.focus_bits(id, range, spread, noise_level)?;
         if !bits.contains(&true) {
             return Err("Nothing on the layer is in focus at that range.".to_string());
         }
         let (width, height) = (self.width, self.height);
+        if soften {
+            let (w, h) = (width as i64, height as i64);
+            let r = 2i64;
+            let n = (2 * r + 1) * (2 * r + 1);
+            let mut soft = Vec::with_capacity(bits.len());
+            for y in 0..h {
+                for x in 0..w {
+                    let mut hits = 0i64;
+                    for dy in -r..=r {
+                        for dx in -r..=r {
+                            let sx = (x + dx).clamp(0, w - 1);
+                            let sy = (y + dy).clamp(0, h - 1);
+                            if bits[(sy * w + sx) as usize] {
+                                hits += 1;
+                            }
+                        }
+                    }
+                    soft.push((255.0 * hits as f32 / n as f32).round() as u8);
+                }
+            }
+            return self.set_soft_mask_selection(soft);
+        }
         self.combine_with(mode, mask_selection(width, height, bits)?)
     }
 
@@ -65410,14 +65471,14 @@ colorspaces:
             grey(255),
             grey(255),
         ]]);
-        doc.select_focus_area_with(SelectionMode::New, id, 50, 1)
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 1, 0, false)
             .unwrap();
         let bits = doc.selected_bits().unwrap();
         assert_eq!(bits, vec![false, true, true, true, true, false]);
-        doc.select_focus_area_with(SelectionMode::New, id, 50, 2)
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 2, 0, false)
             .unwrap();
         assert_eq!(doc.selected_bits().unwrap(), vec![true; 6]);
-        doc.select_focus_area_with(SelectionMode::New, id, 50, 0)
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 0, 0, false)
             .unwrap();
         assert_eq!(
             doc.selected_bits().unwrap(),
@@ -65427,20 +65488,80 @@ colorspaces:
         // (threshold 128) nothing is sharp, at 90 (threshold 26) it all is.
         let (mut soft, sid) = row_doc(&[vec![grey(0), grey(10), grey(20), grey(30)]]);
         assert!(soft
-            .select_focus_area_with(SelectionMode::New, sid, 50, 0)
+            .select_focus_area_with(SelectionMode::New, sid, 50, 0, 0, false)
             .unwrap_err()
             .contains("focus"));
-        soft.select_focus_area_with(SelectionMode::New, sid, 90, 0)
+        soft.select_focus_area_with(SelectionMode::New, sid, 90, 0, 0, false)
             .unwrap();
         assert_eq!(soft.selected_bits().unwrap(), vec![true; 4]);
         assert!(soft
-            .select_focus_area_with(SelectionMode::New, sid, 101, 0)
+            .select_focus_area_with(SelectionMode::New, sid, 101, 0, 0, false)
             .unwrap_err()
             .contains("Range"));
         assert!(soft
-            .select_focus_area_with(SelectionMode::New, sid, 50, 11)
+            .select_focus_area_with(SelectionMode::New, sid, 50, 11, 0, false)
             .unwrap_err()
             .contains("Spread"));
+    }
+
+    #[test]
+    fn focus_area_noise_level_smooths_a_false_edge_before_sobel_reads_it() {
+        // A single bright pixel (200) in an otherwise flat row (50): its
+        // two neighbours read strong edges (sharpness 255, clamped from
+        // |4*(200-50)| = 600) while the spike itself and the rest of the
+        // row read 0. At Range 20 (threshold 255*80/100 = 204) that false
+        // "noise" edge registers as in focus. Image Noise Level 34 (blur
+        // radius 34*3/100 = 1, integer division) box-blurs the row first
+        // -- the spike's own neighbourhood averages to 100 at columns
+        // 2-4 (50+50+200)/3 and (50+200+50)/3 and (200+50+50)/3, flattening
+        // every gradient in the row to at most |4*(100-50)| = 200, which
+        // no longer clears 204, so nothing is in focus anymore.
+        let (mut doc, id) = row_doc(&[vec![
+            grey(50),
+            grey(50),
+            grey(50),
+            grey(200),
+            grey(50),
+            grey(50),
+            grey(50),
+        ]]);
+        doc.select_focus_area_with(SelectionMode::New, id, 20, 0, 0, false)
+            .unwrap();
+        assert_eq!(
+            doc.selected_bits().unwrap(),
+            vec![false, false, true, false, true, false, false]
+        );
+        assert!(doc
+            .select_focus_area_with(SelectionMode::New, id, 20, 0, 34, false)
+            .unwrap_err()
+            .contains("focus"));
+    }
+
+    #[test]
+    fn focus_area_soften_edge_installs_a_soft_mask_from_the_hard_bits() {
+        // Same 6-pixel row and hard bits as
+        // focus_area_selects_where_detail_is_sharp_within_the_spread's own
+        // Spread-1 case (F, T, T, T, T, F). Soften Edge averages each
+        // column's own 5-wide neighbourhood of that hard mask (radius 2,
+        // clamped to the canvas edge): column 0's window [0, 0, 0, 1, 2]
+        // (clamped) holds 2 of 5 true -> 0.4 -> byte 102; column 1's
+        // [0, 0, 1, 2, 3] holds 3 of 5 -> 0.6 -> byte 153; column 2's
+        // [0, 1, 2, 3, 4] holds 4 of 5 -> 0.8 -> byte 204; columns 3-5
+        // mirror columns 2-0 around the step's own centre.
+        let (mut doc, id) = row_doc(&[vec![
+            grey(0),
+            grey(0),
+            grey(0),
+            grey(255),
+            grey(255),
+            grey(255),
+        ]]);
+        doc.select_focus_area_with(SelectionMode::New, id, 50, 1, 0, true)
+            .unwrap();
+        assert_eq!(
+            doc.coverage_mask().unwrap(),
+            vec![102, 153, 204, 204, 153, 102]
+        );
     }
 
     #[test]
@@ -65485,11 +65606,11 @@ colorspaces:
         assert_eq!(doc.sky_bits(id).unwrap(), vec![true, false, false, false]);
         let (sharp, sid) = row_doc(&[vec![grey(0), grey(255)]]);
         // Both pixels see the step: Sobel 255 each.
-        assert_eq!(sharp.focus_bits(sid, 50, 0).unwrap(), vec![true, true]);
-        assert_eq!(sharp.focus_bits(sid, 0, 0).unwrap(), vec![true, true]);
+        assert_eq!(sharp.focus_bits(sid, 50, 0, 0).unwrap(), vec![true, true]);
+        assert_eq!(sharp.focus_bits(sid, 0, 0, 0).unwrap(), vec![true, true]);
         let (flat, fid) = row_doc(&[vec![grey(90), grey(90)]]);
-        assert_eq!(flat.focus_bits(fid, 99, 0).unwrap(), vec![false, false]);
-        assert_eq!(flat.focus_bits(fid, 100, 0).unwrap(), vec![true, true]);
+        assert_eq!(flat.focus_bits(fid, 99, 0, 0).unwrap(), vec![false, false]);
+        assert_eq!(flat.focus_bits(fid, 100, 0, 0).unwrap(), vec![true, true]);
     }
 
     fn mixer(color: [u8; 3], wet: u8, load: u8, mix: u8) -> Stroke<'static> {

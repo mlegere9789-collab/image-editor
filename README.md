@@ -24025,6 +24025,61 @@ angle errors. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and
 Tests: 1926 Rust (1925 → 1926), 36 frontend (unchanged — two sliders
 reusing existing controls' own shape need no new test file).
 
+## Phase 412 — Focus Area's Image Noise Level and Soften Edge, and a Stale Doc Fix
+
+FOCUS AREA's own "Photoshop's Image Noise Level and Soften Edge are
+documented scope cuts" line was next in `docs/PLAN_TO_100.md`'s Phase D
+backlog — and while scoping it, `SELECT AND MASK`'s own neighbouring row
+turned out to be stale in exactly the same way Phase 404's Apply Image
+row was: it still claimed "Edge Detection's Radius and Smart Radius and
+Decontaminate Colors are documented scope cuts," even though
+`edge_detect_selection` (Radius, Smart Radius) and `decontaminate_colors`
+had both already fully shipped, wired end to end, back in Phase 249 — the
+row was simply never updated afterward. Corrected in the same pass, no
+new code: the row now only names the dialog's own view modes (Overlay,
+Onion Skin, Marching Ants) as the real remaining cut.
+
+Focus Area itself gained both of its own named options. `focus_bits`
+gained a `noise_level: u32` (`0..=100`) that box-blurs the layer — radius
+`noise_level * 3 / 100`, so `0` skips the blur outright and reads the
+layer's own pixels exactly as before this option existed — before Sobel
+ever reads it, the same purpose Photoshop's own Image Noise Level serves:
+grain-sized false edges wash out under a few pixels of averaging while a
+real, sustained focus edge survives it. `select_focus_area_with` gained a
+`soften: bool`: true installs the result as a soft mask outright
+(`set_soft_mask_selection`, `mode` unused) instead of combining a hard
+selection — each pixel's coverage the share of true bits in its own 5×5
+neighbourhood (radius 2, clamped to the canvas edge, the same
+clamp-to-edge shape `box_blur_at` uses) — the same hard-selection-in,
+soft-mask-out shape `edge_detect_selection`'s own Smart Radius already
+uses for the identical reason: a soft mask has no combine-mode concept of
+its own in this project. `select_focus_area`'s Tauri command gained
+optional `noiseLevel` (default `0`) and `soften` (default `false`); the
+Focus Area dialog gained an Image Noise Level slider and a Soften Edge
+checkbox below the existing Range and Spread sliders.
+
+**Verified.** All 3 pre-existing `focus`-named tests pass unmodified,
+confirming both defaults are the exact prior behaviour. Two new
+hand-computed tests. `focus_area_noise_level_smooths_a_false_edge_before_sobel_reads_it`:
+a single bright pixel (`200`) in an otherwise flat row (`50`) reads
+sharpness `255` (clamped from `|4·(200−50)| = 600`) at its two
+neighbours — at Range `20` (threshold `255·80/100 = 204`) that lone
+"noise" pixel registers as in focus on its own; Noise Level `34` (blur
+radius `34·3/100 = 1`) averages the spike into its neighbourhood first
+(columns 2-4 all become `100`), flattening every gradient in the row to
+at most `|4·(100−50)| = 200`, which no longer clears `204` — nothing is
+in focus at all afterward. `focus_area_soften_edge_installs_a_soft_mask_from_the_hard_bits`:
+the same 6-pixel hard bits (`F, T, T, T, T, F`) an existing Spread test
+already establishes, averaged over each column's own 5-wide clamped
+neighbourhood — column 0's window `[0, 0, 0, 1, 2]` holds 2 of 5 true
+(byte `102`), column 2's `[0, 1, 2, 3, 4]` holds 4 of 5 (byte `204`),
+mirrored across columns 3-5. `cargo fmt`/`clippy --all-targets -D
+warnings`/`test` and `npm run build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1928 Rust (1926 → 1928), 36 frontend (unchanged — a slider and a
+checkbox reusing the existing Focus Area dialog's own shape need no new
+test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
