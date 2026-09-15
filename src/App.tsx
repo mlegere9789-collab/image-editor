@@ -2056,6 +2056,7 @@ export default function App() {
   const [gradientOverlayAlign, setGradientOverlayAlign] = useState(true);
   const [gradientOverlayBlendMode, setGradientOverlayBlendMode] =
     useState<BlendMode>("normal");
+  const [gradientOverlayDither, setGradientOverlayDither] = useState(false);
   const [showOuterGlowDialog, setShowOuterGlowDialog] = useState(false);
   const [outerGlowSize, setOuterGlowSize] = useState(10);
   const [outerGlowColor, setOuterGlowColor] = useState("#ffff00");
@@ -6303,6 +6304,9 @@ export default function App() {
         alignWithLayer: gradientOverlayAlign,
         opacity: gradientOverlayOpacity,
         blendMode: gradientOverlayBlendMode,
+        dither: gradientOverlayDither
+          ? Math.floor(Math.random() * 0xffffffff)
+          : null,
       },
     });
     setShowGradientOverlayDialog(false);
@@ -6318,6 +6322,7 @@ export default function App() {
     gradientOverlayAlign,
     gradientOverlayOpacity,
     gradientOverlayBlendMode,
+    gradientOverlayDither,
   ]);
 
   const applyOuterGlow = useCallback(async () => {
@@ -25649,6 +25654,16 @@ export default function App() {
                 }
               />
               <span className="control__label">Align with Layer</span>
+            </label>
+            <label className="control control--row">
+              <input
+                type="checkbox"
+                checked={gradientOverlayDither}
+                onChange={(event) =>
+                  setGradientOverlayDither(event.target.checked)
+                }
+              />
+              <span className="control__label">Dither</span>
             </label>
             <label className="control">
               <span className="control__label">

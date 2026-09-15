@@ -453,6 +453,14 @@ pub struct GradientOverlayOptions {
     /// Normal-only scope cut, the same way `color_overlay_with` already
     /// narrows `color_overlay`'s.
     pub blend_mode: BlendMode,
+    /// Dither: when set, its seed drives a per-pixel [`XorShift32`] draw
+    /// (the same generator Add Noise and Convert to Profile's own
+    /// dithered pass already use) added to each channel before it rounds
+    /// to a byte, breaking up the hard bands a smooth gradient can
+    /// otherwise show between adjacent output levels. `None` is
+    /// Photoshop's Dither off — the plain rounding `gradient_overlay_with`
+    /// always used before this option existed.
+    pub dither: Option<u32>,
 }
 
 impl Default for ContentAwareFillOptions {
@@ -24507,6 +24515,7 @@ impl Document {
         let blend_mode = o.blend_mode;
         let frac = o.opacity as f32 / 100.0;
         let w = self.width as usize;
+        let mut rng = o.dither.map(XorShift32::new);
         self.filter_pixels(id, move |src, row, col| {
             let base = (row as usize * w + col as usize) * CHANNELS;
             let a = src[base + 3];
@@ -24522,7 +24531,13 @@ impl Document {
                 let target = color1[c] as f32 + (color2[c] as f32 - color1[c] as f32) * t;
                 let cb = to_unit(src[base + c]);
                 let blended = blend_mode.blend(cb, target / 255.0);
-                out[c] = to_byte(cb * (1.0 - frac) + blended * frac);
+                let mixed = cb * (1.0 - frac) + blended * frac;
+                out[c] = match rng.as_mut() {
+                    Some(rng) => (mixed * 255.0 + rng.next_unit() * 0.5)
+                        .round()
+                        .clamp(0.0, 255.0) as u8,
+                    None => to_byte(mixed),
+                };
             }
             out[3] = a;
             out
@@ -50376,6 +50391,7 @@ mod tests {
             align_with_layer: false,
             opacity: 100,
             blend_mode: BlendMode::Normal,
+            dither: None,
         }
     }
 
@@ -50560,6 +50576,49 @@ mod tests {
         )
         .unwrap();
         assert_eq!(first_row(&doc), vec![0, 7, 20, 40]);
+    }
+
+    #[test]
+    fn gradient_overlay_dither_breaks_up_a_band_the_plain_rounding_always_shows() {
+        // A flat target (129, 129, 129), blended 50% into (126, 126, 126),
+        // lands exactly on the rounding boundary 127.5 (Python f32 model:
+        // (126/255)*0.5 + (129/255)*0.5 = 0.5 exactly, *255 = 127.5) --
+        // without Dither, plain rounding resolves that the same way (128)
+        // for every pixel, the hard band Dither exists to break up.
+        let flat = GradientOverlayOptions {
+            color1: [129, 129, 129],
+            color2: [129, 129, 129],
+            opacity: 50,
+            ..gradient_options()
+        };
+        let pixels = [126, 126, 126, 255, 126, 126, 126, 255];
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 2, 1).unwrap();
+        doc.gradient_overlay_with(id, &flat).unwrap();
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![128, 128, 128, 255, 128, 128, 128, 255]
+        );
+        // With a seed, Python's f32 model of XorShift32(12345)'s first six
+        // draws (R, G, B per pixel, two pixels, the exact order the R/G/B
+        // channel loop inside a row-major pixel scan draws them in) push
+        // half of the six channel bytes down to 127 instead: 127.5 +
+        // draw*0.5 rounds to 128 when the draw is positive, 127 when
+        // negative -- (+0.554, -0.210, +0.312, -0.089, -0.665, +0.529).
+        let mut doc = Document::new(2, 1).unwrap();
+        let id = doc.add_layer("l", &pixels, 2, 1).unwrap();
+        doc.gradient_overlay_with(
+            id,
+            &GradientOverlayOptions {
+                dither: Some(12345),
+                ..flat
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            doc.layers()[0].pixels,
+            vec![128, 127, 128, 255, 127, 127, 128, 255]
+        );
     }
 
     #[test]

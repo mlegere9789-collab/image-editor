@@ -23869,6 +23869,56 @@ the small brush radius, stays untouched. `cargo fmt`/`clippy
 Tests: 1922 Rust (1921 → 1922), 36 frontend (unchanged — a checkbox
 reusing the existing Smudge options row needs no new test file).
 
+## Phase 409 — Gradient Overlay's Dither
+
+GRADIENT OVERLAY's own "Dither remains a documented scope cut" line was
+next in `docs/PLAN_TO_100.md`'s Phase D backlog. A smooth gradient over a
+narrow colour range can band wherever a stretch of adjacent pixels all
+round to the same output byte; Photoshop's Dither breaks that up with a
+small random offset before quantizing. This project already has exactly
+that mechanism, built for Convert to Profile's own Dither option (Phase
+158-ish era) and reused as-is by Add Noise: a seeded
+[`XorShift32`](this project's own tiny generator) draw per channel,
+`-0.5..=0.5` of a byte level, added before rounding.
+
+`GradientOverlayOptions` gained `dither: Option<u32>` — `None` the exact
+prior plain-rounding behaviour, `Some(seed)` a per-pixel `XorShift32`
+draw (one per RGB channel, row-major, the same order
+`convert_to_profile_dithered` already draws in) added to the blended
+value before it rounds to a byte. `gradient_overlay_with`'s own inner
+loop is sequential (`filter_pixels`'s closure is `FnMut`, not `Fn` —
+there is no parallel path to keep in sync here, unlike `flatten`'s own
+parallel composite), so the seeded generator is simply captured by the
+closure and advanced one draw at a time, the same shape
+`convert_to_profile_dithered` already uses. `None` skips the generator
+entirely and falls through to the exact `to_byte` call
+`gradient_overlay_with` always used, so every pre-existing test's
+behaviour is unchanged by construction. The frontend's Gradient Overlay
+dialog gained a Dither checkbox next to Reverse and Align with Layer,
+generating a fresh random seed per apply — `Math.floor(Math.random() *
+0xffffffff)` — the same "fresh in the UI, deterministic under test"
+split Convert to Profile's own Dither checkbox already uses.
+
+**Verified.** All 8 pre-existing `gradient_overlay`-named tests pass
+unmodified, confirming `dither: None` never changes anything. One new
+hand-computed test,
+`gradient_overlay_dither_breaks_up_a_band_the_plain_rounding_always_shows`:
+a flat target `(129, 129, 129)` blended 50% into `(126, 126, 126)` lands
+exactly on the rounding boundary 127.5 (Python f32 model:
+`(126/255)×0.5 + (129/255)×0.5 = 0.5` exactly, `×255 = 127.5`) — without
+Dither, every pixel's plain rounding resolves that the same way, `128`,
+the hard band Dither exists to break up; with seed `12345`, Python's f32
+model of `XorShift32`'s first six draws (`+0.554, -0.210, +0.312,
+-0.089, -0.665, +0.529`, the R/G/B/R/G/B order two pixels' worth of
+channel draws land in) push exactly the negative-draw half of the six
+channel bytes down to `127` instead — `[128, 127, 128]` then `[127, 127,
+128]`. `cargo fmt`/`clippy --all-targets -D warnings`/`test` and `npm run
+build`/`test`/`tsc --noEmit` all clean.
+
+Tests: 1923 Rust (1922 → 1923), 36 frontend (unchanged — a checkbox
+reusing the existing Gradient Overlay dialog's own shape needs no new
+test file).
+
 ## Prerequisites
 
 - **Node.js** 18+ and npm — https://nodejs.org
